@@ -165,4 +165,75 @@ describe('requireTenant middleware', () => {
     expect(r.status).toBe(200);
     expect(r.body.tenant).toBe('ASYNC');
   });
+
+  // T4.24 Phase 3 — JWT tenant must match X-Tenant-ID header.
+  // The middleware decodes (without verifying) the Authorization Bearer
+  // JWT and refuses if its `tenant_id` claim contradicts the header.
+  describe('JWT tenant binding', () => {
+    function makeJwt(payload: Record<string, unknown>): string {
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+        .toString('base64')
+        .replace(/=+$/, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+      const body = Buffer.from(JSON.stringify(payload))
+        .toString('base64')
+        .replace(/=+$/, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+      return `${header}.${body}.fake-signature`;
+    }
+
+    test('JWT tenant_id matching X-Tenant-ID is allowed through', async () => {
+      const r = await request(appWithTenant())
+        .post('/protected')
+        .set({
+          'X-Tenant-ID': 'BANK_DEMO',
+          'X-Channel': 'API',
+          Authorization: `Bearer ${makeJwt({ sub: 'u-001', tenant_id: 'BANK_DEMO', role: 'admin' })}`,
+        })
+        .send({});
+      expect(r.status).toBe(200);
+      expect(r.body.tenant_id).toBe('BANK_DEMO');
+    });
+
+    test('JWT tenant_id different from X-Tenant-ID returns 403 CRITICAL', async () => {
+      const r = await request(appWithTenant())
+        .post('/protected')
+        .set({
+          'X-Tenant-ID': 'BIL',
+          'X-Channel': 'API',
+          Authorization: `Bearer ${makeJwt({ sub: 'u-001', tenant_id: 'BANK_DEMO', role: 'admin' })}`,
+        })
+        .send({});
+      expect(r.status).toBe(403);
+      expect(r.body.error.severity).toBe('CRITICAL');
+      expect(r.body.error.message).toMatch(/tenant mismatch/);
+    });
+
+    test('JWT without tenant_id claim falls through to header-only check', async () => {
+      // Old-style token before Phase 3 — no tenant_id claim. Should pass.
+      const r = await request(appWithTenant())
+        .post('/protected')
+        .set({
+          'X-Tenant-ID': 'BANK_DEMO',
+          'X-Channel': 'API',
+          Authorization: `Bearer ${makeJwt({ sub: 'u-001', role: 'admin' })}`,
+        })
+        .send({});
+      expect(r.status).toBe(200);
+    });
+
+    test('malformed Authorization header is ignored, not fatal', async () => {
+      const r = await request(appWithTenant())
+        .post('/protected')
+        .set({
+          'X-Tenant-ID': 'BANK_DEMO',
+          'X-Channel': 'API',
+          Authorization: 'Bearer not-a-jwt',
+        })
+        .send({});
+      expect(r.status).toBe(200);
+    });
+  });
 });

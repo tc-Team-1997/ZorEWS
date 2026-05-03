@@ -16,6 +16,37 @@
 import type { NextFunction, Request, Response } from 'express';
 import { wrapError, readRequestId } from './envelope';
 
+/**
+ * Decode a JWT payload WITHOUT verifying the signature.
+ *
+ * Prototype shim — production should fetch the auth-svc's public key
+ * (JWKS endpoint) and verify the RS256 signature. For this prototype the
+ * threat model is "honest user setting wrong header", not "attacker
+ * forging tokens", so we just split + base64url-decode the middle
+ * segment and parse the JSON. Returns undefined on any failure.
+ */
+function decodeJwtPayloadUnsafe(token: string): Record<string, unknown> | undefined {
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  try {
+    const padded = parts[1] + '='.repeat((4 - (parts[1].length % 4)) % 4);
+    const json = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const obj = JSON.parse(json);
+    return typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readBearerTenant(req: Request): string | undefined {
+  const auth = req.headers.authorization;
+  if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return undefined;
+  const token = auth.slice(7);
+  const payload = decodeJwtPayloadUnsafe(token);
+  const v = payload?.tenant_id;
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
 export interface Tenant {
   tenant_id: string;
   name: string;
@@ -99,6 +130,23 @@ export function requireTenant(lookup: TenantLookup = defaultTenantLookup()) {
           `channel '${channelHeader}' not permitted for tenant '${tenant.tenant_id}'. ` +
           `Allowed: ${tenant.channels_allowed.join(',')}`,
         severity: 'HIGH',
+      });
+      return;
+    }
+
+    // T4.24 Phase 3 — defense in depth: when an Authorization Bearer JWT
+    // is present and carries a `tenant_id` claim, refuse if the claim
+    // doesn't match X-Tenant-ID. Prevents a logged-in BANK_DEMO user from
+    // claiming X-Tenant-ID: BIL by manually setting the header. Tokens
+    // without the claim (older user sessions, m2m tokens lacking tenant)
+    // fall through to the header-only check.
+    const jwtTenant = readBearerTenant(req);
+    if (jwtTenant && jwtTenant !== tenant.tenant_id) {
+      sendError(res, 403, ctx, {
+        code: 'EWS_403',
+        message:
+          `tenant mismatch: JWT principal belongs to '${jwtTenant}' but request claims '${tenant.tenant_id}'`,
+        severity: 'CRITICAL',
       });
       return;
     }

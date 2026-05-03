@@ -51,6 +51,7 @@ migrate:
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)003_audit_table.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)004_app_schemas.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)005_tenants.sql
+	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)006_audit_tenant.sql
 	@echo "migration complete"
 
 verify:

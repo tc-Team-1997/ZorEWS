@@ -255,6 +255,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       role: user.role,
       display_name: user.display_name,
       sid: session.id,
+      tenant_id: user.tenant_id,
     });
     const refresh = await signRefreshToken(signer, user.id, session.id);
     audit.append({
@@ -262,6 +263,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       target_username: user.username,
       actor_username: user.username,
       actor_role: user.role,
+      tenant_id: user.tenant_id,
       ip,
       metadata: { sid: session.id },
     });
@@ -316,6 +318,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         role: user.role,
         display_name: user.display_name,
         sid,
+        tenant_id: user.tenant_id,
       });
       return reply.send({ access_token: access, token_type: "Bearer", expires_in: 900 });
     } catch {
