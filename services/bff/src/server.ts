@@ -249,17 +249,22 @@ export function makeApp(deps: AppDeps = {}) {
         const score = await evaluator.evaluate({ customer_id, features });
         if (score.level === 'High') {
           // Fire-and-forget — webhook latency doesn't delay the API response.
-          webhookDispatcher.dispatch('alert.created', {
-            tenant_id: req.tenant?.tenant_id,
-            channel: req.channel,
-            customer_id: score.customer_id,
-            pd: score.pd,
-            level: score.level,
-            top_reasons: score.top_reasons,
-            model_name: score.model_name,
-            model_version: score.model_version,
-            evaluated_at: now().toISOString(),
-          });
+          // Phase 4: only fires to subscriptions in the same tenant.
+          webhookDispatcher.dispatch(
+            'alert.created',
+            {
+              tenant_id: req.tenant?.tenant_id,
+              channel: req.channel,
+              customer_id: score.customer_id,
+              pd: score.pd,
+              level: score.level,
+              top_reasons: score.top_reasons,
+              model_name: score.model_name,
+              model_version: score.model_version,
+              evaluated_at: now().toISOString(),
+            },
+            req.tenant!.tenant_id,
+          );
         }
         res.json(wrapResponse(score, ctx));
       } catch (e) {
@@ -466,7 +471,10 @@ export function makeApp(deps: AppDeps = {}) {
       });
       // Fire scenario.run webhook to any subscribed external system —
       // useful for ops dashboards that aggregate stress-test results.
+      // Phase 4: only fires to subscriptions in the same tenant.
       webhookDispatcher.dispatch('scenario.run', {
+        tenant_id: req.tenant?.tenant_id,
+        channel: req.channel,
         inputs: result.inputs,
         portfolio_size: result.portfolio_size,
         baseline_ecl_kes: result.baseline_ecl_kes,
@@ -475,7 +483,7 @@ export function makeApp(deps: AppDeps = {}) {
         baseline_portfolio_pd: result.baseline_portfolio_pd,
         stressed_portfolio_pd: result.stressed_portfolio_pd,
         computed_at: result.computed_at,
-      });
+      }, req.tenant!.tenant_id);
       res.json(wrapResponse(result, env));
     } catch (e) {
       res.status(500).json(
@@ -503,13 +511,17 @@ export function makeApp(deps: AppDeps = {}) {
     const env = extractCtx(req, now);
     const role = getRole(req);
     const me = callerUsername(req);
-    const items = scenarioStore.list(role === 'admin' ? {} : { saved_by: me });
+    const tenant_id = req.tenant!.tenant_id;
+    const items = scenarioStore.list(
+      role === 'admin' ? { tenant_id } : { tenant_id, saved_by: me },
+    );
     res.json(wrapResponse({ items, total: items.length }, env));
   });
 
   app.get('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
     const env = extractCtx(req, now);
-    const s = scenarioStore.get(req.params.id);
+    const tenant_id = req.tenant!.tenant_id;
+    const s = scenarioStore.get(req.params.id, tenant_id);
     const role = getRole(req);
     if (!s || (role !== 'admin' && s.saved_by !== callerUsername(req))) {
       return res.status(404).json(
@@ -556,6 +568,7 @@ export function makeApp(deps: AppDeps = {}) {
     try {
       const saved = scenarioStore.save({
         id: body.id,
+        tenant_id: req.tenant!.tenant_id,
         name: body.name,
         saved_by: callerUsername(req),
         inputs: body.inputs as { gdp: number; rate: number; fx: number },
@@ -579,7 +592,8 @@ export function makeApp(deps: AppDeps = {}) {
 
   app.delete('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
     const env = extractCtx(req, now);
-    const s = scenarioStore.get(req.params.id);
+    const tenant_id = req.tenant!.tenant_id;
+    const s = scenarioStore.get(req.params.id, tenant_id);
     const role = getRole(req);
     if (!s || (role !== 'admin' && s.saved_by !== callerUsername(req))) {
       return res.status(404).json(
@@ -589,7 +603,7 @@ export function makeApp(deps: AppDeps = {}) {
         ),
       );
     }
-    scenarioStore.delete(req.params.id);
+    scenarioStore.delete(req.params.id, tenant_id);
     res.status(204).end();
   });
 
@@ -692,8 +706,8 @@ export function makeApp(deps: AppDeps = {}) {
     'webhook.test',
   ] as const;
 
-  app.get('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (_req: Request, res: Response) => {
-    res.json({ items: webhookStore.list() });
+  app.get('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
+    res.json({ items: webhookStore.list(req.tenant!.tenant_id) });
   });
 
   app.post('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
@@ -718,6 +732,7 @@ export function makeApp(deps: AppDeps = {}) {
     // is ever returned. The admin UI displays it once with a "copy
     // and store" warning; subsequent GETs use the public projection.
     const created = webhookStore.create({
+      tenant_id: req.tenant!.tenant_id,
       name: body.name as string,
       url: body.url as string,
       events: body.events as WebhookEventType[],
@@ -726,7 +741,7 @@ export function makeApp(deps: AppDeps = {}) {
   });
 
   app.delete('/v1/webhooks/:id', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
-    const ok = webhookStore.delete(req.params.id);
+    const ok = webhookStore.delete(req.params.id, req.tenant!.tenant_id);
     if (!ok) return res.status(404).json({ error: 'subscription not found' });
     res.status(204).end();
   });
@@ -736,9 +751,10 @@ export function makeApp(deps: AppDeps = {}) {
     requireTenantMw,
     requireRole('webhooks:manage'),
     (req: Request, res: Response) => {
-      const sub = webhookStore.get(req.params.id);
+      const tenant_id = req.tenant!.tenant_id;
+      const sub = webhookStore.get(req.params.id, tenant_id);
       if (!sub) return res.status(404).json({ error: 'subscription not found' });
-      res.json({ items: webhookStore.deliveriesFor(req.params.id) });
+      res.json({ items: webhookStore.deliveriesFor(req.params.id, tenant_id) });
     },
   );
 
@@ -755,10 +771,16 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('webhooks:manage'),
     async (req: Request, res: Response) => {
       const sub = webhookStore.internalGet(req.params.id);
-      if (!sub) return res.status(404).json({ error: 'subscription not found' });
+      // Cross-tenant guard — internalGet doesn't filter by tenant on
+      // purpose (the dispatcher needs that escape hatch), but admin-test
+      // calls must be scoped to the caller's tenant.
+      if (!sub || sub.tenant_id !== req.tenant!.tenant_id) {
+        return res.status(404).json({ error: 'subscription not found' });
+      }
       const delivery = await webhookDispatcher.deliverOne(sub, 'webhook.test', {
         message: 'APEX EWS webhook test event',
         subscription_id: sub.id,
+        tenant_id: sub.tenant_id,
         sent_at: now().toISOString(),
       });
       // 200 even if the recipient returned non-2xx — the delivery row

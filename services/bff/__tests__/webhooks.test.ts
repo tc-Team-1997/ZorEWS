@@ -98,6 +98,7 @@ describe('WebhookDispatcher.deliverOne', () => {
   test('signs the payload and POSTs to the subscription URL on success', async () => {
     const store = new WebhookSubscriptionStore();
     const sub = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'AML hub',
       url: 'https://example.test/aml',
       events: ['alert.created'],
@@ -125,7 +126,7 @@ describe('WebhookDispatcher.deliverOne', () => {
     expect(delivery.response_status).toBe(200);
 
     // Delivery row recorded on the store.
-    const log = store.deliveriesFor(sub.id);
+    const log = store.deliveriesFor(sub.id, 'BANK_DEMO');
     expect(log).toHaveLength(1);
     expect(log[0].status).toBe('success');
   });
@@ -133,6 +134,7 @@ describe('WebhookDispatcher.deliverOne', () => {
   test('retries 3x on 5xx and ends in failed status', async () => {
     const store = new WebhookSubscriptionStore();
     const sub = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'broken',
       url: 'https://example.test/broken',
       events: ['alert.created'],
@@ -156,6 +158,7 @@ describe('WebhookDispatcher.deliverOne', () => {
   test('succeeds on retry after a transient failure', async () => {
     const store = new WebhookSubscriptionStore();
     const sub = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'flaky',
       url: 'https://example.test/flaky',
       events: ['alert.created'],
@@ -179,11 +182,13 @@ describe('WebhookDispatcher.dispatch — fan-out', () => {
   test('only fires to active subs subscribed to the event type', async () => {
     const store = new WebhookSubscriptionStore();
     const subA = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'A',
       url: 'https://a.test/x',
       events: ['alert.created'],
     });
     const subB = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'B',
       url: 'https://b.test/x',
       events: ['scenario.run'],
@@ -193,6 +198,7 @@ describe('WebhookDispatcher.dispatch — fan-out', () => {
     if (internal) internal.active = false;
     // Sub C: matches event but is independent; should fire.
     const subC = store.create({
+      tenant_id: 'BANK_DEMO',
       name: 'C',
       url: 'https://c.test/x',
       events: ['alert.created', 'scenario.run'],
@@ -205,7 +211,7 @@ describe('WebhookDispatcher.dispatch — fan-out', () => {
       sleep: () => Promise.resolve(),
       now: () => NOW,
     });
-    const promises = dispatcher.dispatch('alert.created', { x: 1 });
+    const promises = dispatcher.dispatch('alert.created', { x: 1 }, 'BANK_DEMO');
     await Promise.all(promises);
 
     // Only subC should have received it (subA is inactive, subB doesn't subscribe).
@@ -282,6 +288,40 @@ describe('admin REST routes', () => {
     expect(t.body.event_type).toBe('webhook.test');
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0].headers['x-apex-event']).toBe('webhook.test');
+  });
+
+  test('cross-tenant — BIL admin never sees BANK_DEMO subscriptions', async () => {
+    const store = new WebhookSubscriptionStore();
+    const fake = makeFakeFetch([200, 200]);
+    const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
+    // BANK_DEMO admin creates a subscription.
+    const created = await request(app)
+      .post('/v1/webhooks')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .send({ name: 'bank-aml', url: 'https://aml-bank.test/x', events: ['alert.created'] });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    // BIL admin lists — sees nothing.
+    const bilList = await request(app)
+      .get('/v1/webhooks')
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
+    expect(bilList.status).toBe(200);
+    expect(bilList.body.items).toHaveLength(0);
+    // BIL admin tries to fetch deliveries for BANK_DEMO's sub — 404.
+    const bilDel = await request(app)
+      .get(`/v1/webhooks/${id}/deliveries`)
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
+    expect(bilDel.status).toBe(404);
+    // BIL admin tries to delete BANK_DEMO's sub — 404, row stays.
+    const bilKill = await request(app)
+      .delete(`/v1/webhooks/${id}`)
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
+    expect(bilKill.status).toBe(404);
+    // BANK_DEMO admin still sees their sub.
+    const bankList = await request(app)
+      .get('/v1/webhooks')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
+    expect(bankList.body.items).toHaveLength(1);
   });
 
   test('GET /v1/webhooks/:id/deliveries returns the recorded log', async () => {

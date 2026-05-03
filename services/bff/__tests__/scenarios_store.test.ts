@@ -52,20 +52,23 @@ function fakeInputs(): ShockInputs {
   return { gdp: -2, rate: 100, fx: 5 };
 }
 
-describe('InMemoryScenarioStore — pure unit', () => {
+describe('InMemoryScenarioStore — pure unit (T4.24 Phase 4 tenant-scoped)', () => {
   let store: InMemoryScenarioStore;
+  const T = 'BANK_DEMO';
   beforeEach(() => {
     store = new InMemoryScenarioStore();
   });
 
-  test('save() trims name + assigns id + saved_at', () => {
+  test('save() trims name + assigns id + saved_at + tenant_id', () => {
     const s = store.save({
+      tenant_id: T,
       name: '  Hot summer  ',
       saved_by: 'alice.admin',
       inputs: fakeInputs(),
       result: fakeResult(),
     });
     expect(s.name).toBe('Hot summer');
+    expect(s.tenant_id).toBe(T);
     expect(s.saved_by).toBe('alice.admin');
     expect(s.id).toMatch(/^s-/);
     expect(s.saved_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -74,6 +77,7 @@ describe('InMemoryScenarioStore — pure unit', () => {
   test('save() throws on empty name', () => {
     expect(() =>
       store.save({
+        tenant_id: T,
         name: '   ',
         saved_by: 'alice.admin',
         inputs: fakeInputs(),
@@ -83,24 +87,42 @@ describe('InMemoryScenarioStore — pure unit', () => {
   });
 
   test('list() filters by saved_by + sorts newest-first', async () => {
-    const a = store.save({ name: 'a', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    const a = store.save({ tenant_id: T, name: 'a', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
     await new Promise((r) => setTimeout(r, 5));
-    const b = store.save({ name: 'b', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
+    const b = store.save({ tenant_id: T, name: 'b', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
     await new Promise((r) => setTimeout(r, 5));
-    const c = store.save({ name: 'c', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    const c = store.save({ tenant_id: T, name: 'c', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
 
-    const all = store.list();
+    const all = store.list({ tenant_id: T });
     expect(all.map((s) => s.id)).toEqual([c.id, b.id, a.id]);
 
-    const aliceOnly = store.list({ saved_by: 'alice' });
+    const aliceOnly = store.list({ tenant_id: T, saved_by: 'alice' });
     expect(aliceOnly.map((s) => s.id)).toEqual([c.id, a.id]);
   });
 
   test('delete() removes the row + returns false on unknown id', () => {
-    const s = store.save({ name: 'x', saved_by: 'u', inputs: fakeInputs(), result: fakeResult() });
-    expect(store.delete(s.id)).toBe(true);
-    expect(store.get(s.id)).toBeUndefined();
-    expect(store.delete('no-such-id')).toBe(false);
+    const s = store.save({ tenant_id: T, name: 'x', saved_by: 'u', inputs: fakeInputs(), result: fakeResult() });
+    expect(store.delete(s.id, T)).toBe(true);
+    expect(store.get(s.id, T)).toBeUndefined();
+    expect(store.delete('no-such-id', T)).toBe(false);
+  });
+
+  // T4.24 Phase 4 — cross-tenant isolation
+  test('cross-tenant isolation — BIL scenarios are invisible to BANK_DEMO and vice-versa', () => {
+    const bank = store.save({ tenant_id: 'BANK_DEMO', name: 'bank-stress', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    const bil = store.save({ tenant_id: 'BIL', name: 'bil-stress', saved_by: 'bil.admin', inputs: fakeInputs(), result: fakeResult() });
+
+    // List is tenant-scoped.
+    expect(store.list({ tenant_id: 'BANK_DEMO' }).map((s) => s.id)).toEqual([bank.id]);
+    expect(store.list({ tenant_id: 'BIL' }).map((s) => s.id)).toEqual([bil.id]);
+
+    // Cross-tenant get returns undefined (no enumeration leak).
+    expect(store.get(bil.id, 'BANK_DEMO')).toBeUndefined();
+    expect(store.get(bank.id, 'BIL')).toBeUndefined();
+
+    // Cross-tenant delete returns false; the row stays.
+    expect(store.delete(bil.id, 'BANK_DEMO')).toBe(false);
+    expect(store.get(bil.id, 'BIL')).toBeDefined();
   });
 });
 
@@ -126,7 +148,7 @@ describe('/v1/scenarios — routes against InMemoryScenarioStore (T4.24 envelope
     expect(res.body.header.code).toBe('EWS_201');
     expect(res.body.body.name).toBe('Drought');
     expect(res.body.body.saved_by).toBe('alice');
-    expect(store.list().length).toBe(1);
+    expect(store.list({ tenant_id: 'BANK_DEMO' }).length).toBe(1);
   });
 
   test('POST /v1/scenarios → 400 envelope on missing name', async () => {
@@ -151,8 +173,8 @@ describe('/v1/scenarios — routes against InMemoryScenarioStore (T4.24 envelope
   });
 
   test('GET /v1/scenarios scopes to caller (non-admin)', async () => {
-    store.save({ name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
-    store.save({ name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
 
     const res = await request(app)
       .get('/v1/scenarios')
@@ -165,8 +187,8 @@ describe('/v1/scenarios — routes against InMemoryScenarioStore (T4.24 envelope
   });
 
   test('GET /v1/scenarios as admin sees everyone', async () => {
-    store.save({ name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
-    store.save({ name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
 
     const adminApp = makeApp({ scenarioStore: store, getRole: () => 'admin' }).app;
     const res = await request(adminApp)
@@ -178,7 +200,7 @@ describe('/v1/scenarios — routes against InMemoryScenarioStore (T4.24 envelope
   });
 
   test('GET /v1/scenarios/:id 404 envelope for other user (no enumeration)', async () => {
-    const s = store.save({ name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
+    const s = store.save({ tenant_id: 'BANK_DEMO', name: 'theirs', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
     const res = await request(app)
       .get(`/v1/scenarios/${s.id}`)
       .set(TENANT_HEADERS)
@@ -188,8 +210,43 @@ describe('/v1/scenarios — routes against InMemoryScenarioStore (T4.24 envelope
     expect(res.body.error.code).toBe('EWS_404');
   });
 
+  test('cross-tenant — BIL request never sees BANK_DEMO scenarios', async () => {
+    // BANK_DEMO scenario, saved by BANK_DEMO's alice.
+    const bankS = store.save({
+      tenant_id: 'BANK_DEMO',
+      name: 'bank-stress',
+      saved_by: 'alice',
+      inputs: fakeInputs(),
+      result: fakeResult(),
+    });
+    // BIL admin lists their own — gets nothing.
+    const list = await request(app)
+      .get('/v1/scenarios')
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' })
+      .set('x-apex-role', 'admin')
+      .set('x-apex-user', 'bil.admin');
+    expect(list.status).toBe(200);
+    expect(list.body.body.total).toBe(0);
+    // BIL admin tries to fetch BANK_DEMO's scenario by id — 404 (no enumeration).
+    const get = await request(app)
+      .get(`/v1/scenarios/${bankS.id}`)
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' })
+      .set('x-apex-role', 'admin')
+      .set('x-apex-user', 'bil.admin');
+    expect(get.status).toBe(404);
+    expect(get.body.error.code).toBe('EWS_404');
+    // BIL admin tries to delete BANK_DEMO's scenario — 404, row stays.
+    const del = await request(app)
+      .delete(`/v1/scenarios/${bankS.id}`)
+      .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' })
+      .set('x-apex-role', 'admin')
+      .set('x-apex-user', 'bil.admin');
+    expect(del.status).toBe(404);
+    expect(store.get(bankS.id, 'BANK_DEMO')).toBeDefined();
+  });
+
   test('DELETE /v1/scenarios/:id → 204 then 404', async () => {
-    const s = store.save({ name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    const s = store.save({ tenant_id: 'BANK_DEMO', name: 'mine', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
     const r1 = await request(app)
       .delete(`/v1/scenarios/${s.id}`)
       .set(TENANT_HEADERS)
@@ -224,6 +281,7 @@ describeIfPg('PgScenarioStore (integration — requires BFF_PG_URL)', () => {
 
   test('save() persists to app_scenario.saved_scenarios', async () => {
     const s = store.save({
+      tenant_id: 'BANK_DEMO',
       name: 'pg-scenario-1',
       saved_by: 'alice.admin',
       inputs: { gdp: -2.5, rate: 150, fx: 7.25 },
@@ -248,6 +306,7 @@ describeIfPg('PgScenarioStore (integration — requires BFF_PG_URL)', () => {
 
   test('init() rebuilds cache (inputs + result intact) after a "restart"', async () => {
     const s = store.save({
+      tenant_id: 'BANK_DEMO',
       name: 'survives-restart',
       saved_by: 'ravi.risk',
       inputs: { gdp: -3, rate: 200, fx: 10 },
@@ -257,7 +316,7 @@ describeIfPg('PgScenarioStore (integration — requires BFF_PG_URL)', () => {
 
     const fresh = new PgScenarioStore(pool, () => undefined);
     await fresh.init();
-    const recovered = fresh.get(s.id);
+    const recovered = fresh.get(s.id, 'BANK_DEMO');
     expect(recovered).toBeDefined();
     expect(recovered?.name).toBe('survives-restart');
     expect(recovered?.saved_by).toBe('ravi.risk');
@@ -267,14 +326,15 @@ describeIfPg('PgScenarioStore (integration — requires BFF_PG_URL)', () => {
 
   test('delete() removes from cache + pg', async () => {
     const s = store.save({
+      tenant_id: 'BANK_DEMO',
       name: 'transient',
       saved_by: 'sue.super',
       inputs: fakeInputs(),
       result: fakeResult(),
     });
     await new Promise((r) => setTimeout(r, 100));
-    expect(store.delete(s.id)).toBe(true);
-    expect(store.get(s.id)).toBeUndefined();
+    expect(store.delete(s.id, 'BANK_DEMO')).toBe(true);
+    expect(store.get(s.id, 'BANK_DEMO')).toBeUndefined();
     await new Promise((r) => setTimeout(r, 150));
     const r = await pool.query(
       `SELECT 1 FROM app_scenario.saved_scenarios WHERE scenario_id = $1`,
@@ -284,13 +344,13 @@ describeIfPg('PgScenarioStore (integration — requires BFF_PG_URL)', () => {
   });
 
   test('list({saved_by}) returns only the user’s rows, newest-first', async () => {
-    store.save({ name: 'a', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'a', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
     await new Promise((r) => setTimeout(r, 5));
-    store.save({ name: 'b', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
+    store.save({ tenant_id: 'BANK_DEMO', name: 'b', saved_by: 'bob', inputs: fakeInputs(), result: fakeResult() });
     await new Promise((r) => setTimeout(r, 5));
-    const c = store.save({ name: 'c', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
+    const c = store.save({ tenant_id: 'BANK_DEMO', name: 'c', saved_by: 'alice', inputs: fakeInputs(), result: fakeResult() });
 
-    const aliceOnly = store.list({ saved_by: 'alice' }).map((s) => s.id);
+    const aliceOnly = store.list({ tenant_id: 'BANK_DEMO', saved_by: 'alice' }).map((s) => s.id);
     expect(aliceOnly).toEqual([c.id, expect.stringMatching(/^s-/)]);
     expect(aliceOnly.length).toBe(2);
   });
