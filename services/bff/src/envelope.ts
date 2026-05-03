@@ -132,3 +132,24 @@ export function readRequestId(envelope: unknown): string | undefined {
   const v = r?.header?.requestId;
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
+
+/**
+ * Build an EnvelopeContext from the inbound request — preferring the
+ * envelope's `header.requestId`, then the `X-Request-Id` HTTP header,
+ * then a fresh UUID inside `wrapResponse` / `wrapError`.
+ *
+ * Works on both Express and Fastify-shaped requests; only the
+ * `headers` and `body` fields are touched.
+ */
+export function extractCtx(
+  req: { headers?: Record<string, string | string[] | undefined>; body?: unknown },
+  now: () => Date = () => new Date(),
+): Required<EnvelopeContext> {
+  const fromBody = readRequestId(req.body);
+  const headerVal = req.headers?.['x-request-id'];
+  const fromHeader = typeof headerVal === 'string' ? headerVal : undefined;
+  return {
+    requestId: fromBody ?? fromHeader ?? randomUUID(),
+    timestamp: now().toISOString(),
+  };
+}

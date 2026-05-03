@@ -217,11 +217,13 @@ describe('WebhookDispatcher.dispatch — fan-out', () => {
 });
 
 describe('admin REST routes', () => {
+  const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
   test('non-admin role gets 403 on /v1/webhooks', async () => {
     const store = new WebhookSubscriptionStore();
     const fake = makeFakeFetch([200]);
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never, role: 'risk_analyst' });
-    const r = await request(app).get('/v1/webhooks');
+    const r = await request(app).get('/v1/webhooks').set(TH);
     expect(r.status).toBe(403);
   });
 
@@ -233,21 +235,22 @@ describe('admin REST routes', () => {
     // Create
     const c = await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({ name: 'AML', url: 'https://example.test/aml', events: ['alert.created'] });
     expect(c.status).toBe(201);
     expect(c.body.secret).toMatch(/^[0-9a-f]{64}$/);
     const id = c.body.id as string;
 
     // List does NOT include the secret
-    const l = await request(app).get('/v1/webhooks');
+    const l = await request(app).get('/v1/webhooks').set(TH);
     expect(l.status).toBe(200);
     expect(l.body.items).toHaveLength(1);
     expect(l.body.items[0]).not.toHaveProperty('secret');
 
     // Delete
-    const d = await request(app).delete(`/v1/webhooks/${id}`);
+    const d = await request(app).delete(`/v1/webhooks/${id}`).set(TH);
     expect(d.status).toBe(204);
-    const l2 = await request(app).get('/v1/webhooks');
+    const l2 = await request(app).get('/v1/webhooks').set(TH);
     expect(l2.body.items).toHaveLength(0);
   });
 
@@ -257,6 +260,7 @@ describe('admin REST routes', () => {
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
     const r = await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['bogus.thing'] });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/bogus\.thing/);
@@ -268,10 +272,11 @@ describe('admin REST routes', () => {
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
     const c = await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['webhook.test'] });
     const id = c.body.id as string;
 
-    const t = await request(app).post(`/v1/webhooks/${id}/test`);
+    const t = await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
     expect(t.status).toBe(200);
     expect(t.body.status).toBe('success');
     expect(t.body.event_type).toBe('webhook.test');
@@ -285,11 +290,12 @@ describe('admin REST routes', () => {
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
     const c = await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['webhook.test'] });
     const id = c.body.id as string;
-    await request(app).post(`/v1/webhooks/${id}/test`);
-    await request(app).post(`/v1/webhooks/${id}/test`);
-    const r = await request(app).get(`/v1/webhooks/${id}/deliveries`);
+    await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
+    await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
+    const r = await request(app).get(`/v1/webhooks/${id}/deliveries`).set(TH);
     expect(r.status).toBe(200);
     expect(r.body.items).toHaveLength(2);
     // newest-first ordering
@@ -325,8 +331,10 @@ describe('hook into /v1/ews/evaluate', () => {
       fetchImpl: fake.fn as never,
       evaluator: new FixedLevelEvaluator('High'),
     });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
     await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({
         name: 'aml',
         url: 'https://aml.test/x',
@@ -334,7 +342,7 @@ describe('hook into /v1/ews/evaluate', () => {
       });
     await request(app)
       .post('/v1/ews/evaluate')
-      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .set(TH)
       .send({ customer_id: 'c-101' });
 
     // The dispatch is fire-and-forget; awaiting a tick lets the queued
@@ -353,8 +361,10 @@ describe('hook into /v1/ews/evaluate', () => {
       fetchImpl: fake.fn as never,
       evaluator: new FixedLevelEvaluator('Medium'),
     });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
     await request(app)
       .post('/v1/webhooks')
+      .set(TH)
       .send({
         name: 'aml',
         url: 'https://aml.test/x',
@@ -362,7 +372,7 @@ describe('hook into /v1/ews/evaluate', () => {
       });
     await request(app)
       .post('/v1/ews/evaluate')
-      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .set(TH)
       .send({ customer_id: 'c-101' });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(fake.calls).toHaveLength(0);

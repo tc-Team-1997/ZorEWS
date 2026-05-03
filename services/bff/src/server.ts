@@ -63,7 +63,7 @@ import {
   type Transition as RuleTransition,
 } from './rules/state_machine';
 import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
-import { wrapError, wrapResponse, readRequestId, EnterpriseError } from './envelope';
+import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, type TenantLookup } from './tenant';
 
 const ROLE_HEADER = 'x-apex-role';
@@ -165,12 +165,37 @@ export function makeApp(deps: AppDeps = {}) {
     listAlerts(req, res, source, lookups, now),
   );
 
-  // ---------- /v1 (public REST API v1 — T3.7) ----------
+  // ---------- /v1 (public REST API v1 — T3.7, envelope + tenant per T4.24) ----------
 
-  /** /v1/alerts — same shape + filters as /api/alerts. Documented contract. */
-  app.get('/v1/alerts', requireRole('alerts:list'), (req, res) =>
-    listAlerts(req, res, source, lookups, now),
-  );
+  /**
+   * /v1/alerts — same data + filters as /api/alerts; T4.24 wraps the
+   * response in the bank-grade envelope and gates on tenant context.
+   */
+  app.get('/v1/alerts', requireTenantMw, requireRole('alerts:list'), (req, res) => {
+    const ctx = extractCtx(req, now);
+    const sevRaw = req.query.severity as string | undefined;
+    if (sevRaw && !VALID_SEVERITIES.includes(sevRaw as UiSeverity)) {
+      return res.status(400).json(
+        wrapError(
+          {
+            code: 'EWS_400',
+            message: `severity must be one of ${VALID_SEVERITIES.join(',')}`,
+            severity: 'MEDIUM',
+          },
+          ctx,
+        ),
+      );
+    }
+    const assignee = (req.query.assignee as string | undefined) || undefined;
+    const canonicals = dedupeByAlertId(source.read());
+    const items = mapAlertList(
+      canonicals,
+      lookups,
+      { severity: sevRaw as UiSeverity | undefined, assignee },
+      now,
+    );
+    res.json(wrapResponse({ items, total: items.length }, ctx));
+  });
 
   /**
    * POST /v1/ews/evaluate — Banking API §6 reference shape (T4.24).
@@ -255,93 +280,177 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** GET /v1/risk-profile/:customer_id */
-  app.get('/v1/risk-profile/:customer_id', requireRole('customers:read_risk_profile'), async (req: Request, res: Response) => {
-    try {
-      const profile = await riskProfile.get(req.params.customer_id);
-      if (!profile) {
-        return res
-          .status(404)
-          .json({ error: `customer ${req.params.customer_id} not found` });
+  /**
+   * GET /v1/risk-profile/:customer_id — T4.24 envelope + tenant.
+   * 404 returns the §11 error envelope; success returns SUCCESS envelope.
+   */
+  app.get(
+    '/v1/risk-profile/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const profile = await riskProfile.get(req.params.customer_id);
+        if (!profile) {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404',
+                message: `customer ${req.params.customer_id} not found`,
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        res.json(wrapResponse(profile, ctx));
+      } catch (e) {
+        res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'lookup failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
       }
-      res.json(profile);
-    } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : 'lookup failed' });
-    }
-  });
+    },
+  );
 
   /**
-   * POST /v1/action
-   * body: { case_id, kind, officer_id, outcome_note?, gps? }
+   * POST /v1/action — T4.24 envelope + tenant.
+   * body: { case_id, kind, officer_id, outcome_note?, gps? } (or wrapped).
    * Proxies to regulatory-svc/cases POST /cases/:id/actions.
    */
-  app.post('/v1/action', requireRole('cases:log_action'), async (req: Request, res: Response) => {
-    const body = req.body as Partial<CaseActionInput>;
-    const errs: string[] = [];
-    if (!body?.case_id) errs.push('case_id is required');
-    if (!body?.kind || !VALID_ACTION_KINDS.includes(body.kind as never)) {
-      errs.push(`kind must be one of ${VALID_ACTION_KINDS.join(',')}`);
-    }
-    if (!body?.officer_id) errs.push('officer_id is required');
-    if (body?.gps) {
-      if (typeof body.gps.lat !== 'number' || typeof body.gps.lng !== 'number') {
-        errs.push('gps.lat and gps.lng must be numbers');
+  app.post(
+    '/v1/action',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as
+        | { header?: unknown; body?: unknown }
+        | Partial<CaseActionInput>;
+      const inner = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+        ? (raw.body as Partial<CaseActionInput>)
+        : (raw as Partial<CaseActionInput>));
+      const errs: string[] = [];
+      if (!inner?.case_id) errs.push('case_id is required');
+      if (!inner?.kind || !VALID_ACTION_KINDS.includes(inner.kind as never)) {
+        errs.push(`kind must be one of ${VALID_ACTION_KINDS.join(',')}`);
       }
-    }
-    if (errs.length) return res.status(400).json({ error: errs.join('; ') });
-
-    try {
-      const result = await caseAction.log(body as CaseActionInput);
-      res.status(201).json(result);
-    } catch (e) {
-      if (e instanceof CaseActionError) {
-        return res.status(e.status).json({ error: e.message, body: e.body });
+      if (!inner?.officer_id) errs.push('officer_id is required');
+      if (inner?.gps) {
+        if (typeof inner.gps.lat !== 'number' || typeof inner.gps.lng !== 'number') {
+          errs.push('gps.lat and gps.lng must be numbers');
+        }
       }
-      res.status(502).json({ error: e instanceof Error ? e.message : 'upstream failure' });
-    }
-  });
+      if (errs.length) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: errs.join('; '), severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const result = await caseAction.log(inner as CaseActionInput);
+        res
+          .status(201)
+          .json(wrapResponse(result, ctx, { code: 'EWS_201', message: 'Created' }));
+      } catch (e) {
+        if (e instanceof CaseActionError) {
+          return res.status(e.status).json(
+            wrapError(
+              {
+                code: `EWS_${e.status}`,
+                message: e.message,
+                severity: e.status >= 500 ? 'HIGH' : 'MEDIUM',
+                detail: e.body as Record<string, unknown>,
+              },
+              ctx,
+            ),
+          );
+        }
+        res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'upstream failure',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
 
   /**
-   * POST /v1/copilot/chat
+   * POST /v1/copilot/chat — T4.24 envelope + tenant.
    * body: { message, context?: { page?, entity?, role? } }
    * Templated context-aware brain — see services/bff/src/copilot/chat.ts.
    * Open to any authenticated role (no extra capability needed beyond what
    * the user already sees on the page they're on).
    */
-  app.post('/v1/copilot/chat', async (req: Request, res: Response) => {
+  app.post('/v1/copilot/chat', requireTenantMw, async (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
     if (!getRole(req)) {
-      return res.status(401).json({ error: 'authentication required' });
+      return res
+        .status(401)
+        .json(wrapError({ code: 'EWS_401', message: 'authentication required', severity: 'MEDIUM' }, env));
     }
-    const body = req.body as Partial<ChatRequest>;
-    if (!body || typeof body.message !== 'string' || !body.message.trim()) {
-      return res.status(400).json({ error: 'message is required' });
+    const raw = req.body as { header?: unknown; body?: unknown } | Partial<ChatRequest>;
+    const inner = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+      ? (raw.body as Partial<ChatRequest>)
+      : (raw as Partial<ChatRequest>));
+    if (!inner || typeof inner.message !== 'string' || !inner.message.trim()) {
+      return res
+        .status(400)
+        .json(wrapError({ code: 'EWS_400', message: 'message is required', severity: 'MEDIUM' }, env));
     }
-    if (body.message.length > 2000) {
-      return res.status(400).json({ error: 'message exceeds 2000 chars' });
+    if (inner.message.length > 2000) {
+      return res
+        .status(400)
+        .json(wrapError({ code: 'EWS_400', message: 'message exceeds 2000 chars', severity: 'MEDIUM' }, env));
     }
     const role = getRole(req) ?? undefined;
-    const ctx = body.context ?? {};
+    const chatCtx = inner.context ?? {};
     const out = await copilotRespond({
-      message: body.message,
-      context: { ...ctx, role: ctx.role ?? role },
+      message: inner.message,
+      context: { ...chatCtx, role: chatCtx.role ?? role },
     });
-    res.json(out);
+    res.json(wrapResponse(out, env));
   });
 
   /**
-   * POST /v1/scenario/run
+   * POST /v1/scenario/run — T4.24 envelope + tenant.
    * body: { gdp: number, rate: number, fx: number }
    * Runs a portfolio-wide stress test and returns the baseline vs. stressed
    * PD distribution, ECL delta, segment heatmap rows, and top-affected
    * customers. Pure compute — no upstream calls — so the response time is
    * O(portfolio_size) and a 240-account run lands well under 50ms.
    */
-  app.post('/v1/scenario/run', requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+  app.post('/v1/scenario/run', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
+    const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+    const innerBody =
+      raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body
+        : raw;
     let shocks;
     try {
-      shocks = validateShocks(req.body);
+      shocks = validateShocks(innerBody);
     } catch (e) {
-      return res.status(400).json({ error: e instanceof Error ? e.message : 'invalid shocks' });
+      return res.status(400).json(
+        wrapError(
+          { code: 'EWS_400', message: e instanceof Error ? e.message : 'invalid shocks', severity: 'MEDIUM' },
+          env,
+        ),
+      );
     }
     try {
       const result = runScenario(portfolio, shocks, now);
@@ -367,9 +476,14 @@ export function makeApp(deps: AppDeps = {}) {
         stressed_portfolio_pd: result.stressed_portfolio_pd,
         computed_at: result.computed_at,
       });
-      res.json(result);
+      res.json(wrapResponse(result, env));
     } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : 'scenario run failed' });
+      res.status(500).json(
+        wrapError(
+          { code: 'EWS_500', message: e instanceof Error ? e.message : 'scenario run failed', severity: 'HIGH' },
+          env,
+        ),
+      );
     }
   });
 
@@ -385,33 +499,44 @@ export function makeApp(deps: AppDeps = {}) {
     return typeof v === 'string' && v.length > 0 ? v : 'anonymous';
   }
 
-  app.get('/v1/scenarios', requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+  app.get('/v1/scenarios', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
     const role = getRole(req);
     const me = callerUsername(req);
     const items = scenarioStore.list(role === 'admin' ? {} : { saved_by: me });
-    res.json({ items, total: items.length });
+    res.json(wrapResponse({ items, total: items.length }, env));
   });
 
-  app.get('/v1/scenarios/:id', requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+  app.get('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
     const s = scenarioStore.get(req.params.id);
-    if (!s) return res.status(404).json({ error: `scenario ${req.params.id} not found` });
-    // Non-admins can only see their own.
     const role = getRole(req);
-    if (role !== 'admin' && s.saved_by !== callerUsername(req)) {
-      return res.status(404).json({ error: `scenario ${req.params.id} not found` });
+    if (!s || (role !== 'admin' && s.saved_by !== callerUsername(req))) {
+      return res.status(404).json(
+        wrapError(
+          { code: 'EWS_404', message: `scenario ${req.params.id} not found`, severity: 'LOW' },
+          env,
+        ),
+      );
     }
-    res.json(s);
+    res.json(wrapResponse(s, env));
   });
 
-  app.post('/v1/scenarios', requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
-    const body = req.body as {
+  app.post('/v1/scenarios', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
+    const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+    const body = (raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+      ? (raw as { body: unknown }).body
+      : raw) as {
       id?: string;
       name?: string;
       inputs?: { gdp?: number; rate?: number; fx?: number };
       result?: unknown;
     };
-    if (!body.name || !body.name.trim()) {
-      return res.status(400).json({ error: 'name is required' });
+    if (!body?.name || !body.name.trim()) {
+      return res
+        .status(400)
+        .json(wrapError({ code: 'EWS_400', message: 'name is required', severity: 'MEDIUM' }, env));
     }
     if (
       !body.inputs ||
@@ -419,10 +544,14 @@ export function makeApp(deps: AppDeps = {}) {
       typeof body.inputs.rate !== 'number' ||
       typeof body.inputs.fx !== 'number'
     ) {
-      return res.status(400).json({ error: 'inputs.{gdp,rate,fx} must all be numbers' });
+      return res
+        .status(400)
+        .json(wrapError({ code: 'EWS_400', message: 'inputs.{gdp,rate,fx} must all be numbers', severity: 'MEDIUM' }, env));
     }
     if (!body.result || typeof body.result !== 'object') {
-      return res.status(400).json({ error: 'result is required' });
+      return res
+        .status(400)
+        .json(wrapError({ code: 'EWS_400', message: 'result is required', severity: 'MEDIUM' }, env));
     }
     try {
       const saved = scenarioStore.save({
@@ -432,20 +561,33 @@ export function makeApp(deps: AppDeps = {}) {
         inputs: body.inputs as { gdp: number; rate: number; fx: number },
         result: body.result as never,
       });
-      res.status(201).json(saved);
+      res.status(201).json(wrapResponse(saved, env, { code: 'EWS_201', message: 'Created' }));
     } catch (e) {
       const status = (e as { status?: number }).status ?? 500;
-      res.status(status).json({ error: e instanceof Error ? e.message : 'save failed' });
+      res.status(status).json(
+        wrapError(
+          {
+            code: `EWS_${status}`,
+            message: e instanceof Error ? e.message : 'save failed',
+            severity: status >= 500 ? 'HIGH' : 'MEDIUM',
+          },
+          env,
+        ),
+      );
     }
   });
 
-  app.delete('/v1/scenarios/:id', requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+  app.delete('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const env = extractCtx(req, now);
     const s = scenarioStore.get(req.params.id);
-    if (!s) return res.status(404).json({ error: `scenario ${req.params.id} not found` });
-    // Non-admins can only delete their own.
     const role = getRole(req);
-    if (role !== 'admin' && s.saved_by !== callerUsername(req)) {
-      return res.status(404).json({ error: `scenario ${req.params.id} not found` });
+    if (!s || (role !== 'admin' && s.saved_by !== callerUsername(req))) {
+      return res.status(404).json(
+        wrapError(
+          { code: 'EWS_404', message: `scenario ${req.params.id} not found`, severity: 'LOW' },
+          env,
+        ),
+      );
     }
     scenarioStore.delete(req.params.id);
     res.status(204).end();
@@ -458,7 +600,7 @@ export function makeApp(deps: AppDeps = {}) {
    * Auth: any role with cases:list (i.e. all 5 seed roles) — notifications
    * are intentionally low-sensitivity (titles + deep links, no PII).
    */
-  app.get('/v1/notifications/stream', requireRole('cases:list'), (req: Request, res: Response) => {
+  app.get('/v1/notifications/stream', requireTenantMw, requireRole('cases:list'), (req: Request, res: Response) => {
     openSse(req, res, bus);
   });
 
@@ -469,7 +611,7 @@ export function makeApp(deps: AppDeps = {}) {
    * The scenario route publishes via the in-process bus directly, not
    * via this endpoint.
    */
-  app.post('/v1/notifications/publish', requireRole('audit:read'), (req: Request, res: Response) => {
+  app.post('/v1/notifications/publish', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
     const body = req.body as {
       level?: NotificationLevel;
       title?: string;
@@ -508,7 +650,7 @@ export function makeApp(deps: AppDeps = {}) {
    *   - the breached_cases list (most-overdue first)
    * Visible to anyone with cases:list.
    */
-  app.get('/v1/cases/sla-summary', requireRole('cases:list'), (_req: Request, res: Response) => {
+  app.get('/v1/cases/sla-summary', requireTenantMw, requireRole('cases:list'), (_req: Request, res: Response) => {
     const fleet = deps.slaFleet ?? makeFleet(now());
     const summary = summariseSla(fleet, now());
     res.json(summary);
@@ -516,6 +658,7 @@ export function makeApp(deps: AppDeps = {}) {
 
   app.get(
     '/v1/integrations/health',
+    requireTenantMw,
     requireRole('audit:read'),
     async (_req: Request, res: Response) => {
       try {
@@ -549,11 +692,11 @@ export function makeApp(deps: AppDeps = {}) {
     'webhook.test',
   ] as const;
 
-  app.get('/v1/webhooks', requireRole('webhooks:manage'), (_req: Request, res: Response) => {
+  app.get('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (_req: Request, res: Response) => {
     res.json({ items: webhookStore.list() });
   });
 
-  app.post('/v1/webhooks', requireRole('webhooks:manage'), (req: Request, res: Response) => {
+  app.post('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
     const body = req.body as { name?: unknown; url?: unknown; events?: unknown };
     const errs: string[] = [];
     if (typeof body?.name !== 'string' || !body.name.trim()) errs.push('name is required');
@@ -582,7 +725,7 @@ export function makeApp(deps: AppDeps = {}) {
     res.status(201).json(created);
   });
 
-  app.delete('/v1/webhooks/:id', requireRole('webhooks:manage'), (req: Request, res: Response) => {
+  app.delete('/v1/webhooks/:id', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
     const ok = webhookStore.delete(req.params.id);
     if (!ok) return res.status(404).json({ error: 'subscription not found' });
     res.status(204).end();
@@ -590,6 +733,7 @@ export function makeApp(deps: AppDeps = {}) {
 
   app.get(
     '/v1/webhooks/:id/deliveries',
+    requireTenantMw,
     requireRole('webhooks:manage'),
     (req: Request, res: Response) => {
       const sub = webhookStore.get(req.params.id);
@@ -607,6 +751,7 @@ export function makeApp(deps: AppDeps = {}) {
    */
   app.post(
     '/v1/webhooks/:id/test',
+    requireTenantMw,
     requireRole('webhooks:manage'),
     async (req: Request, res: Response) => {
       const sub = webhookStore.internalGet(req.params.id);
@@ -633,6 +778,7 @@ export function makeApp(deps: AppDeps = {}) {
    */
   app.get(
     '/v1/reports/:type',
+    requireTenantMw,
     requireRole('customers:read_risk_profile'),
     async (req: Request, res: Response) => {
       const type = req.params.type as ReportType;
@@ -702,12 +848,12 @@ export function makeApp(deps: AppDeps = {}) {
   // ── Rules v2 (Module 3 banking-grade enhancements) ─────────────────
 
   /** GET /v1/rules/variables — banking variable library, grouped by category. */
-  app.get('/v1/rules/variables', requireRole('rules:list'), (_req: Request, res: Response) => {
+  app.get('/v1/rules/variables', requireTenantMw, requireRole('rules:list'), (_req: Request, res: Response) => {
     res.json({ categories: variablesByCategory() });
   });
 
   /** GET /v1/rules?state=…&product=… — filtered list with embedded performance. */
-  app.get('/v1/rules', requireRole('rules:list'), (req: Request, res: Response) => {
+  app.get('/v1/rules', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
     const stateRaw = req.query.state as string | undefined;
     const productRaw = req.query.product as string | undefined;
     if (stateRaw && !VALID_RULE_STATES.includes(stateRaw as RuleV2State)) {
@@ -731,7 +877,7 @@ export function makeApp(deps: AppDeps = {}) {
   });
 
   /** GET /v1/rules/:id — full rule envelope with audit trail. */
-  app.get('/v1/rules/:id', requireRole('rules:read'), (req: Request, res: Response) => {
+  app.get('/v1/rules/:id', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {
     const rule = ruleStore.get(req.params.id);
     if (!rule) return res.status(404).json({ error: 'rule_not_found' });
     res.json({
@@ -744,6 +890,7 @@ export function makeApp(deps: AppDeps = {}) {
   /** POST /v1/rules/:id/transition — fire a maker-checker action. */
   app.post(
     '/v1/rules/:id/transition',
+    requireTenantMw,
     (req: Request, res: Response, next: NextFunction) => {
       // Look up the rule first so we know which RBAC capability the
       // transition needs from the current state.
@@ -800,14 +947,14 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   /** POST /v1/rules/:id/backtest — run the deterministic backtest. */
-  app.post('/v1/rules/:id/backtest', requireRole('rules:simulate'), (req: Request, res: Response) => {
+  app.post('/v1/rules/:id/backtest', requireTenantMw, requireRole('rules:simulate'), (req: Request, res: Response) => {
     const rule = ruleStore.get(req.params.id);
     if (!rule) return res.status(404).json({ error: 'rule_not_found' });
     res.json(runBacktest(rule, now()));
   });
 
   /** GET /v1/rules/:id/performance — live metrics. */
-  app.get('/v1/rules/:id/performance', requireRole('rules:read'), (req: Request, res: Response) => {
+  app.get('/v1/rules/:id/performance', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {
     const rule = ruleStore.get(req.params.id);
     if (!rule) return res.status(404).json({ error: 'rule_not_found' });
     res.json(performanceFor(rule, now()));

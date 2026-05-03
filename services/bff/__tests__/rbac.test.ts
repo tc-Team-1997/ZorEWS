@@ -45,9 +45,12 @@ describe('bff — RBAC enforcement', () => {
 
   test('GET /v1/alerts with field_officer is allowed (alerts:list)', async () => {
     const { app } = makeRealApp();
-    const r = await request(app).get('/v1/alerts').set('x-apex-role', 'field_officer');
+    const r = await request(app)
+      .get('/v1/alerts')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .set('x-apex-role', 'field_officer');
     expect(r.status).toBe(200);
-    expect(r.body.total).toBe(1);
+    expect(r.body.body.total).toBe(1);
   });
 
   test('POST /v1/ews/evaluate without role → 401', async () => {
@@ -76,15 +79,17 @@ describe('bff — RBAC enforcement', () => {
     const { app } = makeRealApp();
     const r = await request(app)
       .get('/v1/risk-profile/c-101')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .set('x-apex-role', 'field_officer');
     expect(r.status).toBe(200);
-    expect(r.body.id).toBe('c-101');
+    expect(r.body.body.id).toBe('c-101');
   });
 
   test('GET /v1/risk-profile with unknown role → 403', async () => {
     const { app } = makeRealApp();
     const r = await request(app)
       .get('/v1/risk-profile/c-101')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .set('x-apex-role', 'ghost');
     expect(r.status).toBe(403);
   });
@@ -95,6 +100,7 @@ describe('bff — RBAC enforcement', () => {
     const { app } = makeRealApp();
     const r = await request(app)
       .post('/v1/action')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .set('x-apex-role', 'field_officer')
       .send({ case_id: 'case-1', kind: 'call', officer_id: 'fo' });
     expect(r.status).toBe(503);  // RBAC passed; upstream cases-svc unconfigured
@@ -104,6 +110,7 @@ describe('bff — RBAC enforcement', () => {
     const { app } = makeRealApp();
     const r = await request(app)
       .post('/v1/action')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .send({ case_id: 'case-1', kind: 'call', officer_id: 'fo' });
     expect(r.status).toBe(401);
   });

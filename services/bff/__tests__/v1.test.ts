@@ -39,20 +39,39 @@ function makeV1App(overrides: { caseAction?: CaseActionSink } = {}) {
   });
 }
 
-describe('GET /v1/alerts (public alias of /api/alerts)', () => {
-  test('returns the same shape', async () => {
+describe('GET /v1/alerts (public alias of /api/alerts, T4.24 enveloped)', () => {
+  const TENANT_HEADERS = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('returns the same data wrapped in the bank-grade envelope', async () => {
     const { app } = makeV1App();
     const a = await request(app).get('/api/alerts');
-    const b = await request(app).get('/v1/alerts');
+    const b = await request(app).get('/v1/alerts').set(TENANT_HEADERS);
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
-    expect(b.body).toEqual(a.body);
+    // /api/alerts stays raw for the SPA; /v1/alerts is enveloped.
+    expect(b.body.header.status).toBe('SUCCESS');
+    expect(b.body.body).toEqual(a.body);
   });
 
   test('honours ?severity= filter', async () => {
     const { app } = makeV1App();
-    const r = await request(app).get('/v1/alerts?severity=critical');
-    expect(r.body.total).toBe(1);
+    const r = await request(app).get('/v1/alerts?severity=critical').set(TENANT_HEADERS);
+    expect(r.body.body.total).toBe(1);
+  });
+
+  test('400 envelope for invalid severity', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/alerts?severity=ULTRA').set(TENANT_HEADERS);
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/severity must be one of/);
+  });
+
+  test('400 envelope when X-Tenant-ID missing', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/alerts').set({ 'X-Channel': 'API' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/X-Tenant-ID/);
   });
 });
 
@@ -185,28 +204,42 @@ describe('POST /v1/ews/evaluate', () => {
   });
 });
 
-describe('GET /v1/risk-profile/:customer_id', () => {
-  test('returns the canned profile for a known customer', async () => {
+describe('GET /v1/risk-profile/:customer_id (T4.24 enveloped)', () => {
+  const TENANT_HEADERS = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('returns the canned profile wrapped in envelope for a known customer', async () => {
     const { app } = makeV1App();
-    const r = await request(app).get('/v1/risk-profile/c-101');
+    const r = await request(app).get('/v1/risk-profile/c-101').set(TENANT_HEADERS);
     expect(r.status).toBe(200);
-    expect(r.body.id).toBe('c-101');
-    expect(r.body.name).toBe('Achieng Otieno');
-    expect(r.body.level).toBe('High');
-    expect(r.body.top_reasons).toHaveLength(5);
-    expect(r.body.model_name).toBe('pd_xgboost');
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.body.id).toBe('c-101');
+    expect(r.body.body.name).toBe('Achieng Otieno');
+    expect(r.body.body.level).toBe('High');
+    expect(r.body.body.top_reasons).toHaveLength(5);
+    expect(r.body.body.model_name).toBe('pd_xgboost');
   });
 
-  test('404 for an unknown customer', async () => {
+  test('404 envelope for an unknown customer', async () => {
     const { app } = makeV1App();
-    const r = await request(app).get('/v1/risk-profile/c-nope');
+    const r = await request(app).get('/v1/risk-profile/c-nope').set(TENANT_HEADERS);
     expect(r.status).toBe(404);
-    expect(r.body.error).toMatch(/c-nope not found/);
+    expect(r.body.error.code).toBe('EWS_404');
+    expect(r.body.error.severity).toBe('LOW');
+    expect(r.body.error.message).toMatch(/c-nope not found/);
+  });
+
+  test('400 envelope when tenant headers missing', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/risk-profile/c-101');
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400');
   });
 });
 
-describe('POST /v1/action', () => {
-  test('proxies to the cases service when configured', async () => {
+describe('POST /v1/action (T4.24 enveloped)', () => {
+  const TENANT_HEADERS = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('proxies to the cases service and returns 201 envelope', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fakeFetch = async (url: string, init: RequestInit): Promise<Response> => {
       calls.push({ url, init });
@@ -222,42 +255,51 @@ describe('POST /v1/action', () => {
     const sink = new HttpCaseActionSink('http://cases:8083', fakeFetch as never);
     const { app } = makeV1App({ caseAction: sink });
 
-    const r = await request(app).post('/v1/action').send({
-      case_id: 'case-501',
-      kind: 'call',
-      officer_id: 'fiona.field',
-      outcome_note: 'Promised by Friday',
-    });
+    const r = await request(app)
+      .post('/v1/action')
+      .set(TENANT_HEADERS)
+      .send({
+        case_id: 'case-501',
+        kind: 'call',
+        officer_id: 'fiona.field',
+        outcome_note: 'Promised by Friday',
+      });
     expect(r.status).toBe(201);
-    expect(r.body.state).toBe('in_action');
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.header.code).toBe('EWS_201');
+    expect(r.body.body.state).toBe('in_action');
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('http://cases:8083/cases/case-501/actions');
     const sent = JSON.parse(calls[0].init.body as string);
     expect(sent).toMatchObject({ kind: 'call', officer_id: 'fiona.field' });
   });
 
-  test('400 when case_id / kind / officer_id missing', async () => {
+  test('400 envelope when case_id / kind / officer_id missing', async () => {
     const { app } = makeV1App();
-    const r = await request(app).post('/v1/action').send({});
+    const r = await request(app).post('/v1/action').set(TENANT_HEADERS).send({});
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/case_id is required/);
-    expect(r.body.error).toMatch(/kind/);
-    expect(r.body.error).toMatch(/officer_id is required/);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/case_id is required/);
+    expect(r.body.error.message).toMatch(/kind/);
+    expect(r.body.error.message).toMatch(/officer_id is required/);
   });
 
-  test('400 on bad GPS', async () => {
+  test('400 envelope on bad GPS', async () => {
     const { app } = makeV1App();
-    const r = await request(app).post('/v1/action').send({
-      case_id: 'case-501',
-      kind: 'visit',
-      officer_id: 'fo',
-      gps: { lat: 'nope', lng: 36.82 },
-    });
+    const r = await request(app)
+      .post('/v1/action')
+      .set(TENANT_HEADERS)
+      .send({
+        case_id: 'case-501',
+        kind: 'visit',
+        officer_id: 'fo',
+        gps: { lat: 'nope', lng: 36.82 },
+      });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/gps/);
+    expect(r.body.error.message).toMatch(/gps/);
   });
 
-  test('forwards upstream errors with their status code', async () => {
+  test('forwards upstream errors as enterprise error envelope with their status', async () => {
     const failing: CaseActionSink = {
       log: async (_input: CaseActionInput) => {
         throw new CaseActionError(409, 'cannot logAction a case in state open', {
@@ -267,24 +309,47 @@ describe('POST /v1/action', () => {
       },
     };
     const { app } = makeV1App({ caseAction: failing });
-    const r = await request(app).post('/v1/action').send({
-      case_id: 'case-503',
-      kind: 'call',
-      officer_id: 'fo',
-    });
+    const r = await request(app)
+      .post('/v1/action')
+      .set(TENANT_HEADERS)
+      .send({ case_id: 'case-503', kind: 'call', officer_id: 'fo' });
     expect(r.status).toBe(409);
-    expect(r.body.error).toMatch(/cannot logAction/);
-    expect(r.body.body.current_state).toBe('open');
+    expect(r.body.error.code).toBe('EWS_409');
+    expect(r.body.error.message).toMatch(/cannot logAction/);
+    expect(r.body.error.detail.current_state).toBe('open');
   });
 
-  test('503 when cases service is not configured', async () => {
+  test('503 envelope when cases service is not configured', async () => {
     const { app } = makeV1App({ caseAction: new UnavailableCaseActionSink() });
-    const r = await request(app).post('/v1/action').send({
-      case_id: 'case-501',
-      kind: 'call',
-      officer_id: 'fo',
-    });
+    const r = await request(app)
+      .post('/v1/action')
+      .set(TENANT_HEADERS)
+      .send({ case_id: 'case-501', kind: 'call', officer_id: 'fo' });
     expect(r.status).toBe(503);
-    expect(r.body.error).toMatch(/APEX_CASES_URL/);
+    expect(r.body.error.code).toBe('EWS_503');
+    expect(r.body.error.message).toMatch(/APEX_CASES_URL/);
+  });
+
+  test('accepts wrapped {header, body} request envelope', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fakeFetch = async (url: string, init: RequestInit): Promise<Response> => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify({ id: 'case-501', state: 'in_action', actions: [] }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+    const sink = new HttpCaseActionSink('http://cases:8083', fakeFetch as never);
+    const { app } = makeV1App({ caseAction: sink });
+    const requestId = '99999999-aaaa-bbbb-cccc-dddddddddddd';
+    const r = await request(app)
+      .post('/v1/action')
+      .set(TENANT_HEADERS)
+      .send({
+        header: { tenantId: 'BANK_DEMO', channel: 'API', requestId, timestamp: '2026-05-03T12:00:00.000Z' },
+        body: { case_id: 'case-501', kind: 'call', officer_id: 'fo' },
+      });
+    expect(r.status).toBe(201);
+    expect(r.body.header.requestId).toBe(requestId);
   });
 });
