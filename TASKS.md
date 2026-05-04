@@ -586,6 +586,30 @@
       - Routes (23): POST happy + envelope body + 409 already_open + 400 invalid_input + 403 unknown role; GET list/single happy + status filter + invalid status 400 + cross-tenant 404; PATCH legal + illegal + invalid status + decision_required + 404; complete happy + 404 unknown_step + 409 already_completed + 409 closed; notes round-trip + empty 400 + too-long 400 + listNotes-404; tenant isolation through HTTP.
     - **Outcome:** Module 9 now has 7 new T6 routes layered on top of the T4.10 SLA + action surface. The BIL claim-fraud workflow can now be driven end-to-end (from open through 8-step evidence to a documented decision) with a per-case audit trail.
 
+  - **M7.1 — BIL AI/ML model registry (2026-05-04):**
+    - Module 7 (AI/ML Model Engine, 25 APIs) had T4.5 surface — the PD model computer wired into `/v1/ews/evaluate`. M7.1 lands the registry + ad-hoc inference + metrics surface so the SPA can show "what models are deployed at what stage", "what's the AUC of the production fraud model", and "score this customer with model X".
+    - New `services/bff/src/ai_model_registry.ts`:
+      - 6 model types per the BIL pitch §6: `pd / fraud / churn / lapse / anomaly / claim_severity`. 5 statuses (`experimental / staging / production / shadow / retired`). 5 frameworks (`xgboost / sklearn / torch / lightgbm / isolation_forest`).
+      - **8 seed model versions** with realistic metrics: PD XGBoost v3 (production, AUC 0.847), PD v2 (retired), Fraud LightGBM v1 (production, AUC 0.891), Churn XGB v1 (production, AUC 0.78), Churn Torch (shadow), Lapse XGB v1 (production), Anomaly IsolationForest v2 (production, no AUC), Claim Severity LGB regressor v1 (staging, MAE 87.5k KES).
+      - `ModelMetrics` carries AUC for binary classifiers, MAE for regression, training_rows + evaluated_at for both. Anomaly models carry neither AUC nor MAE.
+      - `AiModelRegistry` interface (`list / get / getProductionByType / score`) + `InMemoryAiModelRegistry`. `score()` synthesises deterministic predictions per `(model, tenant, customer, day)` via FNV-1a + Mulberry32. PD/fraud/churn/lapse → 0..1 probability with low/medium/high band; anomaly → -1..1 (negative = anomalous), no band; claim_severity → KES regression, no band. SHAP-style top-features synthesised from the model's declared `key_features[]`.
+      - `ModelRegistryError` carries codes `invalid_input`, `unknown_model`, `retired` — routed to 400/404/409 by the BFF.
+    - **`AppDeps.aiModelRegistry` injection point** — defaults to module-level singleton.
+    - **6 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile` — same as the per-customer risk-profile route):
+      - `GET /v1/ai/models/types` — enumerate the 6 model types.
+      - `GET /v1/ai/models/by-type/:type` — production model for a type. 404 `EWS_404_no_production_model` (e.g. claim_severity), 400 `EWS_400_invalid_type`.
+      - `GET /v1/ai/models?type=&status=` — filterable list. Production-first sort. Filter validation with code-routed 400s.
+      - `GET /v1/ai/models/:model_id` — single. 404 `EWS_404_unknown_model`.
+      - `GET /v1/ai/models/:model_id/metrics` — performance block only.
+      - `POST /v1/ai/models/:model_id/score` — run inference. 400 invalid_input / 404 unknown_model / 409 EWS_409_retired (cannot score against a retired model).
+    - **Tests:** BFF 810/810 (was 763 — +47 in `ai_model_registry.test.ts`):
+      - Type guards (2).
+      - Schema (6): exactly 8 versions, ids unique, every required field, exactly 1 production per BIL pitch type, claim_severity in staging, regression-vs-binary-vs-anomaly metric coverage, retired_at invariant.
+      - Registry list/get/by-type (7): all 8 + filter narrowing + production-first sort, get + null, by-type returns prod, claim_severity getProductionByType returns null.
+      - score (10): binary-classifier shape, regression null probability + null band, anomaly score in [-1, 1], determinism, tenant divergence, band derivation thresholds (saw all 3 bands), top_features ⊂ key_features, unknown_model throw, retired throw, missing customer_id throw.
+      - Routes (22): types list happy + 403; by-type happy + 404 no_production + 400 invalid_type; list happy + filters + 2 invalid 400s; single happy + 404; metrics happy + 404; score happy + envelope body + 400 + 404 + 409 retired + tenant divergence + 403.
+    - **Outcome:** Module 7 now has 6 routes covering the model registry + inference surface. The BIL deployment can render the model deployment ladder (production → shadow → staging → retired) and run ad-hoc per-customer inference against any non-retired model. Future M7.2 — model promotion workflow + back-test endpoints — extends the same registry primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

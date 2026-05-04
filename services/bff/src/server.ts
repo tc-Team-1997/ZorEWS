@@ -116,6 +116,16 @@ import {
   type InvestigationStatus,
 } from './case_investigation';
 import {
+  defaultAiModelRegistry,
+  isModelStatus,
+  isModelType,
+  ModelRegistryError,
+  type AiModelRegistry,
+  type InferenceInput,
+  type ModelStatus,
+  type ModelType,
+} from './ai_model_registry';
+import {
   ConfigValidationError,
   defaultConfigStore,
   listCategories as listConfigCategories,
@@ -241,6 +251,13 @@ export interface AppDeps {
    * interface.
    */
   caseInvestigationStore?: CaseInvestigationStore;
+  /**
+   * Override for tests — BIL AI/ML model registry (T6 M7.1).
+   * Defaults to the module-level InMemoryAiModelRegistry seeded with
+   * 8 BIL model versions. Production swaps in an MLflow / Sagemaker
+   * / Vertex-backed registry satisfying the same interface.
+   */
+  aiModelRegistry?: AiModelRegistry;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -300,6 +317,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
+  const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -704,6 +722,186 @@ export function makeApp(deps: AppDeps = {}) {
     });
     res.json(wrapResponse(out, env));
   });
+
+  // ── BIL AI/ML model registry (T6 M7.1) ────────────────────────────────
+  //
+  // Model registry + ad-hoc inference + metrics. Same RBAC as the
+  // per-customer risk-profile route since inference returns a per-
+  // customer score (analyst-level data class).
+
+  /** GET /v1/ai/models/types — enumerate the closed model-type set. */
+  app.get(
+    '/v1/ai/models/types',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items: ModelType[] = ['pd', 'fraud', 'churn', 'lapse', 'anomaly', 'claim_severity'];
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/ai/models/by-type/:type — production model for a type. 404 if none. */
+  app.get(
+    '/v1/ai/models/by-type/:type',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const type = req.params.type;
+      if (!isModelType(type)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_type', message: `invalid type: ${type}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const m = aiModelRegistry.getProductionByType(type as ModelType);
+      if (!m) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_no_production_model', message: `no production model for type ${type}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(m, ctx));
+    },
+  );
+
+  /** GET /v1/ai/models?type=&status= — list with filters. */
+  app.get(
+    '/v1/ai/models',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const t = req.query.type as string | undefined;
+      const s = req.query.status as string | undefined;
+      if (t !== undefined && !isModelType(t)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_type', message: `invalid type: ${t}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (s !== undefined && !isModelStatus(s)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: `invalid status: ${s}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = aiModelRegistry.list({ type: t as ModelType | undefined, status: s as ModelStatus | undefined });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/ai/models/:model_id — single model. 404 on miss. */
+  app.get(
+    '/v1/ai/models/:model_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const m = aiModelRegistry.get(id);
+      if (!m) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_model', message: `unknown model_id: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(m, ctx));
+    },
+  );
+
+  /** GET /v1/ai/models/:model_id/metrics — performance metrics block only. */
+  app.get(
+    '/v1/ai/models/:model_id/metrics',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const m = aiModelRegistry.get(id);
+      if (!m) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_model', message: `unknown model_id: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(
+        wrapResponse(
+          {
+            model_id: m.model_id,
+            type: m.type,
+            version: m.version,
+            status: m.status,
+            metrics: m.metrics,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /**
+   * POST /v1/ai/models/:model_id/score body: InferenceInput
+   * Run inference. Deterministic per (model, tenant, customer, day).
+   * 400 invalid_input on missing customer_id, 404 unknown_model,
+   * 409 retired when targeting a retired model.
+   */
+  app.post(
+    '/v1/ai/models/:model_id/score',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = aiModelRegistry.score(
+          id,
+          (inner ?? {}) as InferenceInput,
+          req.tenant!.tenant_id,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof ModelRegistryError) {
+          const status =
+            e.code === 'unknown_model' ? 404 :
+            e.code === 'retired' ? 409 :
+            400;
+          const code =
+            e.code === 'unknown_model' ? 'EWS_404_unknown_model' :
+            e.code === 'retired' ? 'EWS_409_retired' :
+            `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'score failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
 
   /**
    * POST /v1/scenario/run — T4.24 envelope + tenant.
