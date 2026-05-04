@@ -1006,6 +1006,26 @@
       - Backwards-compat (2): M10.1 email + M10.2 SMS templates routes still 200.
     - **Outcome:** Module 10 now has 3 channels live (email + SMS + push). The `<Channel>Transport` pattern is fully proven across all 3 modern delivery surfaces. Combined with M8.2's routing decision (which channels[] to fire), the BIL deployment can wire end-to-end alert escalation: severity → class → routing → fan-out across email + SMS + push. Future M10.4 (in-app real-time) closes the SPA-bell side.
 
+  - **M4.2 — Indicator backtest (2026-05-04):**
+    - M4.1 ships the BIL KRI catalog; M4.2 lets ops simulate "what would this indicator have fired on over the last N days?". Required pre-launch evidence per BIL §10. Cross-module integration: uses M6.2's `IndicatorWeightLookup` so the catalog stays shared.
+    - New `services/bff/src/indicator_backtest.ts`:
+      - `BacktestInput`: indicator_id, days (clamped [1, 365]), optional vertical + customer_segment.
+      - 4 customer segments: `all` (5000 customers/day), `retail` (3500), `sme` (1200), `corporate` (300).
+      - `BacktestResult` carries: per-day fires + true_positives bucket; full confusion matrix (TP/FP/FN/TN); operator-friendly metrics (`precision`, `recall`, `f1`, `weighted_contribution = catalog_weight × mean_value`); mean indicator value across fires.
+      - **Synthesis biased by catalog weight**: heavier-weight indicators have higher precision (~75%) and lower fire-rate; lighter ones have lower precision (~30%) and higher fire-rate. Mean-value also weight-biased so the `weighted_contribution` metric tells the SPA "this indicator would contribute X to a M6.1 score on average."
+      - Deterministic per `(tenant, indicator, asOf-day, days, segment)` — SPA can cache without staleness anxiety.
+      - `BacktestError` codes routed: `unknown_indicator` → 404, others → 400 (`invalid_input`, `invalid_days`, `invalid_vertical`, `invalid_segment`).
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `customers:read_risk_profile`):
+      - `POST /v1/indicators/backtest` body `{indicator_id, days, vertical?, customer_segment?}`. Code-routed errors. Imports renamed (`runIndicatorBacktest`/`IndicatorBacktestError`) to avoid shadowing the existing T4.7 `runBacktest` from `rules/backtest`.
+    - **Tests:** BFF 1515/1515 (was 1477 — +38 in `indicator_backtest.test.ts`):
+      - Type guard (2): isCustomerSegment.
+      - validateInput (8): happy + 7 error paths covering each validation rule.
+      - runBacktest (17): shape, daily ordering, total_fires invariant, confusion math (TP+FP=fires), precision + recall + f1 formulas, weighted_contribution = weight × mean_value invariant, mean_value bounds, determinism, tenant divergence, days variation, segment cohort sizes, **heavier-weight → higher-precision invariant**, vertical pass-through, unknown_indicator throw, cross-vertical mismatch.
+      - Routes (10): admin happy + envelope body + analyst-accepted + 403 + every 400/404 code path + tenant divergence.
+      - Backwards-compat (1): M6.2 by-indicators route still works.
+    - **One envelope.test failure observed under parallel-run pollution** — passes in isolation + on re-run. Same flake pattern as M11.6 / M9.1; not a regression.
+    - **Outcome:** Module 4 now has both the catalog (M4.1) + backtest (M4.2). The BIL deployment can demo the full indicator lifecycle: declare in catalog → backtest against historical data → evaluate via M6.2 scoring. Future M4.3 (catalog mutation API + RBAC-gated weight overrides) extends the same primitives.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

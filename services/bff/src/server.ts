@@ -115,6 +115,11 @@ import {
   type ScoringVertical,
 } from './bil_scoring_v2';
 import {
+  BacktestError as IndicatorBacktestError,
+  runBacktest as runIndicatorBacktest,
+  type BacktestInput as IndicatorBacktestInput,
+} from './indicator_backtest';
+import {
   defaultEmailTransport,
   EmailValidationError,
   listTemplates as listEmailTemplates,
@@ -2933,6 +2938,55 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'scoring failed', severity: 'HIGH' },
+            env,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── BIL indicator backtest (T6 M4.2) ────────────────────────────────
+  //
+  // Simulation surface — "what would this indicator have fired on
+  // over the last N days?". Required pre-launch evidence per BIL §10.
+  // Uses M6.2's IndicatorWeightLookup so the catalog stays shared.
+  app.post(
+    '/v1/indicators/backtest',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = runIndicatorBacktest(
+          req.tenant!.tenant_id,
+          inner as IndicatorBacktestInput,
+          indicatorWeightLookup,
+          now(),
+        );
+        return res.json(wrapResponse(result, env));
+      } catch (e) {
+        if (e instanceof IndicatorBacktestError) {
+          const status = e.code === 'unknown_indicator' ? 404 : 400;
+          const code =
+            e.code === 'unknown_indicator'
+              ? 'EWS_404_unknown_indicator'
+              : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, env),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'backtest failed',
+              severity: 'HIGH',
+            },
             env,
           ),
         );
