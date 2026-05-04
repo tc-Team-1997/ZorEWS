@@ -51,6 +51,15 @@ import { defaultWebhookStore, makeWebhookStore, type IWebhookStore } from './web
 import { WebhookDispatcher } from './webhooks/dispatcher';
 import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
+import {
+  getTemplate as getRuleTemplate,
+  isRuleTemplateCategory,
+  isRuleTemplateVertical,
+  listCategories as listRuleTemplateCategories,
+  listTemplates as listRuleTemplates,
+  type RuleTemplateCategory,
+  type RuleTemplateVertical,
+} from './rule_templates';
 import { variablesByCategory } from './rules/variables';
 import { backtest as runBacktest } from './rules/backtest';
 import { performanceFor } from './rules/performance';
@@ -3237,6 +3246,83 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     res.json(wrapResponse({ categories: variablesByCategory() }, ctx));
   });
+
+  // ── BIL rule template library (T6 M5.1) ────────────────────────────
+  //
+  // Three additive endpoints layered on top of T4.7's CRUD. Templates
+  // are platform-wide (every tenant sees the same library); cloning
+  // happens via the existing POST /v1/rules path.
+  //
+  // RBAC mirrors the rest of the rules surface: rules:list (analyst+).
+  // Note: declaration order matters — `/v1/rules/templates*` and
+  // `/v1/rules/variables` MUST come before `/v1/rules/:id` to win
+  // pattern matching.
+
+  /** GET /v1/rules/templates/categories — distinct template categories. */
+  app.get(
+    '/v1/rules/templates/categories',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listRuleTemplateCategories();
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/rules/templates?vertical=&category= — filterable list. */
+  app.get(
+    '/v1/rules/templates',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const v = req.query.vertical as string | undefined;
+      const c = req.query.category as string | undefined;
+      if (v !== undefined && !isRuleTemplateVertical(v)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_vertical', message: `invalid vertical: ${v}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (c !== undefined && !isRuleTemplateCategory(c)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_category', message: `invalid category: ${c}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = listRuleTemplates({
+        vertical: v as RuleTemplateVertical | undefined,
+        category: c as RuleTemplateCategory | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/rules/templates/:id — single template. 404 EWS_404_unknown_template. */
+  app.get(
+    '/v1/rules/templates/:id',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const tpl = getRuleTemplate(id);
+      if (!tpl) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_template', message: `unknown template: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(tpl, ctx));
+    },
+  );
 
   /** GET /v1/rules?state=…&product=… — filtered list with embedded performance. */
   app.get('/v1/rules', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {

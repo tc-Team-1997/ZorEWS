@@ -610,6 +610,27 @@
       - Routes (22): types list happy + 403; by-type happy + 404 no_production + 400 invalid_type; list happy + filters + 2 invalid 400s; single happy + 404; metrics happy + 404; score happy + envelope body + 400 + 404 + 409 retired + tenant divergence + 403.
     - **Outcome:** Module 7 now has 6 routes covering the model registry + inference surface. The BIL deployment can render the model deployment ladder (production → shadow → staging → retired) and run ad-hoc per-customer inference against any non-retired model. Future M7.2 — model promotion workflow + back-test endpoints — extends the same registry primitive.
 
+  - **M5.1 — BIL rule template library (2026-05-04):**
+    - Module 5 (Rule Engine) had T4.7 surface — full CRUD, state machine, backtest, performance. M5.1 lands the missing onboarding piece: a starter library of 12 BIL rule templates admins can clone via the existing POST /v1/rules path.
+    - New `services/bff/src/rule_templates.ts`:
+      - 12 templates spanning the 5 categories (`risk_monitoring / fraud_detection / compliance / operational / underwriting`) and 3 verticals (`banking / insurance / both`).
+      - Each template captures the BIL operational intent: `condition_pseudocode` (same form the rule editor uses), `recommended_severity`, `recommended_actions[]` (open_case, notify_supervisor, pause_disbursement, request_documents, flag_for_review, auto_decline), `supporting_indicators[]` (referencing FIN-/BEH-/TXN-/CRD- banking + POL-/CUS-/AGT-/CLM-/OPS- insurance catalogue ids), `source_doc` audit citation.
+      - **Sample seeds** drawn from BIL pitch §§9-12: `tpl_dpd_30_60` (banking risk), `tpl_lapse_imminent` (insurance risk), `tpl_repeat_claim_180d` (insurance fraud), `tpl_velocity_24h` (banking fraud), `tpl_aml_high_severity_open` (compliance, both verticals), `tpl_kyc_expired` (compliance), `tpl_sla_breach_red` (operational), `tpl_high_risk_proposal` (insurance underwriting), and 4 more.
+      - **Inclusive vertical filter semantics**: `?vertical=banking` returns banking AND both (cross-vertical templates apply to either); `?vertical=both` returns ONLY cross-cutting. The `compliance` category schema invariant: every compliance template uses vertical=both (regulatory rules apply to both BIL business lines).
+      - `RuleTemplateError` reserved for future use (templates are read-only in M5.1).
+    - **3 new BFF routes** (all tenant-gated, all enveloped, all RBAC `rules:list` — same as existing rule list):
+      - `GET /v1/rules/templates/categories` — distinct categories enum.
+      - `GET /v1/rules/templates?vertical=&category=` — filterable list with code-routed 400s.
+      - `GET /v1/rules/templates/:id` — single template. 404 `EWS_404_unknown_template`.
+    - **Inserted before `/v1/rules/:id`** so Express matches more-specific paths first; backwards-compat regression-tested asserts the existing `/v1/rules/:id` still works.
+    - **Tests:** BFF 841/841 (was 810 — +31 in `rule_templates.test.ts`):
+      - Type guards (2).
+      - Schema (7): exactly 12 + ids unique + required fields + 5 categories + 3 verticals + compliance-uses-both invariant + indicator-prefix invariant.
+      - listTemplates (7): no-filter, vertical inclusive semantics (banking/insurance/both), category filter, AND combination, listCategories canonical order.
+      - getTemplate (2): hit + null.
+      - Routes (10): categories happy + 403 + analyst+ accepted; list happy + 2 filter cases + AND combo + 2 invalid 400s + 403; single happy + 404; backwards-compat regression on /v1/rules/:id.
+    - **Outcome:** Module 5 now has the onboarding library admins need to set up a fresh BIL tenant. Future M5.2 — bulk-clone "apply this template set" + per-template backtest — extends the same primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
