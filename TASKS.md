@@ -698,6 +698,26 @@
       - Routes (19): types happy + 403; pull happy + envelope body + idempotency + 400 missing + 400 invalid_bureau + 403 + 502 on adapter throw; reports list happy + 400 + 403; single happy + 404 + cross-tenant 404; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 5 shipped adapters covering 19 of the declared 50 APIs. The major BIL upstream regulatory + risk-data sweep is complete (insurance, ifrs9, aml, dms, bureau) — remaining adapters (M14.6+) cover finance, HR, agent productivity, etc.
 
+  - **M10.2 — BIL SMS notification channel (2026-05-04):**
+    - 2nd Module 10 channel (after M10.1 email). Demonstrates the `<Channel>Transport` pattern shipped with M10.1 was correctly factored — SMS reuses the architecture: interface + stub + canned templates + per-tenant ledger.
+    - New `services/bff/src/notifications/sms.ts`:
+      - `SmsTransport` interface (`send / recent`) + `StubSmsTransport` (capped per-tenant ledger). Production swap = Twilio / MSG91 / SMS-gateway adapter.
+      - **4 BIL canned SMS templates** per pitch §13: `ALERT_RED_BRIEF` (escalation digest for ops oncall), `OTP_LOGIN` (login passcode), `KYC_REMINDER` (document expiry), `PAYMENT_REMINDER` (premium due).
+      - **160-char single-segment cap** with hard-stop validation; E.164 phone-number validation enforced at submit.
+      - **Same {{var}} substitution** as the email channel; unmatched slots survive in output for visibility; caller-supplied body overrides template body.
+      - `SmsValidationError` carries codes `invalid_input`, `invalid_recipient`, `missing_template_vars`, `missing_body`, `body_too_long`, `unknown_template` — all routed to 400.
+    - **`AppDeps.smsTransport` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (mirror M10.1's email shape):
+      - `GET /v1/notifications/sms/templates` — RBAC `cases:list` (analyst+).
+      - `POST /v1/notifications/sms/preview` — RBAC `cases:list`. Renders without sending.
+      - `POST /v1/notifications/sms/send` — RBAC `audit:read` (admin). 201 happy, code-routed 400s.
+      - `GET /v1/notifications/sms/log?limit=N` — RBAC `audit:read`. Tenant-scoped.
+    - **Tests:** BFF 989/989 (was 948 — +41 in `sms_channel.test.ts`):
+      - Pure helpers (15): substitute slot replacement; listSmsTemplates / getSmsTemplate / renderSmsTemplate; resolveMessage covering template path, caller-override, explicit-body-only, E.164 acceptance + rejection across countries (Kenya / US / UK / India), 160-char cap, missing-vars, neither-body-nor-template, error code surfacing.
+      - StubSmsTransport (7): receipt segments=1, newest-first, BIL ↔ BANK_DEMO scoping, limit cap, retention cap eviction, template_id + correlations preserved, bad-input throw.
+      - Routes (19): templates list happy + 403; preview happy + missing_vars + 400 missing template_id + 400 unknown_template; send happy + 403 + invalid_phone 400 + body_too_long 400 + missing_template_vars 400 + enveloped body; log tenant scoping + limit + 403.
+    - **Outcome:** Module 10 now has 2 channels live (email + SMS). The `<Channel>Transport` pattern proven; future M10.3 (push) + M10.4 (in-app) follow without new architecture. Combined with the M9.1 case-investigation tracker, ops can now trigger an SMS escalation directly from a Red-class alert.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

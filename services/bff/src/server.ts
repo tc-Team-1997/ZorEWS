@@ -103,6 +103,15 @@ import {
   type EmailTransport,
 } from './notifications/email';
 import {
+  defaultSmsTransport,
+  listSmsTemplates,
+  renderSmsTemplate,
+  SmsValidationError,
+  type SmsMessageInput,
+  type SmsTemplateId,
+  type SmsTransport,
+} from './notifications/sms';
+import {
   AlertClassificationError,
   classifyAlertSeverity,
   classifyWithMetadata,
@@ -233,6 +242,12 @@ export interface AppDeps {
    */
   emailTransport?: EmailTransport;
   /**
+   * Override for tests — SMS transport (T6 M10.2). Defaults to the
+   * module-level StubSmsTransport singleton. Production swaps in a
+   * Twilio / MSG91 / SMS-gateway transport.
+   */
+  smsTransport?: SmsTransport;
+  /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
    * (deterministic synthetic data per (tenant, customer, day)).
@@ -358,6 +373,7 @@ export function makeApp(deps: AppDeps = {}) {
   const portfolio = deps.portfolio ?? defaultPortfolio();
   const bus = deps.notificationBus ?? defaultBus;
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
+  const smsTransport = deps.smsTransport ?? defaultSmsTransport;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -1397,6 +1413,128 @@ export function makeApp(deps: AppDeps = {}) {
       const limitRaw = req.query.limit;
       const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
       const items = emailTransport.recent(req.tenant!.tenant_id, limit);
+      res.json(wrapResponse({ items, total: items.length, limit }, ctx));
+    },
+  );
+
+  // ── SMS notification channel (T6 M10.2) ─────────────────────────────
+  //
+  // Mirrors the M10.1 email channel surface: templates / preview / send /
+  // log. SMS bodies capped at 160 chars; phone numbers must be E.164.
+  // 4 BIL canned templates per pitch §13.
+
+  /** GET /v1/notifications/sms/templates — list canned BIL templates. */
+  app.get(
+    '/v1/notifications/sms/templates',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listSmsTemplates().map((t) => ({
+        id: t.id,
+        description: t.description,
+        required_vars: t.required_vars,
+        body: t.body,
+      }));
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/notifications/sms/preview body: { template_id, template_vars }
+   * Render a template + vars to a body without sending.
+   */
+  app.post(
+    '/v1/notifications/sms/preview',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { template_id, template_vars } = (inner ?? {}) as {
+        template_id?: SmsTemplateId;
+        template_vars?: Record<string, string | number>;
+      };
+      if (!template_id || typeof template_id !== 'string') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'template_id is required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const out = renderSmsTemplate(template_id, template_vars ?? {});
+        return res.json(wrapResponse({ template_id, ...out }, ctx));
+      } catch (e) {
+        if (e instanceof SmsValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/notifications/sms/send body: SmsMessageInput
+   * Validates + dispatches via the configured transport. Admin-only —
+   * sending SMS is higher-trust than reading the bell stream.
+   */
+  app.post(
+    '/v1/notifications/sms/send',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const receipt = await smsTransport.send(req.tenant!.tenant_id, inner as SmsMessageInput);
+        return res.status(201).json(
+          wrapResponse({ ok: true, receipt }, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof SmsValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'send failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/notifications/sms/log?limit=50 — tenant-scoped ledger. */
+  app.get(
+    '/v1/notifications/sms/log',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit;
+      const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
+      const items = smsTransport.recent(req.tenant!.tenant_id, limit);
       res.json(wrapResponse({ items, total: items.length, limit }, ctx));
     },
   );
