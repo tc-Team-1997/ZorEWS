@@ -510,6 +510,31 @@
       - Routes (17): admin happy paths for each route, non-admin 403 (4 routes asserted), unknown-id 404 (4 routes), 409 paused, run round-trip with run-history visible, ?limit query param, BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 3's first slice shipped. **All 16 modules in the BIL platform expansion now have at least one sub-phase shipped** (Module 3 was the last fully-empty one — Modules 5/7/9/16 are partially shipped from the T4 phase; Module 12 is the only remaining gap). The BIL deployment now exposes the full ingestion-fleet status + run-history needed for ops dashboards. Future M3.2 — declarative connector schema (mart→KRI mapping) + M3.3 backfill jobs — extend the same registry primitive.
 
+  - **M12.1 — BIL reports catalog + async job tracker (2026-05-04):**
+    - Module 12 (Reports & Export, 22 APIs) had shipped surface from T4 (synchronous `/v1/reports/:type` for snapshot/alerts/cases/rbi). M12.1 lands the missing pieces — a *catalog* the SPA can render as a picker, plus an *async job tracker* so ops can see who exported what, when. Closes the only T6-untouched module — every module now has shipped T6 surface.
+    - New `services/bff/src/reports_catalog.ts`:
+      - **9 BIL reports** declared across 4 categories — 4 operational (`portfolio_snapshot_daily`, `alerts_activity_weekly`, `case_outcomes_monthly`, `sla_breach_digest`), 3 regulatory (`rbi_quarterly_summary`, `irdai_claims_quarterly`, `irdai_solvency_monthly`), 1 audit (`audit_compliance_dump`), 1 business (`agent_productivity_monthly`). Both BIL pitch regulators (RBI + IRDAI) represented.
+      - Each entry carries `id, name, category, schedule, supported_formats[], regulator, description, legacy_type` (where the report wraps a T4-shipped computer the legacy_type pointer is set; new BIL-specific reports have `legacy_type=null` pending M12.2 computers).
+      - 4 supported formats (`json/csv/pdf/xlsx`), 4 categories, 5 schedules (`manual/daily/weekly/monthly/quarterly`), 3 regulators (`RBI/IRDAI/INTERNAL`).
+      - `ReportJobStore` interface (`submit/get/list/markFailed`) + `InMemoryReportJobStore`. Stub completes synchronously (the underlying T4 computers are sync); production swap = queue-backed worker with the same interface. `ReportsError` carries codes `invalid_input`, `unknown_report`, `invalid_format`, `unsupported_format`, `unknown_job`.
+      - Validation: caller's format must be in the report's `supported_formats[]` (e.g. `sla_breach_digest` declares `[json, csv]` only, so requesting pdf returns `unsupported_format`).
+    - **`AppDeps.reportJobStore` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes inserted before the existing `/v1/reports/:type`** (Express matches more-specific paths first):
+      - `GET /v1/reports/catalog?category=&regulator=` — analyst-level (`customers:read_risk_profile`). Validates filters with code-routed 400s.
+      - `GET /v1/reports/catalog/:id` — analyst-level. 404 `EWS_404_unknown_report`.
+      - `POST /v1/reports/jobs` body `ReportJobInput` — admin (`audit:read`). Status code routing: 201 happy, 404 unknown_report, 409 `EWS_409_unsupported_format`, 400 invalid_format.
+      - `GET /v1/reports/jobs?status=&report_id=&requested_by=&page=&page_size=` — admin. Filter validation via type guards. Pagination clamped to `[1, 200]`.
+      - `GET /v1/reports/jobs/:job_id` — admin. 404 on miss + cross-tenant lookup.
+    - **Backwards-compat regression test** asserts `GET /v1/reports/snapshot` still 200s — catalog routes are inserted first but the `:type` parameter route still matches when path doesn't equal `catalog`/`jobs`.
+    - **Tests:** BFF 667/667 (was 617 — +50 in `reports_catalog.test.ts`):
+      - Catalog schema (4): exactly 9, ids unique, every required field, both RBI + IRDAI regulators present, legacy_type covers exactly the 4 T4 reports.
+      - Type guards + lookup (4).
+      - Job store submit (7): valid → completed + download_url, parameters preserved, unknown_report / unsupported_format / invalid_format throws, tenant isolation, cap eviction.
+      - Job store list (6): newest-first, status / report_id / requested_by filters, pagination disjointness, page_size clamp.
+      - Job store get + markFailed (3): get with miss + cross-tenant null, markFailed flips status + clears download, unknown_job throw.
+      - Routes (23): catalog list happy + 2 filters + 2 invalid 400s + 403; catalog/:id happy + 404; submit happy + envelope + 4 error codes routed correctly + 403; list happy + 4 filter cases + invalid_status 400 + 403; single job happy + 404 + cross-tenant 404; backwards-compat regression on existing /v1/reports/snapshot; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** **Module 12's first T6 slice shipped — the BIL platform expansion now has shipped T6 surface across every one of the 16 declared modules.** Future M12.2 — computers for the 5 new BIL-specific reports (legacy_type=null) + scheduled-job runner that mirrors the registry-shipped schedule strings — extends without altering this primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

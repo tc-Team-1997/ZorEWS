@@ -126,6 +126,20 @@ import {
   IngestionError,
   type IngestionRegistry,
 } from './ingestion';
+import {
+  defaultReportJobStore,
+  isJobStatus,
+  isReportCategory,
+  isReportRegulator,
+  listReportDefs,
+  getReportDef,
+  ReportsError,
+  type JobStatus,
+  type ReportCategory,
+  type ReportJobInput,
+  type ReportJobStore,
+  type ReportRegulator,
+} from './reports_catalog';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -192,6 +206,12 @@ export interface AppDeps {
    * (Airflow, etc.) and connector pool.
    */
   ingestionRegistry?: IngestionRegistry;
+  /**
+   * Override for tests — BIL reports job store (T6 M12.1). Defaults
+   * to the module-level InMemoryReportJobStore. Production swaps in
+   * a queue-backed store; the synthetic stub completes synchronously.
+   */
+  reportJobStore?: ReportJobStore;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -248,6 +268,7 @@ export function makeApp(deps: AppDeps = {}) {
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
+  const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -2261,6 +2282,182 @@ export function makeApp(deps: AppDeps = {}) {
       // captures the failure and the admin can inspect it. The endpoint
       // succeeded (we sent the request); only the recipient failed.
       res.json(wrapResponse(delivery, ctx));
+    },
+  );
+
+  // ── BIL reports catalog + jobs (T6 M12.1) ─────────────────────────
+  //
+  // Additive on top of the existing /v1/reports/:type. The catalog is
+  // a SPA picker source; jobs are a per-tenant ledger of who exported
+  // what. RBAC: catalog read = customers:read_risk_profile (analyst+);
+  // job submit/list = audit:read (admin) since the dump can include
+  // PII.
+
+  /** GET /v1/reports/catalog?category=&regulator= */
+  app.get(
+    '/v1/reports/catalog',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cat = req.query.category as string | undefined;
+      const reg = req.query.regulator as string | undefined;
+      if (cat !== undefined && !isReportCategory(cat)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_category', message: `invalid category: ${cat}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (reg !== undefined && !isReportRegulator(reg)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_regulator', message: `invalid regulator: ${reg}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = listReportDefs({
+        category: cat as ReportCategory | undefined,
+        regulator: reg as ReportRegulator | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/reports/catalog/:id — single report definition. */
+  app.get(
+    '/v1/reports/catalog/:id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const def = getReportDef(id);
+      if (!def) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_report', message: `unknown report_id: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(def, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/reports/jobs body: ReportJobInput
+   * Submit a report-export job. Stub completes synchronously and returns
+   * a download_url; production wires this to a queue-backed worker.
+   */
+  app.post(
+    '/v1/reports/jobs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const requested_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const job = reportJobStore.submit(
+          req.tenant!.tenant_id,
+          inner as ReportJobInput,
+          requested_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(job, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof ReportsError) {
+          const status =
+            e.code === 'unknown_report' ? 404 :
+            e.code === 'unsupported_format' ? 409 :
+            400;
+          const code =
+            e.code === 'unknown_report' ? 'EWS_404_unknown_report' :
+            e.code === 'unsupported_format' ? 'EWS_409_unsupported_format' :
+            `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'submit failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/reports/jobs?status=&report_id=&requested_by=&page=&page_size=
+   * Paginated newest-first listing for the caller's tenant.
+   */
+  app.get(
+    '/v1/reports/jobs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: { status?: JobStatus; report_id?: string; requested_by?: string; page?: number; page_size?: number } = {};
+      if (typeof q.status === 'string') {
+        if (!isJobStatus(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_status', message: `invalid status: ${q.status}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.status = q.status as JobStatus;
+      }
+      if (typeof q.report_id === 'string') filters.report_id = q.report_id;
+      if (typeof q.requested_by === 'string') filters.requested_by = q.requested_by;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') {
+        filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
+      }
+      const out = reportJobStore.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/reports/jobs/:job_id — single job. 404 on miss/cross-tenant. */
+  app.get(
+    '/v1/reports/jobs/:job_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const job_id = req.params.job_id ?? '';
+      const job = reportJobStore.get(req.tenant!.tenant_id, job_id);
+      if (!job) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404', message: `report job ${job_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(job, ctx));
     },
   );
 
