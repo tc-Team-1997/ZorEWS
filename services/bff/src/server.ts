@@ -61,6 +61,11 @@ import {
   type RuleTemplateVertical,
 } from './rule_templates';
 import {
+  BulkCloneError,
+  expandBulkClone,
+  type BulkCloneInput,
+} from './rule_bulk_clone';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -5786,6 +5791,56 @@ export function makeApp(deps: AppDeps = {}) {
         category: c as RuleTemplateCategory | undefined,
       });
       return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/rules/templates/bulk-clone
+   * body: { template_ids?: string[], category?, vertical?, name_prefix? }
+   * Materialises N draft rule shapes from the template selection.
+   * Pure preview — does NOT mutate the rules store. The SPA iterates
+   * the result and POSTs each clone to /v1/rules to commit.
+   *
+   * Selection: EITHER template_ids[] OR (category, vertical). 400 on
+   * both/neither. > 50 ids → 400. RBAC rules:list (analyst+).
+   *
+   * Inserted before /v1/rules/templates/:id so Express matches
+   * /bulk-clone as a literal path.
+   */
+  app.post(
+    '/v1/rules/templates/bulk-clone',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = expandBulkClone((inner ?? {}) as BulkCloneInput, now());
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof BulkCloneError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'bulk-clone failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

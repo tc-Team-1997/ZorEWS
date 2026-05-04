@@ -1051,6 +1051,25 @@
       - Routes (20): submit + 4 error codes; list + filters + invalid filter 400s + 404; approve happy (different user) + self-approval 409 + already_decided 409 + 404 + 403; reject happy + self-rejection 409 + 403; tenant isolation + full round-trip.
     - **Outcome:** Module 9 now has 3 sub-phases (M9.1 investigation tracker + M9.2 custom checklists + M9.3 maker-checker). Combined with M13.1's `features.maker_checker_enabled` toggle, the BIL deployment can demo the full RBI-compliant 4-eyes approval flow on sensitive case actions. Future M9.4 will close the loop by applying approved actions to downstream stores.
 
+  - **M5.2 — Rule template bulk-clone (2026-05-04):**
+    - M5.1 ships the BIL rule template library (12 starter templates). Onboarding a new tenant typically wants to clone *most* of the library at once into draft state, then tweak a handful before activation. M5.2 ships the bulk-clone preview that materialises a draft rule shape per template — the SPA submits each one to the existing T4.7 `POST /v1/rules` to commit. Keeps the bulk-clone logic decoupled from the rules state machine.
+    - New `services/bff/src/rule_bulk_clone.ts`:
+      - `BulkCloneInput` accepts EITHER `template_ids[]` OR a `(category, vertical)` filter (matches the M16.2 bulk-run shape). Both → 400; neither → 400.
+      - `ClonedRule` shape: `source_template_id` + cloned (`name`, `description`, `category`, `vertical`, `condition_pseudocode`, `recommended_severity`, `recommended_actions`, `supporting_indicators`) + always `state: 'draft'` so a reviewer signs off before activation per BIL/RBI rule lifecycle.
+      - `name_prefix` (≤ 80 chars) renames every clone — supports the BIL "BIL-prod-…" / "BIL-uat-…" naming convention.
+      - **Skipped reasons** surfaced in `skipped[]` (not thrown): `unknown_template` (id not found), `duplicate` (same id supplied twice → first kept, second skipped), `out_of_filter` (reserved). SPA renders "5 of 8 cloned, 3 skipped".
+      - **Mutation safety** — clone arrays are spread-copied from the template so SPA edits don't pollute the M5.1 read-only library.
+      - Pure functions (`resolveBulkClone`, `expandBulkClone(input, now)`) — no store, no singleton, no `AppDeps` slot needed.
+      - `BulkCloneError` codes routed: `invalid_input` / `invalid_category` / `invalid_vertical` → 400.
+    - **1 new BFF route** (tenant-gated, enveloped):
+      - `POST /v1/rules/templates/bulk-clone` — RBAC `rules:list` (analyst+). 200 happy. Inserted BEFORE `/v1/rules/templates/:id` so the literal path doesn't get shadowed.
+    - **Tests:** BFF 1603/1603 (was 1565 — +38 in `rule_bulk_clone.test.ts`):
+      - resolveBulkClone (15): by_ids order preserved, by_filter category/vertical/AND, both/neither modes 400, empty array 400, > 50 ids 400, non-string id 400, unknown → skipped, duplicate → skipped, invalid category/vertical, name_prefix length + type.
+      - expandBulkClone (9): happy path order, fields preserved (severity / actions / indicators / vertical / category / pseudocode), name_prefix applied, empty prefix passthrough, mutation-safe arrays, mixed valid+unknown, by_filter requested_count = matched, generated_at echoes now, selection echoes mode + filter.
+      - Routes (10): analyst+ happy by_ids, enveloped body, by_filter narrows, name_prefix forwarded, both/neither/category/vertical/> 50 → 400 with `EWS_400_<code>`, unknown ids → skipped[], non-allowed role 403.
+      - No-regression (3): M5.1 GET `/v1/rules/templates`, `/v1/rules/templates/:id`, `/v1/rules/templates/categories` still 200 (declaration-order check).
+    - **Outcome:** Module 5 now has 2 sub-phases (M5.1 library + M5.2 bulk-clone). Combined with T4.7's existing `POST /v1/rules` commit path, BIL onboarding goes from "create 12 rules one-by-one" to "select-all + name-prefix → SPA fans out". Future M5.3 will likely cover **rule simulation against the M16.1 scenario library** (dry-run new rules against named scenarios before activation).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
