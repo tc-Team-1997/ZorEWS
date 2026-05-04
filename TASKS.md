@@ -1280,6 +1280,23 @@
       - No-regression (3): M13.1 GET /v1/admin/config + PUT /:key + M13.2 GET /:key/history still 200 (sub-paths didn't shadow + new event_id field is additive).
     - **Outcome:** Module 13 now has 3 sub-phases (M13.1 registry + M13.2 audit wiring + M13.3 rollback). Config governance closes the loop: change → audit event → review history → rollback if needed → audit event of the rollback. RBI ops can demonstrate a complete config-change-management story end-to-end. Future M13.4 likely covers **bulk config import/export** for cloning settings between tenants.
 
+  - **M16.3 — Scenario diff (2026-05-05):**
+    - M16.1 ships the BIL named scenario library (10 presets: RBI baseline / adverse / severely-adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans, zero-shock baseline). M16.2 ships bulk-run aggregation. M16.3 closes the SPA-side comparison story: *"show me what's different between RBI Baseline and RBI Adverse."* A pure-function field-by-field diff over two `ScenarioPreset` records — no store, no AppDeps slot.
+    - New `services/bff/src/scenario_diff.ts`:
+      - `DiffEntry` carries `field`, `kind` (numeric / enum / string), `left`, `right`, plus `delta_abs` (right − left) and `delta_pct` ((right − left) / |left|, undefined when left=0 to dodge divide-by-zero) for numeric fields. `changed=true` flags drive the SPA's "only-changed" toggle.
+      - `ScenarioDiffResult.entries[]` carries every comparable field in declared order (8 fields: `category / regulator / severity / shocks.gdp / shocks.rate / shocks.fx / source_doc / name`). `id` and `description` intentionally excluded — id is the lookup key (always different here by construction since same-id is a 400) and description is free-text prose that adds noise.
+      - `changed_entries[]` is the filtered + sorted view: numeric block first, sorted by **|delta_abs| desc** (biggest mover first); categorical block second, sorted by field name ascending. Drives the SPA's ranked side-by-side panel.
+      - `shocks_delta` is a flat `{gdp, rate, fx}` of right−left — convenience for SPA bar-chart rendering without re-walking entries[].
+      - `diffScenariosByIds(left_id, right_id, now)` resolves through M16.1's `getScenarioPreset()` and routes errors via `ScenarioDiffError`: `invalid_input` (missing/blank/non-string id) → 400, `same_preset` (left_id === right_id) → 400, `unknown_preset` → 404.
+    - **1 new BFF route** (tenant-gated, enveloped):
+      - `POST /v1/scenarios/diff` body `{left_id, right_id}` — RBAC `customers:read_risk_profile` (analyst+; matches M16.1+M16.2). 200 happy. Inserted **BEFORE `/v1/scenarios/:id`** (saved-scenario lookup) so the literal `diff` doesn't get shadowed.
+    - **Tests:** BFF 2026/2026 (was 1991 — +35 in `scenario_diff.test.ts`):
+      - diffScenarios pure (13): 8-entry shape (3 enum + 3 numeric + 2 string), numeric deltas + delta_pct (RBI Baseline → Adverse), divide-by-zero guard (left=0), changed flags, same-preset symmetry, sort-by-|delta_abs|-desc, numeric-before-categorical, shocks_delta correctness, generated_at echo, left/right echoed, RBI↔IRDAI regulator change, sign-inversion symmetry (b vs a flips signs).
+      - diffScenariosByIds (8): happy, missing left/right id, non-string, whitespace, same_preset, unknown left, unknown right.
+      - Route (10): analyst+ 200, enveloped, biggest-mover surfaced (rate jumps in severely-adverse), shocks_delta echoed, missing left 400, missing both 400, same_preset 400, unknown left 404, unknown right 404, role 403.
+      - No-regression (4): M16.1 GET /v1/scenarios/library + /:id + M16.2 POST /bulk-run + saved-scenario GET still all 200/404 — `/diff` literal didn't shadow `/:id`.
+    - **Outcome:** Module 16 now has 3 sub-phases (M16.1 library + M16.2 bulk-run + M16.3 diff). Combined the BIL stress-testing UX runs end-to-end: pick presets from library → bulk-run them against the portfolio → diff any two side-by-side to inspect the assumption delta. Future M16.4 likely covers **scenario authoring** (custom user-defined presets that survive across sessions).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
