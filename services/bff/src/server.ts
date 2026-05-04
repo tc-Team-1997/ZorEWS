@@ -107,6 +107,12 @@ import {
   defaultOnboardingStore,
   type OnboardingStore,
 } from './tenant_onboarding';
+import {
+  ApiKeyError,
+  defaultApiKeyStore,
+  validateInput as validateApiKeyInput,
+  type ApiKeyStore,
+} from './api_keys';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 import {
   buildAgentDashboard,
@@ -492,6 +498,11 @@ export interface AppDeps {
    */
   onboardingStore?: OnboardingStore;
   /**
+   * Override for tests — service-account API key store (T6 M1.2).
+   * Defaults to the module-level InMemoryApiKeyStore (cap 20 active/tenant).
+   */
+  apiKeyStore?: ApiKeyStore;
+  /**
    * Override for tests — BIL case investigation store (T6 M9.1).
    * Defaults to the module-level InMemoryCaseInvestigationStore.
    * Production swaps in a PG-backed store satisfying the same
@@ -594,6 +605,7 @@ export function makeApp(deps: AppDeps = {}) {
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const reportScheduleStore = deps.reportScheduleStore ?? defaultReportScheduleStore;
   const onboardingStore = deps.onboardingStore ?? defaultOnboardingStore;
+  const apiKeyStore = deps.apiKeyStore ?? defaultApiKeyStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
@@ -5302,6 +5314,158 @@ export function makeApp(deps: AppDeps = {}) {
           new_value: e.metadata.new_value ?? e.metadata.default_value ?? null,
         }));
       res.json(wrapResponse({ items, total: items.length, key, limit }, ctx));
+    },
+  );
+
+  // ── Service-account API keys (T6 M1.2) ──────────────────────────────
+  //
+  // Provisioning + revocation surface for machine-identity API keys.
+  // The full key value is shown ONCE on creation; subsequent reads
+  // return only the prefix. SHA-256 hashed at rest. Authentication
+  // middleware that accepts these keys is M1.3 — this slice is
+  // provisioning-only. RBAC audit:read = admin (machine identity is
+  // an admin concern, not analyst).
+
+  /** POST /v1/admin/api-keys body: ApiKeyInput → 201 with full key. */
+  app.post(
+    '/v1/admin/api-keys',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const validated = validateApiKeyInput(inner ?? {}, now());
+        const out = apiKeyStore.create(req.tenant!.tenant_id, validated, created_by, now());
+        return res.status(201).json(
+          wrapResponse(out, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof ApiKeyError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/admin/api-keys?page=1&page_size=20 — newest-first redacted list. */
+  app.get(
+    '/v1/admin/api-keys',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = req.query.page ? Math.max(1, Number(req.query.page) || 1) : 1;
+      const page_size = req.query.page_size ? Math.max(1, Math.min(100, Number(req.query.page_size) || 20)) : 20;
+      const out = apiKeyStore.list(req.tenant!.tenant_id, page, page_size);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/admin/api-keys/:key_id — single redacted entry. */
+  app.get(
+    '/v1/admin/api-keys/:key_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.key_id ?? '';
+      const e = apiKeyStore.get(req.tenant!.tenant_id, id);
+      if (!e) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_key', message: `api key ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(e, ctx));
+    },
+  );
+
+  /** POST /v1/admin/api-keys/:key_id/revoke — 200 with revoked entry. */
+  app.post(
+    '/v1/admin/api-keys/:key_id/revoke',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.key_id ?? '';
+      const revoked_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const out = apiKeyStore.revoke(req.tenant!.tenant_id, id, revoked_by, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ApiKeyError) {
+          if (e.code === 'unknown_key') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_key', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'already_revoked') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_already_revoked', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'revoke failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/admin/api-keys/:key_id — irreversible removal (204). */
+  app.delete(
+    '/v1/admin/api-keys/:key_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.key_id ?? '';
+      const removed = apiKeyStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_key', message: `api key ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 

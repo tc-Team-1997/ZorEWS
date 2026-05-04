@@ -1207,6 +1207,40 @@
       - No-regression (3): M2.1 GET /me, /me/readiness, /:id/readiness still 200 (sub-paths didn't shadow).
     - **Outcome:** Module 2 now has 2 sub-phases (M2.1 readiness + M2.2 onboarding). Combined the BIL ops team can: open tenant → mark steps as they configure → call `/readiness` to verify the cross-module result → mark `is_complete`. Future M2.3 likely covers **bulk-tenant onboarding** (CSV-driven provisioning of N tenants in one shot, useful for BIL multi-branch rollouts).
 
+  - **M1.2 — Service-account API keys (2026-05-05):**
+    - Module 1 ships M1.1 (TOTP 2FA) for human auth. M1.2 ships the *machine identity* primitive: scoped API keys for BIL compliance integrations + production callers (claims-svc → BFF, audit extractor cron) that don't have a human in the loop. Provisioning + revocation surface only — authentication MIDDLEWARE that accepts these keys is M1.3 (next slice). The slice landed today carries the verify primitive in code so M1.3 just needs the wire-up.
+    - New `services/bff/src/api_keys.ts`:
+      - 7 platform scopes: `alerts:read / cases:read / audit:read / reports:read / notifications:send / webhooks:dispatch / integrations:read`. Tighter than the human RBAC matrix — service accounts shouldn't grant write-access to ops state without explicit case-by-case design.
+      - **Key format:** `apex_<prefix>.<secret>` where prefix = 12 chars from a 36-char alphabet, secret = 24 random bytes hex (192 bits). Stored only as **SHA-256 hash + prefix** — full key value is shown ONCE in the create response. Prefix index lets `verify()` look up the candidate without scanning all keys.
+      - **Constant-time compare** on verify via `crypto.timingSafeEqual` against the SHA-256 hash. Mismatched lengths return false without timing leak.
+      - `ApiKeyEntry` (redacted view: prefix only, no hash, no key) vs `ApiKeyCreated` (only return shape with `key` field).
+      - Optional `expires_at` — must be strictly future ISO datetime. Expired keys fail `verify` + `touch` even before they're explicitly revoked.
+      - Per-tenant cap = 20 *active* keys (revoked keys don't count). `cap_reached` → 409 — admins must revoke or delete one before adding more.
+      - Operations: `create / list / get / revoke / delete / touch / verify`. `revoke()` flips status to `'revoked'` + records `revoked_at` + `revoked_by` (irreversible). `delete()` is the harder cleanup (irrecoverable removal of the hash). `touch()` bumps `last_used_at` for active non-expired keys; returns null on revoked/expired/unknown.
+      - `ApiKeyError` codes routed: `invalid_input` + `invalid_scopes` + `invalid_expires_at` → 400, `unknown_key` → 404, `cap_reached` + `already_revoked` → 409.
+    - **`AppDeps.apiKeyStore` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes** (all tenant-gated, all enveloped, `audit:read` admin-only):
+      - `POST /v1/admin/api-keys` body `{name, scopes[], expires_at?}` → 201 with **full key value** (only time it's returned). Records X-APEX-USER as `created_by` (default 'admin').
+      - `GET /v1/admin/api-keys?page=1&page_size=20` — newest-first redacted list.
+      - `GET /v1/admin/api-keys/:key_id` — single redacted entry. Tenant-scoped 404.
+      - `POST /v1/admin/api-keys/:key_id/revoke` — 200 with revoked entry; 404 unknown; 409 already_revoked.
+      - `DELETE /v1/admin/api-keys/:key_id` — 204 / 404 (irreversible cleanup; revoke is the lighter option).
+    - **Tests:** BFF 1929/1929 (was 1867 — +62 in `api_keys.test.ts`):
+      - Type guards (2): isApiKeyScope accept/reject, compareKey hash agreement.
+      - validateInput (11): happy, non-object, missing/blank/overlong name, empty scopes, non-array scopes, invalid scope, dedupe, expires_at format, expires_at past, expires_at future.
+      - Store.create (8): returns key once + redacted shape, get hides key, list hides hash + key, expires_at honoured, cap_reached, revoked don't count toward cap, missing created_by, cross-tenant.
+      - Store.revoke (4): status flip + revoked_at + revoked_by, unknown_key, already_revoked, missing revoked_by.
+      - Store.delete (2): hit/miss + idempotent, verify-of-deleted returns null (prefix index cleaned).
+      - Store.touch (4): bumps last_used_at, null on revoked/expired/unknown.
+      - Store.verify (6): happy, non-apex_, mangled, revoked, expired, constant-time-mismatch.
+      - POST route (9): admin 201, enveloped, default created_by, blank name → 400, empty scopes 400, invalid scope 400, past expires 400, cap 409, role 403.
+      - GET list route (3): admin 200 newest-first, no key in items, role 403.
+      - GET single route (3): 200, 404 with code, cross-tenant 404.
+      - POST /revoke route (3): 200, 404 unknown, 409 already_revoked.
+      - DELETE route (2): 204/404, role 403.
+      - No-regression (2): /v1/admin/config + /categories still 200 (api-keys sub-path didn't shadow).
+    - **Outcome:** Module 1 now has 2 sub-phases (M1.1 TOTP + M1.2 API keys). Human + machine identity primitives both shipped. Future M1.3 wires the **API key auth middleware** (`Authorization: Bearer apex_<prefix>.<secret>` → resolve to (tenant, scopes) → enforce per-route). M1.4 likely covers **FIDO2/WebAuthn passkeys** for high-privilege admin actions.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
