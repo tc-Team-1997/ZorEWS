@@ -1,0 +1,19 @@
+{
+  "id": "RULE-016",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Three or more bounced direct-debits / standing instructions in 60 days — repayment infrastructure failing.",
+  "owner": "agent-rule",
+  "tags": ["transaction", "repayment"],
+  "when": {
+    "indicator": "TXN-005",
+    "op": "gte",
+    "value": 3
+  },
+  "then": {
+    "title": "Multiple bounced payments",
+    "recommended_action": "Re-confirm mandate; offer alternative repayment channel.",
+    "tags": ["bounced"]
+  }
+}

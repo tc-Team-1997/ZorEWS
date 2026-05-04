@@ -1,0 +1,100 @@
+version: 2
+
+models:
+  - name: stg_customer
+    description: "One row per customer (latest profile)."
+    columns:
+      - name: customer_id
+        description: "Stable customer identifier (CBS)."
+        tests: [not_null, unique]
+      - name: monthly_income
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 10000000
+      - name: gender
+        tests:
+          - accepted_values:
+              values: ['male','female','other']
+      - name: kyc_status
+        tests:
+          - accepted_values:
+              values: ['verified','pending','rejected']
+
+  - name: stg_loans
+    description: "One row per loan (latest snapshot)."
+    columns:
+      - name: loan_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customer')
+              field: customer_id
+      - name: npa_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PERFORMING','WATCH','SUBSTANDARD','DOUBTFUL','LOSS']
+      - name: outstanding_amount
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: days_past_due
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 3650
+
+  - name: stg_repayments
+    description: "Repayment events with derived shortfall."
+    columns:
+      - name: repayment_id
+        tests: [not_null, unique]
+      - name: loan_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_loans')
+              field: loan_id
+      - name: paid_amount
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: stg_txns
+    description: "Account transactions with inflow/outflow split."
+    columns:
+      - name: txn_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customer')
+              field: customer_id
+      - name: txn_type
+        tests:
+          - not_null
+          - accepted_values: { values: ['credit','debit'] }
+      - name: amount
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: stg_bureau_score
+    description: "Latest bureau snapshot per customer."
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: score
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 200
+              max_value: 900
+      - name: score_band
+        tests:
+          - accepted_values:
+              values: ['A','B','C','D','E']

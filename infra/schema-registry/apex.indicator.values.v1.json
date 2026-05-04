@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.indicator.values.v1.json",
+  "title": "apex.indicator.values",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "type": "object",
+  "required": [
+    "value_id",
+    "indicator_id",
+    "customer_id",
+    "computed_at",
+    "value",
+    "severity_weight",
+    "family"
+  ],
+  "properties": {
+    "value_id": { "type": "string", "format": "uuid" },
+    "indicator_id": {
+      "type": "string",
+      "description": "FK to indicator catalog (agent-indicator)."
+    },
+    "indicator_version": { "type": "string" },
+    "customer_id": { "type": "string", "minLength": 1 },
+    "loan_id": { "type": ["string", "null"] },
+    "computed_at": { "type": "string", "format": "date-time" },
+    "window": {
+      "type": "string",
+      "description": "ISO8601 duration over which the indicator was computed (e.g. P30D)."
+    },
+    "value": { "type": "number" },
+    "severity_weight": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "family": {
+      "type": "string",
+      "enum": ["financial", "behavioural", "transaction", "credit"]
+    },
+    "trace_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@apex-ews/notification-svc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "APEX EWS notification fan-out — SES (email) + Africa's Talking (SMS) adapters with logging fallback. Consumes apex.regulatory.events; routes by severity per FR-ALERT-4.",
+  "type": "commonjs",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.621.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.10",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/__tests__/**/*.test.ts"]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$comment": "Sample user roster for the quarterly access review. In production agent-integration's auth-svc exports this from app.users in Aurora; the prototype ships a static seed that mirrors services/auth-svc/src/users.ts.",
+  "exported_at": "2026-04-27T12:00:00Z",
+  "users": [
+    {
+      "id": "u-001",
+      "username": "alice.admin",
+      "display_name": "Alice Mwangi",
+      "role": "admin",
+      "active": true,
+      "last_login": "2026-04-27T07:30:00Z"
+    },
+    {
+      "id": "u-002",
+      "username": "ravi.risk",
+      "display_name": "Ravi Otieno",
+      "role": "risk_analyst",
+      "active": true,
+      "last_login": "2026-04-26T18:10:00Z"
+    },
+    {
+      "id": "u-003",
+      "username": "sue.super",
+      "display_name": "Sue Wanjiru",
+      "role": "supervisor",
+      "active": true,
+      "last_login": "2026-04-25T09:15:00Z"
+    },
+    {
+      "id": "u-004",
+      "username": "carl.collect",
+      "display_name": "Carl Kamau",
+      "role": "collection_officer",
+      "active": true,
+      "last_login": "2026-04-24T14:00:00Z"
+    },
+    {
+      "id": "u-005",
+      "username": "fiona.field",
+      "display_name": "Fiona Achieng",
+      "role": "field_officer",
+      "active": true,
+      "last_login": "2026-04-27T08:45:00Z"
+    }
+  ]
+}

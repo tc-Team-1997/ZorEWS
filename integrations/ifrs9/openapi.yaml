@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — IFRS 9 ECL Engine API
+  version: 0.1.0
+servers:
+  - url: https://ifrs9.internal.example.co.ke
+security:
+  - oauth2ClientCredentials: []
+paths:
+  /ifrs9/stages/{customer_id}:
+    get:
+      summary: Current IFRS 9 stage assignment + ECL inputs for a customer.
+      parameters:
+        - in: path
+          name: customer_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StageSnapshot"
+  /ifrs9/inputs:
+    post:
+      summary: APEX EWS publishes per-customer behavioural inputs into IFRS 9.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InputPack"
+      responses:
+        "202":
+          description: Accepted
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.internal.example.co.ke/oauth/token
+          scopes:
+            ifrs9.read: Read stages
+            ifrs9.write: Submit inputs
+  schemas:
+    StageSnapshot:
+      type: object
+      required: [customer_id, as_of, loans]
+      properties:
+        customer_id: { type: string }
+        as_of: { type: string, format: date }
+        loans:
+          type: array
+          items:
+            type: object
+            required: [loan_id, stage]
+            properties:
+              loan_id: { type: string }
+              stage: { type: integer, enum: [1, 2, 3] }
+              stage_prev: { type: integer, enum: [1, 2, 3] }
+              stage_changed_at: { type: string, format: date }
+              ecl_12m: { type: number }
+              ecl_lifetime: { type: ["number", "null"] }
+              pd_12m: { type: number, minimum: 0, maximum: 1 }
+              lgd: { type: number, minimum: 0, maximum: 1 }
+              ead: { type: number, minimum: 0 }
+    InputPack:
+      type: object
+      required: [as_of, customer_id, pd_apex]
+      properties:
+        as_of: { type: string, format: date }
+        customer_id: { type: string }
+        behavioural_score: { type: number, minimum: 0, maximum: 1 }
+        indicator_signals:
+          type: array
+          items:
+            type: object
+            required: [id, value, severity]
+            properties:
+              id: { type: string }
+              value: { type: number }
+              severity: { type: number, minimum: 0, maximum: 1 }
+        pd_apex: { type: number, minimum: 0, maximum: 1 }

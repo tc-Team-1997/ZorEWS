@@ -1,0 +1,20 @@
+{
+  "id": "RULE-020",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Rising single-source inflow concentration (HHI > 0.65) — single income dependency.",
+  "owner": "agent-rule",
+  "tags": ["transaction", "concentration"],
+  "when": {
+    "and": [
+      { "indicator": "TXN-006", "op": "gt", "value": 0.65 },
+      { "indicator": "FIN-004", "op": "gt", "value": 0.4 }
+    ]
+  },
+  "then": {
+    "title": "Single-source income with high volatility",
+    "recommended_action": "Tag for income-shock simulation; review insurance options.",
+    "tags": ["concentration"]
+  }
+}

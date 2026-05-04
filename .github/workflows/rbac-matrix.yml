@@ -1,0 +1,67 @@
+name: rbac-matrix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/rbac/**'
+      - '.github/workflows/rbac-matrix.yml'
+  pull_request:
+    paths:
+      - 'infra/rbac/**'
+      - '.github/workflows/rbac-matrix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-matrix:
+    name: Validate RBAC matrix + roster
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install python deps
+        run: pip install --quiet 'pytest>=8.0'
+
+      - name: Validate the matrix self-consistency
+        run: python infra/rbac/scripts/access_review.py --matrix infra/rbac/matrix.json --validate-only
+
+      - name: Validate the sample roster against the matrix
+        run: |
+          python infra/rbac/scripts/access_review.py \
+            --matrix infra/rbac/matrix.json \
+            --roster infra/rbac/scripts/sample_roster.json \
+            --validate-only
+
+      - name: Run pytest
+        run: pytest infra/rbac/tests -q
+
+  validate-ts-helper:
+    name: Build + test the @apex-ews/rbac helper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/rbac/lib/package-lock.json
+
+      - name: Install
+        working-directory: infra/rbac/lib
+        run: npm ci
+
+      - name: Build
+        working-directory: infra/rbac/lib
+        run: npm run build
+
+      - name: Test
+        working-directory: infra/rbac/lib
+        run: npm test

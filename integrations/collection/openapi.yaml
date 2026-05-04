@@ -1,0 +1,79 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — Collection System Mock API
+  version: 0.1.0
+servers:
+  - url: https://collection.internal.example.co.ke
+security:
+  - oauth2ClientCredentials: []
+paths:
+  /collection/cases:
+    post:
+      summary: APEX EWS routes a high-severity case to Collection.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutedCase"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  collection_case_id: { type: string }
+        "200":
+          description: Idempotent — case already exists.
+  /ews/collection/callback:
+    post:
+      summary: Collection sends a status update back to APEX EWS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectionCallback"
+      responses:
+        "202":
+          description: Accepted
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.internal.example.co.ke/oauth/token
+          scopes:
+            collection.write: Create / update cases
+            collection.callback: Send status callbacks
+  schemas:
+    RoutedCase:
+      type: object
+      required: [case_id, alert_id, customer_id, severity, raised_at]
+      properties:
+        case_id: { type: string }
+        alert_id: { type: string, format: uuid }
+        customer_id: { type: string }
+        loan_id: { type: string }
+        severity: { type: string, enum: [HIGH, CRITICAL] }
+        indicators:
+          type: array
+          items: { type: string }
+        pd: { type: number, minimum: 0, maximum: 1 }
+        recommended_action: { type: string }
+        raised_at: { type: string, format: date-time }
+    CollectionCallback:
+      type: object
+      required: [case_id, status, occurred_at]
+      properties:
+        case_id: { type: string }
+        collection_case_id: { type: string }
+        status:
+          type: string
+          enum: [ASSIGNED, IN_PROGRESS, CONTACTED, PROMISE_TO_PAY, CURED, CURED_TEMP, DEFAULTED, RETURNED]
+        officer_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+        notes: { type: string }

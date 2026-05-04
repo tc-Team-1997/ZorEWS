@@ -1,0 +1,90 @@
+-- 002_raw_tables.sql
+-- APEX EWS — RAW landing zone.
+--
+-- HISTORY (2026-05-03): Originally this file defined detailed `raw.cbs_*`
+-- tables (with JSONB payload, generated columns, source-system natural keys
+-- for idempotent CDC) intended to be written by the production CBS ingest
+-- DAG. That loader does not yet exist (tracked as T1.4b in TASKS.md), and
+-- in the prototype the seed CSVs are loaded directly by `dbt seed` into
+-- `raw.seed_*` tables. The detailed `cbs_*` tables sat empty for the
+-- entire prototype lifecycle, so they were dropped on 2026-05-03 and this
+-- file rewritten to declare ONLY the tables that actually carry data.
+--
+-- Production reinstatement plan: when T1.4b ships (real CBS loader), add
+-- a 005_cbs_raw_tables.sql restoring the original CDC-shaped tables under
+-- `raw.cbs_*`, and update `data/dbt/models/sources.yml` to point sources
+-- at the new tables (drop the `identifier:` aliases). The seed_* tables
+-- can stay as a parallel dev-only path or be dropped.
+--
+-- Conventions for the seed_* tables:
+--   * Schema mirrors the seed CSV columns 1:1 (no payload JSONB).
+--   * No surrogate ingest_id — the natural key (customer_id / loan_id /
+--     repayment_id / txn_id) is the primary key.
+--   * source_event_id is retained as a dedup column for idempotent reseeds.
+--   * dbt seed re-creates these tables on `--full-refresh`; the schema
+--     declarations here are advisory + visible to DBeaver users.
+
+-- -------------------------------------------------------------------------
+-- raw.seed_customers — customer master (10,000 rows in current seed)
+-- -------------------------------------------------------------------------
+COMMENT ON SCHEMA raw IS
+    'Landing zone — seed CSVs loaded by dbt seed. Production target: replace with cbs_* tables written by T1.4b CBS ingest DAG.';
+
+-- The actual table DDL is owned by `dbt seed` (creates tables to match the
+-- CSV header + inferred types). The columns each table presents are:
+--
+-- raw.seed_customers (10,000 rows)
+--   source_event_id      TEXT     UNIQUE per row
+--   customer_id          TEXT     PK
+--   full_name            TEXT
+--   national_id          TEXT
+--   date_of_birth        DATE
+--   gender               TEXT     male / female
+--   marital_status       TEXT     single / married / divorced
+--   employment_status    TEXT     employed / self-employed / business-owner / unemployed
+--   monthly_income       NUMERIC(18,2)
+--   branch_code          TEXT     7 branches: NBO-001..003, MSA-010, KSM-020, ELD-030, NKR-040
+--   segment              TEXT     retail (70%) / sme (25%) / corp (5%)
+--   onboarded_at         TIMESTAMPTZ
+--   kyc_status           TEXT     verified (92%) / pending (6%) / rejected (2%)
+--   risk_rating          TEXT     low (60%) / medium (30%) / high (10%)
+--   payload              TEXT     reserved for future JSONB upgrade ('{}' today)
+--
+-- raw.seed_loans (24,000 rows)
+--   source_event_id, loan_id (PK), customer_id (FK→seed_customers),
+--   product_code (PL_RET / AUTO_RET / WC_SME / INV_SME / CORP_TL),
+--   currency CHAR(3), principal_amount NUMERIC(18,2),
+--   outstanding_amount NUMERIC(18,2), interest_rate NUMERIC(7,4),
+--   tenor_months INT, disbursed_at TIMESTAMPTZ, maturity_date DATE,
+--   npa_status (PERFORMING / WATCH / SUBSTANDARD / DOUBTFUL / LOSS),
+--   days_past_due INT, last_repayment_at TIMESTAMPTZ,
+--   collateral_value NUMERIC(18,2), branch_code TEXT, payload TEXT
+--   ~4.25% NPA ratio in current seed.
+--
+-- raw.seed_repayments (~247,550 rows)
+--   source_event_id, repayment_id (PK), loan_id (FK→seed_loans),
+--   customer_id (FK→seed_customers), repayment_date DATE,
+--   scheduled_amount NUMERIC(18,2), paid_amount NUMERIC(18,2),
+--   principal_paid NUMERIC(18,2), interest_paid NUMERIC(18,2),
+--   fees_paid NUMERIC(18,2), currency CHAR(3),
+--   channel (mpesa / branch / standing-order / card),
+--   is_arrears_payment BOOLEAN, payload TEXT
+--
+-- raw.seed_transactions (~289,819 rows)
+--   source_event_id, txn_id (PK), customer_id (FK→seed_customers),
+--   account_id TEXT, txn_timestamp TIMESTAMPTZ, txn_type (credit/debit),
+--   txn_category (salary / mpesa / atm / pos / standing-order /
+--                 loan-disb / loan-repay / biller),
+--   amount NUMERIC(18,2), currency CHAR(3), balance_after NUMERIC(18,2),
+--   counterparty TEXT, channel TEXT, payload TEXT
+--
+-- raw.seed_bureau_score (10,000 rows — one snapshot per customer)
+--   source_event_id, customer_id (PK + FK→seed_customers),
+--   bureau_name (Metropol / TransUnion / CreditInfo),
+--   score INT (200..900), score_band (A/B/C/D/E),
+--   score_as_of DATE, delinquencies_12m INT, open_facilities INT,
+--   total_exposure NUMERIC(18,2), enquiries_3m INT, payload TEXT
+
+-- That's it — see data/dbt/models/sources.yml for the dbt source
+-- declarations that read from these tables, and docs/database-schema.md
+-- for the canonical column-by-column reference.

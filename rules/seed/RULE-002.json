@@ -1,0 +1,20 @@
+{
+  "id": "RULE-002",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "Two or more consecutive months without expected salary inflow — primary income source is interrupted.",
+  "owner": "agent-rule",
+  "tags": ["financial", "income"],
+  "when": {
+    "indicator": "FIN-006",
+    "op": "gte",
+    "value": 2
+  },
+  "then": {
+    "title": "Salary inflow missing for 2+ months",
+    "severity_override": "critical",
+    "recommended_action": "Verify employment status; offer payment-deferral conversation; move to watchlist.",
+    "tags": ["income-loss"]
+  }
+}

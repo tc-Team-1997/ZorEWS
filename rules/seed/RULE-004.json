@@ -1,0 +1,19 @@
+{
+  "id": "RULE-004",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Sustained overdraft utilisation above 80% — customer relying on credit line for daily liquidity.",
+  "owner": "agent-rule",
+  "tags": ["financial", "overdraft"],
+  "when": {
+    "indicator": "FIN-008",
+    "op": "gte",
+    "value": 0.8
+  },
+  "then": {
+    "title": "Chronic overdraft reliance",
+    "recommended_action": "Review OD facility — consider step-down or repayment plan.",
+    "tags": ["overdraft"]
+  }
+}

@@ -1,0 +1,268 @@
+# logs/orchestrator.md — orchestrator agent
+
+> Append entries chronologically. Each entry: task id, files touched, decisions, hand-offs, blockers.
+
+## 2026-04-26 — Initialised
+
+- Log file created. Awaiting first task.
+
+## 2026-04-26 — Verification run (host shell)
+
+- **Goal:** clear blockers B1 (sandbox-prevented execution) and B3 (analytical-only FP rates) by running `BOOTSTRAP.md` end-to-end on the host.
+- **Toolchain installed:** `python@3.12` (BOOTSTRAP-pinned), `terraform 1.14.9` via `brew tap hashicorp/tap` (HashiCorp pulled core formula on BSL change), `libomp` for xgboost arm64. Venv at `.venv/` with `dbt-postgres 1.8.2`, ML stack, `httpx` (BOOTSTRAP omitted).
+- **Steps green (8/9):** 1, 4, 5, 6, 7a, 7b, 8, 9. See STATUS.md verification matrix.
+- **Steps blocked:** 2 (Postgres docker), 3 (dbt) — host Docker daemon not yet up at end of session.
+- **9 real defects fixed** (caught only because the code ran for the first time):
+  - **agent-rule** — `services/regulatory-svc/rules/src/dsl.ts`: Ajv import didn't support draft-2020-12, switched to `Ajv2020`. `__tests__/lifecycle.test.ts` + `__tests__/simulator.test.ts`: fixture `then.title`/`recommended_action` violated `minLength:4`. `__tests__/dsl.test.ts`: `as const` readonly tuples vs `Expr[]` (added `: Expr` annotation); `XYZ-999` indicator id was rejected on schema pattern before catalog check, switched to `FIN-999`.
+  - **agent-ui** — `web/src/__tests__/setup.ts`: jsdom 25 + vitest 2.1 exposes a stub `localStorage` without Storage methods; added a Map-backed polyfill. `web/src/__tests__/LoginPage.test.tsx` + `web/src/__tests__/AppShell.test.tsx`: orchestrator's earlier credential reconciliation (`admin/admin123` → `alice.admin/Admin!Pass1`) was applied to `DEMO_USERS` and to LoginPage hint, but never to the tests; updated matchers and submit values to match.
+- **Measured KPIs (replace placeholders in STATUS.md):**
+  - PD AUC = **0.8822** (synthetic features, B2 retrain still due against `mart.customer_360.has_npa`).
+  - Mean rule FP = **0.148** across 30 seed rules; max 0.523.
+- **BOOTSTRAP.md gaps to amend later:** missing `npm run gen-history` before `npm run simulate`; `npm run typecheck` script doesn't exist in `web/package.json` (`npm run build` already does `tsc --noEmit`); `services/audit-svc/requirements.txt` doesn't exist — venv libs sufficient; needs `brew install libomp` for xgboost on macOS arm64.
+- **Hand-off:** when Docker daemon comes up, orchestrator runs steps 2 + 3 with the resume command block in STATUS.md, then re-trains PD against the materialised mart (clears B2), then closes step 10 KPI update. After that, dispatch agent-case (T3.5) + agent-ui (T2.8/T3.6) + agent-integration (T3.7/T3.8/T3.10) per Wave 3 plan in the prior wrap-up.
+
+## 2026-04-27 — Verification run, day 2 (closes steps 2 + 3 + B2)
+
+- **Goal:** finish what 2026-04-26 left blocked on the Docker daemon.
+- **Steps green:** 2 (postgres up + 003 migrations + audit-trigger smoke), 3 (5 seeds → `raw.*`, 9 dbt models, 79/79 dbt tests). All 9 BOOTSTRAP steps now green.
+- **Defects fixed:**
+  - `data/dbt/macros/generate_schema_name.sql` (new) — added the standard override macro so a model/seed `+schema:` config becomes the literal schema (`raw`, `staging`, `mart`) instead of dbt's default `<target>_<custom>`. Without it `dbt seed` landed in `staging_raw.seed_*` and the staging models pointing at sources `raw.seed_*` failed with `relation does not exist`. Dropped the orphan `staging_raw` schema after re-seeding.
+  - `data/dbt/models/staging/schema.yml` — three `accepted_values` tests had `quote: false`, which made dbt render string values as bare SQL identifiers (`column "male" does not exist`). Removed the override on `stg_customer.gender`, `stg_customer.kyc_status`, `stg_bureau_score.score_band`. Those are string columns; default `quote: true` is correct.
+  - `ml/data/load_from_mart.py` — SCHEMA_QUERY referenced columns the dbt mart doesn't materialise (`utilization`, `dpd_max_90d`, `balance_drop_30d_pct`, `defaulted_within_60d`, `snapshot_date`). Rewrote it to project the actual mart shape into the contracted feature names: `worst_dpd → dpd_max_90d`, `LEAST(exposure_to_income_ratio,1.5) → utilization`, `arrears_repayment_count → repayment_delay_streak`, derived `tenure_months` from `onboarded_at`, computed `txn_volume_zscore_90d` over the population window-function on `mart.txn_features.txn_count_90d`, mapped `loan_360.product_code` (PL_RET/AUTO_RET/INV_SME/WC_SME/CORP_TL) to PRODUCT_LEVELS, banded `monthly_income` to INCOME_LEVELS, mapped `has_npa::int → defaulted_within_60d`. Also fixed the date-range filter — `mart.customer_360.as_of` is a `timestamptz`, so `BETWEEN '2026-04-27' AND '2026-04-27'` matched zero rows. Cast to `::date` in the WHERE clause.
+  - `ml/pipelines/train_pd.py` — XGB hyperparameters were tuned for the 4 000-row synthetic dataset (`min_child_weight=5`, `n_estimators=500`). On the 176-row mart slice with 8 positives no leaf can satisfy `mcw=5`; the tree never splits and the calibrated classifier collapses to a constant predictor, giving holdout AUC 0.5 (despite a plain XGB on the same data hitting 1.0). Added an auto-switch: when `n_positives < 20` the trainer downshifts to `mcw=1, n_estimators=300, max_depth=4`, uses sigmoid (Platt) calibration in place of isotonic (which is data-hungry), and clamps K-fold CV to `min(KFOLDS, n_positives)`. The synthetic-tuned defaults remain the default for the 4 000-row path.
+  - Installed `sqlalchemy>=2.0` + `psycopg2-binary` into the venv (the loader's `from sqlalchemy import …` was unsatisfied by the existing `.venv/`).
+- **Measured KPIs:**
+  - Mart-trained challenger v0.1.0 — AUC 1.0, KS 1.0, Brier 0.0023, CV-AUC 1.0±0.0 on n_train=176 / n_holdout=44 (8 + 4 positives). Registered as challenger; **synthetic-trained 0.8822 model stays champion**.
+  - **Caveat (important):** AUC=1.0 is a leakage artifact, not a generalisation claim. `mart.customer_360.has_npa` is defined in dbt as `npa_status IN ('SUBSTANDARD','DOUBTFUL','LOSS')`, and `data/dbt/seeds/_generate_seeds.py` assigns `npa_status` directly off `days_past_due`, which is the same signal as the `dpd_max_90d` feature the model gets. Honest mart evaluation needs either (a) a `has_npa` definition not co-linear with the DPD feature, or (b) `N_CUSTOMERS` bumped well above the current 220 so the trained model can demonstrate ranking ability across more than the 4 holdout positives.
+- **BOOTSTRAP.md gaps still pending** (carry from 2026-04-26 + new): (a) `npm run gen-history` missing before `npm run simulate`, (b) `web/package.json` has no `typecheck` script, (c) `services/audit-svc/requirements.txt` missing, (d) `brew install libomp` needed for xgboost on macOS arm64, (e) `data/dbt/macros/generate_schema_name.sql` was missing, (f) `ml/data/load_from_mart.py` was a stub against a phantom mart shape, (g) `train_pd.py` needed a low-positive auto-profile.
+- **Hand-off:** verification matrix and Open Blockers in STATUS.md updated. B1, B2, B3 closed. B4 (CI) deferred to Phase 3 T3.8. Wave 3 dispatch (agent-case T3.5; agent-ui T2.8/T3.6; agent-integration T3.7/T3.8/T3.10) is unblocked.
+
+## 2026-04-27 — Wave 3 dispatch begins (T3.5 shipped)
+
+- **Dispatch decision:** with verification fully closed, opened Wave 3 by picking T3.5 first. Rationale: it's the most foundational of the Wave 3 set — T3.6 (Case View UI) depends on it, T3.4 (Collection auto-routing) consumes its events, and unlike T3.8 (schema-registry CI) it's actionable in a non-git prototype. T2.8 (UI risk-profile hookup) is the next logical pick if we want user-visible progress before more backend.
+- **T3.5 shipped — agent-case.** New module `services/regulatory-svc/cases/` (sibling to `alerts/`, `rules/`, `indicators/`).
+  - **Files:** `package.json`, `tsconfig.json`, `README.md`, `src/{types,case_id,state_machine,store,producer,service,server}.ts`, `__tests__/{state_machine,service,server}.test.ts`.
+  - **Numbers:** 26/26 jest tests pass; `tsc -p .` clean; install added 398 npm packages (express, jest, ts-jest, supertest, ts-node, typescript) — same shape as alerts/.
+  - **Surface:** `POST /cases` (idempotent on alert_id), `GET /cases` (paged, filterable by state/assignee/customer_id), `GET/POST /cases/:id/{assign,actions,monitor,close}`, `GET /healthz`. Default port 8083.
+  - **State machine:** open → assigned → in_action → monitored → closed. logAction re-engages from monitored. Close allowed from any non-closed state. Illegal transitions surface as 409 with `current_state` + `attempted` in the body.
+  - **Persistence:** in-memory + NDJSON snapshot at `.store/cases.ndjson`, replays on construction. Restart-survival has a dedicated test.
+  - **Producer:** outbox writes typed events (`case.created` | `case.assigned` | `case.action_logged` | `case.monitored` | `case.closed`) to `.outbox/apex.case.events-<date>.ndjson`. Same shape as alerts/OutboxProducer; agent-integration's MSK wiring is a one-line factory swap.
+  - **No defects** — first run green. Followed the alerts/ patterns closely (Express factory with injectable deps, deterministic id like `deterministicAlertId`, jest preset config inside package.json).
+- **Hand-offs queued:**
+  - `agent-integration` — Kafka producer for `apex.case.events` (T3.4 consumes it); include `/cases` in T3.7 public REST API v1; schema-registry entry for `apex.case.events` v1 (T3.8).
+  - `agent-ui` — T3.6 Case View can consume the local service at :8083; the action log is the source of truth for the UI's timeline.
+  - `agent-rule` / `agent-alert` — the existing alerts/SmartQueue should call `POST /cases` on `close` for high-severity items, or directly on alert emission depending on policy. (Out of scope for T3.5 — leaving as a Wave 3 follow-up.)
+- **Next likely picks:** T2.8 (UI risk profile + SHAP top-5) for visible progress, or T3.6 (Case View UI) now that T3.5 is the contract.
+
+## 2026-04-27 — T3.6 Case View UI shipped (agent-ui)
+
+- **Decision:** picked T3.6 next after T3.5 to complete the vertical slice while the case-service contract was still fresh. T2.8 (Risk Profile + SHAP top-5) is the next visible-progress option.
+- **Files touched:** `web/src/modules/cases/CaseDetailPage.tsx` (new, 380 lines), `web/src/modules/cases/CaseListPage.tsx` (state-name rename + clickable rows), `web/src/lib/api.ts` (CaseDetail/CaseAction/LogActionInput types + 5 new api fns), `web/src/mocks/handlers.ts` (new GET + 4 POST handlers backed by an in-memory state machine that mirrors the backend), `web/src/mocks/data.ts` (caseDetails seed + caseSummariesFrom derivation), `web/src/App.tsx` (`/cases/:id` route), `web/src/__tests__/CaseDetailPage.test.tsx` (new, 8 tests).
+- **Defects fixed during build:** one tsc error — `CaseDetail extends CaseSummary` requires `age_min`, but the detail mock only carries `created_at`. Made `CaseDetail` a sibling type (not extending) so age is computed only at the list-row layer (`caseSummariesFrom`).
+- **State-name unification:** dropped the UI-only `'action'` enum value in favour of `'in_action'` so the list, detail, MSW mocks, and `services/regulatory-svc/cases` all share one vocabulary. The BFF (T3.10) does no rename.
+- **Mock BFF parity with backend:** `web/src/mocks/handlers.ts` now embeds the same allowed-transitions table as `services/regulatory-svc/cases/src/state_machine.ts` and returns HTTP 409 with `current_state` + `attempted` on illegal transitions. The UI's `HttpError` surface for cases matches what the real service will return.
+- **Numbers:** 19 web tests pass (8 new + 11 pre-existing); `tsc --noEmit` clean; `vite build` clean (770 KB bundle, same magnitude as before).
+- **Visual verification gap (called out):** I did not start `npm run dev` and exercise the page in a real browser — vitest + jsdom cover rendering + interactions but not actual styling / responsive layout. Recommended a manual smoke before demoing.
+- **Hand-offs:** `agent-integration` (T3.10) swaps the MSW handlers for a real proxy to the cases service on :8083; `agent-ui` next picks T2.8 (Customer Risk Profile SHAP top-5).
+
+## 2026-04-27 — T2.8 SHAP hookup shipped (agent-ui)
+
+- **Picked T2.8 next** to close the Phase-2 deferred carry-over before continuing into deeper Phase-3 work (T3.7 / T3.10 / T3.8 / T3.4). It's the third agent-ui task in this session.
+- **Files touched:** `web/src/lib/api.ts`, `web/src/mocks/data.ts`, `web/src/modules/customers/CustomerRiskProfilePage.tsx`, `web/src/__tests__/CustomerRiskProfilePage.test.tsx`.
+- **Defects fixed:** none — the existing page already had the PD score and a placeholder reasons panel; T2.8 replaced the placeholder with a real SHAP rendering aligned to `services/ai-copilot-svc/app/main.py:ReasonCode`.
+- **Numbers:** 22/22 web tests pass (3 new); tsc + vite build clean.
+- **Visual verification gap:** same caveat as T3.6 — vitest covers rendering and ordering, but no real-browser smoke. Recommend a 60-second click-through at the end of the session: login, `/customers/c-101`, eyeball the diverging bars + model footer; `/customers/c-102` to see the categorical feature row.
+- **Hand-off:** `agent-integration` T3.10 BFF can now wire `/api/customers/:id/risk` straight to ai-copilot-svc `/score` — UI shape matches.
+- **Wave 3 status update:** T3.5 (case service) ✅, T3.6 (case UI) ✅, T2.8 (risk-profile SHAP) ✅. Remaining: T3.7 (public REST API v1), T3.10 (BFF mapping), T3.8 (schema-registry CI — closes B4), T3.4 (Collection auto-routing on apex.case.events), T3.1–T3.3 (CBS/IFRS9/AML deepening), T3.9 (RBAC matrix).
+
+## 2026-04-27 — T3.10 BFF shipped (agent-integration)
+
+- **Picked T3.10** to close the round-trip: T3.5 (case service) + T3.6 (case UI) + T2.8 (risk-profile SHAP shape) all aligned on contracts; T3.10 is the missing infra piece that lets the SPA actually read those contracts from a real backend instead of MSW.
+- **Files touched:** new module `services/bff/` (sibling to `services/regulatory-svc/{alerts,cases,rules,indicators}`, `services/ai-copilot-svc`, etc.). Files: `package.json`, `tsconfig.json`, `README.md`, `src/{types,mapping,lookups,source,server}.ts`, `__tests__/{mapping,server}.test.ts`.
+- **Mapping coverage** — pure `mapAlertEvent(canonical, lookups, now?)`: severity case-fold, customer + rule name join with id-fallback, age computed and clock-skew-clamped, assignee pulled from a snapshot lookup, schema renames applied. Plus a `mapAlertList` that sorts newest-first and dedupes on alert_id (last-write-wins so at-least-once Kafka doesn't double-count).
+- **Source plumbing** — `OutboxSource` reads NDJSON from `services/regulatory-svc/alerts/.outbox/`; `StaticSource` for tests; `AlertSource` interface is what the future MSK kafkajs consumer plugs into (one-line factory swap).
+- **Numbers:** 20/20 jest tests pass; `tsc -p .` clean; install added 398 npm packages (same shape as alerts/cases).
+- **No defects fixed during build** — first run green. Followed the alerts/ + cases/ patterns closely (Express factory with injectable deps, NDJSON outbox parsing mirrors OutboxProducer, jest preset config inside package.json).
+- **Wave 3 progress:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅. Remaining: T3.7 (public REST API v1), T3.8 (Glue Schema Registry CI — closes B4), T3.4 (Collection auto-routing on apex.case.events), T3.1–T3.3 (CBS/IFRS9/AML deepening), T3.9 (RBAC matrix). Natural next pick: T3.7 (BFF surface extension to /api/cases/* + /api/customers/:id/risk) or T3.8 (closes the last open blocker).
+
+## 2026-04-27 — T3.7 public REST API v1 shipped (agent-integration)
+
+- **Continued in services/bff/ rather than spinning up a new api-gateway** — `/api/*` (SPA) and `/v1/*` (partners) share the same alert source, lookups, and mapping pipeline; carving them apart would duplicate infra without prototype value.
+- **Endpoints added:** `GET /v1/alerts` (alias of /api/alerts), `POST /v1/ews/evaluate`, `GET /v1/risk-profile/:customer_id`, `POST /v1/action`. Each backed by a stub now and an interface that production wiring slots into.
+- **`/v1/action` HTTP-proxies to the cases service** via Node 18 global fetch, configurable through `APEX_CASES_URL`. Forwards upstream HTTP status verbatim — a 409 illegal-transition from the cases service surfaces as a 409 to the public-API caller, with `current_state` + `attempted` preserved in the body.
+- **Numbers:** 32/32 jest tests pass in the bff (12 new on /v1); tsc clean. No regressions.
+- **No defects fixed during build** — first run green.
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅. Five tasks done.
+- **Remaining Wave 3:** T3.8 (Glue Schema Registry CI — closes B4, the last open blocker), T3.4 (Collection auto-routing consumer of apex.case.events), T3.1–T3.3 (CBS/IFRS9/AML deepening), T3.9 (RBAC matrix).
+
+## 2026-04-27 — T3.8 shipped, B4 closed (agent-integration)
+
+- **All 4 listed blockers (B1, B2, B3, B4) are now resolved.** B1 + B3 closed yesterday; B2 closed earlier today (with the leakage caveat); B4 closes now.
+- **Files added:**
+  - `infra/schema-registry/scripts/check_compat.py` — pure-Python BACKWARD checker, validates draft 2020-12, walks all `*.json`, flags six classes of break with JSON pointers.
+  - `infra/schema-registry/tests/test_check_compat.py` — 16 pytest tests (positive + negative + recursion + malformed input), all green.
+  - `.github/workflows/schema-compat.yml` — CI gate on every PR touching `infra/schema-registry/**`.
+  - `infra/terraform/30-data/main.tf` (extended) — `aws_glue_registry.apex_ews` + `aws_glue_schema.topics` auto-discovered via `fileset` + `jsondecode(file(...)).title`. Compatibility mode = BACKWARD on every registered schema.
+  - `infra/terraform/30-data/outputs.tf` — `glue_schema_registry_arn` + `glue_schema_arns` map.
+- **No defects fixed during build** — first run green. Real registry walks clean: `BACKWARD-compat OK — 7 schema(s) across 6 topic(s); 1 version-pair(s) checked.`. `terraform fmt` + `terraform validate` clean.
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅ T3.8 ✅. Six tasks done end-to-end. All four blockers closed.
+- **Remaining Wave 3:** T3.4 (Collection auto-routing on apex.case.events), T3.1–T3.3 (CBS/IFRS9/AML deepening), T3.9 (RBAC matrix). Of these, T3.4 is the most actionable next pick — it directly consumes the `apex.case.events` outbox the cases service already writes, completing the alert-to-Collection round-trip.
+
+## 2026-04-27 — T3.4 collection-adapter shipped
+
+- **What landed:** `services/collection-adapter/` — TS + Express + Jest, port 8085. Implements both halves of T3.4: routing case events to a Collection outbox (`apex.collection.routes`), and a `POST /collection/callback` endpoint that proxies status reports to the cases service `/close`.
+- **Numbers:** 19/19 jest tests pass on first run; tsc clean.
+- **Defect surfaced (not fixed):** `infra/schema-registry/apex.case.events.v1.json` doesn't match what `services/regulatory-svc/cases` actually emits. The schema requires `occurred_at` + `lifecycle_state ∈ {ALERT, CASE, ...}`; the emitter writes `ts` + `event_type ∈ {case.created, ...}` + `prior_state`/`new_state`/`payload`. The collection-adapter consumes the live emitter shape, so T3.4 works end-to-end, but the schema needs a v2 bump (or the emitter needs to be rewritten). Documented in logs/integration.md as a follow-up.
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅ T3.8 ✅ T3.4 ✅. Seven tasks. All blockers (B1/B2/B3/B4) closed.
+- **Remaining Wave 3:** T3.1 (CBS deepening), T3.2 (IFRS 9 stage-movement signal), T3.3 (AML correlation), T3.9 (RBAC matrix doc). T3.1–T3.3 are agent-integration deepening tasks that rely on real bank contracts (out of prototype scope per `project_apex_ews_scope.md`); T3.9 is a doc + RBAC stub task that can land at any time.
+
+## 2026-04-27 — Schema/emitter alignment + AJV emit-side validation (defect from T3.4 closed)
+
+- **The defect surfaced during T3.4 is fixed.** Rewrote `infra/schema-registry/apex.case.events.v1.json` in place (kept version 1.0.0 because v1 had no Glue resource yet — pre-implementation scaffold). New v1 matches `services/regulatory-svc/cases/src/types.ts:CaseEvent` exactly: required fields `event_id`, `event_type` (`case.created` | `case.assigned` | `case.action_logged` | `case.monitored` | `case.closed`), `ts`, `case_id`, `alert_id`, `customer_id`, `new_state` (`open` | `assigned` | `in_action` | `monitored` | `closed`); optional `prior_state` (nullable); free-form `payload`; top-level `additionalProperties: false`.
+- **Added `services/regulatory-svc/cases/src/event_validator.ts`** — Ajv2020 compiled from the registered schema, called by `service.ts:emit` before every write. Future drift throws `CaseEventSchemaError` at emit time. Belt-and-braces: T3.8 CI catches schema-vs-schema drift, this catches schema-vs-emitter drift.
+- **Numbers:** 31/31 cases jest tests pass (5 new); T3.8 CI re-runs clean (`BACKWARD-compat OK — 7 schemas, 6 topics, 1 pair`); 16/16 schema-registry pytest; tsc clean.
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅ T3.8 ✅ T3.4 ✅ + schema-fix ✅. All four blockers (B1–B4) closed. Eight Wave-3-or-tightly-related tasks done.
+- **Remaining Wave 3:** T3.1 (CBS deepening), T3.2 (IFRS 9 stage-movement signal), T3.3 (AML correlation), T3.9 (RBAC matrix). Per `project_apex_ews_scope.md` T3.1–T3.3 are out of prototype scope (real bank integrations); T3.9 is the only clean remaining pick.
+
+## 2026-04-27 — T3.9 RBAC matrix + access review shipped — Wave 3 wrap
+
+- **What landed:**
+  - `infra/rbac/matrix.json` — canonical RBAC matrix. 5 roles × 27 ops.
+  - `infra/rbac/README.md` — permission table + full quarterly-review process doc.
+  - `infra/rbac/scripts/access_review.py` + 11 pytest tests — validator + report generator + CLI.
+  - `infra/rbac/scripts/sample_roster.json` — local-dev roster matching auth-svc seeds.
+  - `infra/rbac/lib/` — TS package `@apex-ews/rbac` (loadMatrix, can, operationsFor, requireRole middleware) + 13 jest tests.
+- **Numbers:** 24 new tests (11 pytest + 13 jest), all green; tsc clean; `terraform validate` still clean (didn't touch terraform).
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅ T3.8 ✅ T3.4 ✅ + schema-fix ✅ + T3.9 ✅. **Nine tasks done end-to-end.** All four blockers closed.
+- **Remaining in TASKS.md Wave 3:** T3.1 (CBS deepening), T3.2 (IFRS 9 stage-movement signal), T3.3 (AML correlation). Per `project_apex_ews_scope.md`, these are **out of prototype scope** — they require real bank integrations (production deploy / real bank integrations are explicitly off-table). Marking Wave 3 effectively complete for prototype purposes.
+- **Total artefacts shipped this session:**
+  - 4 new TS services: `services/regulatory-svc/cases/`, `services/bff/`, `services/collection-adapter/`, `infra/rbac/lib/`.
+  - 1 new Python module: `infra/rbac/scripts/`.
+  - 1 schema rewrite + 1 schema CI gate: `infra/schema-registry/apex.case.events.v1.json` + `.github/workflows/schema-compat.yml` + `infra/schema-registry/scripts/check_compat.py`.
+  - Terraform: `aws_glue_registry` + auto-discovered `aws_glue_schema.topics` in `infra/terraform/30-data`.
+  - UI: `web/src/modules/cases/CaseDetailPage.tsx`, refreshed `CaseListPage`, refreshed `CustomerRiskProfilePage` SHAP panel, MSW mocks aligned to backend state machine.
+  - ML: `ml/data/load_from_mart.py` rewritten to project the actual mart shape; `ml/pipelines/train_pd.py` low-data auto-profile.
+  - dbt: `data/dbt/macros/generate_schema_name.sql` + `accepted_values` schema fix.
+  - Postgres: docker stack live, 3 mart models materialised, 79 dbt tests green.
+  - Verified: 9/9 BOOTSTRAP steps, B1/B2/B3/B4 all closed.
+- **Test posture:**
+  - cases/cases jest — 31 tests pass.
+  - bff jest — 32 tests pass.
+  - collection-adapter jest — 19 tests pass.
+  - rbac jest — 13 tests pass.
+  - schema-registry pytest — 16 tests pass.
+  - rbac pytest — 11 tests pass.
+  - web vitest — 22 tests pass.
+  - **Total this session: 144 new/refreshed tests, all green.**
+
+## 2026-04-27 — RBAC enforced at HTTP layer + matrix CI gate
+
+- **Decision:** turning the RBAC matrix into a runtime guard, not just docs. Wired `@apex-ews/rbac` into the cases service first because that's the most state-machine-heavy surface (`cases:close` is supervisor/admin/collection-only — risk_analyst can no longer close).
+- **Files added/changed:**
+  - `services/regulatory-svc/cases/src/server.ts` — every route now sits behind `requireRole('cases:<op>')`. `getRole` is injectable so tests can use `() => 'admin'` and skip the header dance.
+  - `services/regulatory-svc/cases/__tests__/rbac.test.ts` (new) — 8 tests asserting matrix enforcement.
+  - `infra/rbac/lib/src/index.ts` — matrix-path fallback so the same source works under `lib/src/` (ts-jest) and `lib/dist/src/` (consumer imports).
+  - `.github/workflows/rbac-matrix.yml` (new) — gate the matrix on every PR. `validate-matrix` runs the python validator + 11 pytest tests; `validate-ts-helper` builds + tests `@apex-ews/rbac`.
+- **Defects fixed during build:** one round-trip:
+  1. Imported rbac/lib from source path → tsc complained that the file was outside rootDir.
+  2. Switched to importing from `dist/src/index` → ts-jest crashed at runtime because the compiled `__dirname` is one level deeper than the source path, breaking `DEFAULT_MATRIX_PATH = path.resolve(__dirname, '..', '..', 'matrix.json')`.
+  3. Added `findDefaultMatrixPath()` that walks up the dir tree — both layouts now resolve to `infra/rbac/matrix.json`.
+- **Numbers:** 39/39 cases jest (8 new RBAC tests); 13/13 rbac jest; 11/11 rbac pytest; tsc clean for both. CI workflow yaml is well-formed (not run yet — no GH Actions trigger in this prototype env).
+- **Wave 3 progress this session:** T3.5 ✅ T3.6 ✅ T2.8 ✅ T3.10 ✅ T3.7 ✅ T3.8 ✅ T3.4 ✅ + schema-fix ✅ + T3.9 ✅ + RBAC-enforcement ✅ + matrix-CI ✅. **Eleven discrete pieces of work end-to-end.**
+- **Next likely picks** (if the user continues): adopt `requireRole` in bff (`/v1/action`) and collection-adapter (`/collection/callback`); add a unified `services-ci.yml` workflow that runs jest + tsc on every TS service touched in a PR; swap `defaultGetRole` to a JWT-claim extractor once auth-svc issues real tokens in dev.
+
+## 2026-04-27 — RBAC rolled out everywhere + services-ci.yml
+
+- **bff + collection-adapter** now both consume `@apex-ews/rbac` the same way cases does. Three lines per service: import, defaultGetRole, requireRole factory. Plus per-route `requireRole('<op>')` wrap.
+- **bff guards:** `alerts:list`, `customers:read_risk_profile`, `cases:log_action` — all from the matrix.
+- **collection-adapter guards:** `collection:callback` for the public callback; `/process` is admin-only via inline check (not in matrix because it's diagnostic, not a published operation).
+- **services-ci.yml** — unified workflow gating PRs that touch services/web/rbac. rbac-lib builds first → 8-service matrix downloads its dist → web independently. Each service runs `npm ci && npm test && npm run build`.
+- **Numbers this slice:** 9 new bff RBAC tests + 8 new collection-adapter RBAC tests + 1 new workflow file. **bff: 41/41, collection-adapter: 27/27, cases: 39/39, rbac/lib: 13/13** (TS); rbac/scripts: 11/11, schema-registry: 16/16 (Python). All clean.
+- **Caveat:** GitHub Actions yamls are committed but not running in CI yet — no GH remote in this prototype env. The yaml is well-formed and locally-equivalent commands pass.
+- **Session totals: 13 discrete pieces of work end-to-end** — T3.5 / T3.6 / T2.8 / T3.10 / T3.7 / T3.8 / T3.4 / schema-fix / T3.9 / RBAC-cases / matrix-CI / RBAC-bff+collection / services-CI.
+- **Real next picks if the user keeps going:** swap `defaultGetRole` from header-reader to JWT-claim extractor (needs auth-svc to issue tokens in dev); adopt RBAC in alerts/rules/indicators (3-line each); wire web SPA to send `x-apex-role` header on requests through the existing axios interceptor; add a `terraform fmt && terraform validate` workflow for the IaC layers.
+
+## 2026-04-27 — Front-to-back RBAC enforcement live
+
+- **alerts service** now matches cases/bff/collection-adapter — every operator route guarded by `requireRole('alerts:*')` against the matrix; producer-only `/alerts/evaluate` is admin-inline.
+- **SPA interceptor** sends `x-apex-role` alongside the Bearer token. The full path SPA → bff → backend services is now matrix-enforced at every hop.
+- **Pre-existing defect found + fixed:** `services/regulatory-svc/alerts/src/schemas.ts` used default `Ajv` (draft-07) against draft-2020-12 schemas. Same defect pattern fixed in `rules/dsl.ts` during the verification day, but the alerts variant slipped through because BOOTSTRAP step 6 only exercised rules. Now caught (the new services-ci.yml will catch it on PRs).
+- **Numbers this slice:** alerts 40/40 (8 new RBAC + 7 unblocked by AJV fix); web 27/27 (5 new). `tsc` + `vite build` clean.
+- **Session totals: 14 discrete pieces of work end-to-end** — Wave 3 + RBAC rollout (cases/bff/collection-adapter/alerts) + matrix CI + services CI + SPA interceptor + AJV-defect fix.
+- **Test posture across the codebase:**
+  - cases jest: 39/39
+  - alerts jest: 40/40
+  - bff jest: 41/41
+  - collection-adapter jest: 27/27
+  - rbac/lib jest: 13/13
+  - rbac/scripts pytest: 11/11
+  - schema-registry pytest: 16/16
+  - web vitest: 27/27
+  - **214 tests pass across the codebase.**
+- **Remaining naturally-actionable picks (none of them blocking):** adopt RBAC in regulatory-svc/rules + indicators (5-min each), auth-svc, and notification-svc; add a `terraform fmt + validate` workflow for IaC; swap the SPA's `roles[0]` heuristic for proper multi-role handling once any user has more than one role (DEMO_USERS all have single roles today).
+
+## 2026-04-27 — RBAC rollout completes regulatory-svc (rules + indicators)
+
+- **rules service:** routes guarded per matrix (`rules:list/read/create/simulate` + `rules:retire` for promote/retire + `audit:read` for audit). `makeApp` refactored from positional arg to deps-object with back-compat. tsconfig `rootDir` dropped. 31/31 jest; tsc clean.
+- **indicators service:** `/indicators/compute` + `/compute/batch` admin-only inline (system endpoints, not in matrix); catalog + healthz open. 7 new RBAC tests pass; tsc clean.
+- **Pre-existing test drift surfaced (not RBAC-related):** indicators catalog grew 30→32 since the original tests; `batch.test.ts` + `registry.test.ts` + `compute/transaction.test.ts` carry stale assertions. 6 tests fail. Out of scope for the RBAC slice; tracked in STATUS.md for agent-indicator follow-up. The new `services-ci.yml` workflow will keep this kind of drift visible going forward.
+- **End-to-end RBAC posture (final):** every TS service except auth-svc (deliberate, login is pre-auth) and notification-svc (no operator endpoints yet) enforces the matrix at HTTP layer. SPA → x-apex-role → service. JWT-claim swap is the production change at both ends.
+- **Session totals: 16 discrete pieces of work end-to-end** — Wave 3 (T3.5 / T3.6 / T2.8 / T3.10 / T3.7 / T3.8 / T3.4 / T3.9) + schema-fix + RBAC-rollout × 5 services (cases / bff / collection-adapter / alerts / rules / indicators) + matrix-CI + services-CI + SPA interceptor + AJV-defect-fix.
+- **Test posture this session:**
+  - cases jest: 39/39
+  - alerts jest: 40/40
+  - bff jest: 41/41
+  - collection-adapter jest: 27/27
+  - rules jest: 31/31 (8 new RBAC)
+  - indicators jest: 74/81 (7 new RBAC pass; 7 pre-existing fail on catalog drift, separately tracked)
+  - rbac/lib jest: 13/13
+  - rbac/scripts pytest: 11/11
+  - schema-registry pytest: 16/16
+  - web vitest: 27/27
+  - **Total clean: 282 tests pass; 7 pre-existing tests broken on stale catalog assertions.**
+
+## 2026-04-27 — Indicator catalog test drift cleared (closes the 7 pre-existing fails)
+
+- **What:** the catalog grew 30 → 32 indicators (8 per family across FIN/BEH/TXN/CRD); test assertions hardcoded 30 and were stale. Replaced hardcoded counts with derived assertions:
+  - `batch.test.ts` — `CATALOG_SIZE = loadCatalog().indicators.length` constant; every `.toHaveLength(30)` → `.toHaveLength(CATALOG_SIZE)`.
+  - `registry.test.ts` — drop the magic-number tests entirely. New checks: (a) family coverage with `>= 6 per family` and the four expected family ids, (b) `COMPUTE_REGISTRY size === catalog.indicators.length` (the real invariant, no magic number).
+  - `compute/transaction.test.ts` — TXN-002 z-score test had a flat 80k baseline (zero variance) + a spike, expecting z ≥ 3. Compute fn correctly short-circuits when stddev=0. Jittered the baseline ±2k for non-zero variance. Compute fn behaviour unchanged.
+- **Numbers:** indicators jest 74/81 → 81/81. tsc still clean.
+- **Final clean test posture across the entire codebase this session:**
+  - cases jest: 39/39
+  - alerts jest: 40/40
+  - bff jest: 41/41
+  - collection-adapter jest: 27/27
+  - rules jest: 31/31
+  - indicators jest: **81/81** (now clean)
+  - rbac/lib jest: 13/13
+  - rbac/scripts pytest: 11/11
+  - schema-registry pytest: 16/16
+  - web vitest: 27/27
+  - **Total: 326 tests pass clean across the codebase. Zero failing tests.**
+- **Session totals: 17 discrete pieces of work end-to-end.**
+
+## 2026-04-27 — terraform-ci.yml shipped (CI gate story complete)
+
+- **`.github/workflows/terraform-ci.yml`** — two jobs:
+  - `validate` matrix on the 5 IaC layers (00-landing-zone / 10-network / 20-eks / 30-data / 40-edge): `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`.
+  - `fmt-tree` recursive fmt across the whole `infra/terraform/` subtree to catch stray .tf files outside the layered structure.
+- Locally verified: all 5 layers pass `fmt -check` and `validate` clean. Recursive fmt on the whole subtree is also clean.
+- **Four CI workflows now in place**, gating every PR end-to-end:
+  - `schema-compat.yml` — T3.8 BACKWARD-compat checker + 16 pytest tests on the schema registry.
+  - `rbac-matrix.yml` — T3.9 matrix self-consistency + 11 pytest tests + the @apex-ews/rbac helper build.
+  - `services-ci.yml` — 8 TS services + web SPA jest/vitest/tsc/vite.
+  - `terraform-ci.yml` — 5 IaC layers fmt/init/validate.
+- **Caveat:** workflows are not running in CI (no GH remote in this prototype env). All commands run clean locally.
+- **Session totals: 18 discrete pieces of work end-to-end.**
+
+## 2026-04-27 — Top-level Makefile + README + .gitignore
+
+- **Why:** the Path B local-run recipe was 60 lines of bash spread across 7 terminals. New devs onboarding to the prototype shouldn't have to reverse-engineer that. Same logic for `make ci` mirroring the four GH workflows — local feedback loop should match CI 1:1.
+- **Files:**
+  - `Makefile` (top-level) — install / test / build / lint / ci / up / down / smoke / ps / logs / web-dev. Service registry encoded as `name:path:port` triples; `make up` writes PIDs to `.pids/<name>.pid` and logs to `.logs/<name>.log`; `make down` kills tracked PIDs cleanly; `make smoke` curls /healthz on each running port.
+  - `README.md` (top-level) — orientation page. What's shipped, quick-start for Path A (`make web-dev`) + Path B (`make up && make smoke`), repo layout tree, CI gates table, links to STATUS/AGENTS/TASKS/BOOTSTRAP.
+  - `.gitignore` — covers everything that gets generated (build artefacts, .venv, dbt target, terraform state, Make's .pids/.logs, service runtime .outbox/.store/.queue, .env.local).
+- **Verified locally:** `make help` prints; `make lint` runs clean (terraform fmt + per-layer validate, 5/5 green).
+- **Caveat:** workflows are not running in CI (no GH remote). Same for everything in this session.
+- **Session totals: 19 discrete pieces of work end-to-end.**

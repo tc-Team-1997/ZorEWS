@@ -1,0 +1,278 @@
+{
+  "generated_at": "2026-04-26T08:03:53.437Z",
+  "history_rows": 2859,
+  "rules_simulated": 30,
+  "mean_fp_rate": 0.148,
+  "rules": [
+    {
+      "rule_id": "RULE-001",
+      "total_firings": 47,
+      "fp_rate": 0,
+      "median_lead_time_days": 0,
+      "customers_fired": 34,
+      "true_positives": 47,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-002",
+      "total_firings": 81,
+      "fp_rate": 0.333,
+      "median_lead_time_days": 75,
+      "customers_fired": 58,
+      "true_positives": 54,
+      "false_positives": 27
+    },
+    {
+      "rule_id": "RULE-003",
+      "total_firings": 45,
+      "fp_rate": 0.022,
+      "median_lead_time_days": null,
+      "customers_fired": 35,
+      "true_positives": 44,
+      "false_positives": 1
+    },
+    {
+      "rule_id": "RULE-004",
+      "total_firings": 21,
+      "fp_rate": 0,
+      "median_lead_time_days": null,
+      "customers_fired": 16,
+      "true_positives": 21,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-005",
+      "total_firings": 38,
+      "fp_rate": 0,
+      "median_lead_time_days": null,
+      "customers_fired": 31,
+      "true_positives": 38,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-006",
+      "total_firings": 20,
+      "fp_rate": 0,
+      "median_lead_time_days": null,
+      "customers_fired": 20,
+      "true_positives": 20,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-007",
+      "total_firings": 81,
+      "fp_rate": 0.309,
+      "median_lead_time_days": 0,
+      "customers_fired": 56,
+      "true_positives": 56,
+      "false_positives": 25
+    },
+    {
+      "rule_id": "RULE-008",
+      "total_firings": 59,
+      "fp_rate": 0,
+      "median_lead_time_days": 0,
+      "customers_fired": 37,
+      "true_positives": 59,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-009",
+      "total_firings": 91,
+      "fp_rate": 0.253,
+      "median_lead_time_days": 0,
+      "customers_fired": 57,
+      "true_positives": 68,
+      "false_positives": 23
+    },
+    {
+      "rule_id": "RULE-010",
+      "total_firings": 65,
+      "fp_rate": 0.523,
+      "median_lead_time_days": 0,
+      "customers_fired": 59,
+      "true_positives": 31,
+      "false_positives": 34
+    },
+    {
+      "rule_id": "RULE-011",
+      "total_firings": 70,
+      "fp_rate": 0.3,
+      "median_lead_time_days": 0,
+      "customers_fired": 49,
+      "true_positives": 49,
+      "false_positives": 21
+    },
+    {
+      "rule_id": "RULE-012",
+      "total_firings": 44,
+      "fp_rate": 0.136,
+      "median_lead_time_days": 210,
+      "customers_fired": 33,
+      "true_positives": 38,
+      "false_positives": 6
+    },
+    {
+      "rule_id": "RULE-013",
+      "total_firings": 72,
+      "fp_rate": 0,
+      "median_lead_time_days": 0,
+      "customers_fired": 37,
+      "true_positives": 72,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-014",
+      "total_firings": 49,
+      "fp_rate": 0.102,
+      "median_lead_time_days": 0,
+      "customers_fired": 37,
+      "true_positives": 44,
+      "false_positives": 5
+    },
+    {
+      "rule_id": "RULE-015",
+      "total_firings": 12,
+      "fp_rate": 0,
+      "median_lead_time_days": null,
+      "customers_fired": 11,
+      "true_positives": 12,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-016",
+      "total_firings": 64,
+      "fp_rate": 0.344,
+      "median_lead_time_days": 30,
+      "customers_fired": 50,
+      "true_positives": 42,
+      "false_positives": 22
+    },
+    {
+      "rule_id": "RULE-017",
+      "total_firings": 33,
+      "fp_rate": 0,
+      "median_lead_time_days": 0,
+      "customers_fired": 29,
+      "true_positives": 33,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-018",
+      "total_firings": 50,
+      "fp_rate": 0.08,
+      "median_lead_time_days": 0,
+      "customers_fired": 38,
+      "true_positives": 46,
+      "false_positives": 4
+    },
+    {
+      "rule_id": "RULE-019",
+      "total_firings": 38,
+      "fp_rate": 0.053,
+      "median_lead_time_days": 0,
+      "customers_fired": 33,
+      "true_positives": 36,
+      "false_positives": 2
+    },
+    {
+      "rule_id": "RULE-020",
+      "total_firings": 42,
+      "fp_rate": 0,
+      "median_lead_time_days": 0,
+      "customers_fired": 32,
+      "true_positives": 42,
+      "false_positives": 0
+    },
+    {
+      "rule_id": "RULE-021",
+      "total_firings": 84,
+      "fp_rate": 0.298,
+      "median_lead_time_days": 0,
+      "customers_fired": 56,
+      "true_positives": 59,
+      "false_positives": 25
+    },
+    {
+      "rule_id": "RULE-022",
+      "total_firings": 102,
+      "fp_rate": 0.265,
+      "median_lead_time_days": 30,
+      "customers_fired": 61,
+      "true_positives": 75,
+      "false_positives": 27
+    },
+    {
+      "rule_id": "RULE-023",
+      "total_firings": 127,
+      "fp_rate": 0.488,
+      "median_lead_time_days": 0,
+      "customers_fired": 85,
+      "true_positives": 65,
+      "false_positives": 62
+    },
+    {
+      "rule_id": "RULE-024",
+      "total_firings": 92,
+      "fp_rate": 0.337,
+      "median_lead_time_days": 0,
+      "customers_fired": 61,
+      "true_positives": 61,
+      "false_positives": 31
+    },
+    {
+      "rule_id": "RULE-025",
+      "total_firings": 70,
+      "fp_rate": 0.086,
+      "median_lead_time_days": 0,
+      "customers_fired": 42,
+      "true_positives": 64,
+      "false_positives": 6
+    },
+    {
+      "rule_id": "RULE-026",
+      "total_firings": 68,
+      "fp_rate": 0.132,
+      "median_lead_time_days": 0,
+      "customers_fired": 44,
+      "true_positives": 59,
+      "false_positives": 9
+    },
+    {
+      "rule_id": "RULE-027",
+      "total_firings": 78,
+      "fp_rate": 0.115,
+      "median_lead_time_days": 0,
+      "customers_fired": 45,
+      "true_positives": 69,
+      "false_positives": 9
+    },
+    {
+      "rule_id": "RULE-028",
+      "total_firings": 53,
+      "fp_rate": 0.019,
+      "median_lead_time_days": 0,
+      "customers_fired": 35,
+      "true_positives": 52,
+      "false_positives": 1
+    },
+    {
+      "rule_id": "RULE-029",
+      "total_firings": 68,
+      "fp_rate": 0.015,
+      "median_lead_time_days": 0,
+      "customers_fired": 38,
+      "true_positives": 67,
+      "false_positives": 1
+    },
+    {
+      "rule_id": "RULE-030",
+      "total_firings": 79,
+      "fp_rate": 0.241,
+      "median_lead_time_days": 90,
+      "customers_fired": 51,
+      "true_positives": 60,
+      "false_positives": 19
+    }
+  ]
+}

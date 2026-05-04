@@ -1,0 +1,78 @@
+name: 'apex_ews'
+version: '0.1.0'
+config-version: 2
+
+profile: 'apex_ews'
+
+model-paths:    ["models"]
+seed-paths:     ["seeds"]
+test-paths:     ["tests"]
+analysis-paths: ["analyses"]
+macro-paths:    ["macros"]
+snapshot-paths: ["snapshots"]
+target-path:    "target"
+clean-targets:  ["target", "dbt_packages"]
+
+# All dbt models materialise inside their corresponding logical schema.
+# We use dbt's schema-suffix convention via the `+schema` config so that
+# `models/staging/*.sql` ends up in `staging`, `models/marts/*.sql` in `mart`.
+models:
+  apex_ews:
+    +materialized: view
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: mart
+      +materialized: table
+
+seeds:
+  apex_ews:
+    +schema: raw
+    +quote_columns: false
+    seed_customers:
+      +column_types:
+        customer_id: text
+        date_of_birth: date
+        monthly_income: numeric(18,2)
+        onboarded_at: timestamp
+    seed_loans:
+      +column_types:
+        loan_id: text
+        customer_id: text
+        principal_amount: numeric(18,2)
+        outstanding_amount: numeric(18,2)
+        interest_rate: numeric(7,4)
+        disbursed_at: timestamp
+        maturity_date: date
+        last_repayment_at: timestamp
+        days_past_due: integer
+    seed_repayments:
+      +column_types:
+        repayment_id: text
+        loan_id: text
+        customer_id: text
+        repayment_date: date
+        scheduled_amount: numeric(18,2)
+        paid_amount: numeric(18,2)
+        principal_paid: numeric(18,2)
+        interest_paid: numeric(18,2)
+        fees_paid: numeric(18,2)
+    seed_transactions:
+      +column_types:
+        txn_id: text
+        customer_id: text
+        txn_timestamp: timestamp
+        amount: numeric(18,2)
+        balance_after: numeric(18,2)
+    seed_bureau_score:
+      +column_types:
+        customer_id: text
+        score: integer
+        score_as_of: date
+        total_exposure: numeric(18,2)
+
+vars:
+  txn_window_short:  7
+  txn_window_med:    30
+  txn_window_long:   90

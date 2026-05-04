@@ -1,0 +1,145 @@
+version: 2
+
+models:
+  - name: customer_360
+    description: |
+      One row per customer with rolled-up exposure, behaviour, bureau score and
+      derived ratios. Primary input to indicator-engine and AI training pipeline.
+    columns:
+      - name: customer_id
+        description: "Stable customer identifier."
+        tests: [not_null, unique]
+      - name: total_outstanding
+        description: "Sum of outstanding_amount across active loans (KES)."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: worst_dpd
+        description: "Maximum days_past_due across customer's loans."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 3650
+      - name: has_npa
+        description: "True if any loan is in SUBSTANDARD/DOUBTFUL/LOSS."
+        tests: [not_null]
+      - name: bureau_score
+        description: "Latest CRB score (200-900)."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 200
+              max_value: 900
+              config:
+                where: "bureau_score is not null"
+      - name: exposure_to_income_ratio
+        description: "Total outstanding ÷ monthly income."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              config:
+                where: "exposure_to_income_ratio is not null"
+
+  - name: loan_360
+    description: |
+      One row per loan with current outstanding, dpd, last repayment behaviour
+      and derived dpd_bucket. Drives loan-level rule predicates and Collection
+      auto-routing.
+    columns:
+      - name: loan_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customer')
+              field: customer_id
+      - name: npa_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PERFORMING','WATCH','SUBSTANDARD','DOUBTFUL','LOSS']
+      - name: dpd_bucket
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['0','1-30','31-60','61-90','91-180','180+']
+      - name: outstanding_amount
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: txn_features
+    description: |
+      Rolling 7/30/90-day inflow/outflow aggregates per customer. Powers
+      behavioural + transaction indicator families.
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: as_of
+        tests: [not_null]
+      - name: inflow_30d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: outflow_30d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: burn_ratio_30d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+              config:
+                where: "burn_ratio_30d is not null"
+
+  - name: indicator_values
+    description: |
+      Long-format indicator output, one row per
+      (customer_id, snapshot_date, indicator_id). Materialises 8 of the 30
+      catalog indicators in pure SQL — the rolling-window subset that fits
+      the columns mart already exposes (TXN-001, FIN-005, FIN-007, CRD-006,
+      CRD-007, BEH-002, BEH-003, TXN-005). The other 22 catalog ids are
+      computed at runtime via `regulatory-svc/indicators` POST
+      /indicators/compute. See the model docstring for picks + rationale.
+    columns:
+      - name: customer_id
+        description: "Customer this indicator was computed for."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('customer_360')
+              field: customer_id
+      - name: snapshot_date
+        description: "Date for which the indicator was evaluated."
+        tests: [not_null]
+      - name: indicator_id
+        description: "Catalog id (e.g. TXN-001). See services/regulatory-svc/indicators/catalog.json."
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'TXN-001'
+                - 'FIN-005'
+                - 'FIN-007'
+                - 'CRD-006'
+                - 'CRD-007'
+                - 'BEH-002'
+                - 'BEH-003'
+                - 'TXN-005'
+      - name: value
+        description: "Numeric value of the indicator. Null when inputs are unavailable."
+      - name: breached
+        description: "Whether the value crosses the breach threshold for this indicator."
+        tests: [not_null]
+      - name: severity
+        description: "Severity bucket derived from the catalog's severity_weight when breached, else 'low'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['low', 'medium', 'high', 'critical']
+      - name: computed_at
+        description: "Timestamp this row was computed."
+        tests: [not_null]

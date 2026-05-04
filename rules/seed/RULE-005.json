@@ -1,0 +1,20 @@
+{
+  "id": "RULE-005",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Minimum-balance breach >=15 days in last 30d — chronic underfunded account.",
+  "owner": "agent-rule",
+  "tags": ["financial", "liquidity"],
+  "when": {
+    "and": [
+      { "indicator": "FIN-002", "op": "gte", "value": 15 },
+      { "indicator": "FIN-003", "op": "lt", "value": 0.3 }
+    ]
+  },
+  "then": {
+    "title": "Frequent min-balance breaches with thin savings buffer",
+    "recommended_action": "Send overdue-warning + financial-counselling nudge.",
+    "tags": ["liquidity"]
+  }
+}

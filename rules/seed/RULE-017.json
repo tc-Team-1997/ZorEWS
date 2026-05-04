@@ -1,0 +1,19 @@
+{
+  "id": "RULE-017",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "P2P / wallet outflow spike > 3x trailing baseline — possible informal borrowing pattern.",
+  "owner": "agent-rule",
+  "tags": ["transaction"],
+  "when": {
+    "indicator": "TXN-007",
+    "op": "gt",
+    "value": 3
+  },
+  "then": {
+    "title": "P2P outflow spike",
+    "recommended_action": "Check for informal-credit indicators; review affordability.",
+    "tags": ["p2p"]
+  }
+}

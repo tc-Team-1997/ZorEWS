@@ -1,0 +1,20 @@
+{
+  "id": "RULE-027",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Collateral coverage ratio fell below 1.0 — under-collateralised exposure.",
+  "owner": "agent-rule",
+  "tags": ["credit", "collateral"],
+  "when": {
+    "and": [
+      { "indicator": "CRD-007", "op": "lt", "value": 1.0 },
+      { "indicator": "CRD-006", "op": "gte", "value": 15 }
+    ]
+  },
+  "then": {
+    "title": "Under-collateralised + early DPD",
+    "recommended_action": "Re-value collateral; request additional security if covenant allows.",
+    "tags": ["collateral"]
+  }
+}

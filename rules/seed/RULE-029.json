@@ -1,0 +1,21 @@
+{
+  "id": "RULE-029",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "Cross-family signal: external DPD plus internal late repayments — spread distress.",
+  "owner": "agent-rule",
+  "tags": ["credit", "behavioural", "composite"],
+  "when": {
+    "and": [
+      { "indicator": "CRD-003", "op": "gte", "value": 30 },
+      { "indicator": "BEH-002", "op": "gte", "value": 2 }
+    ]
+  },
+  "then": {
+    "title": "Cross-lender + internal repayment distress",
+    "severity_override": "critical",
+    "recommended_action": "Open case; assign senior credit officer.",
+    "tags": ["composite"]
+  }
+}

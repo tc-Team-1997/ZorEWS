@@ -1,0 +1,19 @@
+{
+  "id": "RULE-011",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Repeated unreachable contact attempts (>=4 in 30d) by collections / RM.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "engagement"],
+  "when": {
+    "indicator": "BEH-008",
+    "op": "gte",
+    "value": 4
+  },
+  "then": {
+    "title": "Customer unreachable across multiple channels",
+    "recommended_action": "Trigger field-officer visit; verify KYC contact details.",
+    "tags": ["engagement"]
+  }
+}

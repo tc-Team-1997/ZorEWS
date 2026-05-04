@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.rule.firings.v1.json",
+  "title": "apex.rule.firings",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "description": "Internal stub topic produced by agent-rule and consumed by agent-alert. The alert producer merges these firings with the PD score from ai-copilot-svc and re-emits the canonical alert on apex.regulatory.events.",
+  "type": "object",
+  "required": [
+    "firing_id",
+    "rule_id",
+    "rule_version",
+    "customer_id",
+    "indicators_fired",
+    "rule_severity",
+    "ts"
+  ],
+  "properties": {
+    "firing_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Producer-side idempotency token. agent-alert dedupes by content hash, but this id is the authoritative event identifier."
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^RULE-[0-9]{3,}$"
+    },
+    "rule_version": {
+      "type": ["string", "number"],
+      "description": "Version of the rule that fired (mirrors Rule.version in rules/types.ts; integer accepted for legacy rules, string preferred going forward)."
+    },
+    "customer_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "loan_id": {
+      "type": ["string", "null"]
+    },
+    "indicators_fired": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "description": "Indicator catalog id, e.g. FIN-001."
+      }
+    },
+    "rule_severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "reason": {
+      "type": "string",
+      "description": "AlertSpec.title from rules/types.ts — the human-readable rule label."
+    },
+    "recommended_action": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Optional bag of indicator → value pairs that contributed to the firing. Keys are indicator ids; values are numbers or null.",
+      "additionalProperties": {
+        "type": ["number", "string", "boolean", "null"]
+      }
+    },
+    "trace_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

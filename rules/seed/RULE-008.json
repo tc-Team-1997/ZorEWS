@@ -1,0 +1,19 @@
+{
+  "id": "RULE-008",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Avg repayment delay > 15 days over last 90 days — soft delinquency pattern.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "repayment"],
+  "when": {
+    "indicator": "BEH-001",
+    "op": "gt",
+    "value": 15
+  },
+  "then": {
+    "title": "Persistent late repayments",
+    "recommended_action": "Send reminder cadence + auto-debit re-confirmation.",
+    "tags": ["repayment"]
+  }
+}

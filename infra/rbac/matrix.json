@@ -1,0 +1,61 @@
+{
+  "$schema": "https://apex-ews/schemas/rbac.matrix.v1.json",
+  "version": "1.0.0",
+  "description": "Canonical RBAC matrix for APEX EWS. Source of truth for auth-svc, regulatory-svc, bff, collection-adapter, and the SPA. T3.9.",
+  "roles": [
+    "admin",
+    "risk_analyst",
+    "supervisor",
+    "collection_officer",
+    "field_officer"
+  ],
+  "role_descriptions": {
+    "admin": "Platform admin. Owns user lifecycle, audit log access, and overrides everywhere. Tightly held — quarterly review confirms the holders.",
+    "risk_analyst": "Front-line analyst. Triages alerts, opens + works cases, can author + simulate rules but cannot retire them.",
+    "supervisor": "Risk manager. Oversight + assignment authority across the analyst pool. Approves case closure and rule retirements.",
+    "collection_officer": "Collection-team operator. Works cases that have been routed to Collection (T3.4); logs actions; closes cases on outcome.",
+    "field_officer": "On-the-ground field rep. Mobile-first; logs call/visit actions with optional GPS (FR-CASE-3); read-only on rules + alerts."
+  },
+  "operations": {
+    "alerts:list":                  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "alerts:read":                  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "alerts:assign":                ["admin", "risk_analyst", "supervisor"],
+    "alerts:ack":                   ["admin", "risk_analyst", "supervisor"],
+    "alerts:close":                 ["admin", "risk_analyst", "supervisor"],
+
+    "cases:create":                 ["admin", "risk_analyst", "supervisor"],
+    "cases:list":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "cases:read":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "cases:assign":                 ["admin", "supervisor"],
+    "cases:log_action":             ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "cases:monitor":                ["admin", "risk_analyst", "supervisor", "collection_officer"],
+    "cases:close":                  ["admin", "supervisor", "collection_officer"],
+
+    "cases:cas_submit":              ["admin", "risk_analyst", "supervisor"],
+    "cases:cas_review":              ["admin", "supervisor"],
+    "cases:cap_propose":             ["admin", "risk_analyst", "supervisor"],
+    "cases:cap_approve":             ["admin", "supervisor"],
+    "cases:cap_close":               ["admin", "risk_analyst", "supervisor", "collection_officer"],
+
+    "rules:list":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "rules:read":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "rules:create":                 ["admin", "risk_analyst"],
+    "rules:update":                 ["admin", "risk_analyst"],
+    "rules:simulate":               ["admin", "risk_analyst", "supervisor"],
+    "rules:promote":                ["admin", "supervisor"],
+    "rules:retire":                 ["admin", "supervisor"],
+
+    "customers:list":               ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+    "customers:read_risk_profile":  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
+
+    "collection:callback":          ["admin", "supervisor", "collection_officer"],
+
+    "users:list":                   ["admin", "supervisor"],
+    "users:create":                 ["admin"],
+    "users:role_change":            ["admin"],
+    "users:deactivate":             ["admin"],
+
+    "audit:read":                   ["admin", "supervisor"],
+    "webhooks:manage":              ["admin"]
+  }
+}

@@ -1,0 +1,65 @@
+name: terraform-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        layer:
+          - 00-landing-zone
+          - 10-network
+          - 20-eks
+          - 30-data
+          - 40-edge
+    defaults:
+      run:
+        working-directory: infra/terraform/${{ matrix.layer }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+          # Don't auto-wrap stdout/stderr — keeps the validate output clean.
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -diff
+
+      - name: terraform init (no backend)
+        # `-backend=false` skips remote state config; we only need init to
+        # download providers + modules so `validate` can resolve them.
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate -no-color
+
+  # Whole-tree fmt sanity check — catches stray .tf files outside the five
+  # layers (e.g. a future module/, scripts/, tools/).
+  fmt-tree:
+    name: fmt -check (whole tree)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive -diff infra/terraform

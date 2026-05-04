@@ -1,0 +1,20 @@
+{
+  "id": "RULE-026",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "External exposure grew >40% in 90d — customer leveraging up across other lenders.",
+  "owner": "agent-rule",
+  "tags": ["credit"],
+  "when": {
+    "and": [
+      { "indicator": "CRD-004", "op": "gt", "value": 0.4 },
+      { "indicator": "CRD-002", "op": "gte", "value": 2 }
+    ]
+  },
+  "then": {
+    "title": "Cross-lender leverage build-up",
+    "recommended_action": "Tighten exposure cap; review co-borrower commitments.",
+    "tags": ["leverage"]
+  }
+}

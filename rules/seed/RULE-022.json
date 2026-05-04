@@ -1,0 +1,19 @@
+{
+  "id": "RULE-022",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "External lender reports DPD >= 30 in last 90 days — contagion risk to our exposure.",
+  "owner": "agent-rule",
+  "tags": ["credit", "bureau"],
+  "when": {
+    "indicator": "CRD-003",
+    "op": "gte",
+    "value": 30
+  },
+  "then": {
+    "title": "External DPD reported",
+    "recommended_action": "Apply cross-default watch; throttle new credit decisions.",
+    "tags": ["bureau", "contagion"]
+  }
+}

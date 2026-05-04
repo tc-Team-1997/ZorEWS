@@ -1,0 +1,20 @@
+{
+  "id": "RULE-030",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Bounced payments combined with late repayment streak — the loan is actively going into default.",
+  "owner": "agent-rule",
+  "tags": ["transaction", "behavioural", "composite"],
+  "when": {
+    "and": [
+      { "indicator": "TXN-005", "op": "gte", "value": 2 },
+      { "indicator": "BEH-002", "op": "gte", "value": 2 }
+    ]
+  },
+  "then": {
+    "title": "Bounced payments + repayment streak",
+    "recommended_action": "Escalate to Collections within 24h; lock new disbursements.",
+    "tags": ["composite"]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.audit.events.v1.json",
+  "title": "apex.audit.events",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "type": "object",
+  "required": [
+    "audit_id",
+    "service",
+    "actor",
+    "action",
+    "resource",
+    "outcome",
+    "occurred_at",
+    "prev_hash",
+    "hash"
+  ],
+  "properties": {
+    "audit_id": { "type": "string", "format": "uuid" },
+    "service": { "type": "string", "description": "Producing service name." },
+    "actor": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["USER", "SERVICE", "SYSTEM"] },
+        "role": { "type": ["string", "null"] }
+      }
+    },
+    "action": { "type": "string", "description": "Verb e.g. login, rule.publish, case.close." },
+    "resource": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "outcome": { "type": "string", "enum": ["SUCCESS", "FAILURE", "DENIED"] },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "ip": { "type": ["string", "null"] },
+    "user_agent": { "type": ["string", "null"] },
+    "trace_id": { "type": ["string", "null"] },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex of the previous record. Genesis is 64 zeros."
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex of (prev_hash || canonical(this record without 'hash'))."
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Action-specific extra context."
+    }
+  },
+  "additionalProperties": false
+}

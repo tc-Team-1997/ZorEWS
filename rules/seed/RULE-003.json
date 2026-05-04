@@ -1,0 +1,20 @@
+{
+  "id": "RULE-003",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "High income volatility (CV > 0.45) combined with leverage above 5x annual income — fragile servicing capacity.",
+  "owner": "agent-rule",
+  "tags": ["financial", "leverage"],
+  "when": {
+    "and": [
+      { "indicator": "FIN-004", "op": "gt", "value": 0.45 },
+      { "indicator": "FIN-007", "op": "gt", "value": 5 }
+    ]
+  },
+  "then": {
+    "title": "Volatile income + over-leveraged",
+    "recommended_action": "Re-underwrite — consider exposure cap or top-up freeze.",
+    "tags": ["leverage", "volatility"]
+  }
+}

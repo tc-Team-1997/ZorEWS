@@ -1,0 +1,19 @@
+{
+  "id": "RULE-015",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Large-outflow anomaly: 30d outflow > 2.5 sigma above 90d mean. Possible asset liquidation or distress payout.",
+  "owner": "agent-rule",
+  "tags": ["transaction", "anomaly"],
+  "when": {
+    "indicator": "TXN-002",
+    "op": "gt",
+    "value": 2.5
+  },
+  "then": {
+    "title": "Statistical outflow anomaly",
+    "recommended_action": "Confirm purpose with customer; reconcile against AML alerts if present.",
+    "tags": ["anomaly"]
+  }
+}

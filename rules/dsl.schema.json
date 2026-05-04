@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/rules/dsl.schema.json",
+  "title": "APEX EWS Rule DSL",
+  "description": "JSON Schema for a single APEX EWS rule. A rule references indicator ids defined in services/regulatory-svc/indicators/catalog.json. The when-tree is a recursive boolean expression evaluated against a customer's latest indicator values.",
+  "type": "object",
+  "required": ["id", "version", "status", "severity", "description", "when", "then"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^RULE-[0-9]{3,4}$",
+      "description": "Stable rule id, e.g. RULE-001."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "simulate", "live", "retired"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 500
+    },
+    "owner": {
+      "type": "string",
+      "description": "Team or individual accountable for the rule.",
+      "default": "agent-rule"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "when": { "$ref": "#/$defs/expr" },
+    "then": { "$ref": "#/$defs/alertSpec" }
+  },
+  "$defs": {
+    "expr": {
+      "description": "Recursive boolean expression — either a logical node or a comparator leaf.",
+      "oneOf": [
+        { "$ref": "#/$defs/and" },
+        { "$ref": "#/$defs/or" },
+        { "$ref": "#/$defs/not" },
+        { "$ref": "#/$defs/cmp" }
+      ]
+    },
+    "and": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["and"],
+      "properties": {
+        "and": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/expr" }
+        }
+      }
+    },
+    "or": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["or"],
+      "properties": {
+        "or": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/expr" }
+        }
+      }
+    },
+    "not": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["not"],
+      "properties": {
+        "not": { "$ref": "#/$defs/expr" }
+      }
+    },
+    "cmp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["indicator", "op"],
+      "properties": {
+        "indicator": {
+          "type": "string",
+          "description": "Indicator id from the catalog (e.g. FIN-001).",
+          "pattern": "^(FIN|BEH|TXN|CRD)-[0-9]{3}$"
+        },
+        "op": {
+          "type": "string",
+          "enum": ["gt", "gte", "lt", "lte", "eq", "between"]
+        },
+        "value": {
+          "description": "Scalar value for gt/gte/lt/lte/eq."
+        },
+        "range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" },
+          "description": "[min, max] inclusive — required when op == 'between'."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "between" } } },
+          "then": { "required": ["range"] },
+          "else": { "required": ["value"] }
+        }
+      ]
+    },
+    "alertSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "recommended_action"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 140
+        },
+        "severity_override": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "recommended_action": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 280
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    }
+  }
+}

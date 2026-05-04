@@ -1,0 +1,19 @@
+{
+  "id": "RULE-009",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Partial-repayment ratio >35% over 90d — customer paying less than due even when paying.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "repayment"],
+  "when": {
+    "indicator": "BEH-003",
+    "op": "gt",
+    "value": 0.35
+  },
+  "then": {
+    "title": "Frequent partial repayments",
+    "recommended_action": "Discuss restructure proactively before formal default.",
+    "tags": ["repayment"]
+  }
+}

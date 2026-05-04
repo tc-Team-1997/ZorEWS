@@ -1,0 +1,25 @@
+# Copy to ~/.dbt/profiles.yml or set DBT_PROFILES_DIR to this directory.
+apex_ews:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 55432
+      user: apex
+      password: apex
+      dbname: apex_ews
+      schema: staging        # default schema; per-folder overrides in dbt_project.yml
+      threads: 4
+      keepalives_idle: 0
+      sslmode: prefer
+    ci:
+      type: postgres
+      host: "{{ env_var('PGHOST', 'localhost') }}"
+      port: "{{ env_var('PGPORT', '5432') | int }}"
+      user: "{{ env_var('PGUSER', 'apex') }}"
+      password: "{{ env_var('PGPASSWORD', 'apex') }}"
+      dbname: "{{ env_var('PGDATABASE', 'apex_ews') }}"
+      schema: staging
+      threads: 4
+      sslmode: require

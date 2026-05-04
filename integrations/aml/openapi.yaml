@@ -1,0 +1,56 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — AML Webhooks
+  version: 0.1.0
+servers:
+  - url: https://aml.internal.example.co.ke
+paths:
+  /aml/inbound:
+    post:
+      summary: AML → APEX EWS — push AML alert for correlation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InboundAlert"
+      responses:
+        "202":
+          description: Accepted
+        "401":
+          description: Bad signature
+  /aml/outbound:
+    post:
+      summary: APEX EWS → AML — push EWS alert for correlation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutboundAlert"
+      responses:
+        "202":
+          description: Accepted
+components:
+  schemas:
+    InboundAlert:
+      type: object
+      required: [aml_alert_id, customer_id, scenario, severity, raised_at]
+      properties:
+        aml_alert_id: { type: string }
+        customer_id: { type: string }
+        scenario: { type: string }
+        severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+        raised_at: { type: string, format: date-time }
+        correlation_id: { type: string }
+    OutboundAlert:
+      type: object
+      required: [ews_alert_id, customer_id, severity]
+      properties:
+        ews_alert_id: { type: string, format: uuid }
+        customer_id: { type: string }
+        indicators:
+          type: array
+          items: { type: string }
+        severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+        correlation_id: { type: string }

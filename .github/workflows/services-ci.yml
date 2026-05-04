@@ -1,0 +1,122 @@
+name: services-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'infra/rbac/lib/**'
+      - 'web/**'
+      - '.github/workflows/services-ci.yml'
+  pull_request:
+    paths:
+      - 'services/**'
+      - 'infra/rbac/lib/**'
+      - 'web/**'
+      - '.github/workflows/services-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------
+  # Stage 1: build the @apex-ews/rbac helper.
+  #
+  # services/{regulatory-svc/cases, bff, collection-adapter} import RBAC
+  # from this package's compiled dist/, so it must be built before the
+  # downstream service jobs run.
+  # ------------------------------------------------------------------
+  rbac-lib:
+    name: Build @apex-ews/rbac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/rbac/lib/package-lock.json
+      - name: npm ci
+        working-directory: infra/rbac/lib
+        run: npm ci
+      - name: tsc build
+        working-directory: infra/rbac/lib
+        run: npm run build
+      - name: jest
+        working-directory: infra/rbac/lib
+        run: npm test
+      - name: Upload dist for downstream service jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rbac-dist
+          path: infra/rbac/lib/dist
+          retention-days: 1
+
+  # ------------------------------------------------------------------
+  # Stage 2: jest + tsc for every TS service.
+  #
+  # Each service runs in parallel via the matrix. Services that consume
+  # @apex-ews/rbac download the dist artifact from rbac-lib first.
+  # ------------------------------------------------------------------
+  service:
+    name: ${{ matrix.svc.name }}
+    needs: rbac-lib
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc:
+          - { name: regulatory-svc/cases,        path: services/regulatory-svc/cases,        needs_rbac: true  }
+          - { name: regulatory-svc/rules,        path: services/regulatory-svc/rules,        needs_rbac: false }
+          - { name: regulatory-svc/alerts,       path: services/regulatory-svc/alerts,       needs_rbac: false }
+          - { name: regulatory-svc/indicators,   path: services/regulatory-svc/indicators,   needs_rbac: false }
+          - { name: bff,                         path: services/bff,                         needs_rbac: true  }
+          - { name: collection-adapter,          path: services/collection-adapter,          needs_rbac: true  }
+          - { name: notification-svc,            path: services/notification-svc,            needs_rbac: false }
+          - { name: auth-svc,                    path: services/auth-svc,                    needs_rbac: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.svc.path }}/package-lock.json
+      - name: Pull rbac dist
+        if: ${{ matrix.svc.needs_rbac }}
+        uses: actions/download-artifact@v4
+        with:
+          name: rbac-dist
+          path: infra/rbac/lib/dist
+      - name: npm ci
+        working-directory: ${{ matrix.svc.path }}
+        run: npm ci
+      - name: jest
+        working-directory: ${{ matrix.svc.path }}
+        run: npm test
+      - name: tsc build
+        working-directory: ${{ matrix.svc.path }}
+        run: npm run build
+
+  # ------------------------------------------------------------------
+  # Stage 3: web SPA — vitest + tsc + vite build.
+  # Independent of rbac-lib (the SPA's MSW path mocks the BFF surface).
+  # ------------------------------------------------------------------
+  web:
+    name: web SPA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+      - name: vitest
+        working-directory: web
+        run: npx vitest run
+      - name: production build
+        working-directory: web
+        run: npm run build

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.cbs.events.v1.json",
+  "title": "apex.cbs.events",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "type": "object",
+  "required": ["event_id", "event_type", "occurred_at", "source_system", "customer_id", "payload"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Globally unique event id."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "loan.disbursed",
+        "loan.repayment.received",
+        "loan.repayment.missed",
+        "account.balance.changed",
+        "account.overdraft",
+        "customer.profile.updated"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ingested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_system": {
+      "type": "string",
+      "enum": ["CBS", "LOS"]
+    },
+    "customer_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "loan_id": {
+      "type": ["string", "null"]
+    },
+    "account_id": {
+      "type": ["string", "null"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Free-form, validated downstream by the staging dbt model.",
+      "additionalProperties": true
+    },
+    "trace_id": {
+      "type": "string",
+      "description": "W3C traceparent for correlation."
+    }
+  },
+  "additionalProperties": false
+}

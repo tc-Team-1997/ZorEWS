@@ -1,0 +1,19 @@
+{
+  "id": "RULE-007",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Repayment delay streak of 3+ consecutive months indicates entrenched servicing failure.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "repayment"],
+  "when": {
+    "indicator": "BEH-002",
+    "op": "gte",
+    "value": 3
+  },
+  "then": {
+    "title": "3+ month late-repayment streak",
+    "recommended_action": "Move to Watch / IFRS Stage-2 review.",
+    "tags": ["repayment"]
+  }
+}

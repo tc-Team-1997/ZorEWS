@@ -1,0 +1,20 @@
+{
+  "id": "RULE-019",
+  "version": 1,
+  "status": "draft",
+  "severity": "low",
+  "description": "Sudden drop in merchant diversity indicates lifestyle compression — soft early signal.",
+  "owner": "agent-rule",
+  "tags": ["transaction", "lifestyle"],
+  "when": {
+    "and": [
+      { "indicator": "TXN-004", "op": "gt", "value": 0.35 },
+      { "indicator": "FIN-005", "op": "lt", "value": 0.7 }
+    ]
+  },
+  "then": {
+    "title": "Lifestyle compression signal",
+    "recommended_action": "Monitor on watchlist; no customer-facing action yet.",
+    "tags": ["watchlist"]
+  }
+}

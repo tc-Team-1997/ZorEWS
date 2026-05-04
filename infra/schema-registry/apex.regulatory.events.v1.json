@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.regulatory.events.v1.json",
+  "title": "apex.regulatory.events",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "type": "object",
+  "required": [
+    "alert_id",
+    "raised_at",
+    "customer_id",
+    "severity",
+    "rule_firings",
+    "scoring"
+  ],
+  "properties": {
+    "alert_id": { "type": "string", "format": "uuid" },
+    "raised_at": { "type": "string", "format": "date-time" },
+    "customer_id": { "type": "string" },
+    "loan_id": { "type": ["string", "null"] },
+    "severity": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    },
+    "rule_firings": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "rule_version", "matched_at"],
+        "properties": {
+          "rule_id": { "type": "string" },
+          "rule_version": { "type": "string" },
+          "matched_at": { "type": "string", "format": "date-time" },
+          "indicator_value_ids": {
+            "type": "array",
+            "items": { "type": "string", "format": "uuid" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "scoring": {
+      "type": "object",
+      "properties": {
+        "pd": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "risk_band": {
+          "type": ["string", "null"],
+          "enum": ["LOW", "MEDIUM", "HIGH", null]
+        },
+        "shap_top": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["feature", "value"],
+            "properties": {
+              "feature": { "type": "string" },
+              "value": { "type": "number" }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "trace_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

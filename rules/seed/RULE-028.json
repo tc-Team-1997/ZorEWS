@@ -1,0 +1,21 @@
+{
+  "id": "RULE-028",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Composite financial-distress signal: balance erosion plus salary skip plus high overdraft use.",
+  "owner": "agent-rule",
+  "tags": ["financial", "composite"],
+  "when": {
+    "and": [
+      { "indicator": "FIN-001", "op": "gte", "value": 0.3 },
+      { "indicator": "FIN-006", "op": "gte", "value": 1 },
+      { "indicator": "FIN-008", "op": "gte", "value": 0.6 }
+    ]
+  },
+  "then": {
+    "title": "Multi-factor financial distress",
+    "recommended_action": "Schedule customer-success call; pre-approve restructure options.",
+    "tags": ["composite"]
+  }
+}

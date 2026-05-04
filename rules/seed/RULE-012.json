@@ -1,0 +1,20 @@
+{
+  "id": "RULE-012",
+  "version": 1,
+  "status": "draft",
+  "severity": "low",
+  "description": "Channel-login drop of 35%+ combined with raised complaint count — disengagement risk.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "engagement"],
+  "when": {
+    "and": [
+      { "indicator": "BEH-004", "op": "gt", "value": 0.35 },
+      { "indicator": "BEH-005", "op": "gte", "value": 2 }
+    ]
+  },
+  "then": {
+    "title": "Disengagement + complaint spike",
+    "recommended_action": "Customer-success outreach within 7 days.",
+    "tags": ["engagement"]
+  }
+}

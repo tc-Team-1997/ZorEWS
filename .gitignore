@@ -1,0 +1,53 @@
+# Build outputs
+dist/
+build/
+target/
+
+# Node
+node_modules/
+.npm/
+npm-debug.log*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# dbt
+data/dbt/dbt_packages/
+data/dbt/logs/
+data/dbt/target/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Local services / Make orchestration
+.pids/
+.logs/
+.outbox/
+.store/
+.queue/
+
+# Vite / web
+web/dist/
+web/.vite/
+*.local
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ML artefacts you don't want to commit accidentally (keep checked-in copies under ml/models/)
+*.joblib
+!ml/models/**/*.joblib

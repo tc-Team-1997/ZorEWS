@@ -1,0 +1,329 @@
+{
+  "version": "1.0.0",
+  "generated_at": "2026-04-26",
+  "owner_agent": "agent-indicator",
+  "seeded_by": "agent-rule (catalog only — compute is agent-indicator's job)",
+  "notes": "Catalog is the contract between agent-rule and agent-indicator. Do not change ids. Compute functions referenced in formula_pseudocode are stubs; agent-indicator implements them in services/regulatory-svc/indicators/compute/*.",
+  "indicators": [
+    {
+      "id": "FIN-001",
+      "family": "Financial",
+      "name": "balance_drop_30d_pct",
+      "description": "Percentage drop in average current-account balance over the last 30 days versus the prior 30-day window.",
+      "formula_pseudocode": "1 - (avg(balance, last_30d) / avg(balance, prior_30d))",
+      "window_days": 60,
+      "severity_weight": 0.7,
+      "inputs": ["mart.txn_features.daily_balance", "mart.customer_360.customer_id"]
+    },
+    {
+      "id": "FIN-002",
+      "family": "Financial",
+      "name": "min_balance_breach_count_30d",
+      "description": "Number of days in the last 30d where end-of-day balance fell below the customer's declared minimum operating balance.",
+      "formula_pseudocode": "count(day where eod_balance < customer.min_op_balance, last_30d)",
+      "window_days": 30,
+      "severity_weight": 0.5,
+      "inputs": ["mart.txn_features.eod_balance", "mart.customer_360.min_op_balance"]
+    },
+    {
+      "id": "FIN-003",
+      "family": "Financial",
+      "name": "savings_to_loan_ratio",
+      "description": "Ratio of total liquid savings to outstanding principal across all live loans.",
+      "formula_pseudocode": "sum(savings_balance) / sum(loan.outstanding_principal)",
+      "window_days": 1,
+      "severity_weight": 0.6,
+      "inputs": ["mart.customer_360.savings_balance", "mart.loan_360.outstanding_principal"]
+    },
+    {
+      "id": "FIN-004",
+      "family": "Financial",
+      "name": "income_volatility_90d_cv",
+      "description": "Coefficient of variation of monthly inflows tagged as salary/business income over the last 90 days.",
+      "formula_pseudocode": "stddev(monthly_income, 90d) / mean(monthly_income, 90d)",
+      "window_days": 90,
+      "severity_weight": 0.55,
+      "inputs": ["mart.txn_features.monthly_income"]
+    },
+    {
+      "id": "FIN-005",
+      "family": "Financial",
+      "name": "net_cashflow_30d",
+      "description": "Inflows minus outflows over the last 30 days, normalised by EMI obligation.",
+      "formula_pseudocode": "(sum(inflow,30d) - sum(outflow,30d)) / customer.total_emi",
+      "window_days": 30,
+      "severity_weight": 0.65,
+      "inputs": ["mart.txn_features.inflow", "mart.txn_features.outflow", "mart.loan_360.total_emi"]
+    },
+    {
+      "id": "FIN-006",
+      "family": "Financial",
+      "name": "salary_inflow_skipped_months",
+      "description": "Consecutive months without an expected recurring salary credit.",
+      "formula_pseudocode": "max_consecutive(month where salary_inflow == 0)",
+      "window_days": 180,
+      "severity_weight": 0.85,
+      "inputs": ["mart.txn_features.salary_inflow"]
+    },
+    {
+      "id": "FIN-007",
+      "family": "Financial",
+      "name": "loan_to_income_ratio",
+      "description": "Outstanding principal divided by trailing 12-month declared/observed income.",
+      "formula_pseudocode": "sum(loan.outstanding_principal) / sum(monthly_income, 365d)",
+      "window_days": 365,
+      "severity_weight": 0.6,
+      "inputs": ["mart.loan_360.outstanding_principal", "mart.txn_features.monthly_income"]
+    },
+    {
+      "id": "FIN-008",
+      "family": "Financial",
+      "name": "overdraft_utilisation_pct",
+      "description": "Used overdraft / sanctioned overdraft, averaged over 30 days.",
+      "formula_pseudocode": "avg(overdraft_used / overdraft_limit, 30d)",
+      "window_days": 30,
+      "severity_weight": 0.55,
+      "inputs": ["mart.customer_360.overdraft_used", "mart.customer_360.overdraft_limit"]
+    },
+    {
+      "id": "BEH-001",
+      "family": "Behavioural",
+      "name": "repayment_delay_days_avg_90d",
+      "description": "Mean days-late across repayments due in the last 90 days.",
+      "formula_pseudocode": "avg(repayment.days_late where due_in_last_90d)",
+      "window_days": 90,
+      "severity_weight": 0.7,
+      "inputs": ["mart.loan_360.repayment_history"]
+    },
+    {
+      "id": "BEH-002",
+      "family": "Behavioural",
+      "name": "repayment_delay_streak",
+      "description": "Consecutive late repayments (current run, ending today).",
+      "formula_pseudocode": "trailing_streak(repayment.days_late > 0)",
+      "window_days": 180,
+      "severity_weight": 0.8,
+      "inputs": ["mart.loan_360.repayment_history"]
+    },
+    {
+      "id": "BEH-003",
+      "family": "Behavioural",
+      "name": "partial_repayment_ratio_90d",
+      "description": "Fraction of repayments in the last 90 days where amount paid < amount due.",
+      "formula_pseudocode": "count(repayment.partial, 90d) / count(repayment.due, 90d)",
+      "window_days": 90,
+      "severity_weight": 0.65,
+      "inputs": ["mart.loan_360.repayment_history"]
+    },
+    {
+      "id": "BEH-004",
+      "family": "Behavioural",
+      "name": "channel_login_drop_30d",
+      "description": "Drop in mobile/web banking logins in the last 30d vs. prior 90d baseline.",
+      "formula_pseudocode": "1 - (count(login,30d)/30) / (count(login,prior_90d)/90)",
+      "window_days": 120,
+      "severity_weight": 0.4,
+      "inputs": ["mart.customer_360.channel_logins"]
+    },
+    {
+      "id": "BEH-005",
+      "family": "Behavioural",
+      "name": "support_complaint_count_60d",
+      "description": "Number of contact-centre complaints filed in the last 60 days.",
+      "formula_pseudocode": "count(complaint, 60d)",
+      "window_days": 60,
+      "severity_weight": 0.45,
+      "inputs": ["mart.customer_360.complaints"]
+    },
+    {
+      "id": "BEH-006",
+      "family": "Behavioural",
+      "name": "kyc_doc_expiry_days",
+      "description": "Days until any mandatory KYC document expires (negative if already expired).",
+      "formula_pseudocode": "min(kyc.expiry_date - today)",
+      "window_days": 1,
+      "severity_weight": 0.3,
+      "inputs": ["mart.customer_360.kyc_documents"]
+    },
+    {
+      "id": "BEH-007",
+      "family": "Behavioural",
+      "name": "restructure_request_flag",
+      "description": "Customer-initiated restructure or moratorium request raised in last 60 days.",
+      "formula_pseudocode": "exists(restructure_request, 60d)",
+      "window_days": 60,
+      "severity_weight": 0.75,
+      "inputs": ["mart.loan_360.restructure_requests"]
+    },
+    {
+      "id": "BEH-008",
+      "family": "Behavioural",
+      "name": "unreachable_contact_count_30d",
+      "description": "Failed-contact-attempt count by collections in the last 30 days.",
+      "formula_pseudocode": "count(contact_attempt where status == 'no_response', 30d)",
+      "window_days": 30,
+      "severity_weight": 0.55,
+      "inputs": ["mart.customer_360.contact_log"]
+    },
+    {
+      "id": "TXN-001",
+      "family": "Transaction",
+      "name": "outflow_to_inflow_ratio_30d",
+      "description": "Total outflows / total inflows over the last 30 days.",
+      "formula_pseudocode": "sum(outflow,30d) / max(sum(inflow,30d), 1)",
+      "window_days": 30,
+      "severity_weight": 0.55,
+      "inputs": ["mart.txn_features.inflow", "mart.txn_features.outflow"]
+    },
+    {
+      "id": "TXN-002",
+      "family": "Transaction",
+      "name": "large_outflow_anomaly",
+      "description": "Latest 30d outflow exceeds 3 sigma above 90-day mean outflow.",
+      "formula_pseudocode": "z = (sum(outflow,30d) - mean(sum(outflow,rolling_30d), 90d)) / stddev(...); z",
+      "window_days": 90,
+      "severity_weight": 0.7,
+      "inputs": ["mart.txn_features.outflow"]
+    },
+    {
+      "id": "TXN-003",
+      "family": "Transaction",
+      "name": "cash_withdrawal_share_30d",
+      "description": "Share of outflows that are cash withdrawals (proxy for opacity).",
+      "formula_pseudocode": "sum(outflow where channel=='cash',30d) / sum(outflow,30d)",
+      "window_days": 30,
+      "severity_weight": 0.4,
+      "inputs": ["mart.txn_features.outflow_by_channel"]
+    },
+    {
+      "id": "TXN-004",
+      "family": "Transaction",
+      "name": "merchant_diversity_drop_60d",
+      "description": "Drop in unique merchant count in last 30d vs. 30-60d-ago window.",
+      "formula_pseudocode": "1 - count_distinct(merchant,30d) / count_distinct(merchant, 30..60d)",
+      "window_days": 60,
+      "severity_weight": 0.35,
+      "inputs": ["mart.txn_features.merchant_id"]
+    },
+    {
+      "id": "TXN-005",
+      "family": "Transaction",
+      "name": "bounced_payment_count_60d",
+      "description": "Standing instructions / direct debits returned for insufficient funds in last 60d.",
+      "formula_pseudocode": "count(txn where status=='returned_NSF',60d)",
+      "window_days": 60,
+      "severity_weight": 0.85,
+      "inputs": ["mart.txn_features.txn_status"]
+    },
+    {
+      "id": "TXN-006",
+      "family": "Transaction",
+      "name": "inflow_concentration_hhi",
+      "description": "Herfindahl index of inflow sources over 90d (high = single-source dependency).",
+      "formula_pseudocode": "sum((source_inflow_share)^2)",
+      "window_days": 90,
+      "severity_weight": 0.4,
+      "inputs": ["mart.txn_features.inflow_by_source"]
+    },
+    {
+      "id": "TXN-007",
+      "family": "Transaction",
+      "name": "p2p_outflow_spike_30d",
+      "description": "Spike in P2P/wallet outflows last 30d vs. trailing 90d baseline.",
+      "formula_pseudocode": "sum(p2p_outflow,30d) / (mean(sum(p2p_outflow,rolling_30d),90d)+1)",
+      "window_days": 90,
+      "severity_weight": 0.5,
+      "inputs": ["mart.txn_features.p2p_outflow"]
+    },
+    {
+      "id": "TXN-008",
+      "family": "Transaction",
+      "name": "weekend_txn_share_change_60d",
+      "description": "Change in share of transactions on weekends — proxy for income-mix change.",
+      "formula_pseudocode": "share(weekend,30d) - share(weekend,30..60d)",
+      "window_days": 60,
+      "severity_weight": 0.25,
+      "inputs": ["mart.txn_features.txn_timestamp"]
+    },
+    {
+      "id": "CRD-001",
+      "family": "Credit",
+      "name": "bureau_score_drop_60d",
+      "description": "Absolute drop in CRB score within the last 60 days.",
+      "formula_pseudocode": "score(prior_60d) - score(today)",
+      "window_days": 60,
+      "severity_weight": 0.8,
+      "inputs": ["mart.customer_360.bureau_score_history"]
+    },
+    {
+      "id": "CRD-002",
+      "family": "Credit",
+      "name": "new_credit_inquiries_90d",
+      "description": "Number of new bureau credit inquiries in the last 90 days.",
+      "formula_pseudocode": "count(bureau.inquiry, 90d)",
+      "window_days": 90,
+      "severity_weight": 0.55,
+      "inputs": ["mart.customer_360.bureau_inquiries"]
+    },
+    {
+      "id": "CRD-003",
+      "family": "Credit",
+      "name": "external_dpd_max_90d",
+      "description": "Max DPD reported by other lenders to the bureau in the last 90 days.",
+      "formula_pseudocode": "max(bureau.tradeline.dpd, 90d)",
+      "window_days": 90,
+      "severity_weight": 0.85,
+      "inputs": ["mart.customer_360.bureau_tradelines"]
+    },
+    {
+      "id": "CRD-004",
+      "family": "Credit",
+      "name": "total_external_exposure_growth_90d",
+      "description": "Growth rate of external (non-this-bank) outstanding balances over 90d.",
+      "formula_pseudocode": "(ext_outstanding(today) - ext_outstanding(today-90d)) / ext_outstanding(today-90d)",
+      "window_days": 90,
+      "severity_weight": 0.6,
+      "inputs": ["mart.customer_360.bureau_tradelines"]
+    },
+    {
+      "id": "CRD-005",
+      "family": "Credit",
+      "name": "ifrs9_stage_movement",
+      "description": "IFRS 9 stage delta versus 90 days ago (1->2 = 1, 2->3 = 1, 1->3 = 2).",
+      "formula_pseudocode": "stage(today) - stage(today-90d)",
+      "window_days": 90,
+      "severity_weight": 0.9,
+      "inputs": ["mart.loan_360.ifrs9_stage"]
+    },
+    {
+      "id": "CRD-006",
+      "family": "Credit",
+      "name": "internal_dpd_current",
+      "description": "Current days-past-due on the most-delinquent loan held with this bank.",
+      "formula_pseudocode": "max(loan.dpd, today)",
+      "window_days": 1,
+      "severity_weight": 0.95,
+      "inputs": ["mart.loan_360.dpd"]
+    },
+    {
+      "id": "CRD-007",
+      "family": "Credit",
+      "name": "collateral_coverage_ratio",
+      "description": "Most-recent collateral valuation / outstanding principal.",
+      "formula_pseudocode": "collateral.fmv / loan.outstanding_principal",
+      "window_days": 365,
+      "severity_weight": 0.5,
+      "inputs": ["mart.loan_360.collateral_fmv", "mart.loan_360.outstanding_principal"]
+    },
+    {
+      "id": "CRD-008",
+      "family": "Credit",
+      "name": "guarantor_default_flag",
+      "description": "Linked guarantor has defaulted on any obligation in last 180 days.",
+      "formula_pseudocode": "exists(guarantor.default, 180d)",
+      "window_days": 180,
+      "severity_weight": 0.7,
+      "inputs": ["mart.customer_360.guarantor_links"]
+    }
+  ]
+}

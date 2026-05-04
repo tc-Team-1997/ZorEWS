@@ -1,0 +1,20 @@
+{
+  "id": "RULE-025",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "Internal DPD >= 30 — formally past due on a loan with this bank.",
+  "owner": "agent-rule",
+  "tags": ["credit", "dpd"],
+  "when": {
+    "indicator": "CRD-006",
+    "op": "gte",
+    "value": 30
+  },
+  "then": {
+    "title": "Internal DPD breach",
+    "severity_override": "critical",
+    "recommended_action": "Auto-route to Collections; ensure case opened.",
+    "tags": ["dpd", "collections"]
+  }
+}

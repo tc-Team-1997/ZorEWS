@@ -1,0 +1,36 @@
+name: schema-compat
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/schema-registry/**'
+      - '.github/workflows/schema-compat.yml'
+  pull_request:
+    paths:
+      - 'infra/schema-registry/**'
+      - '.github/workflows/schema-compat.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backward-compat:
+    name: BACKWARD compatibility check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install checker dependencies
+        run: pip install --quiet 'jsonschema>=4.20' 'pytest>=8.0'
+
+      - name: Run BACKWARD-compat checker
+        run: python infra/schema-registry/scripts/check_compat.py
+
+      - name: Run checker unit tests
+        run: pytest infra/schema-registry/tests -q

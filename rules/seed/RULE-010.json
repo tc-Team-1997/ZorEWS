@@ -1,0 +1,19 @@
+{
+  "id": "RULE-010",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Customer raised a restructure / moratorium request — explicit financial-distress signal.",
+  "owner": "agent-rule",
+  "tags": ["behavioural", "self-reported"],
+  "when": {
+    "indicator": "BEH-007",
+    "op": "eq",
+    "value": 1
+  },
+  "then": {
+    "title": "Customer-initiated restructure request",
+    "recommended_action": "Underwrite restructure scenarios; capture in case management.",
+    "tags": ["restructure"]
+  }
+}

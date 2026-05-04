@@ -1,0 +1,19 @@
+{
+  "id": "RULE-014",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Outflow / inflow ratio > 1.3 over 30d — customer spending faster than earning.",
+  "owner": "agent-rule",
+  "tags": ["transaction"],
+  "when": {
+    "indicator": "TXN-001",
+    "op": "gt",
+    "value": 1.3
+  },
+  "then": {
+    "title": "Outflows exceed inflows",
+    "recommended_action": "Review discretionary outflow categories with customer.",
+    "tags": ["cashflow"]
+  }
+}

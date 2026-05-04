@@ -1,0 +1,20 @@
+{
+  "id": "RULE-024",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "IFRS 9 stage migration up by >= 1 in last 90 days — model-driven deterioration.",
+  "owner": "agent-rule",
+  "tags": ["credit", "ifrs9"],
+  "when": {
+    "indicator": "CRD-005",
+    "op": "gte",
+    "value": 1
+  },
+  "then": {
+    "title": "IFRS 9 stage migration",
+    "severity_override": "critical",
+    "recommended_action": "Recompute ECL; route to Stage-2/Stage-3 management workflow.",
+    "tags": ["ifrs9"]
+  }
+}

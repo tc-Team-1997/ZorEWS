@@ -1,0 +1,69 @@
+version: 2
+
+# 2026-05-03 — Sources renamed to match the actual table names. The
+# previous `identifier:` aliases (cbs_customer_profile → seed_customers,
+# etc.) were removed because the cbs_* tables were dropped — they were
+# defined by 002_raw_tables.sql but never written to. dbt staging models
+# now reference {{ source('raw', 'seed_customers') }} directly.
+#
+# When a real CBS ingest loader lands (T1.4b) and writes to raw.cbs_*,
+# add identifier: cbs_customer_profile (etc.) per source to flip the
+# pipeline back without touching the staging SQL.
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Landing zone — populated by `dbt seed` from data/dbt/seeds/*.csv. Production target: replace with cbs_* tables written by the CBS ingest DAG (T1.4b)."
+    tables:
+      - name: seed_customers
+        description: "Customer master records (10,000 rows)."
+        columns:
+          - name: customer_id
+            tests: [not_null, unique]
+          - name: monthly_income
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 0
+                  max_value: 10000000
+      - name: seed_loans
+        description: "Loan master snapshots (24,000 rows)."
+        columns:
+          - name: loan_id
+            tests: [not_null, unique]
+          - name: customer_id
+            tests: [not_null]
+          - name: npa_status
+            tests:
+              - accepted_values:
+                  values: ['PERFORMING','WATCH','SUBSTANDARD','DOUBTFUL','LOSS']
+          - name: outstanding_amount
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 0
+      - name: seed_repayments
+        description: "Repayment events (~247,550 rows)."
+        columns:
+          - name: repayment_id
+            tests: [not_null, unique]
+          - name: paid_amount
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 0
+      - name: seed_transactions
+        description: "Account transactions (~289,819 rows)."
+        columns:
+          - name: txn_id
+            tests: [not_null, unique]
+          - name: txn_type
+            tests:
+              - accepted_values: { values: ['credit','debit'] }
+      - name: seed_bureau_score
+        description: "Bureau (CRB) score snapshots (10,000 rows, one per customer)."
+        columns:
+          - name: customer_id
+            tests: [not_null]
+          - name: score
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 200
+                  max_value: 900

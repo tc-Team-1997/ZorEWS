@@ -1,0 +1,19 @@
+{
+  "id": "RULE-023",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Rapid credit-seeking behaviour — 3+ new bureau inquiries in 90 days.",
+  "owner": "agent-rule",
+  "tags": ["credit", "bureau"],
+  "when": {
+    "indicator": "CRD-002",
+    "op": "gte",
+    "value": 3
+  },
+  "then": {
+    "title": "Credit-seeking spike",
+    "recommended_action": "Flag for affordability review; pause pre-approved offers.",
+    "tags": ["credit-seeking"]
+  }
+}

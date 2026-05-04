@@ -1,0 +1,20 @@
+{
+  "id": "RULE-006",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Rapid balance drop (>=50%) in a customer with already negative net cashflow — imminent stress.",
+  "owner": "agent-rule",
+  "tags": ["financial"],
+  "when": {
+    "and": [
+      { "indicator": "FIN-001", "op": "gte", "value": 0.5 },
+      { "indicator": "FIN-005", "op": "lt", "value": 0 }
+    ]
+  },
+  "then": {
+    "title": "Severe balance drop + negative cashflow",
+    "recommended_action": "Escalate to Risk Officer; place collection hold flag.",
+    "tags": ["liquidity"]
+  }
+}

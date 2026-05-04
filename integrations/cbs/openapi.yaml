@@ -1,0 +1,138 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — CBS Mock API
+  version: 0.1.0
+  description: |
+    Back-fill and control endpoints exposed by the bank's CBS to APEX EWS.
+    Primary data flow is Kafka (`apex.cbs.events`); this REST surface is for
+    snapshot reads, replay, and reconciliation only.
+servers:
+  - url: https://cbs.internal.example.co.ke
+    description: Bank-internal VPC (PrivateLink only)
+security:
+  - oauth2ClientCredentials: []
+paths:
+  /cbs/customers/{customer_id}:
+    get:
+      summary: Get current customer 360 snapshot.
+      parameters:
+        - in: path
+          name: customer_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: Not found
+  /cbs/loans/{loan_id}:
+    get:
+      summary: Get single loan record.
+      parameters:
+        - in: path
+          name: loan_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+  /cbs/loans:
+    get:
+      summary: Paged list of loans for back-fill.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, CLOSED, WRITTEN_OFF, ALL]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: page_size
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page: { type: integer }
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Loan"
+  /cbs/replay:
+    post:
+      summary: Replay CBS events for a date window onto Kafka.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, format: date-time }
+                to: { type: string, format: date-time }
+                event_types:
+                  type: array
+                  items: { type: string }
+      responses:
+        "202":
+          description: Accepted — async replay started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  replay_id: { type: string, format: uuid }
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.internal.example.co.ke/oauth/token
+          scopes:
+            cbs.read: Read CBS data
+            cbs.replay: Trigger event replay
+  schemas:
+    Customer:
+      type: object
+      properties:
+        customer_id: { type: string }
+        kyc_status: { type: string, enum: [VERIFIED, PENDING, REJECTED] }
+        segment: { type: string }
+        opened_at: { type: string, format: date-time }
+    Loan:
+      type: object
+      properties:
+        loan_id: { type: string }
+        customer_id: { type: string }
+        principal: { type: number }
+        currency: { type: string }
+        product_code: { type: string }
+        status: { type: string, enum: [ACTIVE, CLOSED, WRITTEN_OFF] }
+        dpd: { type: integer, minimum: 0 }
+        outstanding: { type: number }

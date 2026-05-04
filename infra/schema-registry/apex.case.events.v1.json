@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-ews/schemas/apex.case.events.v1.json",
+  "title": "apex.case.events",
+  "version": "1.0.0",
+  "compatibility": "BACKWARD",
+  "description": "Case lifecycle event emitted by services/regulatory-svc/cases on every state transition. Aligned 2026-04-27 with the live emitter shape (the original draft pre-dated the implementation and used different field names — see logs/orchestrator.md). v1 had no registered Glue resource yet, so the rewrite happened in-place rather than as a v2 bump. 2026-05-03 (T4.19): event_type enum extended with cas_submitted/cas_reviewed/cap_proposed/cap_approved/cap_closed for the BAC-A Causal Analysis + Corrective Action Plan flow.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "ts",
+    "case_id",
+    "alert_id",
+    "customer_id",
+    "new_state"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "Unique id for this event; format `evt_<base36-ms>_<hex4>`."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "case.created",
+        "case.assigned",
+        "case.action_logged",
+        "case.monitored",
+        "case.closed",
+        "case.cas_submitted",
+        "case.cas_reviewed",
+        "case.cap_proposed",
+        "case.cap_approved",
+        "case.cap_closed"
+      ]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Time the transition was committed (cases service clock)."
+    },
+    "case_id": {
+      "type": "string",
+      "description": "Deterministic UUIDv5-style id (alert_id + customer_id). Stable across EWS<->Collection."
+    },
+    "alert_id": { "type": "string" },
+    "customer_id": { "type": "string" },
+    "prior_state": {
+      "type": ["string", "null"],
+      "enum": ["open", "assigned", "in_action", "monitored", "closed", null]
+    },
+    "new_state": {
+      "type": "string",
+      "enum": ["open", "assigned", "in_action", "monitored", "closed"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-type-specific payload. Free-form to allow per-event-type evolution without schema bumps; consumers should be tolerant of unknown keys.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

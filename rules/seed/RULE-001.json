@@ -1,0 +1,20 @@
+{
+  "id": "RULE-001",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Sharp 30-day balance erosion (>=40%) coupled with low net cashflow vs EMI suggests the customer can no longer service debt from primary account.",
+  "owner": "agent-rule",
+  "tags": ["financial", "liquidity"],
+  "when": {
+    "and": [
+      { "indicator": "FIN-001", "op": "gte", "value": 0.4 },
+      { "indicator": "FIN-005", "op": "lt", "value": 0.5 }
+    ]
+  },
+  "then": {
+    "title": "Balance erosion + cashflow shortfall",
+    "recommended_action": "Review last 60d statements; pre-emptive call from RM within 48h.",
+    "tags": ["liquidity", "early-warning"]
+  }
+}

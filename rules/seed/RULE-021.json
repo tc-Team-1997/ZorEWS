@@ -1,0 +1,19 @@
+{
+  "id": "RULE-021",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "Bureau score dropped 50+ points within 60 days — significant external credit deterioration.",
+  "owner": "agent-rule",
+  "tags": ["credit", "bureau"],
+  "when": {
+    "indicator": "CRD-001",
+    "op": "gte",
+    "value": 50
+  },
+  "then": {
+    "title": "Bureau score sharp drop",
+    "recommended_action": "Pull fresh bureau report; reassess limit & PD score.",
+    "tags": ["bureau"]
+  }
+}

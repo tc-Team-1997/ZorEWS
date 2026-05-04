@@ -1,0 +1,20 @@
+{
+  "id": "RULE-018",
+  "version": 1,
+  "status": "draft",
+  "severity": "medium",
+  "description": "Cash-withdrawal share of outflows above 45% — opacity / off-book transfer pattern.",
+  "owner": "agent-rule",
+  "tags": ["transaction"],
+  "when": {
+    "and": [
+      { "indicator": "TXN-003", "op": "gt", "value": 0.45 },
+      { "indicator": "TXN-001", "op": "gt", "value": 1.05 }
+    ]
+  },
+  "then": {
+    "title": "Cash-heavy outflow with negative cashflow",
+    "recommended_action": "Verify income source; flag for AML correlation review.",
+    "tags": ["cash", "opacity"]
+  }
+}

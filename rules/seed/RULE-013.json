@@ -1,0 +1,20 @@
+{
+  "id": "RULE-013",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Late-repayment trend (avg > 10d delay) plus partial-payment behaviour — chronic stress.",
+  "owner": "agent-rule",
+  "tags": ["behavioural"],
+  "when": {
+    "and": [
+      { "indicator": "BEH-001", "op": "gt", "value": 10 },
+      { "indicator": "BEH-003", "op": "gt", "value": 0.25 }
+    ]
+  },
+  "then": {
+    "title": "Chronic late + partial repayments",
+    "recommended_action": "Issue formal collection notice; review for Stage-2 migration.",
+    "tags": ["repayment"]
+  }
+}

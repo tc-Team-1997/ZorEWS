@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { font-size: 14px; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-page text-ink antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D3D1C7; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #B9B7AE; }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.brand.blue');
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* ── Buttons ────────────────────────────────────────────────── */
+  .btn-primary {
+    @apply bg-brand-blue text-white text-sm font-medium px-4 py-2 rounded-input
+           hover:bg-brand-blueHover transition-colors
+           focus:outline-none focus:ring-2 focus:ring-brand-blue focus:ring-offset-1
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-brand-skyLight text-brand-blue text-sm font-medium px-4 py-2 rounded-input
+           hover:bg-[#d0e3fb] transition-colors
+           focus:outline-none focus:ring-2 focus:ring-brand-blue/40;
+  }
+  .btn-ghost {
+    @apply border border-border bg-white text-ink-sub text-sm font-medium px-4 py-2 rounded-input
+           hover:bg-surface-alt transition-colors
+           focus:outline-none focus:ring-2 focus:ring-border;
+  }
+  .btn-danger {
+    @apply bg-danger text-white text-sm font-medium px-4 py-2 rounded-input
+           hover:bg-[#c73b3a] transition-colors;
+  }
+
+  /* ── Form controls ─────────────────────────────────────────── */
+  .input, .field-input {
+    @apply w-full h-10 px-3 text-sm border border-border rounded-input bg-white text-ink
+           placeholder:text-muted
+           focus:outline-none focus:ring-2 focus:ring-brand-blue/20 focus:border-brand-blue
+           transition-colors;
+  }
+  .label, .field-label {
+    @apply block text-xs font-medium text-ink-sub mb-1.5;
+  }
+  .field-error { @apply text-xs text-danger mt-1; }
+
+  /* ── Surfaces ──────────────────────────────────────────────── */
+  .card {
+    @apply bg-surface border border-divider rounded-card shadow-card;
+  }
+
+  /* ── Typography helpers ────────────────────────────────────── */
+  .page-title { @apply text-xl font-semibold text-ink; }
+  .section-title { @apply text-md font-semibold text-ink; }
+  .module-label { @apply text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-sky; }
+  .caption { @apply text-xs text-muted; }
+
+  /* ── Table ─────────────────────────────────────────────────── */
+  .table-header {
+    @apply text-[11px] font-semibold text-ink-sub uppercase tracking-wide bg-divider;
+  }
+}
+
+/* ── Login carousel animations (ported from apex) ────────────── */
+
+.auth-slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center center;
+  transform: perspective(1200px) rotateY(-14deg) translateX(64px) scale(0.94);
+  filter: blur(8px);
+  transition:
+    opacity   900ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 900ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter    900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.auth-slide.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: perspective(1200px) rotateY(0deg) translateX(0) scale(1);
+  filter: blur(0);
+}
+.auth-slide.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+  transform: perspective(1200px) rotateY(10deg) translateX(-40px) scale(0.96);
+  filter: blur(6px);
+}
+
+.auth-slide > .auth-slide-child {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity   700ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.auth-slide.is-active > .auth-slide-child {
+  opacity: 1;
+  transform: translateY(0);
+}
+.auth-slide.is-active > .auth-slide-child--icon {
+  transition-delay: 120ms;
+  transform-origin: left center;
+}
+.auth-slide.is-active > .auth-slide-child--title { transition-delay: 260ms; }
+.auth-slide.is-active > .auth-slide-child--body  { transition-delay: 400ms; }
+
+.auth-slide > .auth-slide-child--icon {
+  transform: translateY(24px) scale(0.6) rotate(-14deg);
+}
+.auth-slide.is-active > .auth-slide-child--icon {
+  transform: translateY(0) scale(1) rotate(0);
+}
+
+@keyframes auth-drift-a {
+  0%, 100% { transform: translate3d(0,   0,   0) scale(1);    }
+  50%      { transform: translate3d(30px, 20px, 0) scale(1.08); }
+}
+@keyframes auth-drift-b {
+  0%, 100% { transform: translate3d(0,   0,   0) scale(1);    }
+  50%      { transform: translate3d(-28px, -18px, 0) scale(1.1); }
+}
+.auth-blob-a { animation: auth-drift-a 12s ease-in-out infinite; }
+.auth-blob-b { animation: auth-drift-b 14s ease-in-out infinite; }
+
+@keyframes auth-grid-pan {
+  0%   { background-position:   0   0; }
+  100% { background-position: 180px 180px; }
+}
+.auth-grid { animation: auth-grid-pan 40s linear infinite; }
+
+@keyframes auth-dot-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.auth-dot-active-bar {
+  transform-origin: left center;
+  animation: auth-dot-fill var(--auth-interval, 4500ms) linear forwards;
+}
