@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { SignJWT, exportJWK } from "jose";
 import { RegisterFailure, type Role } from "../users.js";
 import { loadSigner, signAccessToken, signRefreshToken, verifyToken, type Signer } from "../jwt.js";
-import { getServiceClientStore } from "../service_clients.js";
+import { getServiceClientStore, ServiceClientConflict } from "../service_clients.js";
 import {
   LOGIN_POLICY,
   RESET_REQUEST_POLICY,
@@ -1607,4 +1607,142 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       ],
     });
   });
+
+  // ─── Service-client CRUD (T4.24 Phase 11) ──────────────────────────────
+  //
+  // Admin-only management of OAuth client_credentials principals stored
+  // in app_iam.service_clients. Mirrors the webhook subscription pattern:
+  // create returns the plaintext secret ONCE (never retrievable again);
+  // list strips the secret hash; delete by composite (tenant_id, client_id).
+
+  /**
+   * GET /auth/service-clients?tenant_id=...
+   * Authorization: Bearer <admin>
+   *
+   * Lists service clients (without secret hash). Optional `tenant_id`
+   * query param filters by tenant; omit to list every client across all
+   * tenants (platform-admin view).
+   */
+  app.get<{ Querystring: { tenant_id?: string } }>(
+    "/auth/service-clients",
+    async (req, reply) => {
+      const { signer } = await getState();
+      if (!(await requireAdmin(req, reply, signer))) return;
+      const store = await getServiceClientStore();
+      if (!store.list) {
+        return reply.code(501).send({
+          error: "not_implemented",
+          message: "service-client store does not support listing",
+        });
+      }
+      const items = store.list(req.query.tenant_id);
+      return reply.send({ items, total: items.length });
+    },
+  );
+
+  /**
+   * POST /auth/service-clients
+   * Authorization: Bearer <admin>
+   * body: { tenant_id, client_id, display_name, scopes? }
+   *
+   * Creates a new OAuth client_credentials principal. Generates the
+   * client_secret server-side and returns it ONCE in the response — the
+   * caller must persist or display it; subsequent reads never include it.
+   * 409 on duplicate (tenant_id, client_id).
+   */
+  app.post<{
+    Body: {
+      tenant_id?: string;
+      client_id?: string;
+      display_name?: string;
+      scopes?: string[];
+    };
+  }>("/auth/service-clients", async (req, reply) => {
+    const { signer, audit } = await getState();
+    if (!(await requireAdmin(req, reply, signer))) return;
+    const store = await getServiceClientStore();
+    if (!store.create) {
+      return reply.code(501).send({
+        error: "not_implemented",
+        message: "service-client store does not support creation",
+      });
+    }
+    const { tenant_id, client_id, display_name, scopes } = req.body ?? {};
+    const errs: string[] = [];
+    if (!tenant_id || typeof tenant_id !== "string") errs.push("tenant_id is required");
+    if (
+      !client_id ||
+      typeof client_id !== "string" ||
+      !/^[a-z0-9][a-z0-9._-]{2,63}$/.test(client_id)
+    ) {
+      errs.push("client_id must match ^[a-z0-9][a-z0-9._-]{2,63}$");
+    }
+    if (!display_name || typeof display_name !== "string" || !display_name.trim()) {
+      errs.push("display_name is required");
+    }
+    if (errs.length) {
+      return reply.code(400).send({ error: "invalid_request", message: errs.join("; ") });
+    }
+    try {
+      const created = await store.create({
+        tenant_id: tenant_id as string,
+        client_id: client_id as string,
+        display_name: (display_name as string).trim(),
+        scopes: Array.isArray(scopes) ? (scopes as string[]) : [],
+      });
+      audit.append({
+        type: "user_created", // closest existing event-type — service-client is a non-human user
+        target_username: `${created.tenant_id}:${created.client_id}`,
+        actor_role: "admin",
+        ip: callerIp(req),
+        metadata: { kind: "service_client", tenant_id: created.tenant_id },
+      });
+      return reply.code(201).send(created);
+    } catch (err) {
+      if (err instanceof ServiceClientConflict) {
+        return reply.code(409).send({
+          error: "client_exists",
+          message: err.message,
+          tenant_id: err.tenant_id,
+          client_id: err.client_id,
+        });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * DELETE /auth/service-clients/:tenant_id/:client_id
+   * Authorization: Bearer <admin>
+   *
+   * Removes a service client. 204 on success. 404 when the client doesn't
+   * exist for that tenant. Cross-tenant attempts return 404 (no enumeration
+   * leak across tenants).
+   */
+  app.delete<{ Params: { tenant_id: string; client_id: string } }>(
+    "/auth/service-clients/:tenant_id/:client_id",
+    async (req, reply) => {
+      const { signer, audit } = await getState();
+      if (!(await requireAdmin(req, reply, signer))) return;
+      const store = await getServiceClientStore();
+      if (!store.delete) {
+        return reply.code(501).send({
+          error: "not_implemented",
+          message: "service-client store does not support deletion",
+        });
+      }
+      const ok = store.delete(req.params.tenant_id, req.params.client_id);
+      if (!ok) {
+        return reply.code(404).send({ error: "client_not_found" });
+      }
+      audit.append({
+        type: "user_deleted",
+        target_username: `${req.params.tenant_id}:${req.params.client_id}`,
+        actor_role: "admin",
+        ip: callerIp(req),
+        metadata: { kind: "service_client", tenant_id: req.params.tenant_id },
+      });
+      return reply.code(204).send();
+    },
+  );
 }

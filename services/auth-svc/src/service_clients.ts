@@ -26,6 +26,38 @@ export interface ServiceClient {
   active: boolean;
 }
 
+/**
+ * View shape returned by `list()` — strips `client_secret_hash` so admin
+ * listings can't leak hashes that an attacker could grind offline.
+ */
+export type ServiceClientView = Omit<ServiceClient, 'client_secret_hash'>;
+
+/**
+ * Returned by `create()` — the only point at which the plaintext secret
+ * is exposed. Admin UIs display it once with a "copy and store" prompt;
+ * subsequent reads never include it.
+ */
+export interface ServiceClientWithSecret extends ServiceClientView {
+  client_secret: string;
+}
+
+export interface CreateServiceClientInput {
+  client_id: string;
+  tenant_id: string;
+  display_name: string;
+  scopes?: string[];
+}
+
+export class ServiceClientConflict extends Error {
+  constructor(
+    public readonly tenant_id: string,
+    public readonly client_id: string,
+  ) {
+    super(`service client '${client_id}' already exists for tenant '${tenant_id}'`);
+    this.name = 'ServiceClientConflict';
+  }
+}
+
 export interface IServiceClientStore {
   /**
    * Look up by composite (tenant_id, client_id). Returns undefined when
@@ -38,6 +70,13 @@ export interface IServiceClientStore {
    * shouldn't reveal which leg failed; we return false either way).
    */
   verifySecret(client: ServiceClient, secret: string): Promise<boolean>;
+  /**
+   * T4.24 Phase 11 — admin CRUD methods. All optional so existing
+   * stores compile; production stores must implement them.
+   */
+  list?: (tenantId?: string) => ServiceClientView[];
+  create?: (input: CreateServiceClientInput) => Promise<ServiceClientWithSecret>;
+  delete?: (tenantId: string, clientId: string) => boolean;
 }
 
 const SEED_CLIENTS: Array<{
@@ -81,6 +120,48 @@ export class InMemoryServiceClientStore implements IServiceClientStore {
 
   async verifySecret(client: ServiceClient, secret: string): Promise<boolean> {
     return argon2.verify(client.client_secret_hash, secret);
+  }
+
+  list(tenantId?: string): ServiceClientView[] {
+    const all = Array.from(this.clients.values()).filter(
+      (c) => !tenantId || c.tenant_id === tenantId,
+    );
+    return all
+      .map((c) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { client_secret_hash, ...view } = c;
+        return view;
+      })
+      .sort((a, b) =>
+        a.tenant_id !== b.tenant_id
+          ? a.tenant_id.localeCompare(b.tenant_id)
+          : a.client_id.localeCompare(b.client_id),
+      );
+  }
+
+  async create(input: CreateServiceClientInput): Promise<ServiceClientWithSecret> {
+    if (this.clients.has(key(input.tenant_id, input.client_id))) {
+      throw new ServiceClientConflict(input.tenant_id, input.client_id);
+    }
+    // 32 bytes = 256 bits, hex → 64 chars. Same shape as webhook secrets.
+    const plaintext = require('node:crypto').randomBytes(32).toString('hex');
+    const hash = await argon2.hash(plaintext, { type: argon2.argon2id });
+    const client: ServiceClient = {
+      client_id: input.client_id,
+      tenant_id: input.tenant_id,
+      display_name: input.display_name,
+      scopes: input.scopes ?? [],
+      client_secret_hash: hash,
+      active: true,
+    };
+    this.add(client);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { client_secret_hash, ...view } = client;
+    return { ...view, client_secret: plaintext };
+  }
+
+  delete(tenantId: string, clientId: string): boolean {
+    return this.clients.delete(key(tenantId, clientId));
   }
 }
 
@@ -146,6 +227,71 @@ export class PgServiceClientStore implements IServiceClientStore {
 
   async verifySecret(client: ServiceClient, secret: string): Promise<boolean> {
     return argon2.verify(client.client_secret_hash, secret);
+  }
+
+  list(tenantId?: string): ServiceClientView[] {
+    const all = Array.from(this.cache.values()).filter(
+      (c) => !tenantId || c.tenant_id === tenantId,
+    );
+    return all
+      .map((c) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { client_secret_hash, ...view } = c;
+        return view;
+      })
+      .sort((a, b) =>
+        a.tenant_id !== b.tenant_id
+          ? a.tenant_id.localeCompare(b.tenant_id)
+          : a.client_id.localeCompare(b.client_id),
+      );
+  }
+
+  async create(input: CreateServiceClientInput): Promise<ServiceClientWithSecret> {
+    if (this.cache.has(key(input.tenant_id, input.client_id))) {
+      throw new ServiceClientConflict(input.tenant_id, input.client_id);
+    }
+    const plaintext = require('node:crypto').randomBytes(32).toString('hex');
+    const hash = await argon2.hash(plaintext, { type: argon2.argon2id });
+    await this.pool.query(
+      `INSERT INTO app_iam.service_clients
+         (client_id, tenant_id, client_secret_hash, display_name, scopes, active)
+       VALUES ($1, $2, $3, $4, $5, true)`,
+      [
+        input.client_id,
+        input.tenant_id,
+        hash,
+        input.display_name,
+        input.scopes ?? [],
+      ],
+    );
+    const client: ServiceClient = {
+      client_id: input.client_id,
+      tenant_id: input.tenant_id,
+      display_name: input.display_name,
+      scopes: input.scopes ?? [],
+      client_secret_hash: hash,
+      active: true,
+    };
+    this.cache.set(key(client.tenant_id, client.client_id), client);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { client_secret_hash, ...view } = client;
+    return { ...view, client_secret: plaintext };
+  }
+
+  delete(tenantId: string, clientId: string): boolean {
+    if (!this.cache.has(key(tenantId, clientId))) return false;
+    this.cache.delete(key(tenantId, clientId));
+    void this.pool
+      .query(
+        `DELETE FROM app_iam.service_clients
+         WHERE tenant_id = $1 AND client_id = $2`,
+        [tenantId, clientId],
+      )
+      .catch((err) =>
+        // eslint-disable-next-line no-console
+        console.warn(`[pg-service-client-store] failed to delete ${tenantId}/${clientId}`, err),
+      );
+    return true;
   }
 }
 
