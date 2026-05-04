@@ -557,6 +557,35 @@
       - Routes (15): screen happy + envelope body + 400/403/502 + risk_analyst accepted; matches list happy + 400 + 403; single match happy + 404 + cross-tenant 404; PATCH happy + default changed_by + envelope body + 400 invalid_status + 404 unknown_match + 403; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 3 shipped adapters (insurance, ifrs9, aml) — covering 10 of the declared 50 APIs. The pattern is fully established (`<Upstream>Adapter` interface + `Stub<Upstream>Adapter` + adapter-error-class with status-code routing); future M14.4 (DMS), M14.5 (Bureau), M14.6 (CBS data routes), etc. each follow the same shape.
 
+  - **M9.1 — BIL Case Investigation tracker (2026-05-04):**
+    - Module 9 (Case Management) had T4.10 surface (`/v1/cases/sla-summary`, `/v1/action`). M9.1 lands the workflow container that operations actually drives day-to-day on suspected claim-fraud cases — a triage→evidence→decision→close state machine plus the BIL §17 standard 8-step evidence checklist plus a free-text notes thread.
+    - New `services/bff/src/case_investigation.ts`:
+      - `CaseInvestigation` shape: `{investigation_id, tenant_id, case_id, customer_id, status, decision, opened_at, opened_by, last_updated_*, closed_at, steps[], notes_count}`.
+      - **6-state workflow** (`triage / gathering_evidence / awaiting_response / review / decision / closed`) gated by an explicit `TRANSITIONS` table — only legal moves succeed (`triage→review` is rejected; re-opening from `closed` must go through `gathering_evidence`).
+      - **4 decisions** (`fraud_confirmed / fraud_unsubstantiated / partial_fraud / data_quality`) — required when closing from `decision`, optional when closing from `triage` (case dismissed pre-review).
+      - **8 standard BIL claim-fraud steps** sourced from DataNetworks-EWS-Ver1.pdf §17: verify_identity, pull_policy_history, aml_screen, review_documents, check_red_flags, interview_claimant, site_inspection, final_recommendation. `defaultSteps()` returns fresh arrays so concurrent investigations don't share state.
+      - `CaseInvestigationStore` interface (`open/get/list/updateStatus/completeStep/addNote/listNotes`) + `InMemoryCaseInvestigationStore`. Refuses to open a 2nd active investigation for the same case (`investigation_already_open`) — must close the existing one first; allows new investigation after close.
+      - `InvestigationError` carries 9 codes routed to specific HTTP statuses by the BFF: `unknown_investigation`/`unknown_step` → 404, `investigation_already_open`/`step_already_completed`/`closed` → 409, `invalid_input`/`invalid_status`/`invalid_decision`/`invalid_transition`/`decision_required`/`note_too_long` → 400.
+    - **`AppDeps.caseInvestigationStore` injection point** — defaults to module-level singleton.
+    - **7 new BFF routes** (all tenant-gated, all enveloped):
+      - `POST /v1/investigations` — open. RBAC `cases:log_action`. 201 on create.
+      - `GET /v1/investigations?status=&case_id=&customer_id=&page=&page_size=` — RBAC `cases:list`. Newest-first paginated. `?status=invalid` → 400.
+      - `GET /v1/investigations/:id` — RBAC `cases:list`. 404 on miss + cross-tenant.
+      - `PATCH /v1/investigations/:id/status` body `{status, decision?}` — RBAC `cases:log_action`. State-machine enforced.
+      - `POST /v1/investigations/:id/steps/:step_id/complete` body `{evidence_link?}` — RBAC `cases:log_action`. 404 on unknown step, 409 on already-completed or closed-investigation.
+      - `POST /v1/investigations/:id/notes` body `{body}` — RBAC `cases:log_action`. 4000-char cap.
+      - `GET /v1/investigations/:id/notes` — RBAC `cases:list`. Newest-first.
+    - **Tests:** BFF 763/763 (was 705 — +58 in `case_investigation.test.ts`):
+      - Schema (3): defaultSteps shape + 8 BIL ids in order + isolation between calls; type guards.
+      - State machine (6): legal + illegal pairs covering every node; closed→triage forbidden; closed→gathering_evidence allowed (re-open).
+      - Store open (5): fresh-state shape, 2nd-open conflict, allow-after-close, missing-fields rejection, tenant isolation.
+      - Store list (4): newest-first, customer/case filters, pagination + clamp.
+      - Store updateStatus (7): full legal walk to closed/fraud_confirmed, illegal transition throw, decision_required from `decision`, null-decision allowed from `triage` (dismissed), re-open clears closed_at, invalid status throw, unknown id throw.
+      - Store completeStep (5): metadata write, other steps untouched, double-complete throw, unknown step throw, closed-investigation throw.
+      - Store notes (5): add+list round-trip, newest-first, empty-rejected, length-cap, listNotes-on-unknown.
+      - Routes (23): POST happy + envelope body + 409 already_open + 400 invalid_input + 403 unknown role; GET list/single happy + status filter + invalid status 400 + cross-tenant 404; PATCH legal + illegal + invalid status + decision_required + 404; complete happy + 404 unknown_step + 409 already_completed + 409 closed; notes round-trip + empty 400 + too-long 400 + listNotes-404; tenant isolation through HTTP.
+    - **Outcome:** Module 9 now has 7 new T6 routes layered on top of the T4.10 SLA + action surface. The BIL claim-fraud workflow can now be driven end-to-end (from open through 8-step evidence to a documented decision) with a per-case audit trail.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

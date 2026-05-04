@@ -108,6 +108,14 @@ import {
   type AmlMatchStatus,
 } from './integrations/aml';
 import {
+  defaultCaseInvestigationStore,
+  InvestigationError,
+  isInvestigationStatus,
+  type CaseInvestigationStore,
+  type InvestigationDecision,
+  type InvestigationStatus,
+} from './case_investigation';
+import {
   ConfigValidationError,
   defaultConfigStore,
   listCategories as listConfigCategories,
@@ -226,6 +234,13 @@ export interface AppDeps {
    * a queue-backed store; the synthetic stub completes synchronously.
    */
   reportJobStore?: ReportJobStore;
+  /**
+   * Override for tests — BIL case investigation store (T6 M9.1).
+   * Defaults to the module-level InMemoryCaseInvestigationStore.
+   * Production swaps in a PG-backed store satisfying the same
+   * interface.
+   */
+  caseInvestigationStore?: CaseInvestigationStore;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -284,6 +299,7 @@ export function makeApp(deps: AppDeps = {}) {
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
+  const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1070,6 +1086,267 @@ export function makeApp(deps: AppDeps = {}) {
     const summary = summariseSla(fleet, now());
     res.json(wrapResponse(summary, ctx));
   });
+
+  // ── BIL Case Investigation tracker (T6 M9.1) ──────────────────────────
+  //
+  // Workflow container layered on top of /v1/action's audit log + the
+  // case-events stream. Tracks the BIL §17 standard 8-step claim-fraud
+  // checklist + a free-text notes thread. RBAC: any role with
+  // cases:log_action (the same op that records actions on a case).
+
+  function caseInvestigationActor(req: Request): string {
+    const v = req.headers['x-apex-user'];
+    return typeof v === 'string' && v.trim() ? v.trim() : 'admin';
+  }
+
+  function mapInvestigationError(e: unknown, ctx: ReturnType<typeof extractCtx>): {
+    status: number;
+    body: ReturnType<typeof wrapError>;
+  } {
+    if (!(e instanceof InvestigationError)) {
+      return {
+        status: 500,
+        body: wrapError(
+          { code: 'EWS_500', message: e instanceof Error ? e.message : 'investigation failed', severity: 'HIGH' },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'unknown_investigation' || e.code === 'unknown_step') {
+      return {
+        status: 404,
+        body: wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+      };
+    }
+    if (e.code === 'investigation_already_open' || e.code === 'step_already_completed' || e.code === 'closed') {
+      return {
+        status: 409,
+        body: wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      };
+    }
+    return {
+      status: 400,
+      body: wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+    };
+  }
+
+  /**
+   * POST /v1/investigations body: { case_id, customer_id }
+   * Open a fresh investigation for a case. 409 when the case already
+   * has an open one (must close first). 400 on missing fields.
+   */
+  app.post(
+    '/v1/investigations',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const inv = caseInvestigationStore.open(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as { case_id: string; customer_id: string },
+          caseInvestigationActor(req),
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(inv, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /** GET /v1/investigations?status=&case_id=&customer_id=&page=&page_size= */
+  app.get(
+    '/v1/investigations',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: { status?: InvestigationStatus; case_id?: string; customer_id?: string; page?: number; page_size?: number } = {};
+      if (typeof q.status === 'string') {
+        if (!isInvestigationStatus(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_status', message: `invalid status: ${q.status}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.status = q.status as InvestigationStatus;
+      }
+      if (typeof q.case_id === 'string') filters.case_id = q.case_id;
+      if (typeof q.customer_id === 'string') filters.customer_id = q.customer_id;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') {
+        filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
+      }
+      const out = caseInvestigationStore.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/investigations/:id — single. 404 on miss/cross-tenant. */
+  app.get(
+    '/v1/investigations/:id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const inv = caseInvestigationStore.get(req.tenant!.tenant_id, id);
+      if (!inv) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_investigation', message: `unknown investigation: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(inv, ctx));
+    },
+  );
+
+  /**
+   * PATCH /v1/investigations/:id/status body: { status, decision? }
+   * Transition through the workflow. The state machine enforces legal
+   * transitions; closing from `decision` requires a non-null decision.
+   */
+  app.patch(
+    '/v1/investigations/:id/status',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { status, decision } = (inner ?? {}) as {
+        status?: InvestigationStatus;
+        decision?: InvestigationDecision;
+      };
+      try {
+        const inv = caseInvestigationStore.updateStatus(
+          req.tenant!.tenant_id,
+          id,
+          status as InvestigationStatus,
+          decision ?? null,
+          caseInvestigationActor(req),
+          now(),
+        );
+        return res.json(wrapResponse(inv, ctx));
+      } catch (e) {
+        const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /**
+   * POST /v1/investigations/:id/steps/:step_id/complete body: { evidence_link? }
+   * Mark a checklist step as completed.
+   */
+  app.post(
+    '/v1/investigations/:id/steps/:step_id/complete',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const step_id = req.params.step_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const evidence_link =
+        inner && typeof inner === 'object' && typeof (inner as { evidence_link?: unknown }).evidence_link === 'string'
+          ? ((inner as { evidence_link: string }).evidence_link)
+          : null;
+      try {
+        const inv = caseInvestigationStore.completeStep(
+          req.tenant!.tenant_id,
+          id,
+          step_id,
+          caseInvestigationActor(req),
+          evidence_link,
+          now(),
+        );
+        return res.json(wrapResponse(inv, ctx));
+      } catch (e) {
+        const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /**
+   * POST /v1/investigations/:id/notes body: { body }
+   * Append a note to the investigation thread. Returns the note +
+   * the updated investigation (with bumped notes_count).
+   */
+  app.post(
+    '/v1/investigations/:id/notes',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const noteBody =
+        inner && typeof inner === 'object' && typeof (inner as { body?: unknown }).body === 'string'
+          ? ((inner as { body: string }).body)
+          : '';
+      try {
+        const result = caseInvestigationStore.addNote(
+          req.tenant!.tenant_id,
+          id,
+          caseInvestigationActor(req),
+          noteBody,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(result, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /** GET /v1/investigations/:id/notes — newest-first. 404 on unknown id. */
+  app.get(
+    '/v1/investigations/:id/notes',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      try {
+        const items = caseInvestigationStore.listNotes(req.tenant!.tenant_id, id);
+        return res.json(wrapResponse({ items, total: items.length, investigation_id: id }, ctx));
+      } catch (e) {
+        const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
 
   // ── BIL dashboards (T6 M11.1+) — DataNetworks-EWS-Ver1.pdf §14 ────────
   //
