@@ -173,6 +173,11 @@ import {
   type AgentTier,
 } from './integrations/agent';
 import {
+  defaultFinanceAdapter,
+  FinanceError,
+  type FinanceAdapter,
+} from './integrations/finance';
+import {
   defaultCaseInvestigationStore,
   InvestigationError,
   isInvestigationStatus,
@@ -325,6 +330,13 @@ export interface AppDeps {
    */
   agentAdapter?: AgentAdapter;
   /**
+   * Override for tests — Finance / Treasury adapter (T6 M14.7).
+   * Defaults to the module-level StubFinanceAdapter. Production
+   * swaps in an HTTP/SOAP gateway to the Finance core (e.g. Oracle
+   * Flexcube / TCS BaNCS).
+   */
+  financeAdapter?: FinanceAdapter;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -428,6 +440,7 @@ export function makeApp(deps: AppDeps = {}) {
   const dmsAdapter = deps.dmsAdapter ?? defaultDmsAdapter;
   const bureauAdapter = deps.bureauAdapter ?? defaultBureauAdapter;
   const agentAdapter = deps.agentAdapter ?? defaultAgentAdapter;
+  const financeAdapter = deps.financeAdapter ?? defaultFinanceAdapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -3550,6 +3563,131 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(502).json(
           wrapError(
             { code: 'EWS_502', message: e instanceof Error ? e.message : 'agent adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Finance / Treasury adapter (T6 M14.7) ────────────────────────────
+  //
+  // 3 routes over the BIL Finance upstream — accounts (by-customer +
+  // by-id) + ledger (paginated with optional since/until window).
+  // Read-only at this stage; balance mutations come from the upstream
+  // posting engine.
+
+  /** GET /v1/integrations/finance/accounts?customer_id=X — list. */
+  app.get(
+    '/v1/integrations/finance/accounts',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      if (!customer_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id query parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = await financeAdapter.listAccountsForCustomer(
+          req.tenant!.tenant_id,
+          customer_id,
+          now(),
+        );
+        return res.json(wrapResponse({ items, total: items.length, customer_id }, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'finance adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/finance/accounts/:account_id — single. */
+  app.get(
+    '/v1/integrations/finance/accounts/:account_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.account_id ?? '';
+      try {
+        const account = await financeAdapter.getAccount(req.tenant!.tenant_id, id, now());
+        if (!account) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `finance account ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(account, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'finance adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/integrations/finance/accounts/:account_id/ledger?since=&until=&page=&page_size=
+   * Paginated ledger entries newest-first. since/until are ISO timestamps;
+   * 400 EWS_400_invalid_since / _invalid_until on malformed values.
+   * 404 EWS_404_unknown_account on miss / cross-tenant lookup.
+   */
+  app.get(
+    '/v1/integrations/finance/accounts/:account_id/ledger',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.account_id ?? '';
+      const since = req.query.since as string | undefined;
+      const until = req.query.until as string | undefined;
+      const pageRaw = req.query.page as string | undefined;
+      const sizeRaw = req.query.page_size as string | undefined;
+      const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1;
+      const page_size = sizeRaw ? Math.max(1, Math.min(200, Number(sizeRaw) || 50)) : 50;
+      try {
+        const out = await financeAdapter.listLedger(
+          req.tenant!.tenant_id,
+          id,
+          { since, until, page, page_size },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof FinanceError) {
+          if (e.code === 'unknown_account') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_account', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'finance adapter failed', severity: 'HIGH' },
             ctx,
           ),
         );

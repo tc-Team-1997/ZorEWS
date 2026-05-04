@@ -848,6 +848,27 @@
       - Integration with POST /v1/investigations (6): built-in id → 8 steps + recorded id; omitted template_id → 'BUILT_IN' default; custom template id → custom steps; unknown id → 404 with no investigation created; cross-tenant id → 404; full M9.1 flow (open + complete-step) still works on a custom-checklist investigation.
     - **Outcome:** Module 9 now supports per-tenant workflow templates beyond claim-fraud. Combined with M9.1, the BIL deployment can drive arbitrary investigation workflows (KYC, sanctions, complaints) end-to-end while preserving the same state machine + audit trail.
 
+  - **M14.7 — Finance / Treasury adapter (2026-05-04):**
+    - 7th Module 14 adapter — covers the BIL Finance / Treasury upstream (account summaries + ledger entries). The BIL pitch lists Finance as one of the 11 upstream systems; this adapter is the read-side that lets the SPA + case-investigation workflow walk a customer's account history.
+    - New `services/bff/src/integrations/finance.ts`:
+      - `FinanceAccount` shape: `account_id`, `customer_id`, `account_type` (`savings / current / loan / credit_card`), `currency`, `balance_kes`, `last_activity_at`, `status` (`active / frozen / closed`).
+      - `LedgerEntry` shape: `entry_id`, `account_id`, `type` (`credit / debit`), `amount_kes`, `currency`, `narrative`, `posted_at`, `balance_kes_after` (running balance).
+      - `FinanceAdapter` interface (`getAccount / listAccountsForCustomer / listLedger`) + `StubFinanceAdapter`. 0-7 accounts per customer (~10% none / 35% 1-2 / 40% 3-4 / 15% 5-7); 20-50 ledger entries per active account, fewer for frozen/closed.
+      - **Account-type-driven balance signs** asserted in tests: loan always negative (debt owed), savings always positive, credit_card always 0 or negative (utilised). closed-account `last_activity_at` always > 90 days back.
+      - **Ledger walks back** from the current balance — newest entry's `balance_kes_after` equals account.balance_kes; each prior entry's running balance computed by inversing the delta.
+      - `FinanceError` carries `unknown_account` (404) + `invalid_since`/`invalid_until` (400) — ISO timestamp validation on time-window filters.
+    - **`AppDeps.financeAdapter` injection point** — defaults to module-level singleton.
+    - **3 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/finance/accounts?customer_id=X` — paginated list, sorted by last_activity_at desc.
+      - `GET /v1/integrations/finance/accounts/:account_id` — single, 404 on miss + cross-tenant.
+      - `GET /v1/integrations/finance/accounts/:account_id/ledger?since=&until=&page=&page_size=` — paginated ledger newest-first; ISO time-window filters; 400 `EWS_400_invalid_since` / `_invalid_until`; 404 `EWS_404_unknown_account` on miss + cross-tenant.
+    - **Tests:** BFF 1223/1223 (was 1189 — +34 in `finance_adapter.test.ts`):
+      - listAccountsForCustomer (7): 0-7 range, determinism, tenant disjointness, newest-activity sort, balance-sign-by-type invariant, closed-implies-old-activity, empty-customer guard.
+      - getAccount (3): hit-after-list, unknown null, cross-tenant null.
+      - listLedger (9): pagination + sort, every-entry-shape, newest-balance-equals-current, since/until filters, page_size clamp + disjointness, unknown_account throw, invalid_since throw, cross-tenant unknown_account.
+      - Routes (15): list happy + 400 missing customer_id + 403 + 502 on adapter throw; single happy + 404 + cross-tenant 404; ledger happy + since+until + invalid_since 400 + 404 + cross-tenant 404 + pagination disjointness; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 7 shipped adapters covering 26 of the declared 50 APIs. Finance + Bureau + IFRS9 form a tight triangle for any per-customer financial-profile drill-through.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
