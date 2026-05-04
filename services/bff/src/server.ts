@@ -227,6 +227,13 @@ import {
   type ModelType,
 } from './ai_model_registry';
 import {
+  defaultPromotionEngine,
+  isPromotionRequestStatus,
+  PromotionError,
+  type PromotionEngine,
+  type PromotionRequestStatus,
+} from './ai_model_promotion';
+import {
   ConfigValidationError,
   defaultConfigStore,
   listCategories as listConfigCategories,
@@ -418,6 +425,13 @@ export interface AppDeps {
    * / Vertex-backed registry satisfying the same interface.
    */
   aiModelRegistry?: AiModelRegistry;
+  /**
+   * Override for tests — model promotion engine (T6 M7.2). Defaults
+   * to the module-level InMemoryPromotionEngine. Tracks promotion
+   * requests + decisions; does NOT mutate the registry's view (M7.3
+   * will close that loop).
+   */
+  promotionEngine?: PromotionEngine;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -487,6 +501,7 @@ export function makeApp(deps: AppDeps = {}) {
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
+  const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1228,6 +1243,214 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  // ── BIL AI/ML model promotion workflow (T6 M7.2) ─────────────────────
+  //
+  // 5 routes for the request → review → approve/reject lifecycle.
+  // Read = analyst+ (customers:read_risk_profile); request = same;
+  // approve/reject = admin (audit:read).
+
+  function mapPromotionError(e: unknown, ctx: ReturnType<typeof extractCtx>): {
+    status: number;
+    body: ReturnType<typeof wrapError>;
+  } {
+    if (!(e instanceof PromotionError)) {
+      return {
+        status: 500,
+        body: wrapError(
+          { code: 'EWS_500', message: e instanceof Error ? e.message : 'promotion failed', severity: 'HIGH' },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'unknown_request') {
+      return {
+        status: 404,
+        body: wrapError(
+          { code: 'EWS_404_unknown_request', message: e.message, severity: 'LOW' },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'request_already_pending' || e.code === 'already_decided') {
+      return {
+        status: 409,
+        body: wrapError(
+          { code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' },
+          ctx,
+        ),
+      };
+    }
+    return {
+      status: 400,
+      body: wrapError(
+        { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+        ctx,
+      ),
+    };
+  }
+
+  function promotionActor(req: Request): string {
+    const v = req.headers['x-apex-user'];
+    return typeof v === 'string' && v.trim() ? v.trim() : 'admin';
+  }
+
+  /** POST /v1/ai/promotions — request a promotion (analyst+). */
+  app.post(
+    '/v1/ai/promotions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const r = promotionEngine.requestPromotion(
+          req.tenant!.tenant_id,
+          inner,
+          promotionActor(req),
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(r, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        const m = mapPromotionError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /** GET /v1/ai/promotions?status=&model_id=&requested_by=&page=&page_size= */
+  app.get(
+    '/v1/ai/promotions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: {
+        status?: PromotionRequestStatus;
+        model_id?: string;
+        requested_by?: string;
+        page?: number;
+        page_size?: number;
+      } = {};
+      if (typeof q.status === 'string') {
+        if (!isPromotionRequestStatus(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_status',
+                message: `invalid status: ${q.status}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        filters.status = q.status as PromotionRequestStatus;
+      }
+      if (typeof q.model_id === 'string') filters.model_id = q.model_id;
+      if (typeof q.requested_by === 'string') filters.requested_by = q.requested_by;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') {
+        filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
+      }
+      const out = promotionEngine.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/ai/promotions/:request_id — single request. */
+  app.get(
+    '/v1/ai/promotions/:request_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.request_id ?? '';
+      const r = promotionEngine.get(req.tenant!.tenant_id, id);
+      if (!r) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_request', message: `unknown promotion request: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(r, ctx));
+    },
+  );
+
+  /** POST /v1/ai/promotions/:request_id/approve body: { decision_notes? } */
+  app.post(
+    '/v1/ai/promotions/:request_id/approve',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.request_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const notes =
+        inner && typeof inner === 'object' && 'decision_notes' in (inner as object)
+          ? ((inner as { decision_notes: unknown }).decision_notes as string | null)
+          : null;
+      try {
+        const r = promotionEngine.approve(
+          req.tenant!.tenant_id,
+          id,
+          promotionActor(req),
+          notes ?? null,
+          now(),
+        );
+        return res.json(wrapResponse(r, ctx));
+      } catch (e) {
+        const m = mapPromotionError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /** POST /v1/ai/promotions/:request_id/reject body: { decision_notes? } */
+  app.post(
+    '/v1/ai/promotions/:request_id/reject',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.request_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const notes =
+        inner && typeof inner === 'object' && 'decision_notes' in (inner as object)
+          ? ((inner as { decision_notes: unknown }).decision_notes as string | null)
+          : null;
+      try {
+        const r = promotionEngine.reject(
+          req.tenant!.tenant_id,
+          id,
+          promotionActor(req),
+          notes ?? null,
+          now(),
+        );
+        return res.json(wrapResponse(r, ctx));
+      } catch (e) {
+        const m = mapPromotionError(e, ctx);
+        return res.status(m.status).json(m.body);
       }
     },
   );

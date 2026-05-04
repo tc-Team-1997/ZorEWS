@@ -924,6 +924,32 @@
       - Routes (12): list happy + 2 filter narrowings + 2 invalid-axis 400s + 403 + 502; single happy + 404 + cross-tenant 404; leave-balance happy + 2 × 404; tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 8 shipped adapters covering 29 of the declared 50 APIs. Combined with M14.6 Agent, the HR + Agent slice gives ops a complete people-data view (internal staff via M14.8 + external sales force via M14.6).
 
+  - **M7.2 — AI/ML model promotion workflow (2026-05-04):**
+    - M7.1 ships the model registry (read-only catalogue). M7.2 lands the workflow that BIL ops + risk committees actually need: a tracked path for promoting a model from experimental → staging → shadow → production (or retiring it) with explicit reviewer + rationale per RBI's model risk management framework.
+    - New `services/bff/src/ai_model_promotion.ts`:
+      - `PromotionRequest` shape: `request_id`, `tenant_id`, `model_id`, `from_status`, `to_status`, `status` (`pending / approved / rejected / cancelled`), `requested_by/at`, `request_notes`, `reviewed_by/at`, `decision_notes`.
+      - **State machine** `TRANSITIONS` table enforces: experimental → staging | retired; staging → shadow | production | retired; shadow → production | retired; production → retired only (no in-place downgrades — replacements run their own promotion path); retired is terminal.
+      - `PromotionEngine` interface (`requestPromotion / list / get / approve / reject`) + `InMemoryPromotionEngine`. Refuses 2nd pending request for the same model (one decision in flight at a time).
+      - **`request_notes` + `decision_notes` capped at 4000 chars** per audit-trail conventions.
+      - `PromotionError` codes routed by the BFF: `unknown_request` → 404, `request_already_pending` + `already_decided` → 409, `invalid_input` + `invalid_transition` → 400.
+      - Note: the engine does NOT mutate the registry's view (M7.1's `SEED_MODELS` stays read-only). M7.3 will close the loop by consuming approved requests + applying a status override.
+    - **`AppDeps.promotionEngine` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes** (all tenant-gated, all enveloped):
+      - `POST /v1/ai/promotions` — RBAC `customers:read_risk_profile` (analyst+). 201 happy; code-routed 400/409 errors.
+      - `GET /v1/ai/promotions?status=&model_id=&requested_by=&page=&page_size=` — RBAC `customers:read_risk_profile`. Newest-first, paginated.
+      - `GET /v1/ai/promotions/:request_id` — RBAC `customers:read_risk_profile`. 404 on miss + cross-tenant.
+      - `POST /v1/ai/promotions/:request_id/approve` body `{decision_notes?}` — RBAC `audit:read` (admin). 200 happy; 409 `already_decided`; 404 unknown.
+      - `POST /v1/ai/promotions/:request_id/reject` body `{decision_notes?}` — RBAC `audit:read`. Same routing as approve.
+    - **Tests:** BFF 1375/1375 (was 1324 — +51 in `ai_model_promotion.test.ts`):
+      - `canTransition` state machine (7): every legal pair + every illegal rewind + retired-terminal invariant.
+      - `isPromotionRequestStatus` (2).
+      - `validateRequestInput` (6): happy, missing model_id, invalid from_status, illegal transition, length cap, error type.
+      - Engine request (5): happy, 2nd-pending refused, allow-after-reject, concurrent for different models, cross-tenant isolation.
+      - Engine list+get (6): newest-first, status / model_id / requested_by filters, pagination + clamp, get null on miss + cross-tenant.
+      - Engine approve+reject (6): metadata write, mirror, null notes allowed, already_decided, unknown_request, length cap.
+      - Routes (19): POST happy + envelope + 4 error codes + 403; list happy + filter + invalid 400 + cross-tenant 404; approve happy + no-body + 409 + 404 + 403; reject happy + 409 + 403; tenant isolation + full round-trip.
+    - **Outcome:** Module 7 now has the regulator-tracked promotion lifecycle. Combined with M7.1, the BIL deployment can demo the full ML governance flow (declare → request → review → decide). Future M7.3 closes the loop by applying approved requests to the registry's effective view; M7.4 will add backtest + explainability.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
