@@ -101,6 +101,12 @@ import {
   type ReadinessTenantLookup,
   type ReadinessTenantRecord,
 } from './tenant_readiness';
+import {
+  ONBOARDING_STEPS,
+  OnboardingError,
+  defaultOnboardingStore,
+  type OnboardingStore,
+} from './tenant_onboarding';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 import {
   buildAgentDashboard,
@@ -481,6 +487,11 @@ export interface AppDeps {
    */
   reportScheduleStore?: ReportScheduleStore;
   /**
+   * Override for tests — tenant onboarding store (T6 M2.2). Defaults
+   * to the module-level InMemoryOnboardingStore.
+   */
+  onboardingStore?: OnboardingStore;
+  /**
    * Override for tests — BIL case investigation store (T6 M9.1).
    * Defaults to the module-level InMemoryCaseInvestigationStore.
    * Production swaps in a PG-backed store satisfying the same
@@ -582,6 +593,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const reportScheduleStore = deps.reportScheduleStore ?? defaultReportScheduleStore;
+  const onboardingStore = deps.onboardingStore ?? defaultOnboardingStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
@@ -3513,6 +3525,152 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'readiness failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Tenant onboarding wizard (T6 M2.2) ───────────────────────────────
+  //
+  // 8-step platform-defined wizard the BIL ops team uses to walk a
+  // new tenant through setup. Pure-data step catalogue + in-memory
+  // progress store. State per (tenant) — get is total (returns
+  // all-pending for never-touched tenants).
+
+  /** GET /v1/tenants/onboarding/steps — platform step catalog. */
+  app.get(
+    '/v1/tenants/onboarding/steps',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            items: [...ONBOARDING_STEPS].sort((a, b) => a.order - b.order),
+            total: ONBOARDING_STEPS.length,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/tenants/me/onboarding — caller's tenant onboarding state. */
+  app.get(
+    '/v1/tenants/me/onboarding',
+    requireTenantMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      return res.json(wrapResponse(state, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/:tenant_id/onboarding — admin lookup. */
+  app.get(
+    '/v1/tenants/:tenant_id/onboarding',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      try {
+        const state = onboardingStore.get(target);
+        return res.json(wrapResponse(state, ctx));
+      } catch (e) {
+        if (e instanceof OnboardingError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/tenants/:tenant_id/onboarding/steps/:step_id body { status, notes? }. */
+  app.post(
+    '/v1/tenants/:tenant_id/onboarding/steps/:step_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      const step_id = req.params.step_id ?? '';
+      const actor_username = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { status?: unknown; notes?: unknown };
+      try {
+        const state = onboardingStore.markStep(
+          target,
+          step_id,
+          (wrapper.status ?? '') as string,
+          actor_username,
+          wrapper.notes,
+          now(),
+        );
+        return res.json(wrapResponse(state, ctx));
+      } catch (e) {
+        if (e instanceof OnboardingError) {
+          if (e.code === 'unknown_step') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_step', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'mark step failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/tenants/:tenant_id/onboarding/reset — full reset. */
+  app.post(
+    '/v1/tenants/:tenant_id/onboarding/reset',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      const actor_username = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const state = onboardingStore.reset(target, actor_username, now());
+        return res.json(wrapResponse(state, ctx));
+      } catch (e) {
+        if (e instanceof OnboardingError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'reset failed', severity: 'HIGH' },
             ctx,
           ),
         );

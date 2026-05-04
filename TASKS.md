@@ -1177,6 +1177,36 @@
       - No-regression (3): M12.1 GET catalog/`/:id`/jobs still 200 (sub-paths didn't shadow).
     - **Outcome:** Module 12 now has 2 sub-phases (M12.1 catalog + M12.2 schedules). Combined with M10.1 email channel (template `REPORT_READY` already shipped), the BIL deployment can demo end-to-end recurring delivery: schedule created → tick fires → M12.1 job submitted → email dispatched. Future M12.3 likely covers **quarterly cadence + last-day-of-month + per-recipient delivery channels** (some compliance staff want SMS, not email).
 
+  - **M2.2 — Tenant onboarding wizard (2026-05-05):**
+    - M2.1 ships the readiness check (cross-module structural verdict). M2.2 ships the operator-facing tracker that BIL ops uses to walk a new tenant through setup. The 8-step wizard maps loosely onto M2.1's 9 readiness checks but with explicit `pending → completed | skipped` status, actor + timestamp, and per-step notes. Onboarding state is per-(tenant); the step CATALOGUE is platform-static.
+    - New `services/bff/src/tenant_onboarding.ts`:
+      - **8 platform-defined steps in 1-based order** — `tenant_provisioned` / `channels_configured` / `vertical_set` / `config_baseline` / `email_channel` / `alert_routing` / `audit_active` / `operator_invited`. 7 required + 1 optional (operator_invited can defer to next sprint).
+      - `OnboardingState` shape: `tenant_id, steps[StepProgress], total_steps, required_steps, completed_count, skipped_count, pending_count, is_complete, updated_at`. **`is_complete = true` iff every REQUIRED step is `completed`** — a skipped required step doesn't disqualify, but it also doesn't count toward completion (skipped optional is fine).
+      - `StepProgress`: `step_id, status, completed_at, completed_by, notes`. Notes capped at 1000 chars; whitespace-only treated as null.
+      - `OnboardingStore.get()` is **total** — returns a fresh all-pending state for never-touched tenants. No 404 here, since the tenant might exist but have never been touched by the wizard.
+      - `markStep()` rejects bogus step ids (404 unknown_step), bogus statuses (400 invalid_status), missing actor (400 invalid_input), overlong notes (400 invalid_input). Re-marking a step is allowed (overwrites prior). `pending` status clears completed_at/_by; `skipped` records actor but not completed_at.
+      - `reset(tenant_id, actor, now)` zeros progress for one tenant — useful for redoing a failed onboarding. Updates updated_at.
+      - `OnboardingError` codes routed: `unknown_step` → 404, `invalid_input` + `invalid_status` → 400.
+    - **`AppDeps.onboardingStore` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes** (all tenant-gated, all enveloped):
+      - `GET /v1/tenants/onboarding/steps` — RBAC `audit:read` (admin). Platform step catalog ordered by step.order.
+      - `GET /v1/tenants/me/onboarding` — RBAC any authenticated. Caller's tenant state.
+      - `GET /v1/tenants/:tenant_id/onboarding` — RBAC `audit:read`. Admin-only platform view.
+      - `POST /v1/tenants/:tenant_id/onboarding/steps/:step_id` body `{status, notes?}` — RBAC `audit:read`. Records X-APEX-USER as actor (default 'admin'). 200 happy; 404 EWS_404_unknown_step; 400 EWS_400_invalid_status / invalid_input.
+      - `POST /v1/tenants/:tenant_id/onboarding/reset` — RBAC `audit:read`. 200 with zeroed state.
+    - **Tests:** BFF 1867/1867 (was 1821 — +46 in `tenant_onboarding.test.ts`):
+      - Catalogue (5): exactly 8 steps, ids unique, 7 required + 1 optional, isOnboardingStepId/getOnboardingStepDef agree, isStepStatus accepts only the 3 valid values.
+      - Store.get (3): never-touched all-pending shape, sorted by order, empty tenant_id rejected.
+      - Store.markStep (14): completed records timestamp+actor+notes, skipped records actor, pending clears, re-mark overwrites, 7-required + skipped-optional → is_complete=true, skipping required → is_complete=false, unknown step, invalid status, missing actor, > 1000 notes, non-string notes, whitespace → null, updated_at recorded, cross-tenant isolation.
+      - Store.reset (3): zeros, per-tenant, missing actor.
+      - GET /steps catalog route (2): admin 200, role 403.
+      - GET /me/onboarding route (2): own tenant, reflects markStep.
+      - GET /:tenant_id/onboarding route (2): admin lookup, role 403.
+      - POST /steps/:step_id route (9): admin 200, enveloped, default actor, unknown step 404, invalid status 400, overlong notes 400, skipped status accepted, role 403, full happy → is_complete=true.
+      - POST /reset route (3): admin 200, per-tenant, role 403.
+      - No-regression (3): M2.1 GET /me, /me/readiness, /:id/readiness still 200 (sub-paths didn't shadow).
+    - **Outcome:** Module 2 now has 2 sub-phases (M2.1 readiness + M2.2 onboarding). Combined the BIL ops team can: open tenant → mark steps as they configure → call `/readiness` to verify the cross-module result → mark `is_complete`. Future M2.3 likely covers **bulk-tenant onboarding** (CSV-driven provisioning of N tenants in one shot, useful for BIL multi-branch rollouts).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
