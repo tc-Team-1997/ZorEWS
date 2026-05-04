@@ -330,7 +330,7 @@
       - **Abnormal claim patterns:** 4 of 6 known patterns sampled per day, each with count_30d + severity + delta vs baseline. Patterns: WAITING_PERIOD_BREACH, REPEAT_REASON_180D, AMOUNT_DEVIATION_30PCT, MISSING_DOCS, OFF_TEMPLATE_DOCS, RAPID_POLICY_CLAIM.
       - **Flagged hospitals:** top-5 watchlisted providers ranked by fraud score, with claim count + total amount KES.
       - **Turnaround anomalies:** 6 sample claims with actual_tat_hours > expected_tat_hours and a triage status (pending / investigating / escalated).
-    - **Future M11 sub-phases** (placeholders in `bil_dashboards.ts` route comment):
+    - **M11.2-M11.4 follow-up sub-phases** (shipped 2026-05-04, same day as M11.1):
       - M11.2 — Underwriting Dashboard (high-risk proposals, churn, lapse)
       - M11.3 — Agent Dashboard (performance, risk contribution, cancellation clusters)
       - M11.4 — Operational Dashboard (UW delays, login anomalies, override patterns)
@@ -347,6 +347,16 @@
       - non-admin → 403
       - missing tenant headers → 400 envelope
     - All other suites unchanged.
+
+  - **M11.2 + M11.3 + M11.4 — Underwriting / Agent / Operational dashboards (2026-05-04):**
+    - Same builder pattern as M11.1: deterministic Mulberry32 PRNG seeded by `(tenant_id, day-of-asOf, dashboard-key)`. Each builder is a pure function exposed by `bil_dashboards.ts`.
+    - **M11.2 `GET /v1/dashboards/bil/underwriting`** — totals (proposals_30d, approved/declined/pending, average_decision_hours), 8 high_risk_proposals (each with 2-3 risk_factors + UW risk band), 6-month churn_trend (issued/cancelled/lapsed/net_change), 10 lapse_predictions sorted by 30-day probability desc.
+    - **M11.3 `GET /v1/dashboards/bil/agent`** — totals (active_agents, new_agents_30d, suspended_agents, avg payout/lapse ratios), 8-row leaderboard ranked 1-8 by premium volume, 6-row risk_contribution sorted by risk_score desc, 4 cancellation_clusters (branch + product + agent_count + cancellation_rate + premium_at_risk).
+    - **M11.4 `GET /v1/dashboards/bil/operational`** — totals (pending_underwriting, avg_uw_delay, suspicious_logins_30d, overrides_30d, data_modifications_anomalous_7d), 5-row uw_delay_breakdown sorted by p95 desc, 7-row login_anomalies (geo_velocity / device_change / after_hours_admin / failed_attempts_spike) sorted newest-first, 8-row override_log (4 resource types: underwriting / claim / payout / kyc) sorted newest-first.
+    - **Tests:** BFF 305/305 (was 284 — +21 across the 3 new dashboards):
+      - Each builder: shape, determinism, sort invariants (rank/p95/probability/risk_score), enum-bounded fields
+      - Each route: admin happy path; one non-admin 403 for UW + ops
+    - **Outcome:** all 4 BIL dashboards under `/v1/dashboards/bil/*` are now demoable. Combined with the existing banking Executive at `/api/dashboards`, the SPA can render the full DataNetworks-EWS-Ver1.pdf §14 dashboard suite for both verticals. When the BIL synthetic dataset lands, the four builders swap to real queries; the response shapes stay stable.
 
 ## Phase 5 — Optimisation & DR (M18–24)
 

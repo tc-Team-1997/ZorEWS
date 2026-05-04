@@ -66,7 +66,12 @@ import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, TenantConflict, type TenantLookup } from './tenant';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
-import { buildClaimsDashboard } from './bil_dashboards';
+import {
+  buildAgentDashboard,
+  buildClaimsDashboard,
+  buildOperationalDashboard,
+  buildUnderwritingDashboard,
+} from './bil_dashboards';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -716,6 +721,46 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const tenant_id = req.tenant!.tenant_id;
       const dashboard = buildClaimsDashboard(tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // M11.2 — Underwriting Dashboard. High-risk proposals, churn trend
+  // (6 months trailing), lapse predictions sorted by 30-day probability.
+  app.get(
+    '/v1/dashboards/bil/underwriting',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildUnderwritingDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // M11.3 — Agent Dashboard. Performance leaderboard, risk-contribution
+  // ranking (highest portfolio risk first), cancellation clusters.
+  app.get(
+    '/v1/dashboards/bil/agent',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildAgentDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // M11.4 — Operational Dashboard. UW delay breakdown by branch +
+  // underwriter, login anomalies (last 7 days), override audit trail
+  // (last 30 days).
+  app.get(
+    '/v1/dashboards/bil/operational',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildOperationalDashboard(req.tenant!.tenant_id, now());
       res.json(wrapResponse(dashboard, ctx));
     },
   );

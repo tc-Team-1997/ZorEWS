@@ -186,3 +186,388 @@ export function buildClaimsDashboard(tenant_id: string, asOf: Date): ClaimsDashb
     turnaround_anomalies,
   };
 }
+
+// ─── Underwriting Dashboard (T6 M11.2) ─────────────────────────────────
+
+export interface HighRiskProposal {
+  proposal_id: string;
+  customer_id: string;
+  product: string;
+  premium_kes: number;
+  uw_risk_band: 'critical' | 'high' | 'medium';
+  risk_factors: string[];
+}
+
+export interface ChurnRow {
+  month: string; // YYYY-MM
+  policies_issued: number;
+  policies_cancelled: number;
+  policies_lapsed: number;
+  net_change: number;
+}
+
+export interface LapsePrediction {
+  policy_id: string;
+  customer_id: string;
+  product: string;
+  lapse_probability_30d: number;
+  premium_kes: number;
+  driver: string;
+}
+
+export interface UnderwritingDashboard {
+  tenant_id: string;
+  as_of: string;
+  totals: {
+    proposals_30d: number;
+    approved: number;
+    declined: number;
+    pending: number;
+    average_decision_hours: number;
+  };
+  high_risk_proposals: HighRiskProposal[];
+  churn_trend: ChurnRow[];
+  lapse_predictions: LapsePrediction[];
+}
+
+const PRODUCTS = ['HOME_LOAN_LIFE', 'AUTO_COMP', 'HEALTH_FAMILY', 'TERM_LIFE_25Y', 'CRITICAL_ILLNESS'];
+const RISK_FACTORS = [
+  'pre_existing_condition_undisclosed',
+  'occupation_high_risk',
+  'sum_assured_above_band',
+  'address_proxy_match',
+  'recent_claim_history_third_party',
+  'medical_underwriting_flagged',
+];
+const LAPSE_DRIVERS = [
+  'premium_arrears_60d',
+  'declining_inflows_90d',
+  'policy_modification_recent',
+  'claim_dispute_open',
+  'engagement_drop',
+];
+
+export function buildUnderwritingDashboard(tenant_id: string, asOf: Date): UnderwritingDashboard {
+  const dayKey = asOf.toISOString().slice(0, 10);
+  const r = rng(seedFrom(tenant_id, dayKey, 'uw'));
+  const scale = tenant_id === 'BIL' ? 0.6 : 1.0;
+
+  const proposals_30d = Math.floor((480 + r() * 320) * scale);
+  const approved = Math.floor(proposals_30d * (0.65 + r() * 0.12));
+  const declined = Math.floor(proposals_30d * (0.05 + r() * 0.08));
+  const pending = proposals_30d - approved - declined;
+  const average_decision_hours = Math.round((26 + r() * 22) * 10) / 10;
+
+  const high_risk_proposals: HighRiskProposal[] = [];
+  const bands: HighRiskProposal['uw_risk_band'][] = ['critical', 'high', 'medium'];
+  for (let i = 0; i < 8; i++) {
+    const factorCount = 2 + Math.floor(r() * 2);
+    const factors: string[] = [];
+    for (let j = 0; j < factorCount; j++) {
+      const f = RISK_FACTORS[Math.floor(r() * RISK_FACTORS.length)]!;
+      if (!factors.includes(f)) factors.push(f);
+    }
+    high_risk_proposals.push({
+      proposal_id: `PROP-${String(20000 + Math.floor(r() * 9999)).padStart(5, '0')}`,
+      customer_id: `c-${String(Math.floor(r() * 9999)).padStart(4, '0')}`,
+      product: PRODUCTS[Math.floor(r() * PRODUCTS.length)]!,
+      premium_kes: Math.floor((25_000 + r() * 480_000) * scale),
+      uw_risk_band: bands[Math.floor(r() * bands.length)]!,
+      risk_factors: factors,
+    });
+  }
+
+  // 6 months trailing churn trend.
+  const churn_trend: ChurnRow[] = [];
+  const start = new Date(asOf);
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(start);
+    d.setMonth(d.getMonth() - i);
+    const issued = Math.floor((360 + r() * 180) * scale);
+    const cancelled = Math.floor((30 + r() * 60) * scale);
+    const lapsed = Math.floor((20 + r() * 50) * scale);
+    churn_trend.push({
+      month: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      policies_issued: issued,
+      policies_cancelled: cancelled,
+      policies_lapsed: lapsed,
+      net_change: issued - cancelled - lapsed,
+    });
+  }
+
+  const lapse_predictions: LapsePrediction[] = [];
+  for (let i = 0; i < 10; i++) {
+    const p = 0.45 + r() * 0.5;
+    lapse_predictions.push({
+      policy_id: `POL-${String(50000 + Math.floor(r() * 9999)).padStart(5, '0')}`,
+      customer_id: `c-${String(Math.floor(r() * 9999)).padStart(4, '0')}`,
+      product: PRODUCTS[Math.floor(r() * PRODUCTS.length)]!,
+      lapse_probability_30d: Math.round(p * 1000) / 1000,
+      premium_kes: Math.floor((8_000 + r() * 92_000) * scale),
+      driver: LAPSE_DRIVERS[Math.floor(r() * LAPSE_DRIVERS.length)]!,
+    });
+  }
+  // Highest probability first.
+  lapse_predictions.sort((a, b) => b.lapse_probability_30d - a.lapse_probability_30d);
+
+  return {
+    tenant_id,
+    as_of: asOf.toISOString(),
+    totals: { proposals_30d, approved, declined, pending, average_decision_hours },
+    high_risk_proposals,
+    churn_trend,
+    lapse_predictions,
+  };
+}
+
+// ─── Agent Dashboard (T6 M11.3) ────────────────────────────────────────
+
+export interface AgentLeaderboardRow {
+  agent_id: string;
+  agent_name: string;
+  branch: string;
+  policies_30d: number;
+  premium_kes: number;
+  rank: number;
+}
+
+export interface AgentRiskContribution {
+  agent_id: string;
+  agent_name: string;
+  portfolio_size: number;
+  claim_payout_ratio: number;
+  high_risk_share: number;
+  risk_score: number;
+}
+
+export interface CancellationCluster {
+  cluster_id: string;
+  branch: string;
+  product: string;
+  agent_count: number;
+  cancellation_rate: number;
+  total_premium_at_risk_kes: number;
+}
+
+export interface AgentDashboard {
+  tenant_id: string;
+  as_of: string;
+  totals: {
+    active_agents: number;
+    new_agents_30d: number;
+    suspended_agents: number;
+    average_payout_ratio: number;
+    average_lapse_ratio: number;
+  };
+  agent_leaderboard: AgentLeaderboardRow[];
+  risk_contribution: AgentRiskContribution[];
+  cancellation_clusters: CancellationCluster[];
+}
+
+const BRANCHES = ['NBO_CBD', 'NBO_WEST', 'MOMBASA', 'KISUMU', 'NAKURU', 'ELDORET'];
+const FIRST_NAMES = ['Achieng', 'Brian', 'Carol', 'Dennis', 'Esther', 'Frank', 'Grace', 'Hassan', 'Imani', 'James'];
+const LAST_NAMES = ['Otieno', 'Mwangi', 'Wanjiru', 'Kamau', 'Achieng', 'Mutua', 'Kariuki', 'Onyango', 'Njoroge', 'Cheruiyot'];
+
+function syntheticName(r: () => number): string {
+  return `${FIRST_NAMES[Math.floor(r() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(r() * LAST_NAMES.length)]}`;
+}
+
+export function buildAgentDashboard(tenant_id: string, asOf: Date): AgentDashboard {
+  const dayKey = asOf.toISOString().slice(0, 10);
+  const r = rng(seedFrom(tenant_id, dayKey, 'agent'));
+  const scale = tenant_id === 'BIL' ? 0.6 : 1.0;
+
+  const active_agents = Math.floor((120 + r() * 80) * scale);
+  const new_agents_30d = Math.floor((4 + r() * 12) * scale);
+  const suspended_agents = Math.floor((1 + r() * 4) * scale);
+  const average_payout_ratio = Math.round((0.55 + r() * 0.25) * 1000) / 1000;
+  const average_lapse_ratio = Math.round((0.06 + r() * 0.08) * 1000) / 1000;
+
+  const agent_leaderboard: AgentLeaderboardRow[] = [];
+  for (let i = 0; i < 8; i++) {
+    agent_leaderboard.push({
+      agent_id: `AGT-${String(1000 + Math.floor(r() * 8999)).padStart(4, '0')}`,
+      agent_name: syntheticName(r),
+      branch: BRANCHES[Math.floor(r() * BRANCHES.length)]!,
+      policies_30d: Math.floor((40 - i * 3 + r() * 6) * scale),
+      premium_kes: Math.floor((4_500_000 - i * 350_000 + r() * 800_000) * scale),
+      rank: i + 1,
+    });
+  }
+
+  const risk_contribution: AgentRiskContribution[] = [];
+  for (let i = 0; i < 6; i++) {
+    const pr = 0.7 + i * 0.05 + r() * 0.18;
+    risk_contribution.push({
+      agent_id: `AGT-${String(2000 + Math.floor(r() * 8999)).padStart(4, '0')}`,
+      agent_name: syntheticName(r),
+      portfolio_size: Math.floor((180 - i * 18 + r() * 24) * scale),
+      claim_payout_ratio: Math.round(pr * 1000) / 1000,
+      high_risk_share: Math.round((0.15 + i * 0.05 + r() * 0.1) * 1000) / 1000,
+      risk_score: Math.round((0.6 + i * 0.06 + r() * 0.12) * 100) / 100,
+    });
+  }
+  // Highest risk first.
+  risk_contribution.sort((a, b) => b.risk_score - a.risk_score);
+
+  const cancellation_clusters: CancellationCluster[] = [];
+  for (let i = 0; i < 4; i++) {
+    cancellation_clusters.push({
+      cluster_id: `CLU-${String(i + 1).padStart(3, '0')}`,
+      branch: BRANCHES[Math.floor(r() * BRANCHES.length)]!,
+      product: PRODUCTS[Math.floor(r() * PRODUCTS.length)]!,
+      agent_count: 2 + Math.floor(r() * 5),
+      cancellation_rate: Math.round((0.18 + r() * 0.22) * 1000) / 1000,
+      total_premium_at_risk_kes: Math.floor((3_500_000 + r() * 9_000_000) * scale),
+    });
+  }
+
+  return {
+    tenant_id,
+    as_of: asOf.toISOString(),
+    totals: {
+      active_agents,
+      new_agents_30d,
+      suspended_agents,
+      average_payout_ratio,
+      average_lapse_ratio,
+    },
+    agent_leaderboard,
+    risk_contribution,
+    cancellation_clusters,
+  };
+}
+
+// ─── Operational Dashboard (T6 M11.4) ──────────────────────────────────
+
+export interface UwDelayBreakdown {
+  branch: string;
+  underwriter_id: string;
+  underwriter_name: string;
+  pending_count: number;
+  avg_delay_hours: number;
+  p95_delay_hours: number;
+}
+
+export interface LoginAnomaly {
+  occurred_at: string;
+  username: string;
+  ip: string;
+  reason: 'geo_velocity' | 'device_change' | 'after_hours_admin' | 'failed_attempts_spike';
+  severity: 'critical' | 'high' | 'medium';
+}
+
+export interface OverrideEntry {
+  ts: string;
+  manager: string;
+  resource_type: 'underwriting' | 'claim' | 'payout' | 'kyc';
+  resource_id: string;
+  reason: string;
+}
+
+export interface OperationalDashboard {
+  tenant_id: string;
+  as_of: string;
+  totals: {
+    pending_underwriting: number;
+    average_uw_delay_hours: number;
+    suspicious_logins_30d: number;
+    overrides_30d: number;
+    data_modifications_anomalous_7d: number;
+  };
+  uw_delay_breakdown: UwDelayBreakdown[];
+  login_anomalies: LoginAnomaly[];
+  override_log: OverrideEntry[];
+}
+
+const LOGIN_REASONS: LoginAnomaly['reason'][] = [
+  'geo_velocity',
+  'device_change',
+  'after_hours_admin',
+  'failed_attempts_spike',
+];
+const RESOURCE_TYPES: OverrideEntry['resource_type'][] = [
+  'underwriting',
+  'claim',
+  'payout',
+  'kyc',
+];
+const OVERRIDE_REASONS = [
+  'customer_VIP_relationship',
+  'documentation_provided_offline',
+  'compliance_review_clear',
+  'sales_team_escalation',
+  'reciprocity_with_partner',
+];
+
+export function buildOperationalDashboard(tenant_id: string, asOf: Date): OperationalDashboard {
+  const dayKey = asOf.toISOString().slice(0, 10);
+  const r = rng(seedFrom(tenant_id, dayKey, 'ops'));
+  const scale = tenant_id === 'BIL' ? 0.6 : 1.0;
+
+  const pending_underwriting = Math.floor((40 + r() * 120) * scale);
+  const average_uw_delay_hours = Math.round((28 + r() * 24) * 10) / 10;
+  const suspicious_logins_30d = Math.floor((6 + r() * 18) * scale);
+  const overrides_30d = Math.floor((10 + r() * 22) * scale);
+  const data_modifications_anomalous_7d = Math.floor((2 + r() * 8) * scale);
+
+  const uw_delay_breakdown: UwDelayBreakdown[] = [];
+  for (let i = 0; i < 5; i++) {
+    const avg = 18 + r() * 36;
+    uw_delay_breakdown.push({
+      branch: BRANCHES[Math.floor(r() * BRANCHES.length)]!,
+      underwriter_id: `UW-${String(100 + Math.floor(r() * 899)).padStart(3, '0')}`,
+      underwriter_name: syntheticName(r),
+      pending_count: Math.floor((4 + r() * 16) * scale),
+      avg_delay_hours: Math.round(avg * 10) / 10,
+      p95_delay_hours: Math.round((avg + 18 + r() * 24) * 10) / 10,
+    });
+  }
+  uw_delay_breakdown.sort((a, b) => b.p95_delay_hours - a.p95_delay_hours);
+
+  const login_anomalies: LoginAnomaly[] = [];
+  for (let i = 0; i < 7; i++) {
+    const ts = new Date(asOf);
+    ts.setHours(ts.getHours() - Math.floor(r() * 168)); // last 7 days
+    const sevs: LoginAnomaly['severity'][] = ['critical', 'high', 'medium'];
+    login_anomalies.push({
+      occurred_at: ts.toISOString(),
+      username: `${FIRST_NAMES[Math.floor(r() * FIRST_NAMES.length)]!.toLowerCase()}.${
+        ['admin', 'risk', 'super', 'collect', 'field'][Math.floor(r() * 5)]
+      }`,
+      ip: `41.${Math.floor(r() * 256)}.${Math.floor(r() * 256)}.${Math.floor(r() * 256)}`,
+      reason: LOGIN_REASONS[Math.floor(r() * LOGIN_REASONS.length)]!,
+      severity: sevs[Math.floor(r() * sevs.length)]!,
+    });
+  }
+  login_anomalies.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
+
+  const override_log: OverrideEntry[] = [];
+  for (let i = 0; i < 8; i++) {
+    const ts = new Date(asOf);
+    ts.setHours(ts.getHours() - Math.floor(r() * 720)); // last 30 days
+    override_log.push({
+      ts: ts.toISOString(),
+      manager: syntheticName(r),
+      resource_type: RESOURCE_TYPES[Math.floor(r() * RESOURCE_TYPES.length)]!,
+      resource_id: `RES-${String(Math.floor(r() * 99999)).padStart(5, '0')}`,
+      reason: OVERRIDE_REASONS[Math.floor(r() * OVERRIDE_REASONS.length)]!,
+    });
+  }
+  override_log.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+
+  return {
+    tenant_id,
+    as_of: asOf.toISOString(),
+    totals: {
+      pending_underwriting,
+      average_uw_delay_hours,
+      suspicious_logins_30d,
+      overrides_30d,
+      data_modifications_anomalous_7d,
+    },
+    uw_delay_breakdown,
+    login_anomalies,
+    override_log,
+  };
+}

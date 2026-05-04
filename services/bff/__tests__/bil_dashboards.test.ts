@@ -4,7 +4,12 @@
 // builder and the BFF route.
 
 import request from 'supertest';
-import { buildClaimsDashboard } from '../src/bil_dashboards';
+import {
+  buildAgentDashboard,
+  buildClaimsDashboard,
+  buildOperationalDashboard,
+  buildUnderwritingDashboard,
+} from '../src/bil_dashboards';
 import { makeApp } from '../src/server';
 import { StaticSource } from '../src/source';
 import { StubEvaluator } from '../src/score';
@@ -118,5 +123,194 @@ describe('GET /v1/dashboards/bil/claims', () => {
     expect(r.status).toBe(400);
     expect(r.body.error.code).toBe('EWS_400');
     expect(r.body.error.message).toMatch(/X-Tenant-ID/);
+  });
+});
+
+// ─── M11.2 — Underwriting Dashboard ────────────────────────────────────
+
+describe('buildUnderwritingDashboard — pure builder', () => {
+  test('shape: totals + 3 panels', () => {
+    const d = buildUnderwritingDashboard('BIL', NOW);
+    expect(d.tenant_id).toBe('BIL');
+    expect(d.totals.proposals_30d).toBeGreaterThan(0);
+    expect(d.totals.approved + d.totals.declined + d.totals.pending).toBe(d.totals.proposals_30d);
+    expect(d.high_risk_proposals).toHaveLength(8);
+    expect(d.churn_trend).toHaveLength(6);
+    expect(d.lapse_predictions).toHaveLength(10);
+  });
+
+  test('deterministic — same (tenant, day) → identical', () => {
+    expect(buildUnderwritingDashboard('BIL', NOW)).toEqual(buildUnderwritingDashboard('BIL', NOW));
+  });
+
+  test('lapse_predictions sorted highest probability first', () => {
+    const d = buildUnderwritingDashboard('BANK_DEMO', NOW);
+    for (let i = 1; i < d.lapse_predictions.length; i++) {
+      expect(d.lapse_predictions[i - 1]!.lapse_probability_30d).toBeGreaterThanOrEqual(
+        d.lapse_predictions[i]!.lapse_probability_30d,
+      );
+    }
+  });
+
+  test('churn_trend net_change matches issued - cancelled - lapsed', () => {
+    const d = buildUnderwritingDashboard('BANK_DEMO', NOW);
+    for (const m of d.churn_trend) {
+      expect(m.net_change).toBe(m.policies_issued - m.policies_cancelled - m.policies_lapsed);
+    }
+  });
+
+  test('high_risk_proposals: each has 2-3 risk_factors and a valid band', () => {
+    const d = buildUnderwritingDashboard('BANK_DEMO', NOW);
+    for (const p of d.high_risk_proposals) {
+      expect(['critical', 'high', 'medium']).toContain(p.uw_risk_band);
+      expect(p.risk_factors.length).toBeGreaterThanOrEqual(1);
+      expect(p.risk_factors.length).toBeLessThanOrEqual(3);
+    }
+  });
+});
+
+describe('GET /v1/dashboards/bil/underwriting', () => {
+  const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('admin gets the enveloped UW dashboard', async () => {
+    const { app } = makeBilApp();
+    const r = await request(app).get('/v1/dashboards/bil/underwriting').set(TH);
+    expect(r.status).toBe(200);
+    expect(r.body.body.tenant_id).toBe('BANK_DEMO');
+    expect(r.body.body.totals.proposals_30d).toBeGreaterThan(0);
+    expect(r.body.body.churn_trend).toHaveLength(6);
+  });
+
+  test('non-admin → 403', async () => {
+    const { app } = makeBilApp('field_officer');
+    const r = await request(app).get('/v1/dashboards/bil/underwriting').set(TH);
+    expect(r.status).toBe(403);
+  });
+});
+
+// ─── M11.3 — Agent Dashboard ───────────────────────────────────────────
+
+describe('buildAgentDashboard — pure builder', () => {
+  test('shape: totals + 3 panels', () => {
+    const d = buildAgentDashboard('BIL', NOW);
+    expect(d.totals.active_agents).toBeGreaterThan(0);
+    expect(d.agent_leaderboard).toHaveLength(8);
+    expect(d.risk_contribution).toHaveLength(6);
+    expect(d.cancellation_clusters).toHaveLength(4);
+  });
+
+  test('deterministic — same (tenant, day) → identical', () => {
+    expect(buildAgentDashboard('BIL', NOW)).toEqual(buildAgentDashboard('BIL', NOW));
+  });
+
+  test('leaderboard ranked 1..8', () => {
+    const d = buildAgentDashboard('BANK_DEMO', NOW);
+    expect(d.agent_leaderboard.map((a) => a.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  test('risk_contribution sorted highest risk first', () => {
+    const d = buildAgentDashboard('BANK_DEMO', NOW);
+    for (let i = 1; i < d.risk_contribution.length; i++) {
+      expect(d.risk_contribution[i - 1]!.risk_score).toBeGreaterThanOrEqual(
+        d.risk_contribution[i]!.risk_score,
+      );
+    }
+  });
+
+  test('cancellation_clusters carry agent_count + rate + premium-at-risk', () => {
+    const d = buildAgentDashboard('BANK_DEMO', NOW);
+    for (const c of d.cancellation_clusters) {
+      expect(c.agent_count).toBeGreaterThanOrEqual(2);
+      expect(c.cancellation_rate).toBeGreaterThan(0);
+      expect(c.cancellation_rate).toBeLessThan(1);
+      expect(c.total_premium_at_risk_kes).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('GET /v1/dashboards/bil/agent', () => {
+  const TH = { 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' };
+
+  test('admin gets the enveloped agent dashboard', async () => {
+    const { app } = makeBilApp();
+    const r = await request(app).get('/v1/dashboards/bil/agent').set(TH);
+    expect(r.status).toBe(200);
+    expect(r.body.body.tenant_id).toBe('BIL');
+    expect(r.body.body.agent_leaderboard).toHaveLength(8);
+  });
+});
+
+// ─── M11.4 — Operational Dashboard ─────────────────────────────────────
+
+describe('buildOperationalDashboard — pure builder', () => {
+  test('shape: totals + 3 panels', () => {
+    const d = buildOperationalDashboard('BIL', NOW);
+    expect(d.totals.pending_underwriting).toBeGreaterThan(0);
+    expect(d.totals.suspicious_logins_30d).toBeGreaterThan(0);
+    expect(d.uw_delay_breakdown).toHaveLength(5);
+    expect(d.login_anomalies).toHaveLength(7);
+    expect(d.override_log).toHaveLength(8);
+  });
+
+  test('deterministic — same (tenant, day) → identical', () => {
+    expect(buildOperationalDashboard('BIL', NOW)).toEqual(buildOperationalDashboard('BIL', NOW));
+  });
+
+  test('uw_delay_breakdown sorted by p95 desc', () => {
+    const d = buildOperationalDashboard('BANK_DEMO', NOW);
+    for (let i = 1; i < d.uw_delay_breakdown.length; i++) {
+      expect(d.uw_delay_breakdown[i - 1]!.p95_delay_hours).toBeGreaterThanOrEqual(
+        d.uw_delay_breakdown[i]!.p95_delay_hours,
+      );
+    }
+  });
+
+  test('login_anomalies sorted newest-first', () => {
+    const d = buildOperationalDashboard('BANK_DEMO', NOW);
+    for (let i = 1; i < d.login_anomalies.length; i++) {
+      expect(d.login_anomalies[i - 1]!.occurred_at >= d.login_anomalies[i]!.occurred_at).toBe(true);
+    }
+  });
+
+  test('login_anomalies have valid reasons + severities', () => {
+    const d = buildOperationalDashboard('BANK_DEMO', NOW);
+    for (const a of d.login_anomalies) {
+      expect([
+        'geo_velocity',
+        'device_change',
+        'after_hours_admin',
+        'failed_attempts_spike',
+      ]).toContain(a.reason);
+      expect(['critical', 'high', 'medium']).toContain(a.severity);
+    }
+  });
+
+  test('override_log sorted newest-first; resource_type is from the closed enum', () => {
+    const d = buildOperationalDashboard('BANK_DEMO', NOW);
+    for (let i = 1; i < d.override_log.length; i++) {
+      expect(d.override_log[i - 1]!.ts >= d.override_log[i]!.ts).toBe(true);
+    }
+    for (const o of d.override_log) {
+      expect(['underwriting', 'claim', 'payout', 'kyc']).toContain(o.resource_type);
+    }
+  });
+});
+
+describe('GET /v1/dashboards/bil/operational', () => {
+  const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('admin gets the enveloped ops dashboard', async () => {
+    const { app } = makeBilApp();
+    const r = await request(app).get('/v1/dashboards/bil/operational').set(TH);
+    expect(r.status).toBe(200);
+    expect(r.body.body.uw_delay_breakdown).toHaveLength(5);
+    expect(r.body.body.login_anomalies).toHaveLength(7);
+    expect(r.body.body.override_log).toHaveLength(8);
+  });
+
+  test('non-admin → 403', async () => {
+    const { app } = makeBilApp('field_officer');
+    const r = await request(app).get('/v1/dashboards/bil/operational').set(TH);
+    expect(r.status).toBe(403);
   });
 });
