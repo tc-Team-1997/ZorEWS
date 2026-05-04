@@ -571,3 +571,165 @@ export function buildOperationalDashboard(tenant_id: string, asOf: Date): Operat
     override_log,
   };
 }
+
+// ─── Executive Watchlist (T6 M11.5) ────────────────────────────────────
+//
+// Cross-dashboard rollup: pulls the top concern from each of the 4 BIL
+// dashboards into a single executive feed. Each entry cites which
+// dashboard it came from (`source`) and what severity bucket
+// (`severity`) so the SPA can render a colour-coded watchlist.
+//
+// Pure consolidation — re-uses the 4 builders above; no new data
+// synthesis. Same (tenant_id, day) → same watchlist.
+
+export type WatchlistSource = 'claims' | 'underwriting' | 'agent' | 'operational';
+export type WatchlistSeverity = 'critical' | 'high' | 'medium';
+
+export interface WatchlistItem {
+  /** Stable id: `<source>:<dashboard-row-id>`. */
+  id: string;
+  source: WatchlistSource;
+  severity: WatchlistSeverity;
+  /** One-line headline for the SPA card. */
+  headline: string;
+  /** Pointer to the upstream dashboard row id (provider_id, agent_id,
+   *  proposal_id, etc) so the SPA can deep-link. */
+  ref_id: string;
+  /** Optional KES amount when the entry has a financial dimension —
+   *  null when the entry is descriptive (e.g. login anomaly). */
+  amount_kes: number | null;
+}
+
+export interface ExecutiveWatchlist {
+  tenant_id: string;
+  as_of: string;
+  totals: {
+    /** Total items across all sources. */
+    total_items: number;
+    /** Items per severity bucket. */
+    critical: number;
+    high: number;
+    medium: number;
+  };
+  /** Top items per source (newest / worst-first within each). */
+  items: WatchlistItem[];
+  /** Per-source breakdown counts. */
+  by_source: Record<WatchlistSource, number>;
+}
+
+/**
+ * Build the BIL executive watchlist for a tenant. Calls the 4 dashboard
+ * builders + extracts a top slice from each. Items are sorted by
+ * severity (critical → medium) then alphabetically by id for stability.
+ */
+export function buildExecutiveWatchlist(tenant_id: string, asOf: Date): ExecutiveWatchlist {
+  const claims = buildClaimsDashboard(tenant_id, asOf);
+  const uw = buildUnderwritingDashboard(tenant_id, asOf);
+  const agent = buildAgentDashboard(tenant_id, asOf);
+  const ops = buildOperationalDashboard(tenant_id, asOf);
+
+  const items: WatchlistItem[] = [];
+
+  // Claims: top-3 flagged_hospitals (highest fraud_score) — always
+  // surfaced as 'high' (provider-fraud is operational risk).
+  for (const h of claims.flagged_hospitals.slice(0, 3)) {
+    items.push({
+      id: `claims:${h.provider_id}`,
+      source: 'claims',
+      severity: 'high',
+      headline: `Flagged provider — ${h.provider_name} (rank ${h.rank}, fraud score ${h.fraud_score.toFixed(2)})`,
+      ref_id: h.provider_id,
+      amount_kes: h.total_amount_kes,
+    });
+  }
+
+  // Claims: critical abnormal_claim_patterns — only the ones with
+  // severity='critical' (e.g. WAITING_PERIOD_BREACH).
+  for (const p of claims.abnormal_claim_patterns.filter((x) => x.severity === 'critical')) {
+    items.push({
+      id: `claims:pattern:${p.pattern}`,
+      source: 'claims',
+      severity: 'critical',
+      headline: `${p.pattern} — ${p.count_30d} claims in 30 days (${p.description})`,
+      ref_id: p.pattern,
+      amount_kes: null,
+    });
+  }
+
+  // Underwriting: top-3 high_risk_proposals — bucket maps to severity
+  // (the dashboard already classifies as critical/high/medium).
+  const uwSorted = [...uw.high_risk_proposals].sort((a, b) => {
+    const rank = (s: HighRiskProposal['uw_risk_band']): number =>
+      s === 'critical' ? 0 : s === 'high' ? 1 : 2;
+    return rank(a.uw_risk_band) - rank(b.uw_risk_band);
+  });
+  for (const p of uwSorted.slice(0, 3)) {
+    items.push({
+      id: `underwriting:${p.proposal_id}`,
+      source: 'underwriting',
+      severity: p.uw_risk_band,
+      headline: `${p.uw_risk_band.toUpperCase()} proposal ${p.proposal_id} — ${p.product} (${p.risk_factors.length} risk factors)`,
+      ref_id: p.proposal_id,
+      amount_kes: p.premium_kes,
+    });
+  }
+
+  // Agent: top-3 risk_contribution by risk_score (already sorted desc) —
+  // surfaced as 'high' (above-portfolio claim payout ratio is a
+  // concentrated risk).
+  for (const a of agent.risk_contribution.slice(0, 3)) {
+    items.push({
+      id: `agent:${a.agent_id}`,
+      source: 'agent',
+      severity: 'high',
+      headline: `Agent ${a.agent_name} carrying ${(a.high_risk_share * 100).toFixed(0)}% high-risk share, payout ratio ${a.claim_payout_ratio.toFixed(2)}`,
+      ref_id: a.agent_id,
+      amount_kes: null,
+    });
+  }
+
+  // Operational: critical login_anomalies — already sorted newest-first.
+  for (const l of ops.login_anomalies.filter((x) => x.severity === 'critical').slice(0, 3)) {
+    items.push({
+      id: `operational:${l.username}:${l.occurred_at}`,
+      source: 'operational',
+      severity: 'critical',
+      headline: `Critical login anomaly — ${l.username} from ${l.ip} (${l.reason.replace(/_/g, ' ')})`,
+      ref_id: l.username,
+      amount_kes: null,
+    });
+  }
+
+  // Sort: critical → high → medium, then by id for stability.
+  const sevRank = (s: WatchlistSeverity): number => (s === 'critical' ? 0 : s === 'high' ? 1 : 2);
+  items.sort((a, b) => {
+    const r = sevRank(a.severity) - sevRank(b.severity);
+    if (r !== 0) return r;
+    return a.id.localeCompare(b.id);
+  });
+
+  // Aggregate totals + per-source breakdown.
+  const by_source: Record<WatchlistSource, number> = {
+    claims: 0,
+    underwriting: 0,
+    agent: 0,
+    operational: 0,
+  };
+  let critical = 0;
+  let high = 0;
+  let medium = 0;
+  for (const it of items) {
+    by_source[it.source]++;
+    if (it.severity === 'critical') critical++;
+    else if (it.severity === 'high') high++;
+    else medium++;
+  }
+
+  return {
+    tenant_id,
+    as_of: asOf.toISOString(),
+    totals: { total_items: items.length, critical, high, medium },
+    items,
+    by_source,
+  };
+}

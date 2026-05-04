@@ -94,6 +94,7 @@ import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 import {
   buildAgentDashboard,
   buildClaimsDashboard,
+  buildExecutiveWatchlist,
   buildOperationalDashboard,
   buildUnderwritingDashboard,
 } from './bil_dashboards';
@@ -2076,6 +2077,22 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const dashboard = buildOperationalDashboard(req.tenant!.tenant_id, now());
       res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // ── BIL Executive Watchlist (T6 M11.5) ─────────────────────────────
+  //
+  // Cross-dashboard rollup — pulls top concerns from each of the 4
+  // BIL dashboards into a single executive feed. Each item cites its
+  // source so the SPA can deep-link back to the owning dashboard.
+  app.get(
+    '/v1/dashboards/bil/executive',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const watchlist = buildExecutiveWatchlist(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(watchlist, ctx));
     },
   );
 

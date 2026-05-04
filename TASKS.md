@@ -786,6 +786,26 @@
       - Routes (6): /me happy + 403; /:tenant_id happy + unknown-tenant short-circuit + 403 + cross-tenant probe.
     - **Outcome:** The BIL deployment now has a one-call readiness verdict. Combined with M13.1 admin-config + M8.2 routing + M15.1 audit-trail, the SPA can render a green/amber/red tenant onboarding wizard. Future M2.2 — readiness diff + remediation playbook — extends the same primitive.
 
+  - **M11.5 — BIL Executive Watchlist (2026-05-04):**
+    - Cross-dashboard rollup that consolidates the worst items from each of M11.1-4 into a single executive feed. Demonstrates platform coherence (one route reads from 4 builders) — the BIL exec gets one screen with everything that needs attention today.
+    - New `buildExecutiveWatchlist()` in `services/bff/src/bil_dashboards.ts`:
+      - Pulls from each of the 4 BIL dashboard builders (re-uses existing data; no new synthesis):
+        - **Claims**: top-3 flagged_hospitals (severity='high', amount_kes from total_amount) + every critical abnormal_claim_pattern (severity='critical', e.g. WAITING_PERIOD_BREACH).
+        - **Underwriting**: top-3 high_risk_proposals (severity inherited from `uw_risk_band` — critical/high/medium).
+        - **Agent**: top-3 risk_contribution agents (severity='high'; high_risk_share + payout_ratio surfaced in headline).
+        - **Operational**: critical login_anomalies only (severity='critical'; geo_velocity / device_change / after_hours_admin / failed_attempts_spike).
+      - Items sorted critical → high → medium then by id for stability. Each item carries `source` (claims/underwriting/agent/operational), `ref_id` (so the SPA can deep-link back to the source dashboard row), and `amount_kes` (null when descriptive — login anomalies, agent-risk, claim-pattern entries).
+      - **Aggregation totals**: `total_items`, per-severity counts, per-source counts. Asserted invariants in tests: per-severity sum + per-source sum both equal total_items.
+      - Deterministic per-(tenant, day): same input always yields the same watchlist; different days produce different items.
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `audit:read`):
+      - `GET /v1/dashboards/bil/executive` — the watchlist payload.
+    - **Tests:** BFF 1121/1121 (was 1103 — +18 in `exec_watchlist.test.ts`):
+      - Shape (4): tenant_id + as_of + totals + items + by_source; 3 sum invariants.
+      - Sourcing (7): every item has valid source + severity, severity-sort invariant, id uniqueness, claims top-3 providers + amount, underwriting top-3, agent top-3 (severity=high), operational critical-only invariant.
+      - Determinism + tenant divergence (3): identical (tenant, day), tenant divergence, day divergence.
+      - Route (4): admin happy + 403 + tenant divergence through HTTP + envelope shape.
+    - **Outcome:** The BIL exec screen is a single GET away. **5 BIL dashboards now demoable**: Claims, Underwriting, Agent, Operational (M11.1-4) + Executive Watchlist (M11.5). Module 11 has shipped 5 of the declared 30 dashboard APIs.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
