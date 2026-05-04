@@ -101,6 +101,13 @@ import {
   type Ifrs9StageNum,
 } from './integrations/ifrs9';
 import {
+  AmlError,
+  defaultAmlAdapter,
+  isAmlMatchStatus,
+  type AmlAdapter,
+  type AmlMatchStatus,
+} from './integrations/aml';
+import {
   ConfigValidationError,
   defaultConfigStore,
   listCategories as listConfigCategories,
@@ -187,6 +194,13 @@ export interface AppDeps {
    */
   ifrs9Adapter?: Ifrs9Adapter;
   /**
+   * Override for tests — AML Watchlist adapter (T6 M14.3). Defaults
+   * to the module-level StubAmlAdapter (deterministic synthetic
+   * screening — ~85% clean, ~10% one match, ~5% multi-match).
+   * Production swaps in a SOAP/REST gateway to the AML hub.
+   */
+  amlAdapter?: AmlAdapter;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -265,6 +279,7 @@ export function makeApp(deps: AppDeps = {}) {
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
+  const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -1641,6 +1656,190 @@ export function makeApp(deps: AppDeps = {}) {
             {
               code: 'EWS_502',
               message: e instanceof Error ? e.message : 'ifrs9 adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── AML Watchlist adapter (T6 M14.3) ─────────────────────────────────
+
+  /**
+   * POST /v1/integrations/aml/screen body: { customer_id }
+   * Screen a customer against the configured watchlists. Synchronous
+   * stub — production wires this to the AML hub.
+   */
+  app.post(
+    '/v1/integrations/aml/screen',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const customer_id = (inner as { customer_id?: string } | undefined)?.customer_id;
+      if (typeof customer_id !== 'string' || !customer_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const result = await amlAdapter.screenCustomer(req.tenant!.tenant_id, customer_id, now());
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'aml adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/aml/matches?customer_id=X — list customer's matches. */
+  app.get(
+    '/v1/integrations/aml/matches',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      if (!customer_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id query parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = await amlAdapter.listMatches(req.tenant!.tenant_id, customer_id);
+        return res.json(wrapResponse({ items, total: items.length, customer_id }, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'aml adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/aml/matches/:match_id — single match. 404 on miss. */
+  app.get(
+    '/v1/integrations/aml/matches/:match_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const match_id = req.params.match_id ?? '';
+      try {
+        const match = await amlAdapter.getMatch(req.tenant!.tenant_id, match_id);
+        if (!match) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `aml match ${match_id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(match, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'aml adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * PATCH /v1/integrations/aml/matches/:match_id body: { status }
+   * Update a match's status (cleared / escalated / false_positive).
+   * Records the changed_by user from X-APEX-USER (default 'admin').
+   */
+  app.patch(
+    '/v1/integrations/aml/matches/:match_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const match_id = req.params.match_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const status = (inner as { status?: unknown } | undefined)?.status;
+      if (!isAmlMatchStatus(status)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_status',
+              message: 'status must be one of open|cleared|escalated|false_positive',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const changed_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const updated = await amlAdapter.updateMatchStatus(
+          req.tenant!.tenant_id,
+          match_id,
+          status as AmlMatchStatus,
+          changed_by,
+          now(),
+        );
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof AmlError) {
+          if (e.code === 'unknown_match') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_match', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'aml adapter failed',
               severity: 'HIGH',
             },
             ctx,

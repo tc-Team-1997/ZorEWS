@@ -535,6 +535,28 @@
       - Routes (23): catalog list happy + 2 filters + 2 invalid 400s + 403; catalog/:id happy + 404; submit happy + envelope + 4 error codes routed correctly + 403; list happy + 4 filter cases + invalid_status 400 + 403; single job happy + 404 + cross-tenant 404; backwards-compat regression on existing /v1/reports/snapshot; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** **Module 12's first T6 slice shipped — the BIL platform expansion now has shipped T6 surface across every one of the 16 declared modules.** Future M12.2 — computers for the 5 new BIL-specific reports (legacy_type=null) + scheduled-job runner that mirrors the registry-shipped schedule strings — extends without altering this primitive.
 
+  - **M14.3 — AML Watchlist adapter (2026-05-04):**
+    - 3rd Module 14 adapter — completes the BIL pitch's regulatory-screening trio (CBS via existing health, Core Insurance via M14.1, IFRS9 via M14.2, AML now). Surfaces per-customer screening results so the SPA can render the AML match panel and case-management can pivot from a hit to an investigation.
+    - New `services/bff/src/integrations/aml.ts`:
+      - `AmlAdapter` interface — `screenCustomer / listMatches / getMatch / updateMatchStatus`. The screen endpoint is idempotent per `(tenant, customer)` — first call synthesises matches and persists them; subsequent calls return the existing ledger so updates to status survive.
+      - `StubAmlAdapter` — deterministic distribution: ~85% clean, ~10% one match, ~4% two matches, ~1% three matches. Match counts derived deterministically per `(tenant, customer, day)` via FNV-1a + Mulberry32. Matches persisted in a 2-level map (byCustomer + byMatchId reverse index) so listMatches scopes without scanning.
+      - **4 match types** sourced from the 4 BIL-pitch watchlist categories: `sanctions` (OFAC SDN / UN / EU / RBI), `pep` (Dow Jones, World-Check, Internal), `adverse_media` (Reuters / World-Check / local news), `internal_watchlist` (BIL / BANK_DEMO internal). 3 severity buckets (`high/medium/low`) with type-aware mapping (`sanctions` 0.85+ → high; `pep` capped at medium; `adverse_media`/`internal` capped at medium).
+      - **4 status states** for review workflow: `open / cleared / escalated / false_positive`. `requires_review` = any open high OR ≥3 open medium. `highest_severity` rolls up across the match list (null when clean).
+      - `AmlError` carries codes `unknown_match`, `invalid_status`.
+    - **`AppDeps.amlAdapter` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `POST /v1/integrations/aml/screen` body `{customer_id}` — synchronous screening. 400 on missing customer_id, 502 envelope on adapter throw.
+      - `GET /v1/integrations/aml/matches?customer_id=X` — list persisted matches, sorted highest-severity first.
+      - `GET /v1/integrations/aml/matches/:match_id` — single match. 404 on miss + cross-tenant lookup (tenant scoping enforced).
+      - `PATCH /v1/integrations/aml/matches/:match_id` body `{status}` — workflow transition. Records `status_changed_at` + `status_changed_by` (from `X-APEX-USER`, default 'admin'). Errors: `EWS_400_invalid_status`, `EWS_404_unknown_match`.
+    - **Tests:** BFF 705/705 (was 667 — +38 in `aml_adapter.test.ts`):
+      - Type guards (2): isAmlMatchStatus accepts/rejects.
+      - screenCustomer (9): shape, determinism, tenant divergence, ~85% clean distribution (loose ≥70% to avoid statistical flake), every-field-present invariant, severity-sort, requires_review derivation, clean-customer null severity, empty customer_id guard.
+      - listMatches + getMatch (3): persisted after screen, empty before screen, cross-tenant null.
+      - updateMatchStatus (5): updates status + audit fields, mirrored across both maps, unknown_match throw, invalid_status throw.
+      - Routes (15): screen happy + envelope body + 400/403/502 + risk_analyst accepted; matches list happy + 400 + 403; single match happy + 404 + cross-tenant 404; PATCH happy + default changed_by + envelope body + 400 invalid_status + 404 unknown_match + 403; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 3 shipped adapters (insurance, ifrs9, aml) — covering 10 of the declared 50 APIs. The pattern is fully established (`<Upstream>Adapter` interface + `Stub<Upstream>Adapter` + adapter-error-class with status-code routing); future M14.4 (DMS), M14.5 (Bureau), M14.6 (CBS data routes), etc. each follow the same shape.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
