@@ -1090,6 +1090,29 @@
       - No-regression (4): M3.1 GET `/v1/ingestion/connectors`, `/connectors/:id`, `/connectors/:id/runs`, `/health` still 200 (sub-path didn't shadow `:id`).
     - **Outcome:** Module 3 now has 2 sub-phases (M3.1 connector registry + M3.2 schema metadata). The ingestion UI can render a column-mapper preview before file upload + validate sample rows. Future M3.3 would cover *per-tenant schema overrides* — but the platform-static schema is correct for BIL today since every tenant talks to the same upstream systems.
 
+  - **M15.3 — Audit retention / evidence packaging (2026-05-05):**
+    - M15.1 ships the BIL audit log; M15.2 adds the SHA-256 hash-chain. M15.3 ships the evidence-packaging primitive that BIL compliance teams use to respond to RBI / IRDAI audit requests: *"show me every action by user X on case CASE-123 between 2026-04-01 and 2026-04-30, with chain-integrity attestation"*. The package is a frozen, filtered snapshot + chain-verification result + size-estimate; the SPA archives it (typically signed + zipped client-side) and a regulator can replay it from the package alone.
+    - New `services/bff/src/audit_evidence.ts`:
+      - `EvidenceFilters` extends M15.1's `AuditFilters` with `resource_id` (the most-asked axis: "everything that touched this case/customer"). Resource_id post-filtering happens after the M15.1 list since M15.1 doesn't index by it.
+      - `EvidencePackage` shape: `package_id` (`EVD-{tenant}-{ts}-{seq}`), `tenant_id`, `generated_at`, `generated_by` (X-APEX-USER), `filters`, `event_count`, `events[]` (frozen at package time, oldest-first to align with chain order), `integrity` (`chain_verified` + `chain_last_hash` + first/last event hash + `broken_at` if tampered), `size_bytes` (canonical JSON length).
+      - `validateFilters()` — pure validator. ISO-8601 datetime regex, since ≤ until, string-length caps, type/outcome/severity guards routed via `EvidenceError` codes (`invalid_input` / `invalid_resource_type` / `invalid_outcome` / `invalid_severity`) → 400.
+      - `buildEvidencePackage(audit, tenant_id, filters, generated_by, now, seq)` — pure function. Drains all matching events from the audit store via `list()` paginating up to 200 pages × 500 events = 100k cap. Calls `verifyChain()` to attach integrity attestation. **Note:** chain verification reflects the *underlying tenant chain* (the package can be a subset).
+      - `EvidencePackageStore` interface + `InMemoryEvidencePackageStore` (cap = 100 packages/tenant; oldest evicted on overflow). Per-tenant seq counter.
+    - **`AppDeps.evidenceStore` injection point** — defaults to module-level singleton.
+    - **3 new BFF routes** (all tenant-gated, all enveloped, `audit:read` admin-only):
+      - `POST /v1/audit/evidence` body `{since?, until?, actor_username?, action?, resource_type?, resource_id?, outcome?, severity?}` — 201 with package; records `X-APEX-USER` as generated_by (default 'admin').
+      - `GET /v1/audit/evidence?page=1&page_size=20` — newest-first pagination; page_size capped at 50.
+      - `GET /v1/audit/evidence/:package_id` — single package. Tenant-scoped 404 (cross-tenant lookup gets `EWS_404_unknown_package`).
+    - **Tests:** BFF 1700/1700 (was 1646 — +54 in `audit_evidence.test.ts`):
+      - validateFilters (12): empty input, non-object 400, ISO datetime, since > until, string fields, blank/overlong rejection, invalid resource_type/outcome/severity, all-pass case.
+      - buildEvidencePackage (13): empty audit clean chain, package_id format, no-filter capture, resource_id post-filter, actor/resource_type/outcome filters, integrity hashes, size_bytes canonical, generated_by/_at echo, empty generated_by/tenant rejection, cross-tenant isolation.
+      - InMemoryEvidencePackageStore (7): create+get round-trip, per-tenant seq, cap eviction, newest-first paginated list, cross-tenant isolation, get null on miss, page_size cap.
+      - POST route (11): 201 happy, enveloped body, filter by actor/resource_id, integrity surfaced, invalid resource_type/outcome/since 400, since > until 400, default generated_by, role 403.
+      - GET list route (3): newest-first, pagination, role 403.
+      - GET single route (4): 200 happy, 404 unknown, cross-tenant 404, role 403.
+      - No-regression (4): M15.1 GET `/v1/audit/events`, `/v1/audit/integrity`, `/v1/audit/events/:event_id`, `/v1/audit/summary` still 200 (sub-path didn't shadow).
+    - **Outcome:** Module 15 now has 3 sub-phases (M15.1 audit log + M15.2 hash-chain + M15.3 evidence packaging). Combined with M9.3 maker-checker + M13.2 config-audit wiring, the BIL deployment can demo the full RBI evidence flow end-to-end: action recorded → chain-linked → assembled into evidence package → handed to regulator with cryptographic provenance. Future M15.4 would likely add **PDF/Excel evidence export** (the package is currently JSON-only; ops asked for printable formats during the M12.1 reports review).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

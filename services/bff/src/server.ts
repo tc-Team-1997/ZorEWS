@@ -284,6 +284,13 @@ import {
   type AuditTrailStore,
 } from './audit_trail';
 import {
+  EvidenceError,
+  defaultEvidencePackageStore,
+  validateFilters,
+  type EvidenceFilters,
+  type EvidencePackageStore,
+} from './audit_evidence';
+import {
   defaultIngestionRegistry,
   IngestionError,
   type IngestionRegistry,
@@ -433,6 +440,11 @@ export interface AppDeps {
    */
   auditTrailStore?: AuditTrailStore;
   /**
+   * Override for tests — evidence package store (T6 M15.3). Defaults
+   * to the module-level InMemoryEvidencePackageStore (cap 100/tenant).
+   */
+  evidenceStore?: EvidencePackageStore;
+  /**
    * Override for tests — BIL ingestion connector registry (T6 M3.1).
    * Defaults to the module-level InMemoryIngestionRegistry seeded with
    * 8 BIL upstream connectors. Production swaps in an
@@ -543,6 +555,7 @@ export function makeApp(deps: AppDeps = {}) {
   const indicatorWeightLookup = deps.indicatorWeightLookup ?? defaultIndicatorWeightLookup;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
+  const evidenceStore = deps.evidenceStore ?? defaultEvidencePackageStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
@@ -5127,6 +5140,98 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const out = auditTrailStore.verifyChain(req.tenant!.tenant_id, now());
       res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── Audit evidence packaging (T6 M15.3) ─────────────────────────────
+  //
+  // Build a filtered + chain-verified snapshot of audit events that
+  // BIL compliance can hand to a regulator. Per-tenant cap = 100
+  // packages — older entries evict oldest-first. Reuses the M15.1
+  // audit log + M15.2 chain-verifier; this layer only assembles
+  // the package + retains it.
+
+  /** POST /v1/audit/evidence body { since?, until?, actor_username?,
+   *  action?, resource_type?, resource_id?, outcome?, severity? } —
+   *  build + retain a new package. 201 created. Records X-APEX-USER
+   *  as `generated_by`.
+   */
+  app.post(
+    '/v1/audit/evidence',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const generated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const filters: EvidenceFilters = validateFilters(inner ?? {});
+        const pkg = evidenceStore.create(
+          req.tenant!.tenant_id,
+          auditTrailStore,
+          generated_by,
+          filters,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(pkg, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof EvidenceError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'evidence build failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/audit/evidence?page=1&page_size=20 — list packages
+   *  newest-first. */
+  app.get(
+    '/v1/audit/evidence',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = req.query.page ? Math.max(1, Number(req.query.page) || 1) : 1;
+      const page_size = req.query.page_size ? Math.max(1, Math.min(50, Number(req.query.page_size) || 20)) : 20;
+      const out = evidenceStore.list(req.tenant!.tenant_id, page, page_size);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/audit/evidence/:package_id — single package. 404 on miss. */
+  app.get(
+    '/v1/audit/evidence/:package_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const package_id = req.params.package_id ?? '';
+      const pkg = evidenceStore.get(req.tenant!.tenant_id, package_id);
+      if (!pkg) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_package', message: `evidence package ${package_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(pkg, ctx));
     },
   );
 
