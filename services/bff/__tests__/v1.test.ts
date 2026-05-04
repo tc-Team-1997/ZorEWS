@@ -353,3 +353,66 @@ describe('POST /v1/action (T4.24 enveloped)', () => {
     expect(r.body.header.requestId).toBe(requestId);
   });
 });
+
+// T4.24 Phase 9 — multi-tenant introspection endpoints.
+describe('GET /v1/tenants/me + GET /v1/tenants (T4.24 Phase 9)', () => {
+  const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+  const TH_BIL = { 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' };
+
+  test('GET /v1/tenants/me returns the caller\'s tenant from X-Tenant-ID', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/tenants/me').set(TH);
+    expect(r.status).toBe(200);
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.body.tenant_id).toBe('BANK_DEMO');
+    expect(r.body.body.vertical).toBe('banking');
+    // Channels must be exposed so admins know which channels are allowed.
+    expect(r.body.body.channels_allowed).toEqual(expect.arrayContaining(['API']));
+  });
+
+  test('GET /v1/tenants/me returns BIL when caller is in BIL', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/tenants/me').set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.tenant_id).toBe('BIL');
+    expect(r.body.body.vertical).toBe('insurance');
+  });
+
+  test('GET /v1/tenants/me requires tenant context — 400 envelope when missing', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/tenants/me').set({ 'X-Channel': 'API' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400');
+  });
+
+  test('GET /v1/tenants admin lists every configured tenant', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).get('/v1/tenants').set(TH);
+    expect(r.status).toBe(200);
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(Array.isArray(r.body.body.items)).toBe(true);
+    expect(r.body.body.total).toBeGreaterThanOrEqual(2);
+    const ids = r.body.body.items.map((t: { tenant_id: string }) => t.tenant_id).sort();
+    expect(ids).toEqual(expect.arrayContaining(['BANK_DEMO', 'BIL']));
+  });
+
+  test('GET /v1/tenants requires admin (audit:read)', async () => {
+    // makeV1App sets getRole=admin; build a fresh app with field_officer
+    // to assert the RBAC gate.
+    const { makeApp } = jest.requireActual('../src/server') as typeof import('../src/server');
+    const { StaticSource } = jest.requireActual('../src/source') as typeof import('../src/source');
+    const { StubEvaluator } = jest.requireActual('../src/score') as typeof import('../src/score');
+    const { StubRiskProfileSource } = jest.requireActual('../src/risk_profile') as typeof import('../src/risk_profile');
+    const { UnavailableCaseActionSink } = jest.requireActual('../src/case_action') as typeof import('../src/case_action');
+    const fieldOnly = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      now: () => NOW,
+      getRole: () => 'field_officer',
+    });
+    const r = await request(fieldOnly.app).get('/v1/tenants').set(TH);
+    expect(r.status).toBe(403);
+  });
+});

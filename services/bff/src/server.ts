@@ -696,6 +696,43 @@ export function makeApp(deps: AppDeps = {}) {
     res.json(wrapResponse(summary, ctx));
   });
 
+  // ── Multi-tenant introspection (T4.24 Phase 9) ────────────────────────
+  //
+  // Read-only endpoints for callers + admins to introspect the tenant
+  // registry. /tenants/me works for any authenticated request that
+  // carries tenant context (the middleware already populated it).
+  // /tenants is admin-only — listing every configured tenant is a
+  // platform-admin concern, not a per-tenant one.
+
+  /** GET /v1/tenants/me — returns the caller's tenant. */
+  app.get('/v1/tenants/me', requireTenantMw, (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse(req.tenant, ctx));
+  });
+
+  /**
+   * GET /v1/tenants — admin-only listing of every configured tenant.
+   * 501 envelope when the tenant lookup doesn't expose `all()` (some
+   * test stubs don't bother).
+   */
+  app.get('/v1/tenants', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    if (!tenantLookup.all) {
+      return res.status(501).json(
+        wrapError(
+          {
+            code: 'EWS_501',
+            message: 'tenant lookup does not support enumeration',
+            severity: 'LOW',
+          },
+          ctx,
+        ),
+      );
+    }
+    const items = await tenantLookup.all();
+    res.json(wrapResponse({ items, total: items.length }, ctx));
+  });
+
   app.get(
     '/v1/integrations/health',
     requireTenantMw,
@@ -856,24 +893,34 @@ export function makeApp(deps: AppDeps = {}) {
     requireTenantMw,
     requireRole('customers:read_risk_profile'),
     async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
       const type = req.params.type as ReportType;
       if (!REPORT_TYPES.includes(type)) {
-        return res
-          .status(400)
-          .json({ error: `type must be one of ${REPORT_TYPES.join(',')}` });
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: `type must be one of ${REPORT_TYPES.join(',')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
       }
       const periodRaw = (req.query.period as string | undefined) ?? 'month';
       if (!REPORT_PERIODS.includes(periodRaw as ReportPeriod)) {
-        return res
-          .status(400)
-          .json({ error: `period must be one of ${REPORT_PERIODS.join(',')}` });
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: `period must be one of ${REPORT_PERIODS.join(',')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
       }
       const format = (req.query.format as string | undefined) ?? 'json';
       const VALID_FORMATS = ['json', 'csv', 'pdf', 'xlsx'] as const;
       if (!VALID_FORMATS.includes(format as (typeof VALID_FORMATS)[number])) {
-        return res
-          .status(400)
-          .json({ error: `format must be one of ${VALID_FORMATS.join(',')}` });
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: `format must be one of ${VALID_FORMATS.join(',')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
       }
       // Pull the operator's display_name off an optional header so the PDF
       // and XLSX exports can stamp it in the footer / metadata sheet for
@@ -913,9 +960,17 @@ export function makeApp(deps: AppDeps = {}) {
           );
           return res.send(buf);
         }
-        res.json(payload);
+        // T4.24 Phase 9 — JSON variant uses the bank-grade envelope.
+        // Binary formats (csv/pdf/xlsx) above stay raw because the
+        // envelope can't wrap a Buffer + Content-Disposition cleanly.
+        res.json(wrapResponse(payload, ctx));
       } catch (e) {
-        res.status(500).json({ error: e instanceof Error ? e.message : 'report failed' });
+        res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'report failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
       }
     },
   );

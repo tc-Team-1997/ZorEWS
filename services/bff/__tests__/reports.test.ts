@@ -208,8 +208,9 @@ describe('GET /v1/reports/:type (T4.24 tenant-gated)', () => {
     const r = await request(app).get('/v1/reports/snapshot?period=month').set(TENANT_HEADERS);
     expect(r.status).toBe(200);
     expect(r.headers['content-type']).toMatch(/json/);
-    expect(r.body.type).toBe('snapshot');
-    expect(r.body.period).toBe('month');
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.body.type).toBe('snapshot');
+    expect(r.body.body.period).toBe('month');
   });
 
   test('returns CSV with attachment header when format=csv', async () => {
@@ -267,21 +268,22 @@ describe('GET /v1/reports/:type (T4.24 tenant-gated)', () => {
     const { app } = makeReportsApp();
     const r = await request(app).get('/v1/reports/garbage').set(TENANT_HEADERS);
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/type must be one of/);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/type must be one of/);
   });
 
   test('400 on unknown period', async () => {
     const { app } = makeReportsApp();
     const r = await request(app).get('/v1/reports/snapshot?period=year').set(TENANT_HEADERS);
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/period must be one of/);
+    expect(r.body.error.message).toMatch(/period must be one of/);
   });
 
   test('400 on unknown format', async () => {
     const { app } = makeReportsApp();
     const r = await request(app).get('/v1/reports/snapshot?format=docx').set(TENANT_HEADERS);
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/format/);
+    expect(r.body.error.message).toMatch(/format/);
   });
 
   test('all four report types respond with 200', async () => {
@@ -289,7 +291,7 @@ describe('GET /v1/reports/:type (T4.24 tenant-gated)', () => {
     for (const type of ['snapshot', 'alerts', 'cases', 'rbi'] as const) {
       const r = await request(app).get(`/v1/reports/${type}?period=quarter`).set(TENANT_HEADERS);
       expect(r.status).toBe(200);
-      expect(r.body.type).toBe(type);
+      expect(r.body.body.type).toBe(type);
     }
   });
 });

@@ -49,8 +49,18 @@ export interface Tenant {
   active: boolean;
 }
 
-/** Lookup signature; production wires to pg, tests inject a Map. */
-export type TenantLookup = (tenantId: string) => Tenant | undefined | Promise<Tenant | undefined>;
+/**
+ * Lookup signature; production wires to pg, tests inject a Map.
+ *
+ * The `all()` method is optional — used by `GET /v1/tenants` (admin-only
+ * listing) to enumerate every configured tenant. Production lookups
+ * backed by pg should implement it; ad-hoc test stubs can omit it (the
+ * route returns a 501 if it's missing).
+ */
+export interface TenantLookup {
+  (tenantId: string): Tenant | undefined | Promise<Tenant | undefined>;
+  all?: () => Tenant[] | Promise<Tenant[]>;
+}
 
 /** Default in-memory tenant registry — mirrors the 005_tenants.sql seed. */
 const DEFAULT_TENANTS: Tenant[] = [
@@ -72,7 +82,10 @@ const DEFAULT_TENANTS: Tenant[] = [
 
 export function defaultTenantLookup(): TenantLookup {
   const byId = new Map(DEFAULT_TENANTS.map((t) => [t.tenant_id, t]));
-  return (id: string) => byId.get(id);
+  const lookup = ((id: string) => byId.get(id)) as TenantLookup;
+  // Snapshot — admin listing iterates over the seed registry.
+  lookup.all = () => DEFAULT_TENANTS.slice();
+  return lookup;
 }
 
 /**
