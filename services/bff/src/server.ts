@@ -167,6 +167,11 @@ import {
   type RoutingRule,
 } from './alert_routing';
 import {
+  AlertAckError,
+  defaultAlertAckStore,
+  type AlertAckStore,
+} from './alert_ack';
+import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
@@ -365,6 +370,11 @@ export interface AppDeps {
    */
   alertRoutingEngine?: AlertRoutingEngine;
   /**
+   * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
+   * to the module-level InMemoryAlertAckStore.
+   */
+  alertAckStore?: AlertAckStore;
+  /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
    * (deterministic synthetic data per (tenant, customer, day)).
@@ -544,6 +554,7 @@ export function makeApp(deps: AppDeps = {}) {
   const smsTransport = deps.smsTransport ?? defaultSmsTransport;
   const pushTransport = deps.pushTransport ?? defaultPushTransport;
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
+  const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -844,6 +855,148 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  // ── Alert acknowledgment workflow (T6 M8.3) ─────────────────────────
+  //
+  // Per-alert ack/unack lifecycle with notes + history. The full
+  // investigation lifecycle lives in M9.1; this is the lighter "I've
+  // seen this" affordance the BIL §11 SLA timer needs to satisfy.
+  // Ack = analyst+ (cases:log_action); reads = alerts:list.
+
+  /** POST /v1/alerts/:alert_id/ack body { notes? } — 200 with new state. */
+  app.post(
+    '/v1/alerts/:alert_id/ack',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const alert_id = req.params.alert_id ?? '';
+      const actor_username = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { notes?: unknown };
+      try {
+        const out = alertAckStore.acknowledge(
+          req.tenant!.tenant_id,
+          alert_id,
+          actor_username,
+          wrapper.notes as string | null | undefined,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AlertAckError) {
+          if (e.code === 'already_acknowledged') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'ack failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/alerts/:alert_id/unack body { reason } — required reason. */
+  app.post(
+    '/v1/alerts/:alert_id/unack',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const alert_id = req.params.alert_id ?? '';
+      const actor_username = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { reason?: unknown };
+      try {
+        const out = alertAckStore.unacknowledge(
+          req.tenant!.tenant_id,
+          alert_id,
+          actor_username,
+          (wrapper.reason ?? '') as string,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AlertAckError) {
+          if (e.code === 'not_acknowledged') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'unack failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/alerts/:alert_id/ack — current ack state. Always 200
+   *  (an alert that was never touched returns status='open'). */
+  app.get(
+    '/v1/alerts/:alert_id/ack',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const alert_id = req.params.alert_id ?? '';
+      try {
+        const state = alertAckStore.get(req.tenant!.tenant_id, alert_id);
+        return res.json(wrapResponse(state, ctx));
+      } catch (e) {
+        if (e instanceof AlertAckError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/alerts/:alert_id/ack/history — history list (oldest-first). */
+  app.get(
+    '/v1/alerts/:alert_id/ack/history',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const alert_id = req.params.alert_id ?? '';
+      try {
+        const state = alertAckStore.get(req.tenant!.tenant_id, alert_id);
+        return res.json(wrapResponse({ alert_id, items: state.history, total: state.history.length }, ctx));
+      } catch (e) {
+        if (e instanceof AlertAckError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
       }
     },
   );

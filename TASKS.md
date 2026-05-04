@@ -1113,6 +1113,32 @@
       - No-regression (4): M15.1 GET `/v1/audit/events`, `/v1/audit/integrity`, `/v1/audit/events/:event_id`, `/v1/audit/summary` still 200 (sub-path didn't shadow).
     - **Outcome:** Module 15 now has 3 sub-phases (M15.1 audit log + M15.2 hash-chain + M15.3 evidence packaging). Combined with M9.3 maker-checker + M13.2 config-audit wiring, the BIL deployment can demo the full RBI evidence flow end-to-end: action recorded → chain-linked → assembled into evidence package → handed to regulator with cryptographic provenance. Future M15.4 would likely add **PDF/Excel evidence export** (the package is currently JSON-only; ops asked for printable formats during the M12.1 reports review).
 
+  - **M8.3 — Alert acknowledgment workflow (2026-05-05):**
+    - M8.1 ships the BIL Red/Orange/Yellow classification; M8.2 ships the auto-routing matrix. M8.3 closes the loop on the operator side: an analyst sees an alert, marks it `acknowledged` with optional notes, and that ack appears on the dashboard so other analysts know it's been seen. The lighter "I've seen this" affordance the BIL §11 SLA timer needs to satisfy ("orange: respond within 24h") — heavier investigation lifecycle still lives in M9.1.
+    - New `services/bff/src/alert_ack.ts`:
+      - State per (tenant, alert): `open | acknowledged`. Live state carries `acked_by` + `acked_at` + `ack_notes` (latest only) + full `history[]` (every transition).
+      - `history[]` entry: `{ts, action: 'acknowledged' | 'unacknowledged', actor_username, notes}` — preserved across re-acks so the SPA renders the full timeline.
+      - **Unacknowledge requires a `reason`** (analysts have to say WHY they're un-acking). RBI logs this — drives M13.2-style audit-trail entries via the SPA.
+      - Notes/reason capped at 2000 chars; alert_id capped at 64 chars.
+      - `AlertAckStore` interface (`get / acknowledge / unacknowledge`) + `InMemoryAlertAckStore`. `get()` returns a default `open` state for never-touched alerts (no 404 — the alert can be classified before being acked). Defensive copy on every `get` so callers can't mutate the live state.
+      - `AlertAckError` codes routed: `already_acknowledged` + `not_acknowledged` → 409, `invalid_input` + `invalid_alert_id` → 400.
+    - **`AppDeps.alertAckStore` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (all tenant-gated, all enveloped):
+      - `POST /v1/alerts/:alert_id/ack` body `{notes?}` — RBAC `cases:log_action` (analyst+). 200 happy. Records X-APEX-USER as actor (default 'admin').
+      - `POST /v1/alerts/:alert_id/unack` body `{reason}` — RBAC `cases:log_action`. 200 happy. Reason required (empty/whitespace → 400).
+      - `GET /v1/alerts/:alert_id/ack` — RBAC `alerts:list` (analyst). 200 always (default `open` state for never-touched).
+      - `GET /v1/alerts/:alert_id/ack/history` — RBAC `alerts:list`. 200 with `{alert_id, items[], total}` oldest-first.
+    - **Tests:** BFF 1745/1745 (was 1700 — +45 in `alert_ack.test.ts`):
+      - Store.get (4): default-open shape, defensive copy, blank/overlong alert_id rejection.
+      - Store.acknowledge (10): happy with notes, notes optional/null/undefined/whitespace/trim, > 2000 cap, non-string rejection, missing actor, already_acknowledged 409, cross-tenant disjointness.
+      - Store.unacknowledge (6): happy with reason in history, reason required, > 2000 cap, not_acknowledged on never-acked + on already-unacked, re-ack rebuilds live state.
+      - POST /ack route (8): analyst+ 200, enveloped body, default actor admin, optional notes, > 2000 → 400, alert_id > 64 → 400, 2nd ack → 409, role 403.
+      - POST /unack route (5): analyst+ 200, missing reason 400, empty reason 400, never-acked → 409, role 403.
+      - GET /ack route (4): never-touched returns open + empty history, post-ack reflects state, role 403, cross-tenant isolation.
+      - GET /ack/history route (3): empty for never-touched, all transitions oldest-first, role 403.
+      - No-regression (4): M8.1 GET `/v1/alerts`, `/classification/spec`, `/by-class/red`, M8.2 `/routing/rules` still 200 (alert_id param didn't capture by-class).
+    - **Outcome:** Module 8 now has 3 sub-phases (M8.1 classification + M8.2 routing + M8.3 ack). Combined with M9.1 investigation tracker + M9.3 maker-checker, the BIL operator workflow runs end-to-end: severity arrives → classified → routed → acked (analyst sees it) → investigation opened (M9.1) → sensitive actions gated by 4-eyes (M9.3). Future M8.4 likely covers **alert auto-ack via threshold rules** (e.g. green-class alerts auto-ack on receipt to keep dashboard clean).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
