@@ -313,6 +313,16 @@
     - **Tests:** auth-svc 146 in-memory + 20 pg-skipped (was 136 — +10 in `totp.test.ts`: setup happy path, setup→verify happy path with backup-code mint, verify wrong code → 401, verify malformed → 400, login flow round-trip with TOTP, verify-2fa wrong code → 401, backup code single-use, DELETE disables, non-admin can't disable other users, setup 409 when already enrolled). BFF / cases / alerts / SPA all unchanged.
     - **Dependency:** added `otpauth@^9` to auth-svc.
 
+  - **M4.1 — Insurance KRI catalogue (2026-05-04):**
+    - New file `services/regulatory-svc/indicators/catalog_insurance.json` — 25 BIL-specific indicators across 5 KRI families (Policy 7, Customer 5, Agent 4, Claim 5, Operational 4). Sourced from `DataNetworks-EWS-Ver1.pdf` §7-10. Same `IndicatorDef` shape as the banking catalog so any consumer that handles one handles the other.
+    - Family / id-prefix mapping: Policy → `POL-*`, Customer → `CUS-INS-*` (avoids collision with future banking customer ids), Agent → `AGT-*`, Claim → `CLM-*`, Operational → `OPS-*`. Inputs reference `mart.policy_360` / `mart.claim_360` / `mart.agent_360` etc. — those tables don't materialise yet (the catalog is forward-looking; compute fns + tables ship with the BIL synthetic-data follow-up).
+    - **`catalog.ts` evolution** — adds `loadInsuranceCatalog()` (memoised) and `loadCatalogFor(vertical)` (banking | insurance dispatch). The compute-registry assertion (`checkRegistryAgainstCatalog`) is intentionally NOT applied to the insurance catalog because compute fns ship later.
+    - **Two new routes** in `regulatory-svc/indicators/src/server.ts`:
+      - `GET /indicators/insurance` — returns the BIL catalog directly.
+      - `GET /indicators/by-vertical?vertical=banking|insurance` — vertical-aware dispatch. Tenants carry `vertical` (T4.24 Phase 1) so the BFF can forward `?vertical=${req.tenant.vertical}` and the indicator service picks the right catalog without the BFF hard-coding.
+    - **Tests:** indicators suite 94/94 (was 81 — +13 in `insurance_catalog.test.ts`): catalog loads, declares vertical=insurance, spans 5 families with ≥3 indicators each, every indicator carries the standard IndicatorDef fields, ids unique + don't collide with banking prefixes, both new routes happy paths, default + invalid `vertical=` handling.
+    - **Outcome:** the BIL deployment now has a structured indicator contract. When the BIL synthetic dataset lands (separate ticket) the compute fns can target known ids; the catalog itself is already shippable to the BIL stakeholders for review.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

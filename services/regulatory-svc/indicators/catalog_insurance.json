@@ -1,0 +1,264 @@
+{
+  "version": "0.1.0",
+  "vertical": "insurance",
+  "generated_at": "2026-05-04",
+  "owner_agent": "agent-indicator",
+  "source": "DataNetworks-EWS-Ver1.pdf §7-10 — Risk Indicators (Functional Requirements). 5 KRI families covering the BIL deployment.",
+  "notes": "T6 M4.1 — initial 25-indicator BIL insurance catalogue. Inputs reference mart.policy_360 / mart.claim_360 / mart.agent_360 etc. which don't materialise yet — those tables ship with the BIL synthetic-data follow-up. Catalog is the contract; compute fns land alongside the data.",
+  "indicators": [
+    {
+      "id": "POL-001",
+      "family": "Policy",
+      "name": "address_change_freq_180d",
+      "description": "Number of distinct address changes in the customer's profile over the last 180 days. High frequency is a fraud / proxy-policyholder signal.",
+      "formula_pseudocode": "count(distinct customer.address_history.entry, last_180d)",
+      "window_days": 180,
+      "severity_weight": 0.65,
+      "inputs": ["mart.customer_360.address_history"]
+    },
+    {
+      "id": "POL-002",
+      "family": "Policy",
+      "name": "policy_modification_count_90d",
+      "description": "Number of mid-term policy modifications (riders added, sum-assured changed, beneficiary swap) in the last 90 days. Rapid churn correlates with claim manipulation.",
+      "formula_pseudocode": "count(policy.modifications where ts >= now - 90d)",
+      "window_days": 90,
+      "severity_weight": 0.7,
+      "inputs": ["mart.policy_360.modifications"]
+    },
+    {
+      "id": "POL-003",
+      "family": "Policy",
+      "name": "premium_payment_bounce_count_180d",
+      "description": "Premium debits that bounced (NSF / mandate failure) in the last 180 days. Persistent bounces precede lapse.",
+      "formula_pseudocode": "count(premium_payment where status = 'failed', last_180d)",
+      "window_days": 180,
+      "severity_weight": 0.6,
+      "inputs": ["mart.policy_360.premium_history"]
+    },
+    {
+      "id": "POL-004",
+      "family": "Policy",
+      "name": "high_risk_geography_flag",
+      "description": "Customer policy address is in a region flagged on the BIL high-risk geography list (catastrophe / fraud-cluster zones).",
+      "formula_pseudocode": "policy.address.region in high_risk_regions_list",
+      "window_days": 1,
+      "severity_weight": 0.55,
+      "inputs": ["mart.policy_360.address_region", "config.high_risk_regions"]
+    },
+    {
+      "id": "POL-005",
+      "family": "Policy",
+      "name": "premium_discount_pct_above_threshold",
+      "description": "Discount applied to the declared standard premium exceeds the BIL underwriting threshold (default 25%). Indicates aggressive sales or under-pricing.",
+      "formula_pseudocode": "(standard_premium - actual_premium) / standard_premium",
+      "window_days": 1,
+      "severity_weight": 0.5,
+      "inputs": ["mart.policy_360.standard_premium", "mart.policy_360.actual_premium"]
+    },
+    {
+      "id": "POL-006",
+      "family": "Policy",
+      "name": "policy_short_duration_flag",
+      "description": "Policy was sold with a sub-12-month tenor — shorter than the BIL standard 1-year minimum. Often used to game pre-existing condition exclusions.",
+      "formula_pseudocode": "policy.tenor_months < 12",
+      "window_days": 1,
+      "severity_weight": 0.6,
+      "inputs": ["mart.policy_360.tenor_months"]
+    },
+    {
+      "id": "POL-007",
+      "family": "Policy",
+      "name": "policy_count_per_customer_90d",
+      "description": "Number of policies issued to the same customer in the last 90 days. Multiple new policies in a short window is a red flag for cumulative-claim abuse.",
+      "formula_pseudocode": "count(policy where customer_id = $cid and issued_at >= now - 90d)",
+      "window_days": 90,
+      "severity_weight": 0.65,
+      "inputs": ["mart.policy_360.customer_id", "mart.policy_360.issued_at"]
+    },
+
+    {
+      "id": "CUS-INS-001",
+      "family": "Customer",
+      "name": "claim_filed_within_waiting_period",
+      "description": "Claim submitted within the policy's waiting period (typically 30-90 days from issue). Strong fraud signal.",
+      "formula_pseudocode": "claim.filed_at - policy.issued_at < policy.waiting_period_days",
+      "window_days": 90,
+      "severity_weight": 0.85,
+      "inputs": ["mart.claim_360.filed_at", "mart.policy_360.issued_at", "mart.policy_360.waiting_period_days"]
+    },
+    {
+      "id": "CUS-INS-002",
+      "family": "Customer",
+      "name": "lifetime_large_claim_count",
+      "description": "Number of claims above the BIL large-claim threshold (configurable, default ≥ KES 1M) the customer has filed across all their policies.",
+      "formula_pseudocode": "count(claim where customer_id = $cid and amount >= large_claim_threshold)",
+      "window_days": 99999,
+      "severity_weight": 0.7,
+      "inputs": ["mart.claim_360.customer_id", "mart.claim_360.amount", "config.large_claim_threshold"]
+    },
+    {
+      "id": "CUS-INS-003",
+      "family": "Customer",
+      "name": "kyc_mismatch_flag",
+      "description": "Customer's submitted KYC documents have field-level mismatches against their existing profile (DOB / national ID / address). Caught by the KYC vendor's reconciliation pass.",
+      "formula_pseudocode": "exists(kyc.mismatch_event where customer_id = $cid and resolved = false)",
+      "window_days": 1,
+      "severity_weight": 0.8,
+      "inputs": ["mart.customer_360.kyc_status", "mart.customer_360.kyc_mismatch_events"]
+    },
+    {
+      "id": "CUS-INS-004",
+      "family": "Customer",
+      "name": "high_risk_occupation_flag",
+      "description": "Customer's declared occupation is on the BIL high-risk occupation list (mining, certain transport, undeclared self-employed cash businesses).",
+      "formula_pseudocode": "customer.occupation in high_risk_occupations_list",
+      "window_days": 1,
+      "severity_weight": 0.45,
+      "inputs": ["mart.customer_360.occupation", "config.high_risk_occupations"]
+    },
+    {
+      "id": "CUS-INS-005",
+      "family": "Customer",
+      "name": "customer_complaint_streak_180d",
+      "description": "Number of CRM complaints / disputes raised by the customer in the last 180 days. Pattern correlates with claim-readiness behaviour.",
+      "formula_pseudocode": "count(complaint where customer_id = $cid, last_180d)",
+      "window_days": 180,
+      "severity_weight": 0.5,
+      "inputs": ["mart.customer_360.complaint_history"]
+    },
+
+    {
+      "id": "AGT-001",
+      "family": "Agent",
+      "name": "agent_claim_payout_ratio_180d",
+      "description": "Sum of claim payouts on policies sold by the agent ÷ sum of premiums collected by the same agent over the last 180 days. High ratio flags potential collusion or moral hazard.",
+      "formula_pseudocode": "sum(claim.paid_amount where agent_id = $aid, 180d) / sum(premium where agent_id = $aid, 180d)",
+      "window_days": 180,
+      "severity_weight": 0.85,
+      "inputs": ["mart.claim_360.paid_amount", "mart.policy_360.agent_id", "mart.policy_360.premium"]
+    },
+    {
+      "id": "AGT-002",
+      "family": "Agent",
+      "name": "agent_high_risk_policy_share_90d",
+      "description": "Share of an agent's last-90-days bookings that scored as high-risk by the underwriting engine. Above-portfolio rates signal an agent funnelling risky clients.",
+      "formula_pseudocode": "count(high_risk_policy where agent_id = $aid, 90d) / count(policy where agent_id = $aid, 90d)",
+      "window_days": 90,
+      "severity_weight": 0.7,
+      "inputs": ["mart.policy_360.agent_id", "mart.policy_360.uw_risk_band"]
+    },
+    {
+      "id": "AGT-003",
+      "family": "Agent",
+      "name": "agent_lapse_ratio_365d",
+      "description": "Share of policies sold by the agent in the last 365 days that lapsed within 6 months of issue. High lapse ratio = poor sales fit OR misselling.",
+      "formula_pseudocode": "count(policy where agent_id = $aid and lapsed_within_180d, 365d) / count(policy where agent_id = $aid, 365d)",
+      "window_days": 365,
+      "severity_weight": 0.6,
+      "inputs": ["mart.policy_360.agent_id", "mart.policy_360.status", "mart.policy_360.lapse_at"]
+    },
+    {
+      "id": "AGT-004",
+      "family": "Agent",
+      "name": "agent_policy_clustering_flag",
+      "description": "Geographical / demographic clustering: an agent's policies cluster on the same address / phone / family group beyond a normal expected rate. Catches family-fraud rings.",
+      "formula_pseudocode": "count(distinct customer.contact_cluster where agent_id = $aid, 90d) < count(policy where agent_id = $aid, 90d) * cluster_diversity_threshold",
+      "window_days": 90,
+      "severity_weight": 0.75,
+      "inputs": ["mart.policy_360.agent_id", "mart.customer_360.contact_cluster", "config.cluster_diversity_threshold"]
+    },
+
+    {
+      "id": "CLM-001",
+      "family": "Claim",
+      "name": "repeat_claim_same_reason_180d",
+      "description": "Number of claims filed by the same customer with the same primary reason code in the last 180 days. Repeated identical claims warrant manual review.",
+      "formula_pseudocode": "count(claim where customer_id = $cid and reason_code = $rcode, 180d)",
+      "window_days": 180,
+      "severity_weight": 0.7,
+      "inputs": ["mart.claim_360.customer_id", "mart.claim_360.reason_code"]
+    },
+    {
+      "id": "CLM-002",
+      "family": "Claim",
+      "name": "flagged_hospital_provider_flag",
+      "description": "Claim was filed against a hospital / provider on the BIL fraud-watchlist. The watchlist is populated by AML + previous-investigation outcomes.",
+      "formula_pseudocode": "claim.provider_id in flagged_providers_list",
+      "window_days": 1,
+      "severity_weight": 0.85,
+      "inputs": ["mart.claim_360.provider_id", "config.flagged_providers"]
+    },
+    {
+      "id": "CLM-003",
+      "family": "Claim",
+      "name": "claim_amount_deviation_pct",
+      "description": "Claim amount deviates from the benchmark amount (per reason_code × procedure_code) by more than the BIL deviation threshold (default 30%).",
+      "formula_pseudocode": "abs(claim.amount - benchmark.amount) / benchmark.amount",
+      "window_days": 1,
+      "severity_weight": 0.65,
+      "inputs": ["mart.claim_360.amount", "mart.claim_360.reason_code", "mart.claim_360.procedure_code", "config.claim_benchmarks"]
+    },
+    {
+      "id": "CLM-004",
+      "family": "Claim",
+      "name": "missing_supporting_docs_flag",
+      "description": "Claim was submitted without one or more required supporting documents (medical report, FIR, death certificate, etc.). Missing doc = halt + investigate.",
+      "formula_pseudocode": "exists(required_doc not in claim.attachments)",
+      "window_days": 1,
+      "severity_weight": 0.5,
+      "inputs": ["mart.claim_360.attachments", "config.required_docs_per_claim_type"]
+    },
+    {
+      "id": "CLM-005",
+      "family": "Claim",
+      "name": "claim_documents_off_template_flag",
+      "description": "Claim documents fail the BIL template-similarity check vs known fraudulent submissions. Image-similarity vendor flags layout / stamp / signature anomalies.",
+      "formula_pseudocode": "vendor.fraud_score(claim.documents) >= fraud_score_threshold",
+      "window_days": 1,
+      "severity_weight": 0.8,
+      "inputs": ["mart.claim_360.attachments", "vendor.document_fraud_score"]
+    },
+
+    {
+      "id": "OPS-001",
+      "family": "Operational",
+      "name": "underwriting_approval_delay_p95_hours",
+      "description": "Underwriter's p95 approval-decision latency over the last 30 days. Spikes indicate process congestion or override patterns.",
+      "formula_pseudocode": "p95(now - submitted_at where status = 'approved' and underwriter_id = $uid, 30d)",
+      "window_days": 30,
+      "severity_weight": 0.45,
+      "inputs": ["mart.policy_360.underwriting_audit"]
+    },
+    {
+      "id": "OPS-002",
+      "family": "Operational",
+      "name": "underwriting_override_count_30d",
+      "description": "Number of override actions a manager has performed on the underwriting recommendation in the last 30 days. Above-threshold overrides escalate to compliance.",
+      "formula_pseudocode": "count(override where manager_id = $mid and ts >= now - 30d)",
+      "window_days": 30,
+      "severity_weight": 0.65,
+      "inputs": ["mart.policy_360.underwriting_audit"]
+    },
+    {
+      "id": "OPS-003",
+      "family": "Operational",
+      "name": "suspicious_login_count_30d",
+      "description": "Auth events flagged suspicious by the auth-svc rule engine (geo-velocity, device-anomaly, after-hours admin) for an operator over the last 30 days.",
+      "formula_pseudocode": "count(auth_event where actor_username = $u and risk_flag = true, 30d)",
+      "window_days": 30,
+      "severity_weight": 0.55,
+      "inputs": ["audit.event_log.event_type", "audit.event_log.actor", "audit.event_log.payload.risk_flag"]
+    },
+    {
+      "id": "OPS-004",
+      "family": "Operational",
+      "name": "data_modification_anomaly_flag",
+      "description": "Operator has performed a high-impact data modification (sum-assured change, beneficiary swap, claim status manual override) outside their normal pattern over the last 7 days.",
+      "formula_pseudocode": "operator.last_7d_modifications.zscore > anomaly_threshold",
+      "window_days": 7,
+      "severity_weight": 0.6,
+      "inputs": ["audit.event_log.event_type", "audit.event_log.actor"]
+    }
+  ]
+}
