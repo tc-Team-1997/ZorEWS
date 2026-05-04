@@ -121,6 +121,11 @@ import {
   type AuditSeverity,
   type AuditTrailStore,
 } from './audit_trail';
+import {
+  defaultIngestionRegistry,
+  IngestionError,
+  type IngestionRegistry,
+} from './ingestion';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -179,6 +184,14 @@ export interface AppDeps {
    * in a WORM-backed store with hash-chain integrity.
    */
   auditTrailStore?: AuditTrailStore;
+  /**
+   * Override for tests — BIL ingestion connector registry (T6 M3.1).
+   * Defaults to the module-level InMemoryIngestionRegistry seeded with
+   * 8 BIL upstream connectors. Production swaps in an
+   * IngestionRegistry implementation that talks to the real scheduler
+   * (Airflow, etc.) and connector pool.
+   */
+  ingestionRegistry?: IngestionRegistry;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -234,6 +247,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
+  const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1934,6 +1948,199 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(event, ctx));
+    },
+  );
+
+  // ── BIL Data Ingestion connector registry (T6 M3.1) ─────────────────
+  //
+  // 8 BIL upstream connectors (CBS, Core Insurance, Policy Master,
+  // Claims, Agent Productivity, AML, Bureau, IFRS9). Read routes are
+  // analyst-level (audit:read = admin); the run-now + pause/resume
+  // mutations are admin-only.
+
+  /** GET /v1/ingestion/health — fleet aggregate. */
+  app.get(
+    '/v1/ingestion/health',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const summary = ingestionRegistry.health(req.tenant!.tenant_id);
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/connectors — list every connector. */
+  app.get(
+    '/v1/ingestion/connectors',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = ingestionRegistry.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/connectors/:id — single connector. 404 on miss. */
+  app.get(
+    '/v1/ingestion/connectors/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const c = ingestionRegistry.get(req.tenant!.tenant_id, id);
+      if (!c) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(c, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/connectors/:id/runs?limit=50 — recent runs. */
+  app.get(
+    '/v1/ingestion/connectors/:id/runs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
+      try {
+        const items = ingestionRegistry.listRuns(req.tenant!.tenant_id, id, limit);
+        return res.json(wrapResponse({ items, total: items.length, connector_id: id, limit }, ctx));
+      } catch (e) {
+        if (e instanceof IngestionError && e.code === 'unknown_connector') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'list runs failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/ingestion/connectors/:id/run
+   * Trigger an ad-hoc run. 404 on unknown id, 409 on paused connector.
+   * Records the triggering user from X-APEX-USER (default 'admin').
+   */
+  app.post(
+    '/v1/ingestion/connectors/:id/run',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const triggered_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const run = ingestionRegistry.runNow(req.tenant!.tenant_id, id, triggered_by, now());
+        return res.status(202).json(
+          wrapResponse(run, ctx, { code: 'EWS_202', message: 'Accepted' }),
+        );
+      } catch (e) {
+        if (e instanceof IngestionError) {
+          if (e.code === 'unknown_connector') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'paused') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_paused', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'run failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/ingestion/connectors/:id/{pause,resume}
+   * Pause / resume a connector. 404 on unknown id.
+   */
+  app.post(
+    '/v1/ingestion/connectors/:id/pause',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      try {
+        const c = ingestionRegistry.setPaused(req.tenant!.tenant_id, id, true, now());
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        if (e instanceof IngestionError && e.code === 'unknown_connector') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'pause failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  app.post(
+    '/v1/ingestion/connectors/:id/resume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      try {
+        const c = ingestionRegistry.setPaused(req.tenant!.tenant_id, id, false, now());
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        if (e instanceof IngestionError && e.code === 'unknown_connector') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'resume failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

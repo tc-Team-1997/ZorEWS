@@ -483,6 +483,33 @@
       - Routes (26): POST happy + envelope body + 3 validation 400s + 403; GET list happy + 4 filter cases + 3 invalid-axis 400s + pagination disjoint + 403; GET single happy + 404 + cross-tenant 404; GET actions sorted + 403; GET summary default + days override + clamping (with 0 not falsy-collapsing) + 403; tenant isolation through HTTP.
     - **Outcome:** Module 15's first slice shipped. The BIL deployment now has a query-friendly compliance trail with structured filters covering the RBI/IRDAI evidence-dump axes (who did what to which resource, when, with what outcome). Future M15.2 — hash-chain integrity check + replay-from-audit-svc + WORM-backed persistence — extends the same `AuditTrailStore` interface.
 
+  - **M3.1 — BIL Data Ingestion connector registry (2026-05-04):**
+    - Module 3 (Data Ingestion & ETL, 25 APIs) was the last fully-empty T6 module; M3.1 closes that gap. Lands a registry of 8 BIL upstream connectors with status + run-history tracking. Why a registry (vs. real ETL): the prototype doesn't run actual pipelines — the registry is the contract the ops team needs ("which connectors exist, what is each one's status, when did they last run, were there failures"). Production wires this to the real scheduler (Airflow, etc.) implementing the same `IngestionRegistry` interface.
+    - New `services/bff/src/ingestion.ts`:
+      - **8 seed connectors** matching the BIL pitch upstream list (DataNetworks-EWS-Ver1.pdf §15): `cbs_loan_book` (CBS / kafka), `core_insurance_policies` (Core Insurance / sftp daily), `policy_master_increment` (Policy Master / kafka 5min), `claims_feed` (Claims / kafka 1min), `agent_productivity` (Agent / batch_csv daily — seeded `degraded`), `aml_watchlist` (AML / rest_api hourly), `bureau_pull` (Bureau / rest_api weekly), `ifrs9_stage_feed` (IFRS9 / rest_api daily).
+      - 5 connector types: `kafka_stream` / `batch_csv` / `rest_api` / `soap_api` / `sftp_drop`. 4 statuses: `healthy` / `degraded` / `failing` / `paused`. 4 run statuses: `success` / `failure` / `partial` / `running`.
+      - `IngestionRegistry` interface: `list/get/runNow/listRuns/health/setPaused`. `IngestionError` with codes `unknown_connector`, `paused`.
+      - `InMemoryIngestionRegistry` — per-tenant overrides for status + paused state + last-run metadata; per-connector run history capped (default 100, oldest evicted). Run records + average lag derived deterministically per `(tenant, connector, day)` via the same FNV-1a + Mulberry32 helpers used elsewhere — kafka_stream baseline ~50k records, sftp_drop ~25k, batch_csv ~5k, rest_api 500 (or 100k for weekly bureau pull).
+      - **runNow status logic** — failing connector → run.status=failure (records=0, error_message); degraded → partial (5% records_failed); healthy → success.
+      - **`AppDeps.ingestionRegistry` injection point** — defaults to module-level singleton.
+    - **7 new BFF routes** (all tenant-gated, all enveloped, all RBAC `audit:read`):
+      - `GET /v1/ingestion/health` — fleet aggregate (`{total_connectors, by_status, attention_required[], fleet_records_last_run}`). attention_required sorted by severity (failing > degraded > paused).
+      - `GET /v1/ingestion/connectors` — list all 8.
+      - `GET /v1/ingestion/connectors/:id` — single. 404 `EWS_404_unknown_connector` on miss.
+      - `POST /v1/ingestion/connectors/:id/run` — trigger ad-hoc run. 202 on accept, 404 on unknown, 409 `EWS_409_paused` on paused. Triggering user from `X-APEX-USER` header (default 'admin').
+      - `GET /v1/ingestion/connectors/:id/runs?limit=N` — recent runs newest-first; limit clamped to `[1, 200]`.
+      - `POST /v1/ingestion/connectors/:id/pause` — pause.
+      - `POST /v1/ingestion/connectors/:id/resume` — clear pause.
+    - **Tests:** BFF 617/617 (was 570 — +47 in `ingestion.test.ts`):
+      - Schema (4): exactly 8 seed connectors, ids unique, every required field present, 8 BIL source_systems represented.
+      - list+get (7): list returns 8, default status from seed, initial last_run_* null, deterministic stats per (tenant, connector, day), tenant divergence in last_run_records, unknown id null, kafka > batch volume invariant.
+      - runNow (6): healthy→success, degraded→partial with records_failed + error_message, scheduler-triggered → triggered_manually=false, subsequent get reflects run, unknown_connector throw, paused throw.
+      - listRuns (5): newest-first, limit clamp, unknown_connector throw, tenant scoping, retention-cap eviction.
+      - health (4): by_status counts, attention_required filter + sort, paused flips status, fleet_records_last_run sums.
+      - setPaused (4): pause sets paused_at, resume clears it + reverts status, unknown throws, tenant isolation.
+      - Routes (17): admin happy paths for each route, non-admin 403 (4 routes asserted), unknown-id 404 (4 routes), 409 paused, run round-trip with run-history visible, ?limit query param, BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 3's first slice shipped. **All 16 modules in the BIL platform expansion now have at least one sub-phase shipped** (Module 3 was the last fully-empty one — Modules 5/7/9/16 are partially shipped from the T4 phase; Module 12 is the only remaining gap). The BIL deployment now exposes the full ingestion-fleet status + run-history needed for ops dashboards. Future M3.2 — declarative connector schema (mart→KRI mapping) + M3.3 backfill jobs — extend the same registry primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
