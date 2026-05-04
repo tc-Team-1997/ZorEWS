@@ -4,6 +4,15 @@ import { RegisterFailure, type Role } from "../users.js";
 import { loadSigner, signAccessToken, signRefreshToken, verifyToken, type Signer } from "../jwt.js";
 import { getServiceClientStore, ServiceClientConflict } from "../service_clients.js";
 import {
+  buildOtpauthUrl,
+  consumeBackupCode,
+  generateSecret,
+  get2faPendingStore,
+  get2faStore,
+  mintBackupCodes,
+  verifyCode,
+} from "../totp.js";
+import {
   LOGIN_POLICY,
   RESET_REQUEST_POLICY,
   RateLimiter,
@@ -250,6 +259,30 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       ip,
       user_agent: callerUserAgent(req),
     });
+
+    // T5 Module 1.1 — 2FA gate. If the user is enrolled, defer the
+    // full token issuance to /auth/login/verify-2fa. Issue a short-
+    // lived partial token (typ='2fa_partial') the client uses there.
+    const enrolment2fa = get2faStore().get(user.id);
+    if (enrolment2fa) {
+      const partial = await new SignJWT({ typ: "2fa_partial", sid: session.id })
+        .setProtectedHeader({ alg: "RS256", kid: signer.kid })
+        .setSubject(user.id)
+        .setIssuer("apex-ews-auth")
+        .setAudience("apex-ews")
+        .setIssuedAt()
+        .setExpirationTime("300s") // 5 min — enough to grab a code from the app
+        .sign(signer.privateKey);
+      // No login_success yet — only on successful 2FA verify.
+      return reply.send({
+        requires_2fa: true,
+        partial_token: partial,
+        token_type: "Bearer",
+        expires_in: 300,
+        message: "Submit a TOTP or backup code to /auth/login/verify-2fa to complete sign-in.",
+      });
+    }
+
     const access = await signAccessToken(signer, {
       sub: user.id,
       role: user.role,
@@ -1745,4 +1778,301 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(204).send();
     },
   );
+
+  // ─── TOTP 2FA enrolment + step-up (T5 Module 1.1) ──────────────────────
+  //
+  // Standard RFC 6238 TOTP (30-second period, 6-digit code, ±1 step
+  // window). Enrolment flow: setup → user scans QR in their authenticator
+  // app → verify with the first code → backup codes returned ONCE.
+  // Login flow extension: an enrolled user's /auth/login response carries
+  // requires_2fa=true + a short-lived partial_token; the client follows
+  // up with /auth/login/verify-2fa to exchange the partial for the
+  // full access + refresh pair.
+
+  /**
+   * POST /auth/2fa/setup
+   * Authorization: Bearer <access token>
+   *
+   * Generates a fresh TOTP secret (RFC 6238) and stashes it as PENDING.
+   * Returns the secret_base32 + otpauth:// URL — the client renders
+   * the URL as a QR code so the user can scan it. The user must then
+   * call /auth/2fa/verify with the first code from their authenticator
+   * to complete enrolment; a pending secret expires in 10 minutes.
+   *
+   * Idempotent for the same user — re-calling overwrites the pending
+   * row and returns a fresh secret. Already-enrolled users get 409
+   * (must call /auth/2fa/disable first to re-enrol).
+   */
+  app.post("/auth/2fa/setup", async (req, reply) => {
+    const { signer, sessions, users } = await getState();
+    const caller = await authedCallerOrUnauthorized(req, reply, signer, sessions);
+    if (!caller) return;
+    const user = users.findById(caller.sub);
+    if (!user) return reply.code(401).send({ error: "invalid_token" });
+
+    const enrolled = get2faStore().get(user.id);
+    if (enrolled) {
+      return reply.code(409).send({
+        error: "already_enrolled",
+        message: "2FA is already enrolled for this user. Disable first to re-enrol.",
+      });
+    }
+
+    const secret_base32 = generateSecret();
+    const otpauth_url = buildOtpauthUrl({ username: user.username, secret_base32 });
+    // 10-min TTL on the pending secret. Production stashes in Redis.
+    get2faPendingStore().put(user.id, secret_base32, Date.now() + 10 * 60 * 1000);
+
+    return reply.send({
+      secret_base32,
+      otpauth_url,
+      issuer: "APEX EWS",
+      algorithm: "SHA1",
+      digits: 6,
+      period_seconds: 30,
+      // Client builds the QR via any standard library; we surface the
+      // URL rather than rasterise on the server.
+      expires_in_seconds: 600,
+    });
+  });
+
+  /**
+   * POST /auth/2fa/verify
+   * Authorization: Bearer <access token>
+   * body: { code: "123456" }
+   *
+   * Completes enrolment when called against a PENDING secret. Mints
+   * 10 single-use backup codes and returns them ONCE in the response.
+   * The codes will not be retrievable later — admin disable + re-enrol
+   * is the recovery path.
+   */
+  app.post<{ Body: { code?: string } }>("/auth/2fa/verify", async (req, reply) => {
+    const { signer, sessions, users, audit } = await getState();
+    const caller = await authedCallerOrUnauthorized(req, reply, signer, sessions);
+    if (!caller) return;
+    const user = users.findById(caller.sub);
+    if (!user) return reply.code(401).send({ error: "invalid_token" });
+
+    const code = req.body?.code;
+    if (typeof code !== "string" || !/^\d{6}$/.test(code)) {
+      return reply.code(400).send({
+        error: "invalid_code_format",
+        message: "code must be a 6-digit numeric string",
+      });
+    }
+    const pending = get2faPendingStore().get(user.id);
+    if (!pending) {
+      return reply.code(400).send({
+        error: "no_pending_enrolment",
+        message: "Call /auth/2fa/setup first.",
+      });
+    }
+    if (!verifyCode(pending.secret_base32, code)) {
+      return reply.code(401).send({
+        error: "invalid_totp_code",
+        message: "Code did not match. Try again with a fresh code from your authenticator.",
+      });
+    }
+
+    const backups = await mintBackupCodes();
+    get2faStore().put({
+      user_id: user.id,
+      secret_base32: pending.secret_base32,
+      issuer: "APEX EWS",
+      algorithm: "SHA1",
+      digits: 6,
+      period_seconds: 30,
+      enrolled_at: new Date().toISOString(),
+      last_used_at: new Date().toISOString(),
+      backup_code_hashes: backups.hashes,
+    });
+    get2faPendingStore().delete(user.id);
+
+    audit.append({
+      type: "user_unlocked", // closest existing event-type — there's no `2fa_enrolled` yet
+      target_username: user.username,
+      actor_username: user.username,
+      actor_role: user.role,
+      ip: callerIp(req),
+      metadata: { event_kind: "2fa_enrolled" },
+    });
+
+    // Plaintext backup codes returned exactly once.
+    return reply.send({
+      ok: true,
+      enrolled_at: new Date().toISOString(),
+      backup_codes: backups.plaintext,
+      message:
+        "Save the backup codes now. Each is single-use and they cannot be retrieved later.",
+    });
+  });
+
+  /**
+   * POST /auth/login/verify-2fa
+   * body: { partial_token, code, backup_code? }
+   *
+   * Step-up flow. /auth/login returns a partial_token + requires_2fa=true
+   * for enrolled users; this endpoint exchanges the partial for the
+   * full access + refresh pair after verifying the TOTP code (or a
+   * single-use backup code).
+   */
+  app.post<{
+    Body: { partial_token?: string; code?: string; backup_code?: string };
+  }>("/auth/login/verify-2fa", async (req, reply) => {
+    const { signer, users, sessions, audit } = await getState();
+    const { partial_token, code, backup_code } = req.body ?? {};
+    if (!partial_token || (!code && !backup_code)) {
+      return reply.code(400).send({
+        error: "invalid_request",
+        message: "partial_token and one of {code, backup_code} are required",
+      });
+    }
+    let sub: string | undefined;
+    let sid: string | undefined;
+    try {
+      const { payload } = await verifyToken(signer, partial_token);
+      if (payload.typ !== "2fa_partial") {
+        return reply.code(401).send({ error: "invalid_partial_token" });
+      }
+      sub = typeof payload.sub === "string" ? payload.sub : undefined;
+      sid = typeof payload.sid === "string" ? payload.sid : undefined;
+    } catch {
+      return reply.code(401).send({ error: "invalid_partial_token" });
+    }
+    if (!sub) return reply.code(401).send({ error: "invalid_partial_token" });
+    const user = users.findById(sub);
+    if (!user) return reply.code(401).send({ error: "invalid_partial_token" });
+
+    const enrolment = get2faStore().get(user.id);
+    if (!enrolment) {
+      return reply.code(409).send({
+        error: "2fa_not_enrolled",
+        message: "User has no 2FA enrolment but a partial token was issued.",
+      });
+    }
+
+    // TOTP path
+    let nextBackupHashes = enrolment.backup_code_hashes;
+    if (code) {
+      if (!verifyCode(enrolment.secret_base32, code)) {
+        audit.append({
+          type: "login_failure",
+          target_username: user.username,
+          ip: callerIp(req),
+          metadata: { reason: "wrong_2fa_code" },
+        });
+        return reply.code(401).send({ error: "invalid_totp_code" });
+      }
+    } else if (backup_code) {
+      const remaining = await consumeBackupCode(enrolment.backup_code_hashes, backup_code);
+      if (!remaining) {
+        audit.append({
+          type: "login_failure",
+          target_username: user.username,
+          ip: callerIp(req),
+          metadata: { reason: "wrong_backup_code" },
+        });
+        return reply.code(401).send({ error: "invalid_backup_code" });
+      }
+      nextBackupHashes = remaining;
+    }
+
+    // 2FA cleared — single put covers both last_used_at + consumed-code state.
+    get2faStore().put({
+      ...enrolment,
+      backup_code_hashes: nextBackupHashes,
+      last_used_at: new Date().toISOString(),
+    });
+
+    const access = await signAccessToken(signer, {
+      sub: user.id,
+      role: user.role,
+      display_name: user.display_name,
+      sid,
+      tenant_id: user.tenant_id,
+    });
+    const refresh = await signRefreshToken(signer, user.id, sid);
+    audit.append({
+      type: "login_success",
+      target_username: user.username,
+      actor_username: user.username,
+      actor_role: user.role,
+      tenant_id: user.tenant_id,
+      ip: callerIp(req),
+      metadata: { sid, "2fa": backup_code ? "backup_code" : "totp" },
+    });
+    return reply.send({
+      access_token: access,
+      refresh_token: refresh,
+      token_type: "Bearer",
+      expires_in: 900,
+      role: user.role,
+      display_name: user.display_name,
+      session_id: sid,
+      backup_codes_remaining: nextBackupHashes.length,
+    });
+  });
+
+  /**
+   * DELETE /auth/2fa
+   * Authorization: Bearer <access token>
+   *
+   * User disables their own 2FA. Admin can disable anyone's by passing
+   * `?username=...` (gated to admin-only). Idempotent — 204 either way.
+   */
+  app.delete<{ Querystring: { username?: string } }>("/auth/2fa", async (req, reply) => {
+    const { signer, sessions, users, audit } = await getState();
+    const caller = await authedCallerOrUnauthorized(req, reply, signer, sessions);
+    if (!caller) return;
+    const me = users.findById(caller.sub);
+    if (!me) return reply.code(401).send({ error: "invalid_token" });
+
+    const targetUsername = req.query.username?.trim().toLowerCase();
+    let target = me;
+    if (targetUsername && targetUsername !== me.username) {
+      if (me.role !== "admin") {
+        return reply.code(403).send({
+          error: "forbidden",
+          message: "only admins can disable 2FA for other users",
+        });
+      }
+      const found = users.findByUsername(targetUsername);
+      if (!found) return reply.code(404).send({ error: "user_not_found" });
+      target = found;
+    }
+    get2faStore().delete(target.id);
+    get2faPendingStore().delete(target.id);
+    audit.append({
+      type: "user_unlocked",
+      target_username: target.username,
+      actor_username: me.username,
+      actor_role: me.role,
+      ip: callerIp(req),
+      metadata: { event_kind: "2fa_disabled" },
+    });
+    return reply.code(204).send();
+  });
+
+  /**
+   * GET /auth/2fa/status
+   * Authorization: Bearer <access token>
+   *
+   * Returns whether the caller has 2FA enrolled + how many backup
+   * codes remain. SPA polls this to decide whether to show the
+   * "Set up two-factor" CTA in the user menu.
+   */
+  app.get("/auth/2fa/status", async (req, reply) => {
+    const { signer, sessions, users } = await getState();
+    const caller = await authedCallerOrUnauthorized(req, reply, signer, sessions);
+    if (!caller) return;
+    const me = users.findById(caller.sub);
+    if (!me) return reply.code(401).send({ error: "invalid_token" });
+    const e = get2faStore().get(me.id);
+    return reply.send({
+      enrolled: !!e,
+      enrolled_at: e?.enrolled_at ?? null,
+      last_used_at: e?.last_used_at ?? null,
+      backup_codes_remaining: e ? e.backup_code_hashes.length : 0,
+    });
+  });
 }

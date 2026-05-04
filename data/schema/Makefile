@@ -56,6 +56,7 @@ migrate:
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)008_cases_tenant.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)009_alerts_tenant.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)010_mart_tenant.sql
+	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)011_user_2fa.sql
 	@echo "migration complete"
 
 verify:

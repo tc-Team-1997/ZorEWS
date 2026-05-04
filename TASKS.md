@@ -280,6 +280,39 @@
     - Admin SPA pages for tenant CRUD + service client CRUD (analogous to the existing `/admin/webhooks` page).
     - Replace the BFF JWT base64-decode-only shim with proper signature verification via auth-svc's JWKS endpoint.
 
+- [ ] T6 BIL 16-module platform expansion — sourced from the BIL deployment brief (16 main modules / ~365 APIs). Each module ships as one or more sub-phases; existing code from T4.24 is re-used as foundation, all new work is additive. The 16 modules:
+  1. Authentication & User Management (35 APIs) — login, 2FA, RBAC, sessions, maker-checker
+  2. Multi-Tenancy & API Gateway (12 APIs) — already shipped via T4.24
+  3. Data Ingestion & ETL (25 APIs) — connectors, Kafka streaming, batch ETL, data quality
+  4. Risk Indicator Engine (30 APIs) — 8 sub-engines covering banking + insurance KRIs
+  5. Rule Engine (18 APIs) — visual builder, lifecycle, backtesting, versioning
+  6. Scoring Engine (12 APIs) — implements BIL formula `Σ (KRI Weight × KRI Value)`
+  7. AI/ML Model Engine (25 APIs) — PD model, fraud detection, anomaly detection, MLflow
+  8. Alert Engine (18 APIs) — Red/Orange/Yellow classification per BIL doc
+  9. Case Management (20 APIs) — full case lifecycle, evidence, SLA, escalation
+  10. Notification Service (18 APIs) — email, SMS, push, in-app
+  11. Dashboards & Analytics (30 APIs) — all 5 BIL dashboards (Executive, Claims, Underwriting, Agent, Operational)
+  12. Reports & Export (22 APIs) — PDF/Excel/Email per BIL doc
+  13. Admin Configuration (15 APIs) — central control panel
+  14. External Integration Layer (50 APIs) — CBS, Core Insurance, Policy Master, Claims, Agent, Finance, DMS, HR, IFRS 9, AML, Bureau
+  15. Audit & Compliance (20 APIs) — RBI/IRDAI compliance trail
+  16. Scenario Simulation (15 APIs) — already largely shipped via T4.2
+
+  **agent-integration** _(initiative kicked off 2026-05-04; M1.1 shipped same day)_
+
+  - **M1.1 — TOTP 2FA (2026-05-04):**
+    - Migration `data/schema/011_user_2fa.sql` adds `app_iam.user_2fa_secrets` (one row per user, FK CASCADE on user_id, base32 secret + algorithm/digits/period config + backup_codes TEXT[] of argon2id hashes).
+    - `services/auth-svc/src/totp.ts` — `otpauth`-based wrapper. `generateSecret()` produces a fresh 20-byte base32 secret; `buildOtpauthUrl()` returns the `otpauth://totp/` URL the client renders as a QR; `verifyCode()` checks a 6-digit TOTP against the secret with ±1 step (30s) drift tolerance; `mintBackupCodes()` produces 10 single-use codes (10 hex chars each) with argon2id hashes; `consumeBackupCode()` verifies + returns the new hashes array. In-memory `I2faStore` + `I2faPendingStore` interfaces; pg-backed swap is a future ticket.
+    - 5 new routes:
+      - `POST /auth/2fa/setup` — generates secret, stashes pending (10-min TTL), returns secret + otpauth URL. 409 when already enrolled.
+      - `POST /auth/2fa/verify` — promotes pending → enrolled on first valid code, mints + returns 10 backup codes ONCE.
+      - `POST /auth/login/verify-2fa` — partial-token exchange step. Accepts TOTP `code` OR `backup_code` (single-use). Returns the same access + refresh shape `/auth/login` would have, plus `backup_codes_remaining` count.
+      - `DELETE /auth/2fa[?username=...]` — user disables their own; admin disables anyone's.
+      - `GET /auth/2fa/status` — { enrolled, enrolled_at, last_used_at, backup_codes_remaining }.
+    - **`/auth/login` extended** — when the user has 2FA enrolled, returns `{ requires_2fa: true, partial_token, expires_in: 300 }` instead of the full token pair. Partial token is a 5-minute RS256 JWT with `typ: '2fa_partial'` + `sid` claim. Login_success audit event is deferred until the verify-2fa step succeeds.
+    - **Tests:** auth-svc 146 in-memory + 20 pg-skipped (was 136 — +10 in `totp.test.ts`: setup happy path, setup→verify happy path with backup-code mint, verify wrong code → 401, verify malformed → 400, login flow round-trip with TOTP, verify-2fa wrong code → 401, backup code single-use, DELETE disables, non-admin can't disable other users, setup 409 when already enrolled). BFF / cases / alerts / SPA all unchanged.
+    - **Dependency:** added `otpauth@^9` to auth-svc.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
