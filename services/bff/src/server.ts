@@ -289,6 +289,11 @@ import {
   type IngestionRegistry,
 } from './ingestion';
 import {
+  ConnectorSchemaError,
+  getConnectorSchema,
+  validateRecord,
+} from './connector_schema';
+import {
   defaultReportJobStore,
   isJobStatus,
   isReportCategory,
@@ -5223,6 +5228,82 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'list runs failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Connector schema metadata (T6 M3.2) ─────────────────────────────
+  //
+  // Per-connector field-level schema (name, type, required, sample,
+  // enum_values, length/range bounds). Pure-data + pure validator —
+  // no store, no AppDeps slot. The ingestion UI uses these to render
+  // a column-mapper preview before file upload + validate sample
+  // rows server-side.
+
+  /** GET /v1/ingestion/connectors/:id/schema — full field schema. */
+  app.get(
+    '/v1/ingestion/connectors/:id/schema',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const schema = getConnectorSchema(id);
+      if (!schema) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(schema, ctx));
+    },
+  );
+
+  /** POST /v1/ingestion/connectors/:id/schema/validate { record } —
+   *  pure-function validator. Always 200 (valid: true | false in body)
+   *  unless the connector id is unknown (404) or the record shape is
+   *  malformed (400). */
+  app.post(
+    '/v1/ingestion/connectors/:id/schema/validate',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { record?: unknown };
+      try {
+        const result = validateRecord(id, wrapper.record);
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof ConnectorSchemaError) {
+          if (e.code === 'unknown_connector') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'validate failed', severity: 'HIGH' },
             ctx,
           ),
         );

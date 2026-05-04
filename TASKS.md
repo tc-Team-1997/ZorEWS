@@ -1070,6 +1070,26 @@
       - No-regression (3): M5.1 GET `/v1/rules/templates`, `/v1/rules/templates/:id`, `/v1/rules/templates/categories` still 200 (declaration-order check).
     - **Outcome:** Module 5 now has 2 sub-phases (M5.1 library + M5.2 bulk-clone). Combined with T4.7's existing `POST /v1/rules` commit path, BIL onboarding goes from "create 12 rules one-by-one" to "select-all + name-prefix → SPA fans out". Future M5.3 will likely cover **rule simulation against the M16.1 scenario library** (dry-run new rules against named scenarios before activation).
 
+  - **M3.2 — Connector schema metadata (2026-05-04):**
+    - M3.1 ships the 8-connector ingestion registry but stops at connector-level metadata (name, type, schedule, status). M3.2 attaches the *field-level* schema each connector expects so the ingestion UI can (1) render a column-mapper preview before file upload, (2) validate sample rows server-side, (3) surface required vs optional fields + types + sample values.
+    - New `services/bff/src/connector_schema.ts`:
+      - 7 field types: `string / integer / number / boolean / date / datetime / enum`. ISO-8601 date/datetime regex enforcement. Enum + length + range bounds.
+      - `ConnectorSchema` carries `connector_id`, `version`, `record_format` (kafka_json / csv / sftp_csv / rest_json), `primary_key[]`, `fields[]`. PK must be required + present in fields[].
+      - **8 schemas (1 per M3.1 seed connector)** — cbs_loan_book (10 fields incl. status enum + product_type enum + DPD bounds), core_insurance_policies (8 fields), policy_master_increment (5 fields incl. change_type enum), claims_feed (7 fields incl. claim_type + status enums), agent_productivity (6 fields, persistency [0-1]), aml_watchlist (6 fields incl. list_type + entity_type enums), bureau_pull (6 fields, score [300-900]), ifrs9_stage_feed (7 fields, stage [1-3], pd/lgd [0-1]).
+      - `assertSchemaCoverage(seeds)` cross-checks every M3.1 seed connector has a schema — flips at test time so drift fails fast.
+      - `validateRecord(connector_id, record)`: pure function. Aggregates ALL errors (no short-circuit). Codes: `required / wrong_type / enum_violation / too_long / out_of_range`. Extra keys → `unknown_field` warnings (not errors). Null/undefined/blank-string treated as missing for required fields.
+      - `ConnectorSchemaError` codes: `unknown_connector` → 404, `invalid_input` (non-object record) → 400.
+    - **2 new BFF routes** (tenant-gated, enveloped, `audit:read` admin-only matching the existing M3.1 read routes):
+      - `GET /v1/ingestion/connectors/:id/schema` — full field schema. 404 on unknown id.
+      - `POST /v1/ingestion/connectors/:id/schema/validate` body `{record}` — pure-function validator; always 200 with `{valid, errors[], warnings[]}` unless connector is unknown (404) or record shape is malformed (400).
+    - **Tests:** BFF 1646/1646 (was 1603 — +43 in `connector_schema.test.ts`):
+      - Catalogue (4): 8-connector coverage, listSchemaConnectorIds, schema invariants (PK ⊂ fields, PK = required), enum_values present.
+      - validateRecord (18): happy CBS, missing required, null = missing, blank-string = missing, missing optional, wrong-type, non-integer, NaN/Infinity, enum violation, range below/above, too_long, ISO date enforcement, ISO datetime enforcement, unknown_field warning, multi-error aggregation, no boolean fields used, unknown_connector throw, invalid_input throw (non-object + array), happy-path-all-8.
+      - GET schema route (5): admin 200, risk_analyst 403, all 8 connectors return 200, unknown 404, no-tenant 403, non-allowed role 403.
+      - POST validate route (8): valid → valid:true, enveloped body, invalid → valid:false + errors[], unknown_field warning, unknown 404, non-object 400, array 400, role 403.
+      - No-regression (4): M3.1 GET `/v1/ingestion/connectors`, `/connectors/:id`, `/connectors/:id/runs`, `/health` still 200 (sub-path didn't shadow `:id`).
+    - **Outcome:** Module 3 now has 2 sub-phases (M3.1 connector registry + M3.2 schema metadata). The ingestion UI can render a column-mapper preview before file upload + validate sample rows. Future M3.3 would cover *per-tenant schema overrides* — but the platform-static schema is correct for BIL today since every tenant talks to the same upstream systems.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
