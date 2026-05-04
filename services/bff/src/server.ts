@@ -82,6 +82,15 @@ import {
   type EmailTemplateId,
   type EmailTransport,
 } from './notifications/email';
+import {
+  AlertClassificationError,
+  classifyAlertSeverity,
+  classifyWithMetadata,
+  isBilAlertClass,
+  listClassifications,
+  type BilAlertClass,
+  type SeverityInput,
+} from './bil_alert_classification';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -230,6 +239,107 @@ export function makeApp(deps: AppDeps = {}) {
     );
     res.json(wrapResponse({ items, total: items.length }, ctx));
   });
+
+  // ── BIL alert classification (T6 M8.1) — DataNetworks PDF §11 ─────────
+  //
+  // Three additive endpoints layered on top of the existing /v1/alerts.
+  // The /v1/alerts response shape is intentionally unchanged — these
+  // routes exist for SPA badge rendering + ad-hoc severity classification.
+
+  /** GET /v1/alerts/classification/spec — full 4-class metadata table. */
+  app.get(
+    '/v1/alerts/classification/spec',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listClassifications();
+      res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/alerts/classify
+   * body: { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL' (case-insensitive) }
+   * Returns the BIL class + action metadata for the supplied severity.
+   * Stateless — no alert lookup, just the pure mapping.
+   */
+  app.post(
+    '/v1/alerts/classify',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { severity } = (inner ?? {}) as { severity?: SeverityInput };
+      if (severity === undefined) {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'severity is required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const result = classifyWithMetadata(severity);
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof AlertClassificationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'classify failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/alerts/by-class/:class
+   * class ∈ {red, orange, yellow, green}
+   * Returns the same item shape as /v1/alerts but filtered to alerts
+   * whose severity classifies into the requested BIL class. Each item
+   * is decorated with `bil_class` + `bil_metadata` so the SPA can
+   * render badges directly.
+   */
+  app.get(
+    '/v1/alerts/by-class/:class',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cls = req.params.class;
+      if (!isBilAlertClass(cls)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_class',
+              message: 'class must be one of red|orange|yellow|green',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const target: BilAlertClass = cls;
+      const canonicals = dedupeByAlertId(source.read());
+      const all = mapAlertList(canonicals, lookups, {}, now);
+      const items = all
+        .filter((a) => classifyAlertSeverity(a.severity) === target)
+        .map((a) => ({
+          ...a,
+          bil_class: target,
+          bil_metadata: listClassifications().find((m) => m.class === target),
+        }));
+      res.json(wrapResponse({ items, total: items.length, class: target }, ctx));
+    },
+  );
 
   /**
    * POST /v1/ews/evaluate — Banking API §6 reference shape (T4.24).

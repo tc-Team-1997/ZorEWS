@@ -380,6 +380,21 @@
       - Routes (20): templates list happy path + 403, preview happy path + missing_vars + 400 paths, send admin happy path + ledger visible, send 403 for non-admin, every 400 error code, enveloped request body, log tenant scoping (BIL ↔ BANK_DEMO), log limit query param, log 403 for non-admin.
     - **Outcome:** Module 10's primary channel shipped. The BIL deployment now has a tenant-scoped, template-driven, auditable email pipeline. The transport interface keeps SES/SMTP a drop-in swap. The next sub-phase (M10.2 SMS, M10.3 push, M10.4 in-app) follows the same `<Channel>Transport` shape, which means routes can be parameterised.
 
+  - **M8.1 — BIL Red/Orange/Yellow alert classification (2026-05-04):**
+    - New `services/bff/src/bil_alert_classification.ts` — pure stateless mapping from `WireSeverity` (LOW|MEDIUM|HIGH|CRITICAL, case-insensitive) to a 4-colour BIL palette per DataNetworks-EWS-Ver1.pdf §11. Mapping: CRITICAL→red, HIGH→orange, MEDIUM→yellow, LOW→green. The BIL doc only colour-codes 3 levels — `green` is added to keep operational LOW alerts on the SPA badge palette without contradicting the spec. Each class carries `{color_hex, label, monitor_only, sla_hours, escalation_path, action_required, source_severities}` so the SPA legend renders directly off the API. SLA hours: red 4h, orange 24h, yellow 72h, green null (monitor-only, no SLA).
+    - **3 additive BFF routes** (all tenant-gated, RBAC `alerts:list` — same as `/v1/alerts`, 5 roles):
+      - `GET /v1/alerts/classification/spec` — returns the 4-class metadata table for the SPA legend / tooltips.
+      - `POST /v1/alerts/classify` — accepts `{severity}` (case-insensitive), returns `{severity, class, metadata}`. Stateless — no alert lookup. Useful for ad-hoc classification (e.g. preview before save).
+      - `GET /v1/alerts/by-class/:class` (class ∈ red|orange|yellow|green) — filters the existing alert fleet to alerts whose mapped severity is in the target class. Items are decorated with `bil_class` + `bil_metadata` so the SPA can render badges + SLA chips off a single payload.
+    - **The existing `/v1/alerts` response shape is unchanged** — additive only. T4.24 endpoints not modified.
+    - **Validation errors:** `EWS_400_invalid_severity` (unknown wire severity), `EWS_400_invalid_class` (path param not in red|orange|yellow|green; lowercase only — uppercase rejected to keep one canonical form).
+    - **Tests:** BFF 415/415 (was 379 — +36 in `bil_alert_classification.test.ts`):
+      - Pure classifier (8): each WireSeverity → its class, mixed-case acceptance, unknown / non-string rejection.
+      - Metadata table (7): canonical order matches `BIL_CLASS_ORDER`, every row has the required fields, only green is `monitor_only` with `sla_hours=null`, SLAs strictly increase red→yellow, source_severities partition the WireSeverity space (no overlap, full coverage), `getClassMetadata` throws on unknown class.
+      - `classifyWithMetadata` + `isBilAlertClass` type-guard (4).
+      - Routes (17): spec list happy path + 403, classify all-4-severities + lowercase + enveloped body + 3 error paths, by-class filtering for each of the 4 classes, empty fleet, invalid class 400, uppercase rejection, unknown-role 403.
+    - **Outcome:** Module 8's BIL-flavour classification shipped. The SPA can now render the BIL tri-colour alert badges (plus the operational green) directly from the API. Future sub-phases — M8.2 alert auto-routing per class, M8.3 alert acknowledgement workflow per class — extend this primitive rather than altering it.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
