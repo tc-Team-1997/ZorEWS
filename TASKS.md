@@ -631,6 +631,28 @@
       - Routes (10): categories happy + 403 + analyst+ accepted; list happy + 2 filter cases + AND combo + 2 invalid 400s + 403; single happy + 404; backwards-compat regression on /v1/rules/:id.
     - **Outcome:** Module 5 now has the onboarding library admins need to set up a fresh BIL tenant. Future M5.2 — bulk-clone "apply this template set" + per-template backtest — extends the same primitive.
 
+  - **M16.1 — BIL named scenario library (2026-05-04):**
+    - Module 16 (Scenario Simulation) had T4.2 surface (raw `{gdp, rate, fx}` shocks via `/v1/scenario/run`) and T4.18 saved scenarios (per-user save/list/delete). M16.1 lands the missing piece: a platform-wide library of 10 BIL named scenario presets that admins can run instantly without configuring shocks manually.
+    - New `services/bff/src/scenario_library.ts`:
+      - **10 BIL scenario presets** across 4 categories (`regulatory / business / black_swan / baseline`), 3 regulators (`RBI / IRDAI / INTERNAL`), 3 severities (`mild / moderate / severe`).
+      - **Drawn from RBI Stress-Test Framework + IRDAI Form-K + BIL pitch §13:**
+        - regulatory: RBI Baseline / Adverse / Severely Adverse Stress; IRDAI Solvency Stress
+        - business: Rate hike +200bps; FX devaluation 10%; Growth — optimistic
+        - black_swan: Pandemic stress (-7% GDP, rate cut, FX stress); Stagflation (-3% GDP, +400bps, +15% FX)
+        - baseline: zero shocks (sanity-check)
+      - **Schema invariants** (asserted in tests): regulatory category implies non-INTERNAL regulator; baseline preset has zero shocks; black_swan presets are all `severity=severe` with combined-shock magnitude > 10.
+    - **3 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/scenarios/library/categories` — 4 categories enum.
+      - `GET /v1/scenarios/library?category=&regulator=&severity=` — multi-axis filterable list. Code-routed 400s.
+      - `GET /v1/scenarios/library/:id` — single preset. 404 `EWS_404_unknown_preset`.
+    - **Inserted before `/v1/scenarios/:id`** (saved-scenario route) so Express matches more-specific paths first; backwards-compat regression-tested asserts the saved-scenario route still works.
+    - **Tests:** BFF 876/876 (was 841 — +35 in `scenario_library.test.ts`):
+      - Type guards (3).
+      - Schema (8): exactly 10, ids unique, required fields, all 4 categories + 3 regulators + 3 severities, regulatory→non-INTERNAL invariant, baseline=zero, black_swan magnitude floor, RBI severe presence.
+      - Helpers (8): listScenarioPresets no-filter + 3 single-axis + AND combo + listScenarioCategories canonical order; getScenarioPreset hit + null.
+      - Routes (16): categories happy + analyst+ accepted + 403; list happy + 3 single-axis filters + AND combo + 3 invalid 400s + 403; single happy + 404; backwards-compat regression on /v1/scenarios/:id.
+    - **Outcome:** Module 16 now has a one-click scenario picker for the BIL deployment — RBI quarterly stress dashboards can fire the right preset instantly. Future M16.2 — bulk-run preset set + comparison view — extends the same primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

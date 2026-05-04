@@ -60,6 +60,17 @@ import {
   type RuleTemplateCategory,
   type RuleTemplateVertical,
 } from './rule_templates';
+import {
+  getScenarioPreset,
+  isScenarioCategory,
+  isScenarioRegulator,
+  isScenarioSeverity,
+  listScenarioCategories,
+  listScenarioPresets,
+  type ScenarioCategory,
+  type ScenarioRegulator,
+  type ScenarioSeverity,
+} from './scenario_library';
 import { variablesByCategory } from './rules/variables';
 import { backtest as runBacktest } from './rules/backtest';
 import { performanceFor } from './rules/performance';
@@ -998,6 +1009,92 @@ export function makeApp(deps: AppDeps = {}) {
     );
     res.json(wrapResponse({ items, total: items.length }, env));
   });
+
+  // ── BIL named scenario library (T6 M16.1) ────────────────────────────
+  //
+  // Three additive endpoints layered on top of T4.2 scenario/run +
+  // T4.18 saved scenarios. The library is platform-wide (every tenant
+  // sees the same 10 BIL presets); cloning into a saved scenario is
+  // a separate op via POST /v1/scenarios.
+  //
+  // Routes MUST come before /v1/scenarios/:id so Express matches the
+  // more-specific paths first.
+
+  /** GET /v1/scenarios/library/categories — distinct scenario categories. */
+  app.get(
+    '/v1/scenarios/library/categories',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listScenarioCategories();
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/scenarios/library?category=&regulator=&severity= — filtered list. */
+  app.get(
+    '/v1/scenarios/library',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const c = req.query.category as string | undefined;
+      const r = req.query.regulator as string | undefined;
+      const s = req.query.severity as string | undefined;
+      if (c !== undefined && !isScenarioCategory(c)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_category', message: `invalid category: ${c}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (r !== undefined && !isScenarioRegulator(r)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_regulator', message: `invalid regulator: ${r}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (s !== undefined && !isScenarioSeverity(s)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_severity', message: `invalid severity: ${s}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = listScenarioPresets({
+        category: c as ScenarioCategory | undefined,
+        regulator: r as ScenarioRegulator | undefined,
+        severity: s as ScenarioSeverity | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/scenarios/library/:id — single preset. 404 EWS_404_unknown_preset. */
+  app.get(
+    '/v1/scenarios/library/:id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const preset = getScenarioPreset(id);
+      if (!preset) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(preset, ctx));
+    },
+  );
 
   app.get('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
     const env = extractCtx(req, now);
