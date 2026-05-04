@@ -114,6 +114,10 @@ import {
   type ApiKeyStore,
 } from './api_keys';
 import {
+  ConfigRollbackError,
+  rollbackConfig,
+} from './config_rollback';
+import {
   optionalApiKeyAuth,
   requireApiKey,
   requireScope,
@@ -5312,13 +5316,81 @@ export function makeApp(deps: AppDeps = {}) {
       const items = out.items
         .filter((e) => e.resource_id === key)
         .map((e) => ({
+          event_id: e.event_id,
           ts: e.ts,
           actor_username: e.actor_username,
           action: e.action,
           previous_value: e.metadata.previous_value ?? null,
           new_value: e.metadata.new_value ?? e.metadata.default_value ?? null,
+          rolled_back_from_event_id:
+            (e.metadata as { rolled_back_from_event_id?: unknown }).rolled_back_from_event_id ?? null,
         }));
       res.json(wrapResponse({ items, total: items.length, key, limit }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/admin/config/:key/rollback body { to_event_id }
+   * T6 M13.3 — restore the config key to the value it held immediately
+   * after the targeted audit event was applied. Records a NEW
+   * config.update event with `rolled_back_from_event_id` metadata.
+   */
+  app.post(
+    '/v1/admin/config/:key/rollback',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.key ?? '';
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { to_event_id?: unknown };
+      const to_event_id =
+        typeof wrapper.to_event_id === 'string' ? wrapper.to_event_id : '';
+      try {
+        const out = rollbackConfig(
+          req.tenant!.tenant_id,
+          key,
+          to_event_id,
+          actor,
+          now(),
+          configStore,
+          auditTrailStore,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ConfigRollbackError) {
+          if (e.code === 'unknown_event') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_event', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'already_at_value') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_already_at_value', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'rollback failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

@@ -1261,6 +1261,25 @@
       - No-regression (2): /v1/alerts human-auth still 200 (no Bearer), /v1/admin/api-keys admin path still 200 (uncoupled from /svc/*).
     - **Outcome:** Module 1 now has 3 sub-phases (M1.1 TOTP + M1.2 API keys + M1.3 auth middleware). The full machine-identity flow runs end-to-end: admin provisions key (M1.2) → service POSTs `Authorization: Bearer apex_…` (M1.3) → BFF resolves to tenant + scopes → route enforces scope → request executes → last_used_at bumped automatically. Future M1.4 wires the same middleware into the broader `/v1/*` surface (today only `/v1/svc/*` accepts api-keys; the `/v1/alerts` etc. routes still require human auth).
 
+  - **M13.3 — Config rollback to prior audit event (2026-05-05):**
+    - M13.1 ships the admin config registry. M13.2 wires every config mutation as a `config.update / config.reset` audit event with `previous_value`, `new_value`, `default_value` metadata. M13.3 ships the rollback primitive — admin points at a prior audit event id, and the config key is restored to the state THAT EVENT REPRESENTS (the value the key held immediately AFTER the targeted event was applied). Recorded as a NEW `config.update` audit event linking back via `rolled_back_from_event_id` so the trail remains a continuous chain.
+    - **M13.2 history shape extended** — the `/v1/admin/config/:key/history` slim shape now exposes `event_id` (so the SPA can pass it to rollback) + `rolled_back_from_event_id` (so rollback events render with a backlink). Pure additive — no removals.
+    - New `services/bff/src/config_rollback.ts`:
+      - `rollbackTargetFromMetadata(action, metadata)` — pure helper. For `config.update` returns `metadata.new_value`; for `config.reset` returns `metadata.default_value`; null otherwise (unknown action or missing field). Refuses null/undefined/array as ConfigValue (object json type accepted). Refuses values for legacy events written before M13.2.
+      - `rollbackConfig(tenant, key, to_event_id, actor, now, configStore, auditStore)` — main entry. Reads audit event via `auditStore.get`, validates it's a config event for THIS key, extracts the rollback target, checks the current value isn't already equal (no-op rejection), applies via `configStore.set`, then records a NEW `config.update` audit event with `rolled_back_from_event_id` in metadata. Cross-tenant lookup denied via the M15.1 store's tenant-scoped `get`.
+      - `valuesEqual()` handles JSON-typed values (object stringify) so rollback to an `{a:1}` value is correctly detected as no-op when current is `{a:1}`.
+      - **Type-mismatched rollback target** — when an audit event was written before a schema migration changed the type, rollback falls back to `event_not_recoverable` instead of crashing (catches `ConfigValidationError` from `configStore.set`).
+      - `ConfigRollbackError` codes routed: `unknown_event` → 404, `event_not_for_this_key` + `event_not_recoverable` + `invalid_input` → 400, `already_at_value` → 409.
+    - **1 new BFF route** (tenant-gated, enveloped, `audit:read` admin-only):
+      - `POST /v1/admin/config/:key/rollback` body `{to_event_id}` → 200 with `{entry, rolled_back_from_event_id, previous_value, new_value}`. Records X-APEX-USER as actor (default 'admin').
+    - **Tests:** BFF 1991/1991 (was 1957 — +34 in `config_rollback.test.ts`):
+      - `rollbackTargetFromMetadata` (8): config.update/reset happy, missing fields → null, null/undefined rejected, array rejected, object accepted, unknown action → null.
+      - `rollbackConfig` unit (10): happy on update event, happy on reset event, unknown_event 404, event_not_for_this_key 400 (different key + non-config resource_type), event_not_recoverable (missing metadata + type-mismatch via schema rejection), already_at_value 409, cross-tenant denied, missing actor + missing event_id rejected.
+      - History event_id exposure (1): items now carry event_id field.
+      - POST route (10): admin 200 + ev1.new_value applied, new audit event written with rolled_back_from_event_id, enveloped body, default actor, unknown event 404, missing to_event_id 400, event-for-different-key 400, already_at_value 409, cross-tenant 404, role 403, chain ev1→ev2→rollback→re-rollback both apply correctly.
+      - No-regression (3): M13.1 GET /v1/admin/config + PUT /:key + M13.2 GET /:key/history still 200 (sub-paths didn't shadow + new event_id field is additive).
+    - **Outcome:** Module 13 now has 3 sub-phases (M13.1 registry + M13.2 audit wiring + M13.3 rollback). Config governance closes the loop: change → audit event → review history → rollback if needed → audit event of the rollback. RBI ops can demonstrate a complete config-change-management story end-to-end. Future M13.4 likely covers **bulk config import/export** for cloning settings between tenants.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
