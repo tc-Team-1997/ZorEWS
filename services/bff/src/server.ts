@@ -91,6 +91,10 @@ import {
   type BilAlertClass,
   type SeverityInput,
 } from './bil_alert_classification';
+import {
+  defaultInsuranceAdapter,
+  type InsuranceAdapter,
+} from './integrations/insurance';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -123,6 +127,13 @@ export interface AppDeps {
    * same interface.
    */
   emailTransport?: EmailTransport;
+  /**
+   * Override for tests — Core Insurance / Policy Master adapter
+   * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
+   * (deterministic synthetic data per (tenant, customer, day)).
+   * Production swaps in a SOAP/REST gateway adapter.
+   */
+  insuranceAdapter?: InsuranceAdapter;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -174,6 +185,7 @@ export function makeApp(deps: AppDeps = {}) {
   const portfolio = deps.portfolio ?? defaultPortfolio();
   const bus = deps.notificationBus ?? defaultBus;
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
+  const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1312,6 +1324,149 @@ export function makeApp(deps: AppDeps = {}) {
             {
               code: 'EWS_500',
               message: e instanceof Error ? e.message : 'health probe failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Core Insurance / Policy Master adapter (T6 M14.1) ─────────────────
+  //
+  // Four data-fetch endpoints over the insurance adapter — first BIL
+  // adapter in Module 14. Same RBAC as the per-customer risk-profile
+  // route (`customers:read_risk_profile`) since the data class is the
+  // same: per-customer financial profile.
+
+  /** GET /v1/integrations/insurance/policies?customer_id=X */
+  app.get(
+    '/v1/integrations/insurance/policies',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      if (!customer_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id query parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = await insuranceAdapter.listPolicies(req.tenant!.tenant_id, customer_id, now());
+        return res.json(wrapResponse({ items, total: items.length, customer_id }, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'insurance adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/insurance/policies/:policy_id */
+  app.get(
+    '/v1/integrations/insurance/policies/:policy_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const policy_id = req.params.policy_id ?? '';
+      try {
+        const policy = await insuranceAdapter.getPolicy(req.tenant!.tenant_id, policy_id, now());
+        if (!policy) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `policy ${policy_id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(policy, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'insurance adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/insurance/claims?customer_id=X */
+  app.get(
+    '/v1/integrations/insurance/claims',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      if (!customer_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id query parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = await insuranceAdapter.listClaims(req.tenant!.tenant_id, customer_id, now());
+        return res.json(wrapResponse({ items, total: items.length, customer_id }, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'insurance adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/insurance/claims/:claim_id */
+  app.get(
+    '/v1/integrations/insurance/claims/:claim_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const claim_id = req.params.claim_id ?? '';
+      try {
+        const claim = await insuranceAdapter.getClaim(req.tenant!.tenant_id, claim_id, now());
+        if (!claim) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `claim ${claim_id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(claim, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'insurance adapter failed',
               severity: 'HIGH',
             },
             ctx,

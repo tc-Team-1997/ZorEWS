@@ -395,6 +395,25 @@
       - Routes (17): spec list happy path + 403, classify all-4-severities + lowercase + enveloped body + 3 error paths, by-class filtering for each of the 4 classes, empty fleet, invalid class 400, uppercase rejection, unknown-role 403.
     - **Outcome:** Module 8's BIL-flavour classification shipped. The SPA can now render the BIL tri-colour alert badges (plus the operational green) directly from the API. Future sub-phases — M8.2 alert auto-routing per class, M8.3 alert acknowledgement workflow per class — extend this primitive rather than altering it.
 
+  - **M14.1 — Core Insurance / Policy Master adapter (2026-05-04):**
+    - First adapter in Module 14 (External Integration Layer, 50 APIs across 11 upstreams). The existing `/v1/integrations/health` is a probe-only health pinger; M14.1 lands a concrete data-fetch adapter for the BIL Core Insurance / Policy Master / Claims systems so the SPA can render per-customer policy + claim history alongside the indicator panel.
+    - New `services/bff/src/integrations/insurance.ts`:
+      - `InsuranceAdapter` interface — `listPolicies(tenant, customer, asOf)`, `getPolicy(tenant, policy_id, asOf)`, `listClaims(tenant, customer, asOf)`, `getClaim(tenant, claim_id, asOf)`. The contract a SOAP/REST gateway adapter would satisfy.
+      - `StubInsuranceAdapter` — deterministic synthetic data keyed by `(tenant_id, customer_id, day)` via FNV-1a + Mulberry32 (same scheme as `bil_dashboards.ts`). 1-4 policies per customer; 0-3 claims per policy. Tenant baked into both the seed AND the policy/claim id prefix so BIL ↔ BANK_DEMO ids are disjoint.
+      - 4 BIL products: `TERM_LIFE`, `ENDOWMENT`, `ULIP`, `GENERAL_HEALTH`. 5 policy statuses (`in_force`, `lapsed`, `cancelled`, `matured`, `pending_uw`) with realistic distribution (~50% in_force). 6 claim statuses (`submitted`, `under_investigation`, `approved`, `paid`, `rejected`, `withdrawn`) with `paid_amount_kes > 0` iff `status === 'paid'`. 7 reason codes from a closed enum.
+      - Sum-assured ranges by product: TERM_LIFE 5M-50M KES, ENDOWMENT 1M-10M, ULIP 2M-20M, GENERAL_HEALTH 500k-5M. Annual premium calibrated as 1-3% of sum assured.
+      - `getPolicy` / `getClaim` decode the canonical id format (`POL-<TEN>-\d{6}`, `CLM-<TEN>-\d{6}`) and synthesise a self-consistent shape from the id alone — production adapter would hit the Policy Master by id directly.
+    - **`AppDeps.insuranceAdapter` injection point** — defaults to the module-level `defaultInsuranceAdapter`. Tests inject a custom adapter to assert error paths (e.g. upstream timeout → 502 envelope).
+    - **4 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile` since the data class matches the per-customer risk-profile route):
+      - `GET /v1/integrations/insurance/policies?customer_id=X` — list, sorted newest-inception-first. 400 on missing `customer_id`. 502 envelope on adapter throw.
+      - `GET /v1/integrations/insurance/policies/:policy_id` — fetch by id. 404 on malformed/unknown id.
+      - `GET /v1/integrations/insurance/claims?customer_id=X` — list, sorted newest-filed-first.
+      - `GET /v1/integrations/insurance/claims/:claim_id` — fetch by id. 404 on malformed id.
+    - **Tests:** BFF 446/446 (was 415 — +31 in `insurance_adapter.test.ts`):
+      - StubInsuranceAdapter (16): listPolicies determinism + tenant scoping + sort + 1..4 count bound + every-field-present + rider dedup + lapsed-implies-unpaid invariant + empty-customer guard; getPolicy round-trip + malformed-id null; listClaims invariants (claim links back to policy, paid-iff-paid_amount>0, sort, reason_code enum); getClaim id-preservation + malformed-id null.
+      - Routes (15): admin happy paths for all 4 routes, risk_analyst accepted, unknown-role 403, missing-customer-id 400, malformed-id 404, adapter-throw → 502 envelope, tenant scoping (BIL ↔ BANK_DEMO ids disjoint), claims sorted newest-filed-first.
+    - **Outcome:** Module 14's first adapter shipped. The SPA can render a customer's BIL policy + claim history in two GET round-trips. The interface keeps a SOAP/REST gateway swap a drop-in. The next adapters (M14.2 IFRS9, M14.3 AML, M14.4 DMS, etc.) follow the same `<Upstream>Adapter` + `Stub<Upstream>Adapter` shape, parameterising routes once a 2nd adapter lands.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
