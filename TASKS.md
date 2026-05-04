@@ -1241,6 +1241,26 @@
       - No-regression (2): /v1/admin/config + /categories still 200 (api-keys sub-path didn't shadow).
     - **Outcome:** Module 1 now has 2 sub-phases (M1.1 TOTP + M1.2 API keys). Human + machine identity primitives both shipped. Future M1.3 wires the **API key auth middleware** (`Authorization: Bearer apex_<prefix>.<secret>` → resolve to (tenant, scopes) → enforce per-route). M1.4 likely covers **FIDO2/WebAuthn passkeys** for high-privilege admin actions.
 
+  - **M1.3 — API key auth middleware (2026-05-05):**
+    - M1.2 ships the API key store + `verify()` primitive. M1.3 wires the Express middleware that accepts `Authorization: Bearer apex_…`, resolves the caller to (tenant_id, scopes), populates `req.apiKey` + `req.tenant`, and best-effort touches `last_used_at`. Demonstrates the surface end-to-end via `/v1/svc/whoami` + `/v1/svc/audit/integrity`.
+    - New `services/bff/src/api_key_auth.ts` — three composable middlewares:
+      - **`optionalApiKeyAuth(store, now)`** — try-auth. No Authorization header → falls through silently to next middleware (lets human-auth + tenant-mw handle the request). Non-Bearer scheme (Basic, etc.) → falls through. Bearer present but malformed/invalid/revoked/expired → **401 EWS_401_invalid_api_key**. Valid → populates `req.apiKey = {entry, scopes}` + `req.tenant = {tenant_id, defaults}` + `req.channel = 'API'`, calls `store.touch()` (best-effort, swallows races).
+      - **`requireApiKey(now)`** — fails 401 if `req.apiKey` isn't set. Use AFTER optionalApiKeyAuth to enforce machine-only surface.
+      - **`requireScope(scope, now)`** — fails 403 EWS_403_missing_scope if the verified key doesn't carry the named scope. Defensive 401 if no api key context (caller should chain after requireApiKey).
+    - **Security stance** — `X-Tenant-ID` is ignored when api-key auth succeeds. The service account's tenant binding is baked into the key itself; a presented `X-Tenant-ID` cannot override (verified end-to-end in tests). Bearer regex anchored to `apex_<prefix>.<secret>` shape so malformed keys 401 fast without touching the store.
+    - **Express Request augmentation** — `req.apiKey?: ApiKeyAuthContext` added to the existing `Request.tenant` / `Request.channel` augmentation in `tenant.ts`.
+    - **2 new BFF routes** demonstrating the middleware:
+      - `GET /v1/svc/whoami` — returns the verified api-key context (`key_id, tenant_id, name, scopes, last_used_at, expires_at`). No scope required — any active key works.
+      - `GET /v1/svc/audit/integrity` — service-account-readable variant of M15.2 chain-verification. Requires `audit:read` scope on the key (demonstrates `requireScope` on a real route).
+    - **Tests:** BFF 1957/1957 (was 1929 — +28 in `api_key_auth.test.ts`):
+      - optionalApiKeyAuth (10): no header passthrough, Basic-auth passthrough, malformed Bearer 401, non-apex_ Bearer 401, valid populates context, touch bumps last_used_at, revoked 401, expired 401 (with clock past expires_at), tampered-secret 401 (correct prefix wrong tail), cross-tenant override attempt fails (BIL key + X-Tenant-ID=BANK_DEMO → req.tenant=BIL).
+      - requireApiKey (2): no-header 401, valid → 200.
+      - requireScope (3): with-scope 200, without-scope 403, defensive no-key 401.
+      - /v1/svc/whoami end-to-end (7): valid 200 with redacted shape, no-header 401, mangled 401, revoked 401, no-scope-needed, X-Tenant-ID ignored, last_used_at visible via admin GET.
+      - /v1/svc/audit/integrity (4): with-scope 200, without-scope 403, no-auth 401, cross-tenant: BIL key gets BIL chain (X-Tenant-ID override ineffective).
+      - No-regression (2): /v1/alerts human-auth still 200 (no Bearer), /v1/admin/api-keys admin path still 200 (uncoupled from /svc/*).
+    - **Outcome:** Module 1 now has 3 sub-phases (M1.1 TOTP + M1.2 API keys + M1.3 auth middleware). The full machine-identity flow runs end-to-end: admin provisions key (M1.2) → service POSTs `Authorization: Bearer apex_…` (M1.3) → BFF resolves to tenant + scopes → route enforces scope → request executes → last_used_at bumped automatically. Future M1.4 wires the same middleware into the broader `/v1/*` surface (today only `/v1/svc/*` accepts api-keys; the `/v1/alerts` etc. routes still require human auth).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

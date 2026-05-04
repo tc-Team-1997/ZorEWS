@@ -113,6 +113,11 @@ import {
   validateInput as validateApiKeyInput,
   type ApiKeyStore,
 } from './api_keys';
+import {
+  optionalApiKeyAuth,
+  requireApiKey,
+  requireScope,
+} from './api_key_auth';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 import {
   buildAgentDashboard,
@@ -5466,6 +5471,54 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.status(204).send();
+    },
+  );
+
+  // ── Service-account auth surface (T6 M1.3) ───────────────────────────
+  //
+  // /v1/svc/* endpoints accept ONLY the api-key bearer token (no
+  // human auth). Tenant binding comes from the verified key — X-
+  // Tenant-ID is ignored here. Scope enforcement is per-route via
+  // requireScope.
+  const apiKeyMw = optionalApiKeyAuth(apiKeyStore, now);
+  const requireKeyMw = requireApiKey(now);
+
+  /** GET /v1/svc/whoami — returns the verified api-key context.
+   *  Requires only that the caller be authenticated (no scope). */
+  app.get(
+    '/v1/svc/whoami',
+    apiKeyMw,
+    requireKeyMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            key_id: req.apiKey!.entry.key_id,
+            tenant_id: req.apiKey!.entry.tenant_id,
+            name: req.apiKey!.entry.name,
+            scopes: req.apiKey!.scopes,
+            last_used_at: req.apiKey!.entry.last_used_at,
+            expires_at: req.apiKey!.entry.expires_at,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/svc/audit/integrity — service-account-readable variant of
+   *  the M15.2 chain-verification surface. Requires `audit:read`
+   *  scope on the key. Demonstrates requireScope on a real route. */
+  app.get(
+    '/v1/svc/audit/integrity',
+    apiKeyMw,
+    requireKeyMw,
+    requireScope('audit:read', now),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const out = auditTrailStore.verifyChain(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
