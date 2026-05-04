@@ -3657,6 +3657,22 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /**
+   * GET /v1/audit/integrity — recompute the chain hash and report
+   * any tampering. Returns valid=true + last_hash on a clean chain.
+   * Tenant-scoped; admin only.
+   */
+  app.get(
+    '/v1/audit/integrity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const out = auditTrailStore.verifyChain(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/events/:event_id — single event. 404 on miss. */
   app.get(
     '/v1/audit/events/:event_id',

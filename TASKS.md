@@ -806,6 +806,23 @@
       - Route (4): admin happy + 403 + tenant divergence through HTTP + envelope shape.
     - **Outcome:** The BIL exec screen is a single GET away. **5 BIL dashboards now demoable**: Claims, Underwriting, Agent, Operational (M11.1-4) + Executive Watchlist (M11.5). Module 11 has shipped 5 of the declared 30 dashboard APIs.
 
+  - **M15.2 — Audit-trail hash-chain integrity (2026-05-04):**
+    - Extends M15.1 with tamper-evidence. Every recorded `AuditEvent` now carries `hash` (SHA-256 over canonical-encoded fields) + `prev_hash` (link to the prior event in the same tenant's ledger; `GENESIS` for the first). Mutating any field on any event → its hash no longer recomputes correctly → `verifyChain()` detects the break and reports the index + expected vs actual hash + reason (`hash_mismatch` | `prev_hash_mismatch`).
+    - Updates to `services/bff/src/audit_trail.ts`:
+      - `AuditEvent` now has `hash: string` + `prev_hash: string`. `record()` computes hash via `computeEventHash()` — canonical JSON over event fields excluding `hash` itself but **including** `prev_hash`, so a tampered earlier event invalidates every subsequent hash. Metadata keys are sorted before serialisation for cross-input determinism.
+      - New `verifyChain(tenant_id, now)` walks the tenant's events oldest-first, recomputes each event's hash from its on-disk fields, compares to the stored hash, and verifies that each `prev_hash` matches the previous event's `hash`. Returns `ChainVerification` with `{tenant_id, generated_at, total_events, valid, last_hash, broken_at?}`.
+      - `_eventsForTenant()` test helper exposes the underlying array so the tampering tests can simulate mutation. Production WORM stores wouldn't expose this.
+      - Per-tenant chain segmentation: each tenant has its own GENESIS-anchored chain; tampering in BIL doesn't affect BANK_DEMO's verdict.
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `audit:read`):
+      - `GET /v1/audit/integrity` — recompute the chain hash + report any tampering. Returns `valid=true` + `last_hash` on a clean chain; `valid=false` + `broken_at` (with index + event_id + expected/actual hash + reason) on a tampered chain.
+    - **Tests:** BFF 1141/1141 (was 1121 — +20 in `audit_integrity.test.ts`). All existing audit_trail tests still pass — `hash` + `prev_hash` are additive fields; existing assertions check specific scalar fields, not whole-object equality.
+      - `record()` (4): GENESIS for first event, prev_hash linkage, per-tenant chain segmentation, hash uniqueness.
+      - `verifyChain` happy path (4): empty chain, single event, 50-event chain, tenant scoping.
+      - Tampering detection (5): scalar field mutation → hash_mismatch; splice → prev_hash_mismatch; metadata mutation → hash_mismatch; forged-event append → detected; tampering at last index detected.
+      - Routes (5): admin happy + tampered + empty-chain + 403 + cross-tenant verdict isolation.
+      - Backwards-compat (2): POST /v1/audit/events + GET /v1/audit/events/:id now return hash + prev_hash.
+    - **Outcome:** Module 15 now has tamper-evident audit. Combined with the WORM-backed `audit-svc` (Python), the BIL deployment has both the regulatory-grade ledger AND the SPA-friendly query surface — the chain check is one route the SPA can poll on a schedule to catch any silent tampering.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
