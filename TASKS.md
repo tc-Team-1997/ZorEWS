@@ -1026,6 +1026,31 @@
     - **One envelope.test failure observed under parallel-run pollution** — passes in isolation + on re-run. Same flake pattern as M11.6 / M9.1; not a regression.
     - **Outcome:** Module 4 now has both the catalog (M4.1) + backtest (M4.2). The BIL deployment can demo the full indicator lifecycle: declare in catalog → backtest against historical data → evaluate via M6.2 scoring. Future M4.3 (catalog mutation API + RBAC-gated weight overrides) extends the same primitives.
 
+  - **M9.3 — Case maker-checker workflow (2026-05-04):**
+    - BIL ops + compliance need 4-eyes approval on sensitive case actions: closing a case, escalating to head-of-risk, overriding an automated decision. RBI's operational risk framework calls this out explicitly, and M13.1 already exposes `features.maker_checker_enabled` as a per-tenant toggle. M9.3 ships the workflow that the toggle gates.
+    - New `services/bff/src/case_maker_checker.ts`:
+      - `MakerCheckerAction` shape: `action_id`, `case_id`, `action_type` (one of 3: `case.close / case.escalate / case.override_decision`), `payload` (action-specific JSON object), `status` (`pending / approved / rejected / cancelled`), `maker_username/_at`, `rationale`, `checker_username/_at`, `decision_notes`.
+      - **Self-approval refused** — maker and checker MUST be different users. RBI segregation of duties is the law of the land here. `MakerCheckerError(self_approval_forbidden)` → 409 at the BFF layer.
+      - Rationale + decision_notes both capped at 4000 chars.
+      - Refuses 2nd pending submission for the same `(case_id, action_type)` — keeps the audit trail unambiguous. Allows new submission after the prior is approved/rejected.
+      - `MakerCheckerEngine` interface (`submit / list / get / approve / reject`) + `InMemoryMakerCheckerEngine`. Same-shape state machine pattern as M7.2 promotions.
+      - `MakerCheckerError` codes routed: `unknown_action` → 404, `submission_already_pending` + `already_decided` + `self_approval_forbidden` → 409, `invalid_input` + `invalid_action_type` → 400.
+    - **`AppDeps.makerCheckerEngine` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes** (all tenant-gated, all enveloped):
+      - `POST /v1/cases/maker-checker` — RBAC `cases:log_action` (analyst+). 201 happy.
+      - `GET /v1/cases/maker-checker?status=&action_type=&case_id=&maker_username=&page=&page_size=` — RBAC `cases:list`. Newest-first, paginated. Code-routed 400s on invalid filters.
+      - `GET /v1/cases/maker-checker/:action_id` — RBAC `cases:list`. Tenant-scoped 404.
+      - `POST /v1/cases/maker-checker/:action_id/approve` body `{decision_notes?}` — RBAC `audit:read` (admin). 200 happy; 409 `self_approval_forbidden` + `already_decided`; 404 unknown.
+      - `POST /v1/cases/maker-checker/:action_id/reject` body `{decision_notes?}` — same routing as approve.
+    - **Tests:** BFF 1565/1565 (was 1515 — +50 in `case_maker_checker.test.ts`):
+      - Type guards (2): isSensitiveActionType, isMakerCheckerStatus.
+      - validateSubmit (7): happy, missing case_id, invalid action_type, missing rationale, length cap, non-object payload, error code.
+      - Engine submit (6): pending creation, 2nd-pending refused, allow-after-reject, different-action_types-concurrent, cross-tenant isolation, missing maker_username.
+      - Engine list+get (6): newest-first, status / action_type / case_id / maker filters, pagination + clamp, get null on miss + cross-tenant.
+      - Engine approve+reject (9): metadata write, mirror, **self-approval forbidden + self-rejection forbidden** (segregation invariant), null notes, already_decided, unknown_action, length cap, missing checker_username.
+      - Routes (20): submit + 4 error codes; list + filters + invalid filter 400s + 404; approve happy (different user) + self-approval 409 + already_decided 409 + 404 + 403; reject happy + self-rejection 409 + 403; tenant isolation + full round-trip.
+    - **Outcome:** Module 9 now has 3 sub-phases (M9.1 investigation tracker + M9.2 custom checklists + M9.3 maker-checker). Combined with M13.1's `features.maker_checker_enabled` toggle, the BIL deployment can demo the full RBI-compliant 4-eyes approval flow on sensitive case actions. Future M9.4 will close the loop by applying approved actions to downstream stores.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

@@ -232,6 +232,15 @@ import {
   type ChecklistTemplateStore,
 } from './case_checklists';
 import {
+  defaultMakerCheckerEngine,
+  isMakerCheckerStatus,
+  isSensitiveActionType,
+  MakerCheckerError,
+  type MakerCheckerEngine,
+  type MakerCheckerStatus,
+  type SensitiveActionType,
+} from './case_maker_checker';
+import {
   defaultAiModelRegistry,
   isModelStatus,
   isModelType,
@@ -440,6 +449,12 @@ export interface AppDeps {
    */
   checklistTemplateStore?: ChecklistTemplateStore;
   /**
+   * Override for tests — maker-checker engine (T6 M9.3). Defaults
+   * to module-level singleton. Tracks pending sensitive actions
+   * pending 4-eyes approval.
+   */
+  makerCheckerEngine?: MakerCheckerEngine;
+  /**
    * Override for tests — BIL AI/ML model registry (T6 M7.1).
    * Defaults to the module-level InMemoryAiModelRegistry seeded with
    * 8 BIL model versions. Production swaps in an MLflow / Sagemaker
@@ -522,6 +537,7 @@ export function makeApp(deps: AppDeps = {}) {
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
+  const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
@@ -2553,6 +2569,229 @@ export function makeApp(deps: AppDeps = {}) {
         return res.json(wrapResponse({ deleted: true, template_id: id }, ctx));
       } catch (e) {
         const m = mapChecklistError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  // ── BIL case maker-checker workflow (T6 M9.3) ────────────────────────
+  //
+  // 5 routes for the 4-eyes approval workflow on sensitive case actions
+  // (close / escalate / override). Submit = cases:log_action (analyst+);
+  // approve/reject = audit:read (admin) — segregation of duties enforced
+  // by RBAC at the route level + by the engine via self-approval refusal.
+
+  function makerCheckerActor(req: Request): string {
+    const v = req.headers['x-apex-user'];
+    return typeof v === 'string' && v.trim() ? v.trim() : 'admin';
+  }
+
+  function mapMakerCheckerError(e: unknown, ctx: ReturnType<typeof extractCtx>): {
+    status: number;
+    body: ReturnType<typeof wrapError>;
+  } {
+    if (!(e instanceof MakerCheckerError)) {
+      return {
+        status: 500,
+        body: wrapError(
+          {
+            code: 'EWS_500',
+            message: e instanceof Error ? e.message : 'maker-checker failed',
+            severity: 'HIGH',
+          },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'unknown_action') {
+      return {
+        status: 404,
+        body: wrapError({ code: 'EWS_404_unknown_action', message: e.message, severity: 'LOW' }, ctx),
+      };
+    }
+    if (
+      e.code === 'submission_already_pending' ||
+      e.code === 'already_decided' ||
+      e.code === 'self_approval_forbidden'
+    ) {
+      return {
+        status: 409,
+        body: wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      };
+    }
+    return {
+      status: 400,
+      body: wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+    };
+  }
+
+  /** POST /v1/cases/maker-checker — submit a sensitive case action. */
+  app.post(
+    '/v1/cases/maker-checker',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const action = makerCheckerEngine.submit(
+          req.tenant!.tenant_id,
+          inner,
+          makerCheckerActor(req),
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(action, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        const m = mapMakerCheckerError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /**
+   * GET /v1/cases/maker-checker?status=&action_type=&case_id=&maker_username=&
+   *   page=&page_size=
+   */
+  app.get(
+    '/v1/cases/maker-checker',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: {
+        status?: MakerCheckerStatus;
+        action_type?: SensitiveActionType;
+        case_id?: string;
+        maker_username?: string;
+        page?: number;
+        page_size?: number;
+      } = {};
+      if (typeof q.status === 'string') {
+        if (!isMakerCheckerStatus(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_status', message: `invalid status: ${q.status}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.status = q.status as MakerCheckerStatus;
+      }
+      if (typeof q.action_type === 'string') {
+        if (!isSensitiveActionType(q.action_type)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_action_type',
+                message: `invalid action_type: ${q.action_type}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        filters.action_type = q.action_type as SensitiveActionType;
+      }
+      if (typeof q.case_id === 'string') filters.case_id = q.case_id;
+      if (typeof q.maker_username === 'string') filters.maker_username = q.maker_username;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') {
+        filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
+      }
+      const out = makerCheckerEngine.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/cases/maker-checker/:action_id — single action. */
+  app.get(
+    '/v1/cases/maker-checker/:action_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.action_id ?? '';
+      const action = makerCheckerEngine.get(req.tenant!.tenant_id, id);
+      if (!action) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_action', message: `unknown maker-checker action: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(action, ctx));
+    },
+  );
+
+  /** POST /v1/cases/maker-checker/:action_id/approve body: { decision_notes? } */
+  app.post(
+    '/v1/cases/maker-checker/:action_id/approve',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.action_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const notes =
+        inner && typeof inner === 'object' && 'decision_notes' in (inner as object)
+          ? ((inner as { decision_notes: unknown }).decision_notes as string | null)
+          : null;
+      try {
+        const action = makerCheckerEngine.approve(
+          req.tenant!.tenant_id,
+          id,
+          makerCheckerActor(req),
+          notes ?? null,
+          now(),
+        );
+        return res.json(wrapResponse(action, ctx));
+      } catch (e) {
+        const m = mapMakerCheckerError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /** POST /v1/cases/maker-checker/:action_id/reject body: { decision_notes? } */
+  app.post(
+    '/v1/cases/maker-checker/:action_id/reject',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.action_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const notes =
+        inner && typeof inner === 'object' && 'decision_notes' in (inner as object)
+          ? ((inner as { decision_notes: unknown }).decision_notes as string | null)
+          : null;
+      try {
+        const action = makerCheckerEngine.reject(
+          req.tenant!.tenant_id,
+          id,
+          makerCheckerActor(req),
+          notes ?? null,
+          now(),
+        );
+        return res.json(wrapResponse(action, ctx));
+      } catch (e) {
+        const m = mapMakerCheckerError(e, ctx);
         return res.status(m.status).json(m.body);
       }
     },
