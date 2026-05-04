@@ -64,7 +64,7 @@ import {
 } from './rules/state_machine';
 import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
-import { requireTenant, defaultTenantLookup, type TenantLookup } from './tenant';
+import { requireTenant, defaultTenantLookup, TenantConflict, type TenantLookup } from './tenant';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 
 const ROLE_HEADER = 'x-apex-role';
@@ -731,6 +731,191 @@ export function makeApp(deps: AppDeps = {}) {
     }
     const items = await tenantLookup.all();
     res.json(wrapResponse({ items, total: items.length }, ctx));
+  });
+
+  /**
+   * POST /v1/tenants — admin creates a tenant (T4.24 Phase 10).
+   *
+   * Validates: tenant_id (uppercase + underscore + digits, ≤32 chars),
+   * vertical in {banking, insurance}, channels_allowed non-empty, name
+   * non-empty. 409 envelope on duplicate. 501 envelope when the lookup
+   * doesn't support mutations.
+   */
+  app.post('/v1/tenants', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    if (!tenantLookup.create) {
+      return res.status(501).json(
+        wrapError(
+          { code: 'EWS_501', message: 'tenant lookup is read-only', severity: 'LOW' },
+          ctx,
+        ),
+      );
+    }
+    const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+    const body = (raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+      ? (raw as { body: unknown }).body
+      : raw) as {
+      tenant_id?: unknown;
+      name?: unknown;
+      vertical?: unknown;
+      channels_allowed?: unknown;
+      active?: unknown;
+    };
+    const errs: string[] = [];
+    if (typeof body?.tenant_id !== 'string' || !/^[A-Z][A-Z0-9_]{1,31}$/.test(body.tenant_id)) {
+      errs.push('tenant_id must match ^[A-Z][A-Z0-9_]{1,31}$ (uppercase + digits + underscore)');
+    }
+    if (typeof body?.name !== 'string' || !body.name.trim()) {
+      errs.push('name is required');
+    }
+    if (body?.vertical !== 'banking' && body?.vertical !== 'insurance') {
+      errs.push("vertical must be 'banking' or 'insurance'");
+    }
+    if (
+      !Array.isArray(body?.channels_allowed) ||
+      body.channels_allowed.length === 0 ||
+      !body.channels_allowed.every((c) => typeof c === 'string' && c.length > 0)
+    ) {
+      errs.push('channels_allowed must be a non-empty array of strings');
+    }
+    if (errs.length > 0) {
+      return res.status(400).json(
+        wrapError(
+          { code: 'EWS_400', message: errs.join('; '), severity: 'MEDIUM' },
+          ctx,
+        ),
+      );
+    }
+    try {
+      const created = await tenantLookup.create({
+        tenant_id: body.tenant_id as string,
+        name: (body.name as string).trim(),
+        vertical: body.vertical as 'banking' | 'insurance',
+        channels_allowed: body.channels_allowed as string[],
+        active: typeof body.active === 'boolean' ? body.active : true,
+      });
+      res.status(201).json(wrapResponse(created, ctx, { code: 'EWS_201', message: 'Created' }));
+    } catch (e) {
+      if (e instanceof TenantConflict) {
+        return res.status(409).json(
+          wrapError(
+            {
+              code: 'EWS_409',
+              message: e.message,
+              severity: 'MEDIUM',
+              detail: { tenant_id: e.tenant_id },
+            },
+            ctx,
+          ),
+        );
+      }
+      throw e;
+    }
+  });
+
+  /**
+   * PATCH /v1/tenants/:tenant_id — admin updates name / channels / active.
+   * tenant_id is immutable. 404 envelope when missing.
+   */
+  app.patch('/v1/tenants/:tenant_id', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    if (!tenantLookup.update) {
+      return res.status(501).json(
+        wrapError(
+          { code: 'EWS_501', message: 'tenant lookup is read-only', severity: 'LOW' },
+          ctx,
+        ),
+      );
+    }
+    const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+    const body = (raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+      ? (raw as { body: unknown }).body
+      : raw) as {
+      name?: unknown;
+      channels_allowed?: unknown;
+      active?: unknown;
+    };
+    const patch: { name?: string; channels_allowed?: string[]; active?: boolean } = {};
+    if (body?.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'name must be a non-empty string', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      patch.name = body.name.trim();
+    }
+    if (body?.channels_allowed !== undefined) {
+      if (
+        !Array.isArray(body.channels_allowed) ||
+        body.channels_allowed.length === 0 ||
+        !body.channels_allowed.every((c) => typeof c === 'string' && c.length > 0)
+      ) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'channels_allowed must be a non-empty string array', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      patch.channels_allowed = body.channels_allowed as string[];
+    }
+    if (body?.active !== undefined) {
+      if (typeof body.active !== 'boolean') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'active must be a boolean', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      patch.active = body.active;
+    }
+    const updated = await tenantLookup.update(req.params.tenant_id, patch);
+    if (!updated) {
+      return res.status(404).json(
+        wrapError(
+          { code: 'EWS_404', message: `tenant '${req.params.tenant_id}' not found`, severity: 'LOW' },
+          ctx,
+        ),
+      );
+    }
+    res.json(wrapResponse(updated, ctx));
+  });
+
+  /**
+   * DELETE /v1/tenants/:tenant_id — admin removes a tenant.
+   * 204 on success. 404 envelope when missing. 409 envelope when the
+   * tenant is system-protected (BANK_DEMO is always protected).
+   */
+  app.delete('/v1/tenants/:tenant_id', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    if (!tenantLookup.delete) {
+      return res.status(501).json(
+        wrapError(
+          { code: 'EWS_501', message: 'tenant lookup is read-only', severity: 'LOW' },
+          ctx,
+        ),
+      );
+    }
+    const result = await tenantLookup.delete(req.params.tenant_id);
+    if (result === 'system_protected') {
+      return res.status(409).json(
+        wrapError(
+          {
+            code: 'EWS_409',
+            message: `tenant '${req.params.tenant_id}' is system-protected and cannot be deleted`,
+            severity: 'MEDIUM',
+          },
+          ctx,
+        ),
+      );
+    }
+    if (result === false) {
+      return res.status(404).json(
+        wrapError(
+          { code: 'EWS_404', message: `tenant '${req.params.tenant_id}' not found`, severity: 'LOW' },
+          ctx,
+        ),
+      );
+    }
+    res.status(204).end();
   });
 
   app.get(

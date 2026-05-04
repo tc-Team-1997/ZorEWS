@@ -416,3 +416,152 @@ describe('GET /v1/tenants/me + GET /v1/tenants (T4.24 Phase 9)', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// T4.24 Phase 10 — tenant mutation endpoints. Each test runs against a
+// fresh app (and therefore a fresh defaultTenantLookup) so create/delete
+// across tests don't leak.
+describe('Tenant mutations: POST + PATCH + DELETE /v1/tenants (T4.24 Phase 10)', () => {
+  const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+  test('POST /v1/tenants creates a new tenant + returns 201 envelope', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).post('/v1/tenants').set(TH).send({
+      tenant_id: 'TEST_BANK',
+      name: 'Test Bank',
+      vertical: 'banking',
+      channels_allowed: ['API', 'MOBILE'],
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.header.code).toBe('EWS_201');
+    expect(r.body.body.tenant_id).toBe('TEST_BANK');
+    expect(r.body.body.vertical).toBe('banking');
+    expect(r.body.body.active).toBe(true);
+    // Round-trip: the new tenant shows up in /v1/tenants
+    const list = await request(app).get('/v1/tenants').set(TH);
+    const ids = list.body.body.items.map((t: { tenant_id: string }) => t.tenant_id);
+    expect(ids).toContain('TEST_BANK');
+  });
+
+  test('POST /v1/tenants — 409 envelope on duplicate', async () => {
+    const { app } = makeV1App();
+    const dup = {
+      tenant_id: 'BANK_DEMO',
+      name: 'Duplicate',
+      vertical: 'banking',
+      channels_allowed: ['API'],
+    };
+    const r = await request(app).post('/v1/tenants').set(TH).send(dup);
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('EWS_409');
+    expect(r.body.error.detail.tenant_id).toBe('BANK_DEMO');
+  });
+
+  test('POST /v1/tenants — 400 envelope when tenant_id is malformed', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).post('/v1/tenants').set(TH).send({
+      tenant_id: 'lowercase-bad',
+      name: 'X',
+      vertical: 'banking',
+      channels_allowed: ['API'],
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/tenant_id/);
+  });
+
+  test('POST /v1/tenants — 400 envelope on bad vertical', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).post('/v1/tenants').set(TH).send({
+      tenant_id: 'NEW_OK',
+      name: 'X',
+      vertical: 'crypto', // invalid
+      channels_allowed: ['API'],
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/vertical/);
+  });
+
+  test('POST /v1/tenants requires admin (audit:read)', async () => {
+    const { makeApp } = jest.requireActual('../src/server') as typeof import('../src/server');
+    const { StaticSource } = jest.requireActual('../src/source') as typeof import('../src/source');
+    const { StubEvaluator } = jest.requireActual('../src/score') as typeof import('../src/score');
+    const { StubRiskProfileSource } = jest.requireActual('../src/risk_profile') as typeof import('../src/risk_profile');
+    const { UnavailableCaseActionSink } = jest.requireActual('../src/case_action') as typeof import('../src/case_action');
+    const fieldOnly = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      now: () => NOW,
+      getRole: () => 'field_officer',
+    });
+    const r = await request(fieldOnly.app).post('/v1/tenants').set(TH).send({
+      tenant_id: 'NEW_TENANT',
+      name: 'X',
+      vertical: 'banking',
+      channels_allowed: ['API'],
+    });
+    expect(r.status).toBe(403);
+  });
+
+  test('PATCH /v1/tenants/:id updates name + channels + active', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).patch('/v1/tenants/BIL').set(TH).send({
+      name: 'BIL Updated',
+      channels_allowed: ['API'],
+      active: false,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.body.tenant_id).toBe('BIL');
+    expect(r.body.body.name).toBe('BIL Updated');
+    expect(r.body.body.channels_allowed).toEqual(['API']);
+    expect(r.body.body.active).toBe(false);
+  });
+
+  test('PATCH /v1/tenants/:id — 404 envelope when tenant unknown', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).patch('/v1/tenants/DOES_NOT_EXIST').set(TH).send({
+      name: 'X',
+    });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404');
+  });
+
+  test('PATCH /v1/tenants/:id — 400 envelope on invalid patch field', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).patch('/v1/tenants/BIL').set(TH).send({
+      active: 'yes', // must be boolean
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/active/);
+  });
+
+  test('DELETE /v1/tenants/:id removes a non-system tenant', async () => {
+    const { app } = makeV1App();
+    // Create a deletable one first.
+    await request(app).post('/v1/tenants').set(TH).send({
+      tenant_id: 'TEMP_TENANT',
+      name: 'Temp',
+      vertical: 'banking',
+      channels_allowed: ['API'],
+    });
+    const d = await request(app).delete('/v1/tenants/TEMP_TENANT').set(TH);
+    expect(d.status).toBe(204);
+    // Subsequent delete returns 404 envelope
+    const d2 = await request(app).delete('/v1/tenants/TEMP_TENANT').set(TH);
+    expect(d2.status).toBe(404);
+    expect(d2.body.error.code).toBe('EWS_404');
+  });
+
+  test('DELETE /v1/tenants/BANK_DEMO is refused with 409 (system-protected)', async () => {
+    const { app } = makeV1App();
+    const r = await request(app).delete('/v1/tenants/BANK_DEMO').set(TH);
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('EWS_409');
+    expect(r.body.error.message).toMatch(/system-protected/);
+    // Tenant must still exist after the refused delete
+    const list = await request(app).get('/v1/tenants').set(TH);
+    const ids = list.body.body.items.map((t: { tenant_id: string }) => t.tenant_id);
+    expect(ids).toContain('BANK_DEMO');
+  });
+});

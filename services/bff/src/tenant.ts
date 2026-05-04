@@ -52,15 +52,51 @@ export interface Tenant {
 /**
  * Lookup signature; production wires to pg, tests inject a Map.
  *
- * The `all()` method is optional — used by `GET /v1/tenants` (admin-only
- * listing) to enumerate every configured tenant. Production lookups
- * backed by pg should implement it; ad-hoc test stubs can omit it (the
- * route returns a 501 if it's missing).
+ * The optional methods support `GET /v1/tenants` (`all`) and the Phase
+ * 10 mutation endpoints (`create`, `update`, `delete`). Stubs that
+ * don't implement them return 501 from the corresponding route.
+ *
+ * Mutation contract (Phase 10):
+ *   - create: throws TenantConflict when tenant_id already exists
+ *   - update: returns undefined when tenant_id doesn't exist (route → 404);
+ *     applies a partial patch (name, channels_allowed, active)
+ *   - delete: returns false when missing OR when refusing to delete a
+ *     system tenant (BANK_DEMO is protected — the prototype always needs it)
  */
 export interface TenantLookup {
   (tenantId: string): Tenant | undefined | Promise<Tenant | undefined>;
   all?: () => Tenant[] | Promise<Tenant[]>;
+  create?: (input: TenantCreateInput) => Tenant | Promise<Tenant>;
+  update?: (
+    tenant_id: string,
+    patch: TenantUpdatePatch,
+  ) => Tenant | undefined | Promise<Tenant | undefined>;
+  delete?: (tenant_id: string) => boolean | 'system_protected' | Promise<boolean | 'system_protected'>;
 }
+
+export interface TenantCreateInput {
+  tenant_id: string;
+  name: string;
+  vertical: 'banking' | 'insurance';
+  channels_allowed: string[];
+  active?: boolean;
+}
+
+export interface TenantUpdatePatch {
+  name?: string;
+  channels_allowed?: string[];
+  active?: boolean;
+}
+
+export class TenantConflict extends Error {
+  constructor(public readonly tenant_id: string) {
+    super(`tenant '${tenant_id}' already exists`);
+    this.name = 'TenantConflict';
+  }
+}
+
+/** System tenants — refuse DELETE on these so the prototype always works. */
+const SYSTEM_TENANTS = new Set(['BANK_DEMO']);
 
 /** Default in-memory tenant registry — mirrors the 005_tenants.sql seed. */
 const DEFAULT_TENANTS: Tenant[] = [
@@ -81,10 +117,38 @@ const DEFAULT_TENANTS: Tenant[] = [
 ];
 
 export function defaultTenantLookup(): TenantLookup {
-  const byId = new Map(DEFAULT_TENANTS.map((t) => [t.tenant_id, t]));
+  // Mutable copies of every seed tenant so the lookup can be patched by
+  // the mutation endpoints. The original DEFAULT_TENANTS array stays
+  // immutable as the canonical seed.
+  const byId = new Map(DEFAULT_TENANTS.map((t) => [t.tenant_id, { ...t }]));
   const lookup = ((id: string) => byId.get(id)) as TenantLookup;
-  // Snapshot — admin listing iterates over the seed registry.
-  lookup.all = () => DEFAULT_TENANTS.slice();
+  lookup.all = () => Array.from(byId.values()).map((t) => ({ ...t }));
+  lookup.create = (input) => {
+    if (byId.has(input.tenant_id)) throw new TenantConflict(input.tenant_id);
+    const t: Tenant = {
+      tenant_id: input.tenant_id,
+      name: input.name,
+      vertical: input.vertical,
+      channels_allowed: [...input.channels_allowed],
+      active: input.active ?? true,
+    };
+    byId.set(t.tenant_id, t);
+    return { ...t };
+  };
+  lookup.update = (tenant_id, patch) => {
+    const t = byId.get(tenant_id);
+    if (!t) return undefined;
+    if (patch.name !== undefined) t.name = patch.name;
+    if (patch.channels_allowed !== undefined) {
+      t.channels_allowed = [...patch.channels_allowed];
+    }
+    if (patch.active !== undefined) t.active = patch.active;
+    return { ...t };
+  };
+  lookup.delete = (tenant_id) => {
+    if (SYSTEM_TENANTS.has(tenant_id)) return 'system_protected';
+    return byId.delete(tenant_id);
+  };
   return lookup;
 }
 
