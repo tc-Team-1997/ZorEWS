@@ -653,6 +653,29 @@
       - Routes (16): categories happy + analyst+ accepted + 403; list happy + 3 single-axis filters + AND combo + 3 invalid 400s + 403; single happy + 404; backwards-compat regression on /v1/scenarios/:id.
     - **Outcome:** Module 16 now has a one-click scenario picker for the BIL deployment — RBI quarterly stress dashboards can fire the right preset instantly. Future M16.2 — bulk-run preset set + comparison view — extends the same primitive.
 
+  - **M14.4 — DMS Document Management adapter (2026-05-04):**
+    - 4th Module 14 adapter (after insurance / ifrs9 / aml). DMS holds the document layer that case investigation, AML evidence pivots, and KYC compliance all rely on. M14.4 surfaces document metadata (the actual file content lives in the DMS — production routes serve via `download_url` to the vendor).
+    - New `services/bff/src/integrations/dms.ts`:
+      - 9 document types (`claim_form / medical_record / kyc_proof / identity_proof / address_proof / policy_doc / photo / invoice / misc`); 4 status states (`pending_review / verified / rejected / expired`).
+      - `DmsDocument` carries optional pivots (`case_id`, `policy_id`, `claim_id`) so the same document can be queried from multiple workflows. Synthesised links: ~30% case-linked, ~25% policy-linked, ~10% claim-linked, the rest unlinked.
+      - `DmsAdapter` interface (`listByCustomer / listByCase / get / updateStatus`) + `StubDmsAdapter`. Per-tenant 2-level map (byCustomer + byId) for O(1) lookups + status-update mirror across both indexes.
+      - Deterministic per-(tenant, customer) document count (~10% none, 50% 1-3, 30% 4-7, 10% 8-12). Type-aware status distribution: KYC/identity/address proofs ~85% verified vs ~70% for other docs. Proof types may carry `expires_at`; non-proofs always null.
+      - **Schema invariants** asserted in tests: pending_review → status_changed_at null; expired → expires_at ≤ now; non-proof types never carry expires_at; all document_ids match `^dms-<tenant>-\d{7}$`.
+      - `DmsError` carries codes `invalid_status`, `unknown_document` — routed to 400/404.
+    - **`AppDeps.dmsAdapter` injection point** — defaults to module-level singleton.
+    - **5 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/dms/document-types` — 9-type closed enum for SPA filter dropdown.
+      - `GET /v1/integrations/dms/documents?customer_id=X|case_id=X` — list by customer OR by case (exactly one — both supplied → 400, neither → 400).
+      - `GET /v1/integrations/dms/documents/:document_id` — single. 404 on miss + cross-tenant lookup.
+      - `PATCH /v1/integrations/dms/documents/:document_id/status` body `{status}` — review workflow. Records changed_by from `X-APEX-USER` header (default 'admin'). Errors: `EWS_400_invalid_status`, `EWS_404_unknown_document`.
+    - **Tests:** BFF 912/912 (was 876 — +36 in `dms_adapter.test.ts`):
+      - Type guards + helpers (3): isDocumentStatus / isDocumentType / listDocumentTypes canonical order.
+      - listByCustomer (8): 0-12 doc range, determinism, tenant disjointness, newest-first sort, every-field-present, proof-vs-non-proof expires_at invariant, expired-status implies past expiry, pending_review status_changed_at invariant, empty-customer guard.
+      - listByCase (3): empty before warm, returns case-linked after warm, tenant scoping.
+      - get + updateStatus (4): get hit + null + cross-tenant null, updateStatus mirrors across maps, invalid_status throw, unknown_document throw.
+      - Routes (18): document-types happy + 403; documents customer/case/neither/both/403/502; single happy + 404 + cross-tenant 404; PATCH happy + default actor + envelope body + invalid 400 + unknown 404; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 4 shipped adapters (insurance / ifrs9 / aml / dms) — covering 15 of the declared 50 APIs. The pattern continues to scale: each new adapter adds ~150 LOC + ~40 tests with no impact on prior surface.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

@@ -128,6 +128,14 @@ import {
   type AmlMatchStatus,
 } from './integrations/aml';
 import {
+  defaultDmsAdapter,
+  DmsError,
+  isDocumentStatus,
+  listDocumentTypes,
+  type DmsAdapter,
+  type DocumentStatus,
+} from './integrations/dms';
+import {
   defaultCaseInvestigationStore,
   InvestigationError,
   isInvestigationStatus,
@@ -239,6 +247,13 @@ export interface AppDeps {
    */
   amlAdapter?: AmlAdapter;
   /**
+   * Override for tests — DMS Document Management adapter (T6 M14.4).
+   * Defaults to the module-level StubDmsAdapter (deterministic
+   * 0-12 docs per customer with realistic type mix). Production
+   * swaps in a DMS-vendor (e.g. SharePoint, Documentum) adapter.
+   */
+  dmsAdapter?: DmsAdapter;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -332,6 +347,7 @@ export function makeApp(deps: AppDeps = {}) {
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
+  const dmsAdapter = deps.dmsAdapter ?? defaultDmsAdapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -2423,6 +2439,172 @@ export function makeApp(deps: AppDeps = {}) {
               message: e instanceof Error ? e.message : 'aml adapter failed',
               severity: 'HIGH',
             },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── DMS Document Management adapter (T6 M14.4) ───────────────────────
+  //
+  // Document metadata layer over the BIL DMS upstream. List by customer
+  // / by case, fetch single, update review status. RBAC mirrors the
+  // existing per-customer routes (customers:read_risk_profile).
+
+  /** GET /v1/integrations/dms/document-types — closed enum for SPA filter. */
+  app.get(
+    '/v1/integrations/dms/document-types',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listDocumentTypes();
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * GET /v1/integrations/dms/documents?customer_id=&case_id=
+   * Exactly one of customer_id / case_id must be provided. case_id
+   * scopes to documents linked to that case (across customers if
+   * applicable); customer_id scopes to all documents for a customer.
+   */
+  app.get(
+    '/v1/integrations/dms/documents',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      const case_id = (req.query.case_id as string | undefined) ?? '';
+      if (!customer_id && !case_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'one of customer_id or case_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (customer_id && case_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'supply only one of customer_id / case_id', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = case_id
+          ? await dmsAdapter.listByCase(req.tenant!.tenant_id, case_id)
+          : await dmsAdapter.listByCustomer(req.tenant!.tenant_id, customer_id, now());
+        return res.json(
+          wrapResponse(
+            { items, total: items.length, customer_id: customer_id || null, case_id: case_id || null },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'dms adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/dms/documents/:document_id — single. 404 on miss. */
+  app.get(
+    '/v1/integrations/dms/documents/:document_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.document_id ?? '';
+      try {
+        const doc = await dmsAdapter.get(req.tenant!.tenant_id, id);
+        if (!doc) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `dms document ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(doc, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'dms adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * PATCH /v1/integrations/dms/documents/:document_id/status body: { status }
+   * Update review status (pending_review / verified / rejected / expired).
+   * Records changed_by from X-APEX-USER (default 'admin').
+   */
+  app.patch(
+    '/v1/integrations/dms/documents/:document_id/status',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.document_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const status = (inner as { status?: unknown } | undefined)?.status;
+      if (!isDocumentStatus(status)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_status',
+              message: 'status must be one of pending_review|verified|rejected|expired',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const changed_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const updated = await dmsAdapter.updateStatus(
+          req.tenant!.tenant_id,
+          id,
+          status as DocumentStatus,
+          changed_by,
+          now(),
+        );
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof DmsError) {
+          if (e.code === 'unknown_document') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_document', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'dms adapter failed', severity: 'HIGH' },
             ctx,
           ),
         );
