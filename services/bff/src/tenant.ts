@@ -15,34 +15,28 @@
 
 import type { NextFunction, Request, Response } from 'express';
 import { wrapError, readRequestId } from './envelope';
+import {
+  InsecureDecodeVerifier,
+  makeJwtVerifier,
+  type JwtVerifier,
+} from './jwks_client';
 
 /**
- * Decode a JWT payload WITHOUT verifying the signature.
+ * Read the bearer token's tenant_id claim using the supplied verifier.
+ * Production: pass a JwksVerifier (signature-verified). Tests + dev:
+ * default to InsecureDecodeVerifier (Phase 3 shim — no signature check).
  *
- * Prototype shim — production should fetch the auth-svc's public key
- * (JWKS endpoint) and verify the RS256 signature. For this prototype the
- * threat model is "honest user setting wrong header", not "attacker
- * forging tokens", so we just split + base64url-decode the middle
- * segment and parse the JSON. Returns undefined on any failure.
+ * Returns undefined when the Authorization header is missing, malformed,
+ * or the token fails verification.
  */
-function decodeJwtPayloadUnsafe(token: string): Record<string, unknown> | undefined {
-  const parts = token.split('.');
-  if (parts.length !== 3) return undefined;
-  try {
-    const padded = parts[1] + '='.repeat((4 - (parts[1].length % 4)) % 4);
-    const json = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    const obj = JSON.parse(json);
-    return typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function readBearerTenant(req: Request): string | undefined {
+async function readBearerTenant(
+  req: Request,
+  verifier: JwtVerifier,
+): Promise<string | undefined> {
   const auth = req.headers.authorization;
   if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return undefined;
   const token = auth.slice(7);
-  const payload = decodeJwtPayloadUnsafe(token);
+  const payload = await verifier.verify(token);
   const v = payload?.tenant_id;
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
@@ -85,8 +79,16 @@ export function defaultTenantLookup(): TenantLookup {
  * Express middleware factory. Each call returns a fresh middleware bound to
  * the supplied lookup. Routes that need tenant context apply it explicitly:
  *   app.post('/v1/ews/evaluate', requireTenant(lookup), requireRole(...), handler);
+ *
+ * `verifier` injects the JWT verifier — production wires a JwksVerifier
+ * (real signature verification), tests use the default
+ * InsecureDecodeVerifier so existing test JWTs with fake signatures
+ * still parse for the tenant_id claim check.
  */
-export function requireTenant(lookup: TenantLookup = defaultTenantLookup()) {
+export function requireTenant(
+  lookup: TenantLookup = defaultTenantLookup(),
+  verifier: JwtVerifier = new InsecureDecodeVerifier(),
+) {
   return async function tenantMiddleware(
     req: Request,
     res: Response,
@@ -140,7 +142,11 @@ export function requireTenant(lookup: TenantLookup = defaultTenantLookup()) {
     // claiming X-Tenant-ID: BIL by manually setting the header. Tokens
     // without the claim (older user sessions, m2m tokens lacking tenant)
     // fall through to the header-only check.
-    const jwtTenant = readBearerTenant(req);
+    //
+    // Phase 7: when a JwksVerifier is wired (BFF_JWKS_URL set), the
+    // signature is also checked — forged tokens fail readBearerTenant()
+    // entirely, so the JWT is treated as absent for the gate.
+    const jwtTenant = await readBearerTenant(req, verifier);
     if (jwtTenant && jwtTenant !== tenant.tenant_id) {
       sendError(res, 403, ctx, {
         code: 'EWS_403',

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { SignJWT } from "jose";
+import { SignJWT, exportJWK } from "jose";
 import { RegisterFailure, type Role } from "../users.js";
 import { loadSigner, signAccessToken, signRefreshToken, verifyToken, type Signer } from "../jwt.js";
 import { getServiceClientStore } from "../service_clients.js";
@@ -1577,6 +1577,34 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       expires_in: ttlSeconds,
       scope: (body.scope ?? client.scopes.join(" ")).trim() || "default",
       tenant_id: client.tenant_id,
+    });
+  });
+
+  // ─── JWKS publication (T4.24 Phase 7) ──────────────────────────────────
+  //
+  // RFC 7517 — Resource servers (the BFF, partner integrations) fetch this
+  // endpoint to verify RS256-signed access tokens minted by /auth/login,
+  // /auth/refresh, and /oauth/token. Anonymous (no auth required); the
+  // public key is, by definition, not a secret.
+  //
+  // Local dev: ephemeral keypair generated on first signer load. Production:
+  // the same kid points at KMS alias/apex-ews-secret; verifiers fetch the
+  // public key from KMS or from this endpoint (mirrors KMS for resource
+  // servers that can't reach KMS directly).
+  app.get("/.well-known/jwks.json", async (_req, reply) => {
+    const { signer } = await getState();
+    const jwk = await exportJWK(signer.publicKey);
+    // exportJWK gives us the algorithm-implied fields; tag with kid + use
+    // for the verifier. RS256 → use=sig, alg=RS256.
+    return reply.send({
+      keys: [
+        {
+          ...jwk,
+          kid: signer.kid,
+          alg: "RS256",
+          use: "sig",
+        },
+      ],
     });
   });
 }

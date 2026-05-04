@@ -65,6 +65,7 @@ import {
 import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, type TenantLookup } from './tenant';
+import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -120,6 +121,14 @@ export interface AppDeps {
    * 005_tenants.sql (BANK_DEMO + BIL).
    */
   tenantLookup?: TenantLookup;
+  /**
+   * Override for tests — JWT verifier used by the multi-tenant
+   * middleware to extract `tenant_id` from the Authorization Bearer
+   * token (T4.24 Phase 7). Defaults to env-driven: BFF_JWKS_URL set →
+   * remote JWKS verification; unset → InsecureDecodeVerifier (the
+   * Phase 3 shim, retained for hermetic tests).
+   */
+  jwtVerifier?: JwtVerifier;
   now?: () => Date;
   getRole?: (req: Request) => string | null;
 }
@@ -137,7 +146,8 @@ export function makeApp(deps: AppDeps = {}) {
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
   const scenarioStore = deps.scenarioStore ?? new InMemoryScenarioStore();
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
-  const requireTenantMw = requireTenant(tenantLookup);
+  const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
+  const requireTenantMw = requireTenant(tenantLookup, jwtVerifier);
   const now = deps.now ?? (() => new Date());
   const getRole = deps.getRole ?? defaultGetRole;
   const requireRole = (op: string) =>
