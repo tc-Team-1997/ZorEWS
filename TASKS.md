@@ -887,6 +887,22 @@
       - Backwards-compat regression (1): the M6.1 `/v1/scoring/risk` endpoint still works.
     - **Outcome:** Module 6 now has both the pure formula (M6.1) and the catalog-driven convenience layer (M6.2). Future M6.3 — bulk-score (multiple customers in one call) — extends the same primitives.
 
+  - **M16.2 — Scenario bulk-run + comparison (2026-05-04):**
+    - M16.1 ships the named scenario library; M16.2 lets ops fire many presets at once and ranks them by `|ECL delta|` so the SPA renders a comparison table directly. Re-uses the existing `runScenario` engine from T4.2 — math + portfolio + ECL aggregation stay shared with `/v1/scenario/run`.
+    - New `services/bff/src/scenario_bulk.ts`:
+      - `resolveBulkInput()` accepts EITHER `preset_ids[]` OR `category`. Both supplied → 400; neither → 400; `> 20` ids → 400; unknown id → 404.
+      - `runBulkScenarios()` iterates presets, calls `runScenario` per preset, ranks by `|ECL delta|` desc with stable id-tiebreaker.
+      - **Aggregate totals**: `worst_ecl_delta_kes` (the rank-1 row), `mean_ecl_delta_kes`, `adverse_count` (delta > 0) + `benign_count` (delta ≤ 0). Sum invariant tested.
+      - `BulkRunError` codes routed: `unknown_preset` → 404, others → 400 (`invalid_input`, `invalid_category`).
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `customers:read_risk_profile`):
+      - `POST /v1/scenarios/bulk-run` body `{preset_ids?, category?}` — exactly one required; returns the ranked comparison.
+    - **Tests:** BFF 1288/1288 (was 1257 — +31 in `scenario_bulk.test.ts`):
+      - `resolveBulkInput` (10): both modes happy + 8 error paths (both/neither, empty array, > 20, unknown id, non-string id, invalid category, non-object).
+      - `runBulkScenarios` (9): shape, every-row-shape with delta = stressed-baseline invariant (±1 rounding), |delta| sort, rank-1 = worst, adverse + benign sum invariant, baseline → near-0 delta, severely-adverse > baseline, mean integer, determinism.
+      - Routes (10): admin happy via category + preset_ids modes, envelope body, code-routed 400/404, RBAC.
+      - Backwards-compat (2): `/v1/scenarios/library` + `/v1/scenario/run` still work.
+    - **Outcome:** Module 16 now has 2 sub-phases (M16.1 library + M16.2 bulk-run) — the BIL exec can fire RBI's 3-tier annual stress + IRDAI solvency check in one call and see the comparison ranked by ECL impact. Future M16.3 (cross-scenario variance + sensitivity analysis) extends the same primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

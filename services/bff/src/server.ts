@@ -71,6 +71,12 @@ import {
   type ScenarioRegulator,
   type ScenarioSeverity,
 } from './scenario_library';
+import {
+  BulkRunError,
+  resolveBulkInput,
+  runBulkScenarios,
+  type BulkRunInput,
+} from './scenario_bulk';
 import { variablesByCategory } from './rules/variables';
 import { backtest as runBacktest } from './rules/backtest';
 import { performanceFor } from './rules/performance';
@@ -1380,6 +1386,57 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(preset, ctx));
+    },
+  );
+
+  // ── BIL scenario bulk-run + comparison (T6 M16.2) ────────────────────
+  //
+  // Fires multiple presets against the portfolio and returns a ranked
+  // comparison table. Caller supplies EITHER preset_ids[] OR category;
+  // exactly one. Re-uses the existing runScenario engine + portfolio.
+  app.post(
+    '/v1/scenarios/bulk-run',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const { presets, selection } = resolveBulkInput((inner ?? {}) as BulkRunInput);
+        const result = runBulkScenarios(
+          req.tenant!.tenant_id,
+          presets,
+          selection,
+          portfolio,
+          now,
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof BulkRunError) {
+          const status = e.code === 'unknown_preset' ? 404 : 400;
+          const code =
+            e.code === 'unknown_preset'
+              ? 'EWS_404_unknown_preset'
+              : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'bulk-run failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
     },
   );
 
