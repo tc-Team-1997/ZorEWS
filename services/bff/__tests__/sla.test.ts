@@ -180,9 +180,10 @@ describe('GET /v1/cases/sla-summary', () => {
       .get('/v1/cases/sla-summary')
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
     expect(r.status).toBe(200);
-    expect(r.body.by_severity).toHaveLength(4);
-    expect(typeof r.body.totals.breached).toBe('number');
-    expect(Array.isArray(r.body.breached_cases)).toBe(true);
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.body.by_severity).toHaveLength(4);
+    expect(typeof r.body.body.totals.breached).toBe('number');
+    expect(Array.isArray(r.body.body.breached_cases)).toBe(true);
   });
 
   test('field_officer can read (cases:list grants access)', async () => {
@@ -225,7 +226,7 @@ describe('GET /v1/cases/sla-summary', () => {
       .get('/v1/cases/sla-summary')
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
     expect(r.status).toBe(200);
-    expect(r.body.totals.total).toBe(1);
-    expect(r.body.totals.on_track).toBe(1);
+    expect(r.body.body.totals.total).toBe(1);
+    expect(r.body.body.totals.on_track).toBe(1);
   });
 });

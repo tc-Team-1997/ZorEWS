@@ -125,8 +125,9 @@ describe('POST /v1/notifications/publish', () => {
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .send({ level: 'info', title: 'hello world' });
     expect(r.status).toBe(201);
-    expect(r.body.ok).toBe(true);
-    expect(r.body.notification.title).toBe('hello world');
+    expect(r.body.header.code).toBe('EWS_201');
+    expect(r.body.body.ok).toBe(true);
+    expect(r.body.body.notification.title).toBe('hello world');
     expect(bus.recent).toHaveLength(1);
   });
 
@@ -146,7 +147,8 @@ describe('POST /v1/notifications/publish', () => {
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .send({ level: 'info' });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/title/);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/title/);
   });
 
   test('400 on bad level', async () => {
@@ -156,7 +158,7 @@ describe('POST /v1/notifications/publish', () => {
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .send({ level: 'fatal', title: 'x' });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/level/);
+    expect(r.body.error.message).toMatch(/level/);
   });
 });
 

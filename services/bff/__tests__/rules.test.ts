@@ -215,7 +215,8 @@ describe('GET /v1/rules/variables', () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules/variables').set(TH);
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body.categories).sort()).toEqual([
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(Object.keys(r.body.body.categories).sort()).toEqual([
       'account', 'customer', 'external', 'loan', 'transaction',
     ]);
   });
@@ -246,8 +247,8 @@ describe('GET /v1/rules', () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules').set(TH);
     expect(r.status).toBe(200);
-    expect(r.body.items.length).toBeGreaterThan(0);
-    const first = r.body.items[0];
+    expect(r.body.body.items.length).toBeGreaterThan(0);
+    const first = r.body.body.items[0];
     expect(first.performance).toBeDefined();
     expect(Array.isArray(first.legal_transitions)).toBe(true);
   });
@@ -256,14 +257,14 @@ describe('GET /v1/rules', () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules?state=active').set(TH);
     expect(r.status).toBe(200);
-    for (const item of r.body.items) expect(item.state).toBe('active');
+    for (const item of r.body.body.items) expect(item.state).toBe('active');
   });
 
   test('filters by product (rules with empty applicable_products always match)', async () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules?product=credit_card').set(TH);
     expect(r.status).toBe(200);
-    for (const item of r.body.items) {
+    for (const item of r.body.body.items) {
       const ok =
         item.applicable_products.length === 0 ||
         item.applicable_products.includes('credit_card');
@@ -283,8 +284,8 @@ describe('GET /v1/rules/:id', () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules/r-22').set(TH);
     expect(r.status).toBe(200);
-    expect(r.body.rule.id).toBe('r-22');
-    expect(r.body.performance.rule_id).toBe('r-22');
+    expect(r.body.body.rule.id).toBe('r-22');
+    expect(r.body.body.performance.rule_id).toBe('r-22');
   });
 
   test('404 when missing', async () => {
@@ -299,7 +300,7 @@ describe('POST /v1/rules/:id/transition', () => {
     const { app } = makeRulesApp('admin', store);
     const r = await request(app).post('/v1/rules/r-03/transition').set(TH).send({ transition: 'submit' });
     expect(r.status).toBe(200);
-    expect(r.body.rule.state).toBe('pending_review');
+    expect(r.body.body.rule.state).toBe('pending_review');
     expect(store.get('r-03')!.state).toBe('pending_review');
   });
 
@@ -308,8 +309,8 @@ describe('POST /v1/rules/:id/transition', () => {
     const { app } = makeRulesApp('supervisor', store);
     const r = await request(app).post('/v1/rules/r-14/transition').set(TH).send({ transition: 'approve' });
     expect(r.status).toBe(200);
-    expect(r.body.rule.state).toBe('approved');
-    expect(r.body.rule.approved_by).toContain('supervisor');
+    expect(r.body.body.rule.state).toBe('approved');
+    expect(r.body.body.rule.approved_by).toContain('supervisor');
   });
 
   test('reject without comment → 400 invalid_payload', async () => {
@@ -317,7 +318,8 @@ describe('POST /v1/rules/:id/transition', () => {
     const { app } = makeRulesApp('supervisor', store);
     const r = await request(app).post('/v1/rules/r-14/transition').set(TH).send({ transition: 'reject' });
     expect(r.status).toBe(400);
-    expect(r.body.error).toBe('invalid_payload');
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.detail.error_kind).toBe('invalid_payload');
   });
 
   test('illegal transition → 409', async () => {
@@ -326,7 +328,8 @@ describe('POST /v1/rules/:id/transition', () => {
     // r-22 is active; submit is not legal.
     const r = await request(app).post('/v1/rules/r-22/transition').set(TH).send({ transition: 'submit' });
     expect(r.status).toBe(409);
-    expect(r.body.error).toBe('illegal_transition');
+    expect(r.body.error.code).toBe('EWS_409');
+    expect(r.body.error.detail.error_kind).toBe('illegal_transition');
   });
 
   test('field_officer cannot promote (rejected by RBAC)', async () => {
@@ -354,8 +357,8 @@ describe('POST /v1/rules/:id/backtest', () => {
     const { app } = makeRulesApp();
     const r = await request(app).post('/v1/rules/r-22/backtest').set(TH);
     expect(r.status).toBe(200);
-    expect(r.body.monthly_volume).toHaveLength(12);
-    expect(r.body.true_positives + r.body.false_positives).toBe(r.body.total_alerts);
+    expect(r.body.body.monthly_volume).toHaveLength(12);
+    expect(r.body.body.true_positives + r.body.body.false_positives).toBe(r.body.body.total_alerts);
   });
 
   test('field_officer is forbidden (no rules:simulate)', async () => {
@@ -370,7 +373,7 @@ describe('GET /v1/rules/:id/performance', () => {
     const { app } = makeRulesApp();
     const r = await request(app).get('/v1/rules/r-22/performance').set(TH);
     expect(r.status).toBe(200);
-    expect(r.body.rule_id).toBe('r-22');
-    expect(['performing', 'underperforming', 'deprecated', 'no_data']).toContain(r.body.status);
+    expect(r.body.body.rule_id).toBe('r-22');
+    expect(['performing', 'underperforming', 'deprecated', 'no_data']).toContain(r.body.body.status);
   });
 });

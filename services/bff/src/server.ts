@@ -640,6 +640,7 @@ export function makeApp(deps: AppDeps = {}) {
    * via this endpoint.
    */
   app.post('/v1/notifications/publish', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const body = req.body as {
       level?: NotificationLevel;
       title?: string;
@@ -654,14 +655,24 @@ export function makeApp(deps: AppDeps = {}) {
     if (!body.level || !validLevels.includes(body.level)) {
       errs.push(`level must be one of ${validLevels.join(',')}`);
     }
-    if (errs.length) return res.status(400).json({ error: errs.join('; ') });
+    if (errs.length) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400', message: errs.join('; '), severity: 'MEDIUM' }, ctx),
+      );
+    }
     const n = bus.publish({
       level: body.level!,
       title: body.title!,
       body: body.body,
       href: body.href,
     });
-    res.status(201).json({ ok: true, notification: n, subscribers: bus.size() });
+    res.status(201).json(
+      wrapResponse(
+        { ok: true, notification: n, subscribers: bus.size() },
+        ctx,
+        { code: 'EWS_201', message: 'Created' },
+      ),
+    );
   });
 
   /**
@@ -678,27 +689,36 @@ export function makeApp(deps: AppDeps = {}) {
    *   - the breached_cases list (most-overdue first)
    * Visible to anyone with cases:list.
    */
-  app.get('/v1/cases/sla-summary', requireTenantMw, requireRole('cases:list'), (_req: Request, res: Response) => {
+  app.get('/v1/cases/sla-summary', requireTenantMw, requireRole('cases:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const fleet = deps.slaFleet ?? makeFleet(now());
     const summary = summariseSla(fleet, now());
-    res.json(summary);
+    res.json(wrapResponse(summary, ctx));
   });
 
   app.get(
     '/v1/integrations/health',
     requireTenantMw,
     requireRole('audit:read'),
-    async (_req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
       try {
         const report: HealthReport = await pingIntegrations({
           fetcher: deps.integrationsFetcher,
           now,
         });
-        res.json(report);
+        res.json(wrapResponse(report, ctx));
       } catch (e) {
-        res
-          .status(500)
-          .json({ error: e instanceof Error ? e.message : 'health probe failed' });
+        res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'health probe failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
       }
     },
   );
@@ -721,10 +741,12 @@ export function makeApp(deps: AppDeps = {}) {
   ] as const;
 
   app.get('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
-    res.json({ items: webhookStore.list(req.tenant!.tenant_id) });
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse({ items: webhookStore.list(req.tenant!.tenant_id) }, ctx));
   });
 
   app.post('/v1/webhooks', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const body = req.body as { name?: unknown; url?: unknown; events?: unknown };
     const errs: string[] = [];
     if (typeof body?.name !== 'string' || !body.name.trim()) errs.push('name is required');
@@ -740,7 +762,11 @@ export function makeApp(deps: AppDeps = {}) {
         }
       }
     }
-    if (errs.length > 0) return res.status(400).json({ error: errs.join('; ') });
+    if (errs.length > 0) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400', message: errs.join('; '), severity: 'MEDIUM' }, ctx),
+      );
+    }
 
     // Returning the FULL record (with secret) — only time the secret
     // is ever returned. The admin UI displays it once with a "copy
@@ -751,12 +777,17 @@ export function makeApp(deps: AppDeps = {}) {
       url: body.url as string,
       events: body.events as WebhookEventType[],
     });
-    res.status(201).json(created);
+    res.status(201).json(wrapResponse(created, ctx, { code: 'EWS_201', message: 'Created' }));
   });
 
   app.delete('/v1/webhooks/:id', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const ok = webhookStore.delete(req.params.id, req.tenant!.tenant_id);
-    if (!ok) return res.status(404).json({ error: 'subscription not found' });
+    if (!ok) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404', message: 'subscription not found', severity: 'LOW' }, ctx),
+      );
+    }
     res.status(204).end();
   });
 
@@ -765,10 +796,15 @@ export function makeApp(deps: AppDeps = {}) {
     requireTenantMw,
     requireRole('webhooks:manage'),
     (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
       const tenant_id = req.tenant!.tenant_id;
       const sub = webhookStore.get(req.params.id, tenant_id);
-      if (!sub) return res.status(404).json({ error: 'subscription not found' });
-      res.json({ items: webhookStore.deliveriesFor(req.params.id, tenant_id) });
+      if (!sub) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404', message: 'subscription not found', severity: 'LOW' }, ctx),
+        );
+      }
+      res.json(wrapResponse({ items: webhookStore.deliveriesFor(req.params.id, tenant_id) }, ctx));
     },
   );
 
@@ -784,12 +820,15 @@ export function makeApp(deps: AppDeps = {}) {
     requireTenantMw,
     requireRole('webhooks:manage'),
     async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
       const sub = webhookStore.internalGet(req.params.id);
       // Cross-tenant guard — internalGet doesn't filter by tenant on
       // purpose (the dispatcher needs that escape hatch), but admin-test
       // calls must be scoped to the caller's tenant.
       if (!sub || sub.tenant_id !== req.tenant!.tenant_id) {
-        return res.status(404).json({ error: 'subscription not found' });
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404', message: 'subscription not found', severity: 'LOW' }, ctx),
+        );
       }
       const delivery = await webhookDispatcher.deliverOne(sub, 'webhook.test', {
         message: 'APEX EWS webhook test event',
@@ -800,7 +839,7 @@ export function makeApp(deps: AppDeps = {}) {
       // 200 even if the recipient returned non-2xx — the delivery row
       // captures the failure and the admin can inspect it. The endpoint
       // succeeded (we sent the request); only the recipient failed.
-      res.json(delivery);
+      res.json(wrapResponse(delivery, ctx));
     },
   );
 
@@ -884,21 +923,31 @@ export function makeApp(deps: AppDeps = {}) {
   // ── Rules v2 (Module 3 banking-grade enhancements) ─────────────────
 
   /** GET /v1/rules/variables — banking variable library, grouped by category. */
-  app.get('/v1/rules/variables', requireTenantMw, requireRole('rules:list'), (_req: Request, res: Response) => {
-    res.json({ categories: variablesByCategory() });
+  app.get('/v1/rules/variables', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse({ categories: variablesByCategory() }, ctx));
   });
 
   /** GET /v1/rules?state=…&product=… — filtered list with embedded performance. */
   app.get('/v1/rules', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const stateRaw = req.query.state as string | undefined;
     const productRaw = req.query.product as string | undefined;
     if (stateRaw && !VALID_RULE_STATES.includes(stateRaw as RuleV2State)) {
-      return res.status(400).json({ error: `state must be one of ${VALID_RULE_STATES.join(',')}` });
+      return res.status(400).json(
+        wrapError(
+          { code: 'EWS_400', message: `state must be one of ${VALID_RULE_STATES.join(',')}`, severity: 'MEDIUM' },
+          ctx,
+        ),
+      );
     }
     if (productRaw && !VALID_PRODUCTS.includes(productRaw as RuleProduct)) {
-      return res
-        .status(400)
-        .json({ error: `product must be one of ${VALID_PRODUCTS.join(',')}` });
+      return res.status(400).json(
+        wrapError(
+          { code: 'EWS_400', message: `product must be one of ${VALID_PRODUCTS.join(',')}`, severity: 'MEDIUM' },
+          ctx,
+        ),
+      );
     }
     const items = ruleStore.list({
       state: stateRaw as RuleV2State | undefined,
@@ -909,18 +958,28 @@ export function makeApp(deps: AppDeps = {}) {
       performance: performanceFor(rule, now()),
       legal_transitions: legalTransitions(rule.state),
     }));
-    res.json({ items: enriched, total: enriched.length });
+    res.json(wrapResponse({ items: enriched, total: enriched.length }, ctx));
   });
 
   /** GET /v1/rules/:id — full rule envelope with audit trail. */
   app.get('/v1/rules/:id', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const rule = ruleStore.get(req.params.id);
-    if (!rule) return res.status(404).json({ error: 'rule_not_found' });
-    res.json({
-      rule,
-      performance: performanceFor(rule, now()),
-      legal_transitions: legalTransitions(rule.state),
-    });
+    if (!rule) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404', message: 'rule_not_found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(
+      wrapResponse(
+        {
+          rule,
+          performance: performanceFor(rule, now()),
+          legal_transitions: legalTransitions(rule.state),
+        },
+        ctx,
+      ),
+    );
   });
 
   /** POST /v1/rules/:id/transition — fire a maker-checker action. */
@@ -928,16 +987,24 @@ export function makeApp(deps: AppDeps = {}) {
     '/v1/rules/:id/transition',
     requireTenantMw,
     (req: Request, res: Response, next: NextFunction) => {
+      const ctx = extractCtx(req, now);
       // Look up the rule first so we know which RBAC capability the
       // transition needs from the current state.
       const rule = ruleStore.get(req.params.id);
-      if (!rule) return res.status(404).json({ error: 'rule_not_found' });
+      if (!rule) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404', message: 'rule_not_found', severity: 'LOW' }, ctx),
+        );
+      }
       const body = req.body as { transition?: string };
       const transition = (body?.transition ?? '') as RuleTransition;
       if (!VALID_TRANSITIONS.includes(transition)) {
-        return res
-          .status(400)
-          .json({ error: `transition must be one of ${VALID_TRANSITIONS.join(',')}` });
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: `transition must be one of ${VALID_TRANSITIONS.join(',')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
       }
       const op = rbacFor(transition, rule.state);
       // Reuse the RBAC middleware against the resolved capability.
@@ -962,19 +1029,42 @@ export function makeApp(deps: AppDeps = {}) {
               href: '/rules',
             });
           }
-          res.status(200).json({
-            rule: next,
-            performance: performanceFor(next, now()),
-            legal_transitions: legalTransitions(next.state),
-          });
+          res.status(200).json(
+            wrapResponse(
+              {
+                rule: next,
+                performance: performanceFor(next, now()),
+                legal_transitions: legalTransitions(next.state),
+              },
+              ctx,
+            ),
+          );
         } catch (e) {
           if (e instanceof IllegalTransition) {
-            return res
-              .status(409)
-              .json({ error: 'illegal_transition', message: e.message, current_state: rule.state });
+            return res.status(409).json(
+              wrapError(
+                {
+                  code: 'EWS_409',
+                  message: e.message,
+                  severity: 'MEDIUM',
+                  detail: { error_kind: 'illegal_transition', current_state: rule.state },
+                },
+                ctx,
+              ),
+            );
           }
           if (e instanceof InvalidPayload) {
-            return res.status(400).json({ error: 'invalid_payload', message: e.message });
+            return res.status(400).json(
+              wrapError(
+                {
+                  code: 'EWS_400',
+                  message: e.message,
+                  severity: 'MEDIUM',
+                  detail: { error_kind: 'invalid_payload' },
+                },
+                ctx,
+              ),
+            );
           }
           next(e);
         }
@@ -984,16 +1074,26 @@ export function makeApp(deps: AppDeps = {}) {
 
   /** POST /v1/rules/:id/backtest — run the deterministic backtest. */
   app.post('/v1/rules/:id/backtest', requireTenantMw, requireRole('rules:simulate'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const rule = ruleStore.get(req.params.id);
-    if (!rule) return res.status(404).json({ error: 'rule_not_found' });
-    res.json(runBacktest(rule, now()));
+    if (!rule) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404', message: 'rule_not_found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(wrapResponse(runBacktest(rule, now()), ctx));
   });
 
   /** GET /v1/rules/:id/performance — live metrics. */
   app.get('/v1/rules/:id/performance', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
     const rule = ruleStore.get(req.params.id);
-    if (!rule) return res.status(404).json({ error: 'rule_not_found' });
-    res.json(performanceFor(rule, now()));
+    if (!rule) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404', message: 'rule_not_found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(wrapResponse(performanceFor(rule, now()), ctx));
   });
 
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };

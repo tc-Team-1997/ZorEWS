@@ -75,8 +75,9 @@ describe('GET /v1/integrations/health', () => {
       .get('/v1/integrations/health')
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
     expect(r.status).toBe(200);
-    expect(r.body.integrations).toHaveLength(4);
-    expect(r.body.generated_at).toBe(NOW.toISOString());
+    expect(r.body.header.status).toBe('SUCCESS');
+    expect(r.body.body.integrations).toHaveLength(4);
+    expect(r.body.body.generated_at).toBe(NOW.toISOString());
   });
 
   test('supervisor can read the report (audit:read includes them)', async () => {
@@ -108,11 +109,11 @@ describe('GET /v1/integrations/health', () => {
       .get('/v1/integrations/health')
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
     expect(r.status).toBe(200);
-    const ifrs9 = r.body.integrations.find((i: { id: string }) => i.id === 'ifrs9');
+    const ifrs9 = r.body.body.integrations.find((i: { id: string }) => i.id === 'ifrs9');
     expect(ifrs9.status).toBe('down');
-    const aml = r.body.integrations.find((i: { id: string }) => i.id === 'aml');
+    const aml = r.body.body.integrations.find((i: { id: string }) => i.id === 'aml');
     expect(aml.status).toBe('down');
-    const cbs = r.body.integrations.find((i: { id: string }) => i.id === 'cbs');
+    const cbs = r.body.body.integrations.find((i: { id: string }) => i.id === 'cbs');
     expect(cbs.status).toBe('up');
   });
 });

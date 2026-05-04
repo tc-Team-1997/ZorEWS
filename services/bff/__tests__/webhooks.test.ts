@@ -233,34 +233,35 @@ describe('admin REST routes', () => {
     expect(r.status).toBe(403);
   });
 
-  test('admin can create + list + delete', async () => {
+  test('admin can create + list + delete (T4.24 Phase 8 enveloped)', async () => {
     const store = new WebhookSubscriptionStore();
     const fake = makeFakeFetch([200]);
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
 
-    // Create
+    // Create — envelope + secret in body
     const c = await request(app)
       .post('/v1/webhooks')
       .set(TH)
       .send({ name: 'AML', url: 'https://example.test/aml', events: ['alert.created'] });
     expect(c.status).toBe(201);
-    expect(c.body.secret).toMatch(/^[0-9a-f]{64}$/);
-    const id = c.body.id as string;
+    expect(c.body.header.code).toBe('EWS_201');
+    expect(c.body.body.secret).toMatch(/^[0-9a-f]{64}$/);
+    const id = c.body.body.id as string;
 
     // List does NOT include the secret
     const l = await request(app).get('/v1/webhooks').set(TH);
     expect(l.status).toBe(200);
-    expect(l.body.items).toHaveLength(1);
-    expect(l.body.items[0]).not.toHaveProperty('secret');
+    expect(l.body.body.items).toHaveLength(1);
+    expect(l.body.body.items[0]).not.toHaveProperty('secret');
 
-    // Delete
+    // Delete (204 — no body envelope)
     const d = await request(app).delete(`/v1/webhooks/${id}`).set(TH);
     expect(d.status).toBe(204);
     const l2 = await request(app).get('/v1/webhooks').set(TH);
-    expect(l2.body.items).toHaveLength(0);
+    expect(l2.body.body.items).toHaveLength(0);
   });
 
-  test('create with an invalid event type returns 400', async () => {
+  test('create with an invalid event type returns 400 envelope', async () => {
     const store = new WebhookSubscriptionStore();
     const fake = makeFakeFetch([200]);
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
@@ -269,10 +270,11 @@ describe('admin REST routes', () => {
       .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['bogus.thing'] });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/bogus\.thing/);
+    expect(r.body.error.code).toBe('EWS_400');
+    expect(r.body.error.message).toMatch(/bogus\.thing/);
   });
 
-  test('test-fire dispatches a webhook.test event and returns the delivery row', async () => {
+  test('test-fire dispatches a webhook.test event and returns the delivery envelope', async () => {
     const store = new WebhookSubscriptionStore();
     const fake = makeFakeFetch([200]);
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
@@ -280,12 +282,12 @@ describe('admin REST routes', () => {
       .post('/v1/webhooks')
       .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['webhook.test'] });
-    const id = c.body.id as string;
+    const id = c.body.body.id as string;
 
     const t = await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
     expect(t.status).toBe(200);
-    expect(t.body.status).toBe('success');
-    expect(t.body.event_type).toBe('webhook.test');
+    expect(t.body.body.status).toBe('success');
+    expect(t.body.body.event_type).toBe('webhook.test');
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0].headers['x-apex-event']).toBe('webhook.test');
   });
@@ -300,31 +302,33 @@ describe('admin REST routes', () => {
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
       .send({ name: 'bank-aml', url: 'https://aml-bank.test/x', events: ['alert.created'] });
     expect(created.status).toBe(201);
-    const id = created.body.id as string;
+    const id = created.body.body.id as string;
     // BIL admin lists — sees nothing.
     const bilList = await request(app)
       .get('/v1/webhooks')
       .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
     expect(bilList.status).toBe(200);
-    expect(bilList.body.items).toHaveLength(0);
-    // BIL admin tries to fetch deliveries for BANK_DEMO's sub — 404.
+    expect(bilList.body.body.items).toHaveLength(0);
+    // BIL admin tries to fetch deliveries for BANK_DEMO's sub — 404 envelope.
     const bilDel = await request(app)
       .get(`/v1/webhooks/${id}/deliveries`)
       .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
     expect(bilDel.status).toBe(404);
-    // BIL admin tries to delete BANK_DEMO's sub — 404, row stays.
+    expect(bilDel.body.error.code).toBe('EWS_404');
+    // BIL admin tries to delete BANK_DEMO's sub — 404 envelope, row stays.
     const bilKill = await request(app)
       .delete(`/v1/webhooks/${id}`)
       .set({ 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' });
     expect(bilKill.status).toBe(404);
+    expect(bilKill.body.error.code).toBe('EWS_404');
     // BANK_DEMO admin still sees their sub.
     const bankList = await request(app)
       .get('/v1/webhooks')
       .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' });
-    expect(bankList.body.items).toHaveLength(1);
+    expect(bankList.body.body.items).toHaveLength(1);
   });
 
-  test('GET /v1/webhooks/:id/deliveries returns the recorded log', async () => {
+  test('GET /v1/webhooks/:id/deliveries returns the recorded log envelope', async () => {
     const store = new WebhookSubscriptionStore();
     const fake = makeFakeFetch([200]);
     const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
@@ -332,14 +336,14 @@ describe('admin REST routes', () => {
       .post('/v1/webhooks')
       .set(TH)
       .send({ name: 'X', url: 'https://x.test/x', events: ['webhook.test'] });
-    const id = c.body.id as string;
+    const id = c.body.body.id as string;
     await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
     await request(app).post(`/v1/webhooks/${id}/test`).set(TH);
     const r = await request(app).get(`/v1/webhooks/${id}/deliveries`).set(TH);
     expect(r.status).toBe(200);
-    expect(r.body.items).toHaveLength(2);
+    expect(r.body.body.items).toHaveLength(2);
     // newest-first ordering
-    expect(r.body.items[0].id).not.toBe(r.body.items[1].id);
+    expect(r.body.body.items[0].id).not.toBe(r.body.body.items[1].id);
   });
 });
 
