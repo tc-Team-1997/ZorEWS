@@ -676,6 +676,28 @@
       - Routes (18): document-types happy + 403; documents customer/case/neither/both/403/502; single happy + 404 + cross-tenant 404; PATCH happy + default actor + envelope body + invalid 400 + unknown 404; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 4 shipped adapters (insurance / ifrs9 / aml / dms) — covering 15 of the declared 50 APIs. The pattern continues to scale: each new adapter adds ~150 LOC + ~40 tests with no impact on prior surface.
 
+  - **M14.5 — Credit Bureau adapter (2026-05-04):**
+    - 5th Module 14 adapter — completes the major BIL upstream sweep (insurance, ifrs9, aml, dms, bureau). Bureau pulls feed both banking (loan underwriting + monitoring) and insurance (premium pricing + agent persistency). The BIL pitch lists 4 supported bureaus: `CIBIL`, `CRIF`, `EXPERIAN`, `EQUIFAX`.
+    - New `services/bff/src/integrations/bureau.ts`:
+      - `BureauReport` shape carries score (300-900), `band` (`subprime / near_prime / prime / super_prime` per the standard CIBIL TransUnion 600/700/800 cutoffs), 90-day `expires_at`, and a `BureauReportSummary` (open_accounts, closed_accounts_24m, total_outstanding_kes, total_limit_kes, dpd_max_24m, enquiries_3m, months_on_record).
+      - `BureauAdapter` interface (`pull / listByCustomer / get`) + `StubBureauAdapter`. Score distribution biased toward prime (~50%) per realistic banking-book; `bandFor()` is the canonical mapping.
+      - **Idempotency**: per-day cache key `(tenant, customer, bureau, day)` — repeated pulls within a day return the same `report_id` (mirroring how real bureau APIs cache to cap fees).
+      - **Calibrated summary by band**: subprime customers carry 5-12 open accounts, 800k-5M KES outstanding, 30-300 DPD, 3-9 enquiries; super_prime carries 2-5 accounts, 50k-1M outstanding, DPD always 0, 0-2 enquiries.
+      - **Schema invariants** asserted in tests: `band === bandFor(score)`; `expires_at - pulled_at = 90 days`; `total_outstanding_kes ≤ total_limit_kes`; super_prime → DPD always 0.
+      - `BureauError` carries codes `invalid_input`, `invalid_bureau_type` — both routed to 400.
+    - **`AppDeps.bureauAdapter` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/bureau/types` — 4-bureau closed enum.
+      - `POST /v1/integrations/bureau/pull` body `{customer_id, bureau_type}` — synchronous pull, idempotent per day. Records `pulled_by` from `X-APEX-USER` header.
+      - `GET /v1/integrations/bureau/reports?customer_id=X` — list, newest-first.
+      - `GET /v1/integrations/bureau/reports/:report_id` — single, tenant-scoped 404.
+    - **Tests:** BFF 948/948 (was 912 — +36 in `bureau_adapter.test.ts`):
+      - Type guards + helpers (3): isBureauType, listBureauTypes canonical order, bandFor at all 4 boundaries.
+      - pull (10): valid shape, band-from-score consistency, 90-day expiry invariant, intra-day idempotency, distinct ids per (bureau, tenant), subprime > super_prime DPD invariant, outstanding ≤ limit invariant, missing/invalid input throws.
+      - listByCustomer + get (4): empty-before-pull, newest-first, tenant scoping, get null on miss + cross-tenant.
+      - Routes (19): types happy + 403; pull happy + envelope body + idempotency + 400 missing + 400 invalid_bureau + 403 + 502 on adapter throw; reports list happy + 400 + 403; single happy + 404 + cross-tenant 404; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 5 shipped adapters covering 19 of the declared 50 APIs. The major BIL upstream regulatory + risk-data sweep is complete (insurance, ifrs9, aml, dms, bureau) — remaining adapters (M14.6+) cover finance, HR, agent productivity, etc.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

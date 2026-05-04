@@ -136,6 +136,13 @@ import {
   type DocumentStatus,
 } from './integrations/dms';
 import {
+  BureauError,
+  defaultBureauAdapter,
+  listBureauTypes,
+  type BureauAdapter,
+  type BureauType,
+} from './integrations/bureau';
+import {
   defaultCaseInvestigationStore,
   InvestigationError,
   isInvestigationStatus,
@@ -254,6 +261,13 @@ export interface AppDeps {
    */
   dmsAdapter?: DmsAdapter;
   /**
+   * Override for tests — Credit Bureau adapter (T6 M14.5). Defaults
+   * to the module-level StubBureauAdapter (deterministic 300-900
+   * score distribution biased toward prime). Production swaps in
+   * the real bureau API gateway.
+   */
+  bureauAdapter?: BureauAdapter;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -348,6 +362,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
   const dmsAdapter = deps.dmsAdapter ?? defaultDmsAdapter;
+  const bureauAdapter = deps.bureauAdapter ?? defaultBureauAdapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -2605,6 +2620,129 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(502).json(
           wrapError(
             { code: 'EWS_502', message: e instanceof Error ? e.message : 'dms adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Credit Bureau adapter (T6 M14.5) ─────────────────────────────────
+  //
+  // 5th adapter completing the BIL upstream regulatory + risk-data
+  // sweep (after insurance, ifrs9, aml, dms, bureau).
+
+  /** GET /v1/integrations/bureau/types — closed enum of bureaus. */
+  app.get(
+    '/v1/integrations/bureau/types',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listBureauTypes();
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/integrations/bureau/pull body: { customer_id, bureau_type }
+   * Idempotent per (tenant, customer, bureau, day) — same caller,
+   * same day = same report. Pulled-by recorded from X-APEX-USER.
+   */
+  app.post(
+    '/v1/integrations/bureau/pull',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { customer_id, bureau_type } = (inner ?? {}) as {
+        customer_id?: string;
+        bureau_type?: BureauType;
+      };
+      const pulled_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const report = await bureauAdapter.pull(
+          req.tenant!.tenant_id,
+          (customer_id ?? '') as string,
+          bureau_type as BureauType,
+          pulled_by,
+          now(),
+        );
+        return res.json(wrapResponse(report, ctx));
+      } catch (e) {
+        if (e instanceof BureauError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'bureau adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/bureau/reports?customer_id=X — list, newest-first. */
+  app.get(
+    '/v1/integrations/bureau/reports',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = (req.query.customer_id as string | undefined) ?? '';
+      if (!customer_id) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'customer_id query parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const items = await bureauAdapter.listByCustomer(req.tenant!.tenant_id, customer_id);
+        return res.json(wrapResponse({ items, total: items.length, customer_id }, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'bureau adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/bureau/reports/:report_id — single. 404 on miss. */
+  app.get(
+    '/v1/integrations/bureau/reports/:report_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.report_id ?? '';
+      try {
+        const report = await bureauAdapter.get(req.tenant!.tenant_id, id);
+        if (!report) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `bureau report ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(report, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'bureau adapter failed', severity: 'HIGH' },
             ctx,
           ),
         );
