@@ -72,6 +72,7 @@ import {
   buildOperationalDashboard,
   buildUnderwritingDashboard,
 } from './bil_dashboards';
+import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -762,6 +763,54 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const dashboard = buildOperationalDashboard(req.tenant!.tenant_id, now());
       res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // ── BIL Σ(W×V) risk-scoring engine (T6 M6.1) ──────────────────────────
+  //
+  // Stateless POST that takes a list of (indicator_id, weight, value)
+  // tuples and returns the BIL risk score per DataNetworks PDF §12.
+  // Defaults to Low/Medium/High thresholds at 30/70 — caller can override.
+  // Tenant-gated + the same role as scenario run (risk-analyst level).
+  app.post(
+    '/v1/scoring/risk',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' },
+            env,
+          ),
+        );
+      }
+      const { items, thresholds } = inner as {
+        items?: ScoringItem[];
+        thresholds?: Partial<ScoringThresholds>;
+      };
+      try {
+        const result = computeRiskScore(items ?? [], thresholds ?? {});
+        return res.json(wrapResponse(result, env));
+      } catch (e) {
+        if (e instanceof ScoringInputError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, env),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'scoring failed', severity: 'HIGH' },
+            env,
+          ),
+        );
+      }
     },
   );
 
