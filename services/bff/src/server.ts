@@ -362,7 +362,11 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       try {
-        const result = await caseAction.log(inner as CaseActionInput);
+        const result = await caseAction.log({
+          ...(inner as CaseActionInput),
+          tenant_id: req.tenant?.tenant_id,
+          channel: req.channel,
+        });
         res
           .status(201)
           .json(wrapResponse(result, ctx, { code: 'EWS_201', message: 'Created' }));
