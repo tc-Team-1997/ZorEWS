@@ -193,6 +193,14 @@ import {
   type FinanceAdapter,
 } from './integrations/finance';
 import {
+  defaultHrAdapter,
+  isEmployeeDepartment,
+  isEmployeeStatus,
+  type EmployeeDepartment,
+  type EmployeeStatus,
+  type HrAdapter,
+} from './integrations/hr';
+import {
   defaultCaseInvestigationStore,
   InvestigationError,
   isInvestigationStatus,
@@ -352,6 +360,13 @@ export interface AppDeps {
    */
   financeAdapter?: FinanceAdapter;
   /**
+   * Override for tests — HR adapter (T6 M14.8). Defaults to the
+   * module-level StubHrAdapter (80 staff per tenant + leave balance).
+   * Production swaps in a SAP SuccessFactors / Workday / similar HR
+   * upstream adapter.
+   */
+  hrAdapter?: HrAdapter;
+  /**
    * Override for tests — indicator weight lookup (T6 M6.2). Defaults
    * to the module-level StubIndicatorWeightLookup with a hand-curated
    * BIL + banking catalogue mirror. Production swaps in an HTTP-backed
@@ -463,6 +478,7 @@ export function makeApp(deps: AppDeps = {}) {
   const bureauAdapter = deps.bureauAdapter ?? defaultBureauAdapter;
   const agentAdapter = deps.agentAdapter ?? defaultAgentAdapter;
   const financeAdapter = deps.financeAdapter ?? defaultFinanceAdapter;
+  const hrAdapter = deps.hrAdapter ?? defaultHrAdapter;
   const indicatorWeightLookup = deps.indicatorWeightLookup ?? defaultIndicatorWeightLookup;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
@@ -3837,6 +3853,124 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(502).json(
           wrapError(
             { code: 'EWS_502', message: e instanceof Error ? e.message : 'finance adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── HR adapter (T6 M14.8) ────────────────────────────────────────────
+  //
+  // 3 routes over the BIL HR upstream — staff list/single + leave
+  // balance. RBAC mirrors the rest of the integration surface
+  // (customers:read_risk_profile = analyst+).
+
+  /** GET /v1/integrations/hr/employees?department=&status=&page=&page_size= */
+  app.get(
+    '/v1/integrations/hr/employees',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dept = req.query.department as string | undefined;
+      const status = req.query.status as string | undefined;
+      if (dept !== undefined && !isEmployeeDepartment(dept)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_department', message: `invalid department: ${dept}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (status !== undefined && !isEmployeeStatus(status)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: `invalid status: ${status}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const pageRaw = req.query.page as string | undefined;
+      const sizeRaw = req.query.page_size as string | undefined;
+      const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1;
+      const page_size = sizeRaw ? Math.max(1, Math.min(100, Number(sizeRaw) || 25)) : 25;
+      try {
+        const out = await hrAdapter.list(
+          req.tenant!.tenant_id,
+          {
+            department: dept as EmployeeDepartment | undefined,
+            status: status as EmployeeStatus | undefined,
+            page,
+            page_size,
+          },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'hr adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/hr/employees/:employee_id — single. */
+  app.get(
+    '/v1/integrations/hr/employees/:employee_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.employee_id ?? '';
+      try {
+        const employee = await hrAdapter.get(req.tenant!.tenant_id, id);
+        if (!employee) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `employee ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(employee, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'hr adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/hr/employees/:employee_id/leave-balance */
+  app.get(
+    '/v1/integrations/hr/employees/:employee_id/leave-balance',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.employee_id ?? '';
+      try {
+        const balance = await hrAdapter.getLeaveBalance(req.tenant!.tenant_id, id, now());
+        if (!balance) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `employee ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(balance, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'hr adapter failed', severity: 'HIGH' },
             ctx,
           ),
         );

@@ -903,6 +903,27 @@
       - Backwards-compat (2): `/v1/scenarios/library` + `/v1/scenario/run` still work.
     - **Outcome:** Module 16 now has 2 sub-phases (M16.1 library + M16.2 bulk-run) — the BIL exec can fire RBI's 3-tier annual stress + IRDAI solvency check in one call and see the comparison ranked by ECL impact. Future M16.3 (cross-scenario variance + sensitivity analysis) extends the same primitive.
 
+  - **M14.8 — HR adapter (2026-05-04):**
+    - 8th Module 14 adapter — covers the BIL HR upstream (SAP SuccessFactors / Workday / similar): bank/insurer staff register + leave balance. Distinct from M14.6 Agent (external sales force).
+    - New `services/bff/src/integrations/hr.ts`:
+      - `Employee` shape: `employee_id`, `name`, `role`, `department` (one of 8: risk / underwriting / claims / operations / compliance / it / finance / admin), `manager_id`, `status` (active / on_leave / suspended / terminated), `joined_at`, `type` (permanent / contract / intern / consultant), `location`.
+      - `LeaveBalance` shape: per-employee casual/sick/annual/comp_off remaining + last_synced_at. Terminated employees → all zeros; interns → tighter caps than permanent staff.
+      - `HrAdapter` interface (`list / get / getLeaveBalance`) + `StubHrAdapter`. 80 staff per tenant; first 8 indices are department heads (one per dept) with `manager_id=null`; remaining 72 report to one of the 8 heads.
+      - **Department-head invariant** asserted in tests: indices 0-7 cover all 8 departments uniquely + roles end with Manager/Head/Controller.
+      - Distributions: 86% active / 7% on_leave / 4% suspended / 3% terminated; 70% permanent / 18% contract / 7% consultant / 5% intern.
+    - **`AppDeps.hrAdapter` injection point** — defaults to module-level singleton.
+    - **3 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/hr/employees?department=&status=&page=&page_size=` — list. Code-routed `EWS_400_invalid_department` / `EWS_400_invalid_status`.
+      - `GET /v1/integrations/hr/employees/:employee_id` — single, 404 on miss + cross-tenant.
+      - `GET /v1/integrations/hr/employees/:employee_id/leave-balance` — leave snapshot. 404 on unknown employee.
+    - **Tests:** BFF 1324/1324 (was 1288 — +36 in `hr_adapter.test.ts`):
+      - Type guards (2): isEmployeeStatus + isEmployeeDepartment.
+      - list (10): 80-fleet, every-field-present, first-8-heads-with-distinct-departments invariant, manager-id-points-at-head invariant, dept + status filters + AND combo, pagination disjointness + clamp, tenant disjointness, every-dept-has-employees.
+      - get (4): hit, out-of-range null, malformed null, cross-tenant null.
+      - getLeaveBalance (6): active employee balance, terminated → zeros, interns < permanent caps, determinism, unknown null, cross-tenant null.
+      - Routes (12): list happy + 2 filter narrowings + 2 invalid-axis 400s + 403 + 502; single happy + 404 + cross-tenant 404; leave-balance happy + 2 × 404; tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 8 shipped adapters covering 29 of the declared 50 APIs. Combined with M14.6 Agent, the HR + Agent slice gives ops a complete people-data view (internal staff via M14.8 + external sales force via M14.6).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
