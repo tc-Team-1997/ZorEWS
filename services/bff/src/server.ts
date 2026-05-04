@@ -158,6 +158,15 @@ import {
   type BureauType,
 } from './integrations/bureau';
 import {
+  AgentError,
+  defaultAgentAdapter,
+  isAgentStatus,
+  isAgentTier,
+  type AgentAdapter,
+  type AgentStatus,
+  type AgentTier,
+} from './integrations/agent';
+import {
   defaultCaseInvestigationStore,
   InvestigationError,
   isInvestigationStatus,
@@ -295,6 +304,13 @@ export interface AppDeps {
    */
   bureauAdapter?: BureauAdapter;
   /**
+   * Override for tests — Agent Productivity adapter (T6 M14.6).
+   * Defaults to the module-level StubAgentAdapter (50 agents per
+   * tenant with monthly productivity history). Production swaps
+   * in a HR-system-backed adapter (e.g. SAP SuccessFactors).
+   */
+  agentAdapter?: AgentAdapter;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -392,6 +408,7 @@ export function makeApp(deps: AppDeps = {}) {
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
   const dmsAdapter = deps.dmsAdapter ?? defaultDmsAdapter;
   const bureauAdapter = deps.bureauAdapter ?? defaultBureauAdapter;
+  const agentAdapter = deps.agentAdapter ?? defaultAgentAdapter;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -3054,6 +3071,178 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(502).json(
           wrapError(
             { code: 'EWS_502', message: e instanceof Error ? e.message : 'bureau adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Agent Productivity adapter (T6 M14.6) ────────────────────────────
+  //
+  // 4 routes over the BIL Agent upstream — list/single + per-period +
+  // history. Read-only at this stage; productivity edits would come
+  // from the upstream HR system, not this surface.
+
+  /** GET /v1/integrations/agent/agents?tier=&status=&page=&page_size= */
+  app.get(
+    '/v1/integrations/agent/agents',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tier = req.query.tier as string | undefined;
+      const status = req.query.status as string | undefined;
+      if (tier !== undefined && !isAgentTier(tier)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_tier', message: `invalid tier: ${tier}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (status !== undefined && !isAgentStatus(status)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: `invalid status: ${status}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const pageRaw = req.query.page as string | undefined;
+      const sizeRaw = req.query.page_size as string | undefined;
+      const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1;
+      const page_size = sizeRaw ? Math.max(1, Math.min(100, Number(sizeRaw) || 25)) : 25;
+      try {
+        const out = await agentAdapter.list(
+          req.tenant!.tenant_id,
+          { tier: tier as AgentTier | undefined, status: status as AgentStatus | undefined, page, page_size },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'agent adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/integrations/agent/agents/:agent_id — single agent. 404 on miss. */
+  app.get(
+    '/v1/integrations/agent/agents/:agent_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.agent_id ?? '';
+      try {
+        const agent = await agentAdapter.get(req.tenant!.tenant_id, id);
+        if (!agent) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `agent ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(agent, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'agent adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/integrations/agent/agents/:agent_id/productivity[?period=YYYY-MM]
+   * Single-period productivity. Period defaults to YYYY-MM of now.
+   * 400 EWS_400_invalid_period when period malformed.
+   */
+  app.get(
+    '/v1/integrations/agent/agents/:agent_id/productivity',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.agent_id ?? '';
+      const period = req.query.period as string | undefined;
+      try {
+        const out = await agentAdapter.getProductivity(
+          req.tenant!.tenant_id,
+          id,
+          { period },
+          now(),
+        );
+        if (!out) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `agent ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AgentError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'agent adapter failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/integrations/agent/agents/:agent_id/productivity/history?months=12
+   * Productivity for the last N months ending at now, newest-first.
+   * months clamped to [1, 36].
+   */
+  app.get(
+    '/v1/integrations/agent/agents/:agent_id/productivity/history',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.agent_id ?? '';
+      const monthsRaw = req.query.months as string | undefined;
+      let months = 12;
+      if (monthsRaw !== undefined) {
+        const n = Number(monthsRaw);
+        months = Math.max(1, Math.min(36, Number.isFinite(n) ? n : 12));
+      }
+      try {
+        // Validate the agent exists first so we 404 cleanly.
+        const agent = await agentAdapter.get(req.tenant!.tenant_id, id);
+        if (!agent) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `agent ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        const items = await agentAdapter.listProductivity(req.tenant!.tenant_id, id, months, now());
+        return res.json(
+          wrapResponse({ items, total: items.length, agent_id: id, months }, ctx),
+        );
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            { code: 'EWS_502', message: e instanceof Error ? e.message : 'agent adapter failed', severity: 'HIGH' },
             ctx,
           ),
         );

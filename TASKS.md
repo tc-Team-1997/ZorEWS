@@ -740,6 +740,31 @@
       - Routes (19): rules list happy + override-reflected + 403; decide all-severities + lowercase + override + envelope + 2 invalid 400s; PUT happy + 4 validation 400 codes + 403; DELETE happy + 400 + 403; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 8 now has both classification (M8.1) + routing (M8.2). Combined with M10.1 (email) + M10.2 (sms), the BIL deployment can now wire end-to-end alert escalation: severity → class → routing decision → notification channel → assigned role + SLA. **BFF crossed 1000 tests.**
 
+  - **M14.6 — Agent Productivity adapter (2026-05-04):**
+    - 6th Module 14 adapter — covers BIL pitch's #5 upstream (Agent / HR feed). Complements the M11.3 Agent dashboard with a single-agent drill-through path.
+    - New `services/bff/src/integrations/agent.ts`:
+      - `Agent` shape: `agent_id`, `name`, `branch`, `joined_at`, `status` (`active / suspended / terminated / on_leave`), `tier` (`gold / silver / bronze`), `manager_id` (null for the first 5 agents per tenant who are branch heads).
+      - `AgentProductivity` shape: `period` (YYYY-MM), `policies_sold`, `premium_collected_kes`, `persistency_pct` (12-month rolling), `lapse_count`, `complaints_count`, `conversion_pct`, `branch_rank` (null for terminated/inactive months).
+      - `AgentAdapter` interface (`list / get / getProductivity / listProductivity`) + `StubAgentAdapter`. 50 agents per tenant; productivity history up to 36 months; clean cross-year traversal (Dec → Nov of prior year).
+      - **Tier-driven productivity calibration**: gold gets 2.5× the baseline policies + persistency floor 82%; silver 1.5× + 75%; bronze 1.0× + 65%. Tested invariant: gold avg policies_sold > bronze avg.
+      - **Status-driven productivity reduction**: terminated → all zeros + null branch_rank; suspended/on_leave → 40% of baseline.
+      - `AgentError` carries code `invalid_period` (400) for malformed YYYY-MM input.
+      - Period helper `priorPeriod(YYYY-MM, n)` correctly subtracts months across year boundaries.
+    - **`AppDeps.agentAdapter` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (all tenant-gated, all enveloped, all RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/agent/agents?tier=&status=&page=&page_size=` — paginated list. 400 `EWS_400_invalid_tier` / `EWS_400_invalid_status`.
+      - `GET /v1/integrations/agent/agents/:agent_id` — single, 404 on miss + cross-tenant lookup.
+      - `GET /v1/integrations/agent/agents/:agent_id/productivity[?period=YYYY-MM]` — single-period productivity. 400 `EWS_400_invalid_period`. Defaults to current month.
+      - `GET /v1/integrations/agent/agents/:agent_id/productivity/history?months=N` — last N months, clamped to [1, 36], newest-first.
+    - **Tests:** BFF 1080/1080 (was 1035 — +45 in `agent_adapter.test.ts`):
+      - Type guards + period validation (3): tier, status, YYYY-MM regex covering 13/00 invalid + slash/short formats.
+      - list (8): default 50/page=25; required fields; branch-head-vs-manager invariant (first 5 idx → manager_id null); tier filter; status filter; AND combination; pagination disjointness + clamp; cross-tenant disjointness.
+      - get (4): hit + null on out-of-range + null on malformed + null on cross-tenant.
+      - getProductivity (8): default-period current YYYY-MM; explicit period; invalid_period throw; unknown-agent null; terminated→zeros+null-rank; determinism per (tenant, agent, period); every-row valid types; gold > bronze policies_sold avg invariant.
+      - listProductivity (4): default 12 newest-first; months clamp [1, 36]; cross-year traversal correct (Feb 2026 ← Sept 2025); unknown agent → empty.
+      - Routes (18): list happy + filters + 2 invalid 400s + 403; single happy + 404 + cross-tenant 404; productivity default + period + invalid_period 400 + 404; history default + months override + clamp + 404; tenant isolation through HTTP.
+    - **Outcome:** Module 14 now has 6 shipped adapters covering 23 of the declared 50 APIs. Agent + IFRS9 + Insurance form a tight triangle for any per-customer drill-through workflow.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
