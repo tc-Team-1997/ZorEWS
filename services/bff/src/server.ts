@@ -133,6 +133,15 @@ import {
   type SmsTransport,
 } from './notifications/sms';
 import {
+  defaultPushTransport,
+  listPushTemplates,
+  PushValidationError,
+  renderPushTemplate,
+  type PushMessageInput,
+  type PushTemplateId,
+  type PushTransport,
+} from './notifications/push';
+import {
   AlertClassificationError,
   classifyAlertSeverity,
   classifyWithMetadata,
@@ -313,6 +322,12 @@ export interface AppDeps {
    */
   smsTransport?: SmsTransport;
   /**
+   * Override for tests — push transport (T6 M10.3). Defaults to the
+   * module-level StubPushTransport. Production swaps in a Firebase
+   * Admin SDK / APNS / Web Push transport.
+   */
+  pushTransport?: PushTransport;
+  /**
    * Override for tests — alert routing engine (T6 M8.2). Defaults to
    * the module-level InMemoryAlertRoutingEngine. Tenant overrides
    * persist within the engine instance; tests pass a fresh engine.
@@ -485,6 +500,7 @@ export function makeApp(deps: AppDeps = {}) {
   const bus = deps.notificationBus ?? defaultBus;
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const smsTransport = deps.smsTransport ?? defaultSmsTransport;
+  const pushTransport = deps.pushTransport ?? defaultPushTransport;
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
@@ -2127,6 +2143,128 @@ export function makeApp(deps: AppDeps = {}) {
       const limitRaw = req.query.limit;
       const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
       const items = smsTransport.recent(req.tenant!.tenant_id, limit);
+      res.json(wrapResponse({ items, total: items.length, limit }, ctx));
+    },
+  );
+
+  // ── Push notification channel (T6 M10.3) ────────────────────────────
+  //
+  // 3rd <Channel>Transport (after email + SMS). 4 routes mirror the
+  // shape: templates / preview / send / log.
+
+  /** GET /v1/notifications/push/templates — list canned BIL templates. */
+  app.get(
+    '/v1/notifications/push/templates',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listPushTemplates().map((t) => ({
+        id: t.id,
+        description: t.description,
+        required_vars: t.required_vars,
+        title: t.title,
+        body: t.body,
+      }));
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/notifications/push/preview body: { template_id, template_vars }
+   * Render a template + vars to (title, body, missing_vars[]) without sending.
+   */
+  app.post(
+    '/v1/notifications/push/preview',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { template_id, template_vars } = (inner ?? {}) as {
+        template_id?: PushTemplateId;
+        template_vars?: Record<string, string | number>;
+      };
+      if (!template_id || typeof template_id !== 'string') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'template_id is required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const out = renderPushTemplate(template_id, template_vars ?? {});
+        return res.json(wrapResponse({ template_id, ...out }, ctx));
+      } catch (e) {
+        if (e instanceof PushValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/notifications/push/send body: PushMessageInput
+   * Validates + dispatches via the configured transport. Admin-only —
+   * sending push is higher-trust than reading the bell stream.
+   */
+  app.post(
+    '/v1/notifications/push/send',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const receipt = await pushTransport.send(req.tenant!.tenant_id, inner as PushMessageInput);
+        return res.status(201).json(
+          wrapResponse({ ok: true, receipt }, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof PushValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'send failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/notifications/push/log?limit=50 — tenant-scoped ledger. */
+  app.get(
+    '/v1/notifications/push/log',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit;
+      const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
+      const items = pushTransport.recent(req.tenant!.tenant_id, limit);
       res.json(wrapResponse({ items, total: items.length, limit }, ctx));
     },
   );

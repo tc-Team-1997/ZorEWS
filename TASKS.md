@@ -981,6 +981,31 @@
       - Routes (5): admin happy + analyst-accepted + 403 + tenant divergence (BIL ↔ BANK_DEMO policies disjoint) + envelope shape.
     - **Outcome:** **Module 11 now has 6 dashboards** (M11.1 Claims + M11.2 Underwriting + M11.3 Agent + M11.4 Operational + M11.5 Executive Watchlist + M11.6 Customer 360). The BIL exec + investigator + ops officer all have a single screen to land on. Cross-module integration with 6 adapters + 1 store demonstrates the platform's coherence at scale. **One audit_trail.test failure observed under parallel-run pollution; passes in isolation + on re-run — flake, not regression.**
 
+  - **M10.3 — BIL push notification channel (2026-05-04):**
+    - 3rd Module 10 channel (after email M10.1 + SMS M10.2). Same `<Channel>Transport` shape proves the abstraction scales to a 3rd channel — push completes the modern-channel triad (email + SMS + push).
+    - New `services/bff/src/notifications/push.ts`:
+      - `PushTransport` interface (`send / recent`) + `StubPushTransport` (per-tenant capped ledger). Production swap = Firebase Admin SDK (FCM) / APNS / Web Push transport.
+      - **3 platforms**: `fcm` (Android), `apns` (iOS), `web` (browser Web Push). Validated as a closed enum.
+      - **`PushDevice` shape**: `{device_token, platform, user_id}`. Up to 1000 devices per send (multicast). user_id audit-trail-friendly.
+      - **4 BIL canned templates** per pitch §13: `ALERT_RED_PUSH` (escalation push for ops oncall), `OTP_CONFIRM` (login confirmation), `NEW_CASE_ASSIGNED` (case assignment to investigator's device), `REPORT_READY` (export ready for download).
+      - **Tight platform constraints**: title ≤ 100 chars, body ≤ 240 chars; deep_link must be either a relative SPA path (`/cases/123`) OR an `https://` URL (the SPA + native shell deep-link based on protocol — `http://` rejected for security); badge_count must be a non-negative integer.
+      - `PushReceipt` carries `per_device[]` with per-recipient status — production transport returns per-device errors here; stub fans out 'sent' for every device.
+      - `PushValidationError` codes routed by the BFF: `no_devices` / `too_many_devices` / `invalid_device` / `missing_title` / `title_too_long` / `missing_body` / `body_too_long` / `missing_template_vars` / `unknown_template` / `invalid_deep_link` / `invalid_badge` — all 400.
+    - **`AppDeps.pushTransport` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (mirror the M10.1 / M10.2 shape):
+      - `GET /v1/notifications/push/templates` — RBAC `cases:list`. Lists the 4 templates.
+      - `POST /v1/notifications/push/preview` — RBAC `cases:list`. Renders without sending.
+      - `POST /v1/notifications/push/send` — RBAC `audit:read` (admin). 201 + code-routed 400s on validation failure.
+      - `GET /v1/notifications/push/log?limit=N` — RBAC `audit:read`. Tenant-scoped ledger.
+    - **Tests:** BFF 1477/1477 (was 1421 — +56 in `push_channel.test.ts`):
+      - Type guards + helpers (4): isPushPlatform, substitute slot replacement, listPushTemplates / getPushTemplate.
+      - renderPushTemplate (3): substitution, missing-vars reporting, unknown template throw.
+      - resolveMessage (17): template path, caller override, explicit-only, empty-devices, > 1000 devices, every per-device validation path (token / platform / user_id), 100/240 length caps, missing template vars, neither-supplied, deep_link relative + https + reject http + reject relative-without-leading-slash, badge_count negative + non-integer rejection, error code surfacing.
+      - StubPushTransport (7): receipt + per-device status, newest-first, BIL ↔ BANK_DEMO scoping, limit cap, retention eviction, template + deep_link preserved in ledger, bad-input throw.
+      - Routes (21): templates list happy + 403; preview happy + missing_vars + 400 missing template_id + 400 unknown_template; send happy (3 devices fan-out) + 403 + every 400 error code (no_devices, invalid_device, title_too_long, body_too_long, missing_template_vars, invalid_deep_link) + enveloped body; log tenant scoping + limit + 403.
+      - Backwards-compat (2): M10.1 email + M10.2 SMS templates routes still 200.
+    - **Outcome:** Module 10 now has 3 channels live (email + SMS + push). The `<Channel>Transport` pattern is fully proven across all 3 modern delivery surfaces. Combined with M8.2's routing decision (which channels[] to fire), the BIL deployment can wire end-to-end alert escalation: severity → class → routing → fan-out across email + SMS + push. Future M10.4 (in-app real-time) closes the SPA-bell side.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
