@@ -108,6 +108,19 @@ import {
   type ConfigStore,
   type ConfigValue,
 } from './admin_config';
+import {
+  AuditValidationError,
+  defaultAuditTrailStore,
+  isAuditOutcome,
+  isAuditResourceType,
+  isAuditSeverity,
+  type AuditEventInput,
+  type AuditFilters,
+  type AuditOutcome,
+  type AuditResourceType,
+  type AuditSeverity,
+  type AuditTrailStore,
+} from './audit_trail';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -160,6 +173,12 @@ export interface AppDeps {
    * store per test so overrides don't leak across runs.
    */
   configStore?: ConfigStore;
+  /**
+   * Override for tests — BIL audit trail store (T6 M15.1). Defaults
+   * to the module-level InMemoryAuditTrailStore. Production swaps
+   * in a WORM-backed store with hash-chain integrity.
+   */
+  auditTrailStore?: AuditTrailStore;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -214,6 +233,7 @@ export function makeApp(deps: AppDeps = {}) {
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const configStore = deps.configStore ?? defaultConfigStore;
+  const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1747,6 +1767,173 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── BIL Audit & Compliance trail (T6 M15.1) ─────────────────────────
+  //
+  // Per-tenant structured audit log with filters tuned for RBI/IRDAI
+  // evidence dumps. All routes RBAC audit:read (admin-only) — audit
+  // events can contain PII (actor names, IP addresses, sensitive
+  // resource ids).
+
+  /**
+   * POST /v1/audit/events — record a new audit event.
+   * body: AuditEventInput
+   * Returns the recorded event with assigned event_id + ts.
+   */
+  app.post(
+    '/v1/audit/events',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const event = auditTrailStore.record(req.tenant!.tenant_id, inner as AuditEventInput, now());
+        return res.status(201).json(
+          wrapResponse(event, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof AuditValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'audit record failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/audit/events?actor_username=&action=&resource_type=&outcome=&
+   *   severity=&since=&until=&page=&page_size=
+   * Newest-first paginated query. Multiple actions can be supplied as a
+   * comma-separated list (action=auth.login,auth.logout).
+   */
+  app.get(
+    '/v1/audit/events',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: AuditFilters = {};
+      if (typeof q.actor_username === 'string') filters.actor_username = q.actor_username;
+      if (typeof q.action === 'string') filters.action = q.action;
+      if (typeof q.resource_type === 'string') {
+        if (!isAuditResourceType(q.resource_type)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_resource_type', message: `invalid resource_type: ${q.resource_type}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.resource_type = q.resource_type as AuditResourceType;
+      }
+      if (typeof q.outcome === 'string') {
+        if (!isAuditOutcome(q.outcome)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_outcome', message: `invalid outcome: ${q.outcome}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.outcome = q.outcome as AuditOutcome;
+      }
+      if (typeof q.severity === 'string') {
+        if (!isAuditSeverity(q.severity)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_severity', message: `invalid severity: ${q.severity}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.severity = q.severity as AuditSeverity;
+      }
+      if (typeof q.since === 'string') filters.since = q.since;
+      if (typeof q.until === 'string') filters.until = q.until;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') {
+        filters.page_size = Math.max(1, Math.min(500, Number(q.page_size) || 50));
+      }
+      const out = auditTrailStore.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/audit/actions — distinct action verbs for this tenant. */
+  app.get(
+    '/v1/audit/actions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = auditTrailStore.listActions(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * GET /v1/audit/summary?days=30
+   * Aggregate counts by outcome / severity / action / resource_type
+   * over the trailing window. days defaults to 30, clamped to [1, 365].
+   */
+  app.get(
+    '/v1/audit/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const daysRaw = req.query.days as string | undefined;
+      let days = 30;
+      if (daysRaw !== undefined) {
+        const n = Number(daysRaw);
+        days = Math.max(1, Math.min(365, Number.isFinite(n) ? n : 30));
+      }
+      const summary = auditTrailStore.summarise(req.tenant!.tenant_id, days, now());
+      return res.json(wrapResponse({ ...summary, days }, ctx));
+    },
+  );
+
+  /** GET /v1/audit/events/:event_id — single event. 404 on miss. */
+  app.get(
+    '/v1/audit/events/:event_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const event_id = req.params.event_id ?? '';
+      const event = auditTrailStore.get(req.tenant!.tenant_id, event_id);
+      if (!event) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404', message: `audit event ${event_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(event, ctx));
     },
   );
 

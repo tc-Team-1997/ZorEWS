@@ -459,6 +459,30 @@
       - Routes (19): categories list + 403, list-all + category filter + invalid-category 400 + 403, get single happy + 404, PUT happy + enveloped body + invalid_value + unknown_key + missing-value + default updated_by + 403, DELETE happy + 404 + 403, BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 13's first slice shipped. The BIL deployment now has a structured way to override the 13 platform defaults per tenant (e.g. tighter Red SLA, stricter scoring thresholds). The `ConfigStore` interface keeps a future PG-backed swap mechanical. Future sub-phases — M13.2 audit-trail of config changes, M13.3 bulk import/export, M13.4 schema-version metadata — extend this primitive.
 
+  - **M15.1 — BIL Audit & Compliance trail (2026-05-04):**
+    - Module 15 (Audit & Compliance, RBI/IRDAI traceability) was empty in T6; this lands the BIL-facing query surface. Distinct from existing surfaces: `services/audit-svc` is a Python WORM hash-chain ledger (long-term tamper-proof storage); `services/bff/src/rules/types.ts` AuditEvent covers rule-state transitions only. M15.1 is purely additive.
+    - New `services/bff/src/audit_trail.ts`:
+      - `AuditEvent` carries `event_id`, `ts`, `tenant_id`, `actor_username`, `actor_role`, `action` (verb), `resource_type` (closed enum: user/session/config/case/alert/report/scenario/rule/integration/system), `resource_id`, `outcome` (success/failure/denied), `severity` (info/warning/critical), `correlation_id`, `ip_address`, `metadata`.
+      - `AuditTrailStore` interface — `record/list/get/listActions/summarise`. Validation enforced at every `record()` via `AuditValidationError` with codes `invalid_input`, `invalid_resource_type`, `invalid_outcome`, `invalid_severity`.
+      - `InMemoryAuditTrailStore` — per-tenant capped log (default 5000 entries, oldest evicted). Production swap = WORM-backed store with hash-chain integrity satisfying the same interface.
+      - 7 filter axes on list: actor_username, action (single OR comma-list OR string array), resource_type, outcome, severity, since/until time-window, page/page_size (clamped to `[1, 500]`).
+      - `summarise(days, now)` aggregates by outcome / severity / action / resource_type within a trailing window — feeds the compliance dashboard.
+    - **`AppDeps.auditTrailStore` injection point** — defaults to the module-level `defaultAuditTrailStore`. Tests pass a fresh store per test.
+    - **5 new BFF routes** (all tenant-gated, all enveloped, all RBAC `audit:read` — admin-only since events can include PII):
+      - `POST /v1/audit/events` — record an event. Accepts raw + enveloped bodies. 400 with code-routed errors on validation failure.
+      - `GET /v1/audit/events?actor_username=&action=&resource_type=&outcome=&severity=&since=&until=&page=&page_size=` — newest-first paginated query. Pre-validates resource_type/outcome/severity, returning 400 with code routing (`EWS_400_invalid_outcome` etc).
+      - `GET /v1/audit/events/:event_id` — single event. 404 on miss (tenant-scoped — cross-tenant lookup also 404).
+      - `GET /v1/audit/actions` — distinct action verbs seen for this tenant (sorted) — feeds SPA filter dropdown.
+      - `GET /v1/audit/summary?days=30` — aggregate counts. `days` clamped to `[1, 365]`.
+    - **Tests:** BFF 570/570 (was 523 — +47 in `audit_trail.test.ts`):
+      - Type guards (3): isAuditOutcome / isAuditSeverity / isAuditResourceType.
+      - Store record (4): event_id + ts + tenant_id + default severity, optional fields preserved, missing-required → invalid_input, invalid resource_type/outcome/severity rejected.
+      - Store list/get/listActions (10): newest-first ordering, every filter axis (actor, action single + comma + array, resource+outcome AND combination, since/until window), pagination disjointness, page_size clamp, BIL ↔ BANK_DEMO tenant isolation, listActions sorted distinct.
+      - Retention cap (1): cap evicts oldest, newest retained.
+      - Summarise (3): aggregates by every dimension within window, days parameter respected, zero-event window returns zero counts not undefined.
+      - Routes (26): POST happy + envelope body + 3 validation 400s + 403; GET list happy + 4 filter cases + 3 invalid-axis 400s + pagination disjoint + 403; GET single happy + 404 + cross-tenant 404; GET actions sorted + 403; GET summary default + days override + clamping (with 0 not falsy-collapsing) + 403; tenant isolation through HTTP.
+    - **Outcome:** Module 15's first slice shipped. The BIL deployment now has a query-friendly compliance trail with structured filters covering the RBI/IRDAI evidence-dump axes (who did what to which resource, when, with what outcome). Future M15.2 — hash-chain integrity check + replay-from-audit-svc + WORM-backed persistence — extends the same `AuditTrailStore` interface.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
