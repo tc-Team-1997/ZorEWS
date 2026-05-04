@@ -73,6 +73,15 @@ import {
   buildUnderwritingDashboard,
 } from './bil_dashboards';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
+import {
+  defaultEmailTransport,
+  EmailValidationError,
+  listTemplates as listEmailTemplates,
+  renderTemplate as renderEmailTemplate,
+  type EmailMessageInput,
+  type EmailTemplateId,
+  type EmailTransport,
+} from './notifications/email';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -98,6 +107,13 @@ export interface AppDeps {
   slaFleet?: SlaCase[];
   /** Override for tests — defaults to the module-level singleton. */
   notificationBus?: NotificationBus;
+  /**
+   * Override for tests — email transport (T6 M10.1). Defaults to the
+   * module-level StubEmailTransport singleton (in-memory ledger).
+   * Production deploys swap in a SES/SMTP transport implementing the
+   * same interface.
+   */
+  emailTransport?: EmailTransport;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -148,6 +164,7 @@ export function makeApp(deps: AppDeps = {}) {
   const caseAction = deps.caseAction ?? makeCaseActionSink();
   const portfolio = deps.portfolio ?? defaultPortfolio();
   const bus = deps.notificationBus ?? defaultBus;
+  const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -681,6 +698,137 @@ export function makeApp(deps: AppDeps = {}) {
       ),
     );
   });
+
+  // ── Email channel (T6 M10.1) — DataNetworks-EWS-Ver1.pdf §13 ──────────
+  //
+  // Out-of-band delivery transport for BIL. The default StubEmailTransport
+  // records to an in-memory ledger; prod swaps to SES/SMTP. Templates are
+  // rendered server-side so the SPA can preview before sending.
+
+  /** GET /v1/notifications/email/templates — list canned BIL templates. */
+  app.get(
+    '/v1/notifications/email/templates',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listEmailTemplates().map((t) => ({
+        id: t.id,
+        description: t.description,
+        required_vars: t.required_vars,
+        subject: t.subject,
+        body_text: t.body_text,
+      }));
+      res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/notifications/email/preview
+   * body: { template_id, template_vars }
+   * Renders a template + vars to (subject, body_text, body_html?) without
+   * sending. Useful for the SPA preview pane.
+   */
+  app.post(
+    '/v1/notifications/email/preview',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const { template_id, template_vars } = (inner ?? {}) as {
+        template_id?: EmailTemplateId;
+        template_vars?: Record<string, string | number>;
+      };
+      if (!template_id || typeof template_id !== 'string') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'template_id is required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const out = renderEmailTemplate(template_id, template_vars ?? {});
+        return res.json(wrapResponse({ template_id, ...out }, ctx));
+      } catch (e) {
+        if (e instanceof EmailValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/notifications/email/send
+   * body: EmailMessageInput
+   * Validates + dispatches via the configured transport. Mirrors the
+   * RBAC of the publish endpoint (audit:read = admin) — sending email
+   * is a higher-trust op than reading the SSE stream.
+   */
+  app.post(
+    '/v1/notifications/email/send',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const receipt = await emailTransport.send(req.tenant!.tenant_id, inner as EmailMessageInput);
+        return res.status(201).json(
+          wrapResponse({ ok: true, receipt }, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof EmailValidationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'send failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/notifications/email/log?limit=50
+   * Recent ledger entries scoped to the caller's tenant. Admin-only —
+   * the ledger contains rendered subject + body which may include PII.
+   */
+  app.get(
+    '/v1/notifications/email/log',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit;
+      const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
+      const items = emailTransport.recent(req.tenant!.tenant_id, limit);
+      res.json(wrapResponse({ items, total: items.length, limit }, ctx));
+    },
+  );
 
   /**
    * GET /v1/integrations/health
