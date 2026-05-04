@@ -966,6 +966,21 @@
       - M15 surface integration (2): `GET /v1/audit/events?resource_type=config` returns the same events; `/v1/audit/integrity` valid after config writes.
     - **Outcome:** Module 13 is now wired end-to-end with Module 15 — the BIL deployment can answer "who changed this config when, and what was the prior value?" with one route call. The audit-chain integrity check from M15.2 covers config events too.
 
+  - **M11.6 — Per-customer 360 drill-through (2026-05-04):**
+    - Single endpoint that orchestrates 6 integration adapters + 1 store into one consolidated customer view. Maximum platform-coherence play this session — `/v1/customers/:customer_id/360` is one network call that gives ops the customer's full risk picture without N round-trips.
+    - **Adapters consulted concurrently** (5 parallel + 3 sequential to avoid amplification): `InsuranceAdapter` (M14.1) → policies + claims; `FinanceAdapter` (M14.7) → accounts; `DmsAdapter` (M14.4) → documents; `Ifrs9Adapter` (M14.2) → stage; then `AmlAdapter` (M14.3) → match list; `BureauAdapter` (M14.5) → latest report (no fresh pull — that has cost); `CaseInvestigationStore` (M9.1) → investigations filtered to customer.
+    - **Panel-level degradation**: `tryPanel(panel, fn, degraded[])` wrapper catches errors per panel — failed panel comes back null + the panel name appended to `degraded[]`. The whole call stays 200. The SPA renders "data unavailable" tiles for degraded panels while the rest of the page works. This is the right contract for a customer page where one flaky upstream shouldn't blank the whole view.
+    - **Summary derivations** (8 fields): `aml_highest_severity` (highest open match), `open_investigations` (non-closed count), `ifrs9_stage`, `bureau_score`, `total_finance_balance_kes`, `in_force_policies`, `open_claims`. Each summary field is `null` when the panel it depends on degraded.
+    - **`Customer360Error`** carries `invalid_input` for missing tenant_id / customer_id (route → 400).
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `customers:read_risk_profile`):
+      - `GET /v1/customers/:customer_id/360` — assembled view.
+    - **Tests:** BFF 1421/1421 (was 1395 — +26 in `customer_360.test.ts`):
+      - Happy path (8): all panels populated, summary derivations match panels, AML severity rollup, open-investigations filter, bureau pull-then-surface, investigation customer-filter.
+      - Panel-level degradation (10): `test.each` over all 8 panels — each failing panel correctly null + listed in `degraded[]`; finance / ifrs9 summary nulls when corresponding panel fails; multiple-panel failure preserves still-healthy panels.
+      - Input validation (2): empty customer_id / empty tenant_id throws `Customer360Error`.
+      - Routes (5): admin happy + analyst-accepted + 403 + tenant divergence (BIL ↔ BANK_DEMO policies disjoint) + envelope shape.
+    - **Outcome:** **Module 11 now has 6 dashboards** (M11.1 Claims + M11.2 Underwriting + M11.3 Agent + M11.4 Operational + M11.5 Executive Watchlist + M11.6 Customer 360). The BIL exec + investigator + ops officer all have a single screen to land on. Cross-module integration with 6 adapters + 1 store demonstrates the platform's coherence at scale. **One audit_trail.test failure observed under parallel-run pollution; passes in isolation + on re-run — flake, not regression.**
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

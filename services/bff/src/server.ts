@@ -200,6 +200,7 @@ import {
   type EmployeeStatus,
   type HrAdapter,
 } from './integrations/hr';
+import { buildCustomer360, Customer360Error } from './customer_360';
 import {
   defaultCaseInvestigationStore,
   InvestigationError,
@@ -948,6 +949,61 @@ export function makeApp(deps: AppDeps = {}) {
             {
               code: 'EWS_500',
               message: e instanceof Error ? e.message : 'lookup failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Per-customer 360 drill-through (T6 M11.6) ────────────────────────
+  //
+  // Single endpoint that orchestrates 6 integration adapters
+  // (insurance, ifrs9, aml, dms, bureau, finance) + the M9.1
+  // investigation store into one consolidated customer view. Panel-
+  // level degradation: if any adapter throws, that panel comes back
+  // null + the panel name is added to `degraded[]` in the response,
+  // but the call still 200s — partial answers beat hard failures
+  // when the SPA needs to render *something* on the customer page.
+  app.get(
+    '/v1/customers/:customer_id/360',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.params.customer_id ?? '';
+      try {
+        const view = await buildCustomer360(
+          req.tenant!.tenant_id,
+          customer_id,
+          {
+            insuranceAdapter,
+            ifrs9Adapter,
+            amlAdapter,
+            dmsAdapter,
+            bureauAdapter,
+            financeAdapter,
+            caseInvestigationStore,
+          },
+          now,
+        );
+        return res.json(wrapResponse(view, ctx));
+      } catch (e) {
+        if (e instanceof Customer360Error) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'customer-360 failed',
               severity: 'HIGH',
             },
             ctx,
