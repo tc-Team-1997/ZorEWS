@@ -121,6 +121,12 @@ import {
   type SeverityInput,
 } from './bil_alert_classification';
 import {
+  AlertRoutingError,
+  defaultAlertRoutingEngine,
+  type AlertRoutingEngine,
+  type RoutingRule,
+} from './alert_routing';
+import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
@@ -248,6 +254,12 @@ export interface AppDeps {
    */
   smsTransport?: SmsTransport;
   /**
+   * Override for tests — alert routing engine (T6 M8.2). Defaults to
+   * the module-level InMemoryAlertRoutingEngine. Tenant overrides
+   * persist within the engine instance; tests pass a fresh engine.
+   */
+  alertRoutingEngine?: AlertRoutingEngine;
+  /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
    * (deterministic synthetic data per (tenant, customer, day)).
@@ -374,6 +386,7 @@ export function makeApp(deps: AppDeps = {}) {
   const bus = deps.notificationBus ?? defaultBus;
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const smsTransport = deps.smsTransport ?? defaultSmsTransport;
+  const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -549,6 +562,166 @@ export function makeApp(deps: AppDeps = {}) {
           bil_metadata: listClassifications().find((m) => m.class === target),
         }));
       res.json(wrapResponse({ items, total: items.length, class: target }, ctx));
+    },
+  );
+
+  // ── BIL alert auto-routing (T6 M8.2) ──────────────────────────────────
+  //
+  // 4 routes layered on top of M8.1 classification: list effective rules,
+  // decide routing for a given severity, set/clear per-tenant overrides.
+  // Rules are admin-managed (audit:read); the decide endpoint is
+  // analyst-level (alerts:list) since it's a read.
+
+  /** GET /v1/alerts/routing/rules — effective rules (defaults + overrides). */
+  app.get(
+    '/v1/alerts/routing/rules',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = alertRoutingEngine.listRules(req.tenant!.tenant_id).map((rule) => {
+        const { source } = alertRoutingEngine.getRule(req.tenant!.tenant_id, rule.class);
+        return { ...rule, source };
+      });
+      res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/alerts/routing/decide
+   * body: { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL' (case-insensitive) }
+   * Returns the RoutingDecision for the supplied severity given the
+   * tenant's effective rules.
+   */
+  app.post(
+    '/v1/alerts/routing/decide',
+    requireTenantMw,
+    requireRole('alerts:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const severity = (inner as { severity?: unknown } | undefined)?.severity;
+      if (severity === undefined) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'severity is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const decision = alertRoutingEngine.route(req.tenant!.tenant_id, severity as SeverityInput);
+        return res.json(wrapResponse(decision, ctx));
+      } catch (e) {
+        if (e instanceof AlertClassificationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'route failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * PUT /v1/alerts/routing/rules/:class
+   * body: Partial<RoutingRule> (sans `class` — taken from path)
+   * Set/update the tenant's override. Validates the rule (sla > escalation,
+   * monitor_only ⇒ null SLA, etc).
+   */
+  app.put(
+    '/v1/alerts/routing/rules/:class',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cls = req.params.class;
+      if (!isBilAlertClass(cls)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_class',
+              message: 'class must be one of red|orange|yellow|green',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      // Path class wins — body class ignored if mismatched.
+      const rule: Partial<RoutingRule> = { ...(inner as object), class: cls as BilAlertClass };
+      try {
+        const saved = alertRoutingEngine.setOverride(req.tenant!.tenant_id, rule);
+        return res.json(wrapResponse({ ...saved, source: 'tenant_override' as const }, ctx));
+      } catch (e) {
+        if (e instanceof AlertRoutingError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'set failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/alerts/routing/rules/:class — clear override → revert. */
+  app.delete(
+    '/v1/alerts/routing/rules/:class',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cls = req.params.class;
+      if (!isBilAlertClass(cls)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_class',
+              message: 'class must be one of red|orange|yellow|green',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const reverted = alertRoutingEngine.clearOverride(
+          req.tenant!.tenant_id,
+          cls as BilAlertClass,
+        );
+        return res.json(wrapResponse({ ...reverted, source: 'platform_default' as const }, ctx));
+      } catch (e) {
+        if (e instanceof AlertRoutingError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'clear failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

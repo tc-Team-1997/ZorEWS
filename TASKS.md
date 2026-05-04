@@ -718,6 +718,28 @@
       - Routes (19): templates list happy + 403; preview happy + missing_vars + 400 missing template_id + 400 unknown_template; send happy + 403 + invalid_phone 400 + body_too_long 400 + missing_template_vars 400 + enveloped body; log tenant scoping + limit + 403.
     - **Outcome:** Module 10 now has 2 channels live (email + SMS). The `<Channel>Transport` pattern proven; future M10.3 (push) + M10.4 (in-app) follow without new architecture. Combined with the M9.1 case-investigation tracker, ops can now trigger an SMS escalation directly from a Red-class alert.
 
+  - **M8.2 — Alert auto-routing per BIL class (2026-05-04):**
+    - Extends M8.1's classification with the routing matrix that connects an alert's class to its operational owner + notification channels + SLA. Sourced directly from DataNetworks-EWS-Ver1.pdf §11. Module 8 now has classification (M8.1) + routing (M8.2) — 2 of 18 declared APIs.
+    - New `services/bff/src/alert_routing.ts`:
+      - `RoutingRule` shape carries `class`, `primary_assignee` (`head_of_risk / supervisor / analyst / none`), optional `secondary_assignee`, `channels[]` (email / sms / in_app / push), `sla_hours`, `escalate_after_hours`, `monitor_only`.
+      - **Default rules per BIL §11**: red→head_of_risk+supervisor / email+sms / 4h SLA / 1h escalation; orange→supervisor+analyst / email+in_app / 24h / 12h; yellow→analyst / email+in_app / 72h / 48h; green→none / in_app / monitor-only.
+      - **Validation invariants** enforced in `validateRule`: `escalate_after_hours < sla_hours`; `monitor_only=true ⇒ sla_hours=null AND escalate_after_hours=null`; closed-enum class/role/channel.
+      - `AlertRoutingEngine` interface (`route / listRules / getRule / setOverride / clearOverride`) + `InMemoryAlertRoutingEngine`. Per-tenant overrides via `Map<tenant, Map<class, RoutingRule>>` — defaults merged on read; clear reverts.
+      - **Decision shape** carries `class`, `severity_in`, `rule`, and `source` (`'platform_default' | 'tenant_override'`) so the SPA can distinguish.
+      - `AlertRoutingError` carries codes `invalid_input`, `invalid_class`, `invalid_assignee`, `invalid_channels`, `invalid_sla`, `invalid_escalation`, `invalid_monitor_only` — all routed to 400.
+    - **`AppDeps.alertRoutingEngine` injection point** — defaults to module-level singleton.
+    - **4 new BFF routes** (all tenant-gated, all enveloped):
+      - `GET /v1/alerts/routing/rules` — RBAC `alerts:list` (analyst+). Returns 4 effective rules; each carries a `source` field.
+      - `POST /v1/alerts/routing/decide` body `{severity}` — RBAC `alerts:list`. Returns the RoutingDecision for the supplied severity given the tenant's effective rules. Handles both upper + lower case severities. 400 `EWS_400_invalid_severity` on unknown.
+      - `PUT /v1/alerts/routing/rules/:class` body `Partial<RoutingRule>` — RBAC `audit:read` (admin). Path class wins; body class ignored if mismatched. 400 `EWS_400_invalid_class` on bad path; code-routed validation 400s otherwise.
+      - `DELETE /v1/alerts/routing/rules/:class` — RBAC `audit:read`. Reverts to platform_default.
+    - **Tests:** BFF 1035/1035 (was 989 — +46 in `alert_routing.test.ts`):
+      - Type guards + DEFAULT_RULES schema (8): including escalation < SLA invariant + SLA monotonicity (red < orange < yellow).
+      - validateRule (9): happy + 8 error paths covering each validation invariant.
+      - Engine (10): all 4 severities, lowercase acceptance, listRules canonical order, override-reflected-by-route, clearOverride reverts, tenant isolation, override-validation-rejected.
+      - Routes (19): rules list happy + override-reflected + 403; decide all-severities + lowercase + override + envelope + 2 invalid 400s; PUT happy + 4 validation 400 codes + 403; DELETE happy + 400 + 403; BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 8 now has both classification (M8.1) + routing (M8.2). Combined with M10.1 (email) + M10.2 (sms), the BIL deployment can now wire end-to-end alert escalation: severity → class → routing decision → notification channel → assigned role + SLA. **BFF crossed 1000 tests.**
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
