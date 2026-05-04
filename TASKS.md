@@ -323,6 +323,31 @@
     - **Tests:** indicators suite 94/94 (was 81 — +13 in `insurance_catalog.test.ts`): catalog loads, declares vertical=insurance, spans 5 families with ≥3 indicators each, every indicator carries the standard IndicatorDef fields, ids unique + don't collide with banking prefixes, both new routes happy paths, default + invalid `vertical=` handling.
     - **Outcome:** the BIL deployment now has a structured indicator contract. When the BIL synthetic dataset lands (separate ticket) the compute fns can target known ids; the catalog itself is already shippable to the BIL stakeholders for review.
 
+  - **M11.1 — BIL Claims Dashboard (2026-05-04):**
+    - New `services/bff/src/bil_dashboards.ts` — pure-function builder for BIL dashboard payloads. `buildClaimsDashboard(tenant_id, asOf)` returns a deterministic `ClaimsDashboard` shape with totals + 3 panels (abnormal patterns, flagged hospitals, turnaround anomalies). Same (tenant, day) → identical output, so the SPA + downstream consumers can integrate against a stable contract today; the body swaps to real `mart.claim_360` queries when the BIL synthetic dataset lands.
+    - New BFF endpoint `GET /v1/dashboards/bil/claims` — tenant-scoped, RBAC-gated on `audit:read`, enveloped response. BIL gets a 60%-scale dataset relative to BANK_DEMO so the two tenants' dashboards look distinguishable side-by-side.
+    - **Dashboard panels** (mirror DataNetworks-EWS-Ver1.pdf §14):
+      - **Abnormal claim patterns:** 4 of 6 known patterns sampled per day, each with count_30d + severity + delta vs baseline. Patterns: WAITING_PERIOD_BREACH, REPEAT_REASON_180D, AMOUNT_DEVIATION_30PCT, MISSING_DOCS, OFF_TEMPLATE_DOCS, RAPID_POLICY_CLAIM.
+      - **Flagged hospitals:** top-5 watchlisted providers ranked by fraud score, with claim count + total amount KES.
+      - **Turnaround anomalies:** 6 sample claims with actual_tat_hours > expected_tat_hours and a triage status (pending / investigating / escalated).
+    - **Future M11 sub-phases** (placeholders in `bil_dashboards.ts` route comment):
+      - M11.2 — Underwriting Dashboard (high-risk proposals, churn, lapse)
+      - M11.3 — Agent Dashboard (performance, risk contribution, cancellation clusters)
+      - M11.4 — Operational Dashboard (UW delays, login anomalies, override patterns)
+      - The Executive Dashboard is already shipped via the existing banking `/api/dashboards`.
+    - **Tests:** BFF 284/284 (was 274 — +10 in `bil_dashboards.test.ts`):
+      - builder shape + 3 panel arrays
+      - deterministic — same (tenant, day) → identical
+      - different tenants get different scale (BIL < BANK_DEMO)
+      - flagged_hospitals ranked 1-5 by fraud_score
+      - abnormal patterns carry valid severity buckets
+      - turnaround anomalies have actual > expected TAT
+      - `/v1/dashboards/bil/claims` admin happy path
+      - BIL-tenant scoping
+      - non-admin → 403
+      - missing tenant headers → 400 envelope
+    - All other suites unchanged.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

@@ -66,6 +66,7 @@ import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, TenantConflict, type TenantLookup } from './tenant';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
+import { buildClaimsDashboard } from './bil_dashboards';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -695,6 +696,29 @@ export function makeApp(deps: AppDeps = {}) {
     const summary = summariseSla(fleet, now());
     res.json(wrapResponse(summary, ctx));
   });
+
+  // ── BIL dashboards (T6 M11.1+) — DataNetworks-EWS-Ver1.pdf §14 ────────
+  //
+  // Five BIL dashboards live under /v1/dashboards/bil/*. Each is tenant-
+  // scoped + RBAC-gated; payloads are deterministic stubs today and swap
+  // to real queries when the BIL synthetic dataset lands. Module 11 of
+  // T6 ships them one at a time:
+  //   M11.1 — claims (this endpoint)
+  //   M11.2 — underwriting (future)
+  //   M11.3 — agent (future)
+  //   M11.4 — operational (future)
+  // The Executive dashboard already exists for banking via /api/dashboards.
+  app.get(
+    '/v1/dashboards/bil/claims',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const dashboard = buildClaimsDashboard(tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
 
   // ── Multi-tenant introspection (T4.24 Phase 9) ────────────────────────
   //
