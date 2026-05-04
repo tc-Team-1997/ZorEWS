@@ -95,6 +95,11 @@ import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
+import {
+  defaultIfrs9Adapter,
+  type Ifrs9Adapter,
+  type Ifrs9StageNum,
+} from './integrations/ifrs9';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -134,6 +139,13 @@ export interface AppDeps {
    * Production swaps in a SOAP/REST gateway adapter.
    */
   insuranceAdapter?: InsuranceAdapter;
+  /**
+   * Override for tests — IFRS9 Stage adapter (T6 M14.2). Defaults
+   * to the module-level StubIfrs9Adapter (deterministic synthetic
+   * loan-book of 200 customers per tenant). Production swaps in an
+   * HTTP-backed adapter pointing at the IFRS 9 engine.
+   */
+  ifrs9Adapter?: Ifrs9Adapter;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -186,6 +198,7 @@ export function makeApp(deps: AppDeps = {}) {
   const bus = deps.notificationBus ?? defaultBus;
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
+  const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1467,6 +1480,97 @@ export function makeApp(deps: AppDeps = {}) {
             {
               code: 'EWS_502',
               message: e instanceof Error ? e.message : 'insurance adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── IFRS9 Stage adapter (T6 M14.2) ────────────────────────────────────
+
+  /** GET /v1/integrations/ifrs9/stages/:customer_id — fetch one stage. */
+  app.get(
+    '/v1/integrations/ifrs9/stages/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.params.customer_id ?? '';
+      try {
+        const stage = await ifrs9Adapter.getStage(req.tenant!.tenant_id, customer_id, now());
+        if (!stage) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404', message: `IFRS9 record for ${customer_id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.json(wrapResponse(stage, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'ifrs9 adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * GET /v1/integrations/ifrs9/stages?stage=2&page=1&page_size=50
+   * Paginated list of customers in the IFRS 9 book, optionally
+   * filtered by stage. Highest-ECL first within each page.
+   */
+  app.get(
+    '/v1/integrations/ifrs9/stages',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const stageRaw = req.query.stage as string | undefined;
+      let stage: Ifrs9StageNum | undefined;
+      if (stageRaw !== undefined) {
+        const n = Number(stageRaw);
+        if (n !== 1 && n !== 2 && n !== 3) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_stage',
+                message: 'stage must be 1, 2, or 3',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        stage = n as Ifrs9StageNum;
+      }
+      const pageRaw = req.query.page as string | undefined;
+      const sizeRaw = req.query.page_size as string | undefined;
+      const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1;
+      const page_size = sizeRaw ? Math.max(1, Math.min(200, Number(sizeRaw) || 50)) : 50;
+      try {
+        const out = await ifrs9Adapter.listStages(
+          req.tenant!.tenant_id,
+          { stage, page, page_size },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'ifrs9 adapter failed',
               severity: 'HIGH',
             },
             ctx,

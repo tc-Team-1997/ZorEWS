@@ -414,6 +414,24 @@
       - Routes (15): admin happy paths for all 4 routes, risk_analyst accepted, unknown-role 403, missing-customer-id 400, malformed-id 404, adapter-throw → 502 envelope, tenant scoping (BIL ↔ BANK_DEMO ids disjoint), claims sorted newest-filed-first.
     - **Outcome:** Module 14's first adapter shipped. The SPA can render a customer's BIL policy + claim history in two GET round-trips. The interface keeps a SOAP/REST gateway swap a drop-in. The next adapters (M14.2 IFRS9, M14.3 AML, M14.4 DMS, etc.) follow the same `<Upstream>Adapter` + `Stub<Upstream>Adapter` shape, parameterising routes once a 2nd adapter lands.
 
+  - **M14.2 — IFRS9 Stage adapter (2026-05-04):**
+    - Second Module 14 adapter. IFRS9 (International Financial Reporting Standard 9) classifies financial assets into 3 stages (Stage 1 performing → Stage 3 credit-impaired). The BIL pitch lists IFRS9 as one of the 11 regulatory upstreams; this adapter surfaces per-customer stage + PD/LGD/EAD/ECL data so the SPA can render the staging panel alongside risk profile + indicators.
+    - New `services/bff/src/integrations/ifrs9.ts`:
+      - `Ifrs9Adapter` interface — `getStage(tenant, customer, asOf)`, `listStages(tenant, {stage?, page?, page_size?}, asOf)`.
+      - `StubIfrs9Adapter` — deterministic synthetic data per `(tenant, customer, day)` via FNV-1a + Mulberry32. Stage distribution matches a realistic banking book (~80% Stage 1, ~15% Stage 2, ~5% Stage 3). 200-customer book per tenant for paginated `listStages`.
+      - **IFRS9 invariants enforced by the stub** — Stage 1 ⇒ DPD=0; Stage 2 ⇒ 30 ≤ DPD < 90; Stage 3 ⇒ DPD ≥ 90; pd_12m and pd_lifetime ∈ [0, 1] with pd_lifetime ≥ pd_12m; LGD ∈ (0, 1]; ECL = round(driver_PD × LGD × EAD) where driver_PD is pd_12m for Stage 1 and pd_lifetime for Stage 2/3.
+      - Per-stage parameter ranges: pd_12m 0.5%-5% (S1) / 6%-20% (S2) / 25%-90% (S3); pd_lifetime 15-50% (S2) / capped at 1 (S3); LGD 25-75% (typical secured-to-unsecured spread); EAD 50k-5M KES.
+      - Stage reasons drawn from a closed bucket per stage (e.g. Stage 2: "DPD 30+ but <90", "PD increased > 50% since origination", "watchlist flag raised", "restructuring under negotiation"). Evaluation date 0-7 days before `asOf`.
+    - **`AppDeps.ifrs9Adapter` injection point** — defaults to the module-level `defaultIfrs9Adapter`. Tests inject custom adapters to assert null + throw paths.
+    - **2 new BFF routes** (tenant-gated, enveloped, RBAC `customers:read_risk_profile`):
+      - `GET /v1/integrations/ifrs9/stages/:customer_id` — fetch one customer's stage. 404 when adapter returns null.
+      - `GET /v1/integrations/ifrs9/stages?stage=2&page=1&page_size=50` — paginated list, sorted highest-ECL first. `stage` filter optional; when present must be 1, 2, or 3 (else `EWS_400_invalid_stage`). `page_size` clamped to `[1, 200]`.
+      - Both routes 502-envelope on adapter throw.
+    - **Tests:** BFF 482/482 (was 446 — +36 in `ifrs9_adapter.test.ts`):
+      - StubIfrs9Adapter (23): getStage determinism + tenant-divergence + null-guards; the 8 IFRS9 invariants above; listStages defaults + sort + filter + cross-stage totals=200 + pagination disjointness + page_size clamp + beyond-data behaviour + tenant book independence.
+      - Routes (13): admin happy paths, risk_analyst accepted, unknown-role 403, null-adapter 404, throwing-adapter 502, tenant divergence, stage filter, invalid-stage 400, pagination disjointness, ECL sort.
+    - **Outcome:** Module 14's second adapter shipped. The SPA can now render IFRS9 staging tables + per-customer ECL chips. Two adapters now share the `<Upstream>Adapter` + `Stub<Upstream>Adapter` pattern — future M14.3 AML / M14.4 DMS / M14.5 Bureau adapters follow the same shape.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
