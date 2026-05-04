@@ -950,6 +950,22 @@
       - Routes (19): POST happy + envelope + 4 error codes + 403; list happy + filter + invalid 400 + cross-tenant 404; approve happy + no-body + 409 + 404 + 403; reject happy + 409 + 403; tenant isolation + full round-trip.
     - **Outcome:** Module 7 now has the regulator-tracked promotion lifecycle. Combined with M7.1, the BIL deployment can demo the full ML governance flow (declare → request → review → decide). Future M7.3 closes the loop by applying approved requests to the registry's effective view; M7.4 will add backtest + explainability.
 
+  - **M13.2 — Config audit trail (2026-05-04):**
+    - Cross-module integration: every successful PUT/DELETE on `/v1/admin/config/:key` (M13.1) now writes an event to the M15.1 audit trail. Adds a per-key history endpoint that filters the trail. Required for RBI/IRDAI traceability — every operator-tunable knob change must be reconstructable.
+    - Updates to existing M13.1 routes:
+      - `PUT /v1/admin/config/:key`: snapshots the prior value via `configStore.get`, calls `configStore.set`, then records `auditTrailStore.record({action: 'config.update', resource_type: 'config', resource_id: key, metadata: {previous_value, previous_was_default, new_value}})`. Audit write happens AFTER successful mutation — failed sets / 400s / 404s do NOT pollute the trail.
+      - `DELETE /v1/admin/config/:key`: records `config.reset` with metadata `{previous_value, default_value}`. **Only when there's an actual override to clear** — DELETE on a never-set key is a no-op + no audit event.
+      - Audit write is best-effort: the in-memory store never throws on valid input, but the wrapper catches just in case so a stuck audit doesn't fail a config update.
+    - **1 new BFF route**:
+      - `GET /v1/admin/config/:key/history?limit=50` — RBAC `audit:read`. Filters audit events for `resource_type=config`, `resource_id=key`, `action ∈ {config.update, config.reset}`. Returns slim shape `{ts, actor_username, action, previous_value, new_value}` (the SPA only needs change semantics, not full event ids). 404 `EWS_404_unknown_key` when the key isn't in the schema (so callers don't chase typos through empty results).
+    - **Tests:** BFF 1395/1395 (was 1375 — +20 in `config_audit_trail.test.ts`):
+      - PUT writes audit (6): first-override has `previous_was_default=true`; subsequent has prior-override value; default actor `admin`; invalid value → no audit; unknown_key → no audit; chain integrity preserved across 5 sequential writes.
+      - DELETE writes audit (3): override-then-reset records `config.reset`; reset-on-default writes nothing; reset-on-unknown writes nothing.
+      - History route (7): ordered change history with PUT + DELETE rolled in, key-scoped (other keys excluded), empty when no overrides, 404 on unknown_key, `?limit` cap, 403 on non-admin.
+      - Tenant isolation (2): BIL config writes scoped to BIL audit chain; BIL history doesn't surface BANK_DEMO changes.
+      - M15 surface integration (2): `GET /v1/audit/events?resource_type=config` returns the same events; `/v1/audit/integrity` valid after config writes.
+    - **Outcome:** Module 13 is now wired end-to-end with Module 15 — the BIL deployment can answer "who changed this config when, and what was the prior value?" with one route call. The audit-chain integrity check from M15.2 covers config events too.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

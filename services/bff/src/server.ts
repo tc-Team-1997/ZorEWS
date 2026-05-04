@@ -4282,6 +4282,12 @@ export function makeApp(deps: AppDeps = {}) {
    * body: { value }
    * Sets the override for the supplied key. Validates the value
    * against the declared type. Returns the resulting entry.
+   *
+   * T6 M13.2 — every successful mutation writes an audit event:
+   *   action=config.update, resource_type=config, resource_id=key,
+   *   metadata={ previous_value, previous_was_default, new_value }
+   * The audit write happens after the mutation succeeds, so failed
+   * sets don't pollute the trail.
    */
   app.put(
     '/v1/admin/config/:key',
@@ -4306,7 +4312,35 @@ export function makeApp(deps: AppDeps = {}) {
       const value = (inner as { value: unknown }).value as ConfigValue;
       const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
       try {
+        // Snapshot the prior state for the audit trail.
+        const previous = configStore.get(req.tenant!.tenant_id, key);
         const entry = configStore.set(req.tenant!.tenant_id, key, value, updated_by, now());
+        // Audit trail record — best-effort. Throwing here would mean
+        // the config is updated but the audit log is missing — log +
+        // continue rather than failing the request. (Production WORM
+        // store guarantees this never throws on valid input.)
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'config.update',
+              resource_type: 'config',
+              resource_id: key,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_value: previous?.value,
+                previous_was_default: previous?.is_default ?? null,
+                new_value: entry.value,
+              },
+            },
+            now(),
+          );
+        } catch (auditErr) {
+          // swallow + continue — surface in server logs in production
+        }
         return res.json(wrapResponse(entry, ctx));
       } catch (e) {
         if (e instanceof ConfigValidationError) {
@@ -4326,7 +4360,11 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** DELETE /v1/admin/config/:key — clear override → revert to default. */
+  /**
+   * DELETE /v1/admin/config/:key — clear override → revert to default.
+   * T6 M13.2 — writes a config.reset audit event with metadata
+   *   { previous_value, default_value }.
+   */
   app.delete(
     '/v1/admin/config/:key',
     requireTenantMw,
@@ -4334,8 +4372,36 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const key = req.params.key ?? '';
+      const reset_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
       try {
+        const previous = configStore.get(req.tenant!.tenant_id, key);
         const entry = configStore.reset(req.tenant!.tenant_id, key);
+        // Only write an audit event when there was actually an override
+        // to clear — resetting a never-set key is a no-op and shouldn't
+        // pollute the trail.
+        if (previous && !previous.is_default) {
+          try {
+            auditTrailStore.record(
+              req.tenant!.tenant_id,
+              {
+                actor_username: reset_by,
+                actor_role: 'admin',
+                action: 'config.reset',
+                resource_type: 'config',
+                resource_id: key,
+                outcome: 'success',
+                severity: 'info',
+                metadata: {
+                  previous_value: previous.value,
+                  default_value: entry.value,
+                },
+              },
+              now(),
+            );
+          } catch {
+            // swallow
+          }
+        }
         return res.json(wrapResponse(entry, ctx));
       } catch (e) {
         if (e instanceof ConfigValidationError && e.code === 'unknown_key') {
@@ -4353,6 +4419,55 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  /**
+   * GET /v1/admin/config/:key/history?limit=50
+   * Returns audit events for the given config key, newest-first.
+   * T6 M13.2 — filters the audit trail by resource_type='config' AND
+   * resource_id=key. Returns 404 EWS_404_unknown_key when the key
+   * isn't in the schema (so callers don't query phantom history).
+   */
+  app.get(
+    '/v1/admin/config/:key/history',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.key ?? '';
+      // Validate the key is in the schema before walking the audit trail
+      // — saves callers from chasing typos through empty results.
+      const known = configStore.get(req.tenant!.tenant_id, key);
+      if (!known) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_key', message: `unknown config key: ${key}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const limitRaw = req.query.limit;
+      const limit =
+        typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
+      const out = auditTrailStore.list(req.tenant!.tenant_id, {
+        resource_type: 'config',
+        action: 'config.update,config.reset',
+        page_size: limit,
+      });
+      // Surface a slim shape — the SPA only cares about who/when/what
+      // changed; the full event id + correlation_id are still in the
+      // /v1/audit/events surface.
+      const items = out.items
+        .filter((e) => e.resource_id === key)
+        .map((e) => ({
+          ts: e.ts,
+          actor_username: e.actor_username,
+          action: e.action,
+          previous_value: e.metadata.previous_value ?? null,
+          new_value: e.metadata.new_value ?? e.metadata.default_value ?? null,
+        }));
+      res.json(wrapResponse({ items, total: items.length, key, limit }, ctx));
     },
   );
 
