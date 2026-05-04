@@ -100,6 +100,15 @@ import {
 } from './bil_dashboards';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
+  defaultIndicatorWeightLookup,
+  IndicatorLookupError,
+  isScoringVertical,
+  scoreFromIndicators,
+  type ByIndicatorItem,
+  type IndicatorWeightLookup,
+  type ScoringVertical,
+} from './bil_scoring_v2';
+import {
   defaultEmailTransport,
   EmailValidationError,
   listTemplates as listEmailTemplates,
@@ -337,6 +346,13 @@ export interface AppDeps {
    */
   financeAdapter?: FinanceAdapter;
   /**
+   * Override for tests — indicator weight lookup (T6 M6.2). Defaults
+   * to the module-level StubIndicatorWeightLookup with a hand-curated
+   * BIL + banking catalogue mirror. Production swaps in an HTTP-backed
+   * adapter to regulatory-svc/indicators.
+   */
+  indicatorWeightLookup?: IndicatorWeightLookup;
+  /**
    * Override for tests — admin config registry (T6 M13.1). Defaults
    * to the module-level InMemoryConfigStore. Tests pass a fresh
    * store per test so overrides don't leak across runs.
@@ -441,6 +457,7 @@ export function makeApp(deps: AppDeps = {}) {
   const bureauAdapter = deps.bureauAdapter ?? defaultBureauAdapter;
   const agentAdapter = deps.agentAdapter ?? defaultAgentAdapter;
   const financeAdapter = deps.financeAdapter ?? defaultFinanceAdapter;
+  const indicatorWeightLookup = deps.indicatorWeightLookup ?? defaultIndicatorWeightLookup;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
@@ -2343,6 +2360,81 @@ export function makeApp(deps: AppDeps = {}) {
         const result = computeRiskScore(items ?? [], thresholds ?? {});
         return res.json(wrapResponse(result, env));
       } catch (e) {
+        if (e instanceof ScoringInputError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, env),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'scoring failed', severity: 'HIGH' },
+            env,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── BIL scoring with catalog weight lookup (T6 M6.2) ─────────────────
+  //
+  // Convenience layer over M6.1 — caller passes (indicator_id, value)
+  // and the engine fetches severity_weight from the indicator catalog,
+  // then delegates to computeRiskScore. Same RBAC / tenant gating as
+  // /v1/scoring/risk; same response shape plus a `resolved` array
+  // surfacing the indicator names so the SPA doesn't round-trip.
+  app.post(
+    '/v1/scoring/risk/by-indicators',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' },
+            env,
+          ),
+        );
+      }
+      const { items, vertical, thresholds } = inner as {
+        items?: ByIndicatorItem[];
+        vertical?: ScoringVertical;
+        thresholds?: Partial<ScoringThresholds>;
+      };
+      if (vertical !== undefined && !isScoringVertical(vertical)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_vertical',
+              message: 'vertical must be one of banking|insurance',
+              severity: 'MEDIUM',
+            },
+            env,
+          ),
+        );
+      }
+      try {
+        const result = scoreFromIndicators(items ?? [], indicatorWeightLookup, {
+          vertical,
+          thresholds,
+        });
+        return res.json(wrapResponse(result, env));
+      } catch (e) {
+        if (e instanceof IndicatorLookupError) {
+          const status = e.code === 'unknown_indicator' ? 404 : 400;
+          const code =
+            e.code === 'unknown_indicator'
+              ? 'EWS_404_unknown_indicator'
+              : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, env),
+          );
+        }
         if (e instanceof ScoringInputError) {
           return res.status(400).json(
             wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, env),

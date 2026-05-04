@@ -869,6 +869,24 @@
       - Routes (15): list happy + 400 missing customer_id + 403 + 502 on adapter throw; single happy + 404 + cross-tenant 404; ledger happy + since+until + invalid_since 400 + 404 + cross-tenant 404 + pagination disjointness; BIL ↔ BANK_DEMO tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 7 shipped adapters covering 26 of the declared 50 APIs. Finance + Bureau + IFRS9 form a tight triangle for any per-customer financial-profile drill-through.
 
+  - **M6.2 — Scoring with catalog weight lookup (2026-05-04):**
+    - M6.1 ships the pure `Σ(W × V)` formula taking explicit weights. M6.2 adds the convenience layer most BIL workflows actually want: caller passes `[{indicator_id, value}]` and the engine resolves `severity_weight` from the indicator catalog, then delegates to M6.1.
+    - New `services/bff/src/bil_scoring_v2.ts`:
+      - `IndicatorWeightLookup` interface — `getWeight(indicator_id, vertical?) → {weight, name} | null`. Pluggable via `AppDeps.indicatorWeightLookup`.
+      - `StubIndicatorWeightLookup` + `STUB_CATALOG` — hand-curated mirror of 17 entries from the production catalogues (banking: FIN/BEH/TXN/CRD; insurance: POL/CUS-INS/AGT/CLM/OPS) so M6.2 doesn't take a cross-service file dependency. Production swaps in the HTTP-backed adapter to `regulatory-svc/indicators`.
+      - `scoreFromIndicators(items, lookup, opts)` — fail-fast: resolves all weights up-front, throws `IndicatorLookupError(unknown_indicator)` on the first miss (deterministic 400/404 instead of partial computation).
+      - Vertical filter is inclusive of "no filter" — passing `vertical='insurance'` rejects banking ids; passing nothing matches either vertical.
+      - `ScoringByIndicatorsResult` extends M6.1's result with `vertical` echo + `resolved[]` (id + name + weight) so the SPA doesn't round-trip back to the catalog for display.
+    - **1 new BFF route** (tenant-gated, enveloped, RBAC `customers:read_risk_profile` — same as M6.1):
+      - `POST /v1/scoring/risk/by-indicators` body `{items, vertical?, thresholds?}`. Code-routed errors: `EWS_400_invalid_vertical` (bad vertical), `EWS_404_unknown_indicator` (id missing or out-of-vertical), `EWS_400_invalid_input` (missing id / NaN value), all M6.1 ScoringInputError codes pass through.
+    - **Tests:** BFF 1257/1257 (was 1223 — +34 in `bil_scoring_v2.test.ts`):
+      - Type guard + catalogue schema (4): isScoringVertical, weight in (0, 1] + non-empty name, both verticals represented, indicator-prefix matches conventions.
+      - StubIndicatorWeightLookup (6): hit, miss, vertical filter rejects cross-vertical ids, no-filter behaviour.
+      - scoreFromIndicators (11): happy path with resolved[] populated + ordered, vertical pass-through, threshold pass-through, formula correctness (Σ(W×V)/Σ(W) × 100), fail-fast on unknown id, cross-vertical mismatch throws, validation errors.
+      - Routes (12): admin happy + envelope body + insurance happy + invalid_vertical 400 + unknown_indicator 404 + cross-vertical 404 + threshold pass + null body 400 + NaN 400 + 403 + risk_analyst accepted + custom lookup injection.
+      - Backwards-compat regression (1): the M6.1 `/v1/scoring/risk` endpoint still works.
+    - **Outcome:** Module 6 now has both the pure formula (M6.1) and the catalog-driven convenience layer (M6.2). Future M6.3 — bulk-score (multiple customers in one call) — extends the same primitives.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
