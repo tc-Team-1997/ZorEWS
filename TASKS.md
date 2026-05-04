@@ -1139,6 +1139,44 @@
       - No-regression (4): M8.1 GET `/v1/alerts`, `/classification/spec`, `/by-class/red`, M8.2 `/routing/rules` still 200 (alert_id param didn't capture by-class).
     - **Outcome:** Module 8 now has 3 sub-phases (M8.1 classification + M8.2 routing + M8.3 ack). Combined with M9.1 investigation tracker + M9.3 maker-checker, the BIL operator workflow runs end-to-end: severity arrives → classified → routed → acked (analyst sees it) → investigation opened (M9.1) → sensitive actions gated by 4-eyes (M9.3). Future M8.4 likely covers **alert auto-ack via threshold rules** (e.g. green-class alerts auto-ack on receipt to keep dashboard clean).
 
+  - **M12.2 — Recurring report schedules (2026-05-05):**
+    - M12.1 ships the BIL report catalog + async job tracker for ad-hoc runs. Compliance teams also need *recurring* runs — *"the RBI monthly compliance pack must be generated on the 1st at 06:00 UTC and delivered to compliance.lead@bil.example.com"*. M12.2 ships the schedule definitions + the tick endpoints the SPA polls to fan out matching report jobs. Schedule machinery is decoupled from the M12.1 job tracker — SPA is responsible for: poll `/due` → call M12.1 `POST /v1/reports/jobs` for each matching schedule → call `/mark-run` to advance `next_run_at`.
+    - New `services/bff/src/report_schedules.ts`:
+      - `ScheduleCadence`: `daily | weekly | monthly` (quarterly deferred to M12.3 — falls out of the same primitives).
+      - `ReportScheduleEntry` shape: schedule_id, report_id, format, name, cadence, hour_utc (0-23), day_of_week (0-6, weekly only), day_of_month (1-28, monthly only), recipients[] (1-25 emails), enabled, parameters (forwarded to M12.1 jobs), created_by, created_at, updated_at, next_run_at, last_run_at.
+      - **`computeNextRun(cadence, dow, dom, hour_utc, after)`** — pure function. Daily rolls to tomorrow if hour has passed (strictly future). Weekly walks `(dow - today_dow + 7) % 7` days then pushes a week if still ≤ after. Monthly tries this month then advances to next month + sets dom; handles December → January year roll. day_of_month capped at 28 to dodge leap-year February surprises (production "last day of month" deferred to M12.3).
+      - **report_id cross-checked against M12.1's `getReportDef()`** so bogus ids 400 at create time. Format cross-checked against `def.supported_formats[]` — e.g. `sla_breach_digest` (json+csv only) refuses pdf with `EWS_400_invalid_format`.
+      - Recipients validated as basic RFC-5322-ish email shape (regex `^[^\s@]+@[^\s@]+\.[^\s@]+$`, ≤ 200 chars each, 1-25 list).
+      - `ReportScheduleStore` interface: `create / list / get / update / delete / listDue / markRun`. `InMemoryReportScheduleStore` cap = 50/tenant; throws `cap_reached` → 409 on overflow (admins must delete one before adding more, since silent eviction would lose recurring schedules).
+      - `update()` merges patch + base + re-runs `validateInput`. Switches like cadence='weekly'→'monthly' clear the irrelevant timing field. Recomputes `next_run_at` only when timing fields change (toggling `enabled` doesn't disturb the timer).
+      - Defensive copy on every read so callers can't mutate live state.
+      - `ScheduleError` codes routed: `invalid_input` + `invalid_report_id` + `invalid_format` + `invalid_cadence` + `invalid_recipients` → 400, `unknown_schedule` → 404, `cap_reached` → 409.
+    - **`AppDeps.reportScheduleStore` injection point** — defaults to module-level singleton.
+    - **7 new BFF routes** (all tenant-gated, all enveloped, `audit:read` admin-only):
+      - `POST /v1/reports/schedules` body: `ReportScheduleInput` → 201 with entry. Records X-APEX-USER as created_by (default 'admin'). 400 on every invalid_*; 409 on cap.
+      - `GET /v1/reports/schedules?page=1&page_size=20` — newest-first; page_size capped at 100.
+      - `GET /v1/reports/schedules/due?as_of=ISO` — due-to-fire schedules (enabled + `next_run_at <= as_of`), earliest-first. Default as_of=now. Invalid timestamp → 400. **Declared BEFORE `/:schedule_id`** so the literal "due" wins.
+      - `GET /v1/reports/schedules/:schedule_id` — 200 / 404 with `EWS_404_unknown_schedule`.
+      - `PATCH /v1/reports/schedules/:schedule_id` — partial patch; report_id intentionally NOT patchable (schedules bind to report at create time). 400 on bad patch; 404 on miss.
+      - `DELETE /v1/reports/schedules/:schedule_id` — 204 / 404 on miss.
+      - `POST /v1/reports/schedules/:schedule_id/mark-run` — bumps `last_run_at = now` + recomputes `next_run_at`. 404 on miss.
+    - **Tests:** BFF 1821/1821 (was 1745 — +76 in `report_schedules.test.ts`):
+      - Type guards (2): isScheduleCadence accept/reject.
+      - computeNextRun (12): daily future-hour / past-hour / strictly-future, weekly later-dow / same-dow-earlier-hour / same-dow-same-hour / earlier-dow-this-week / null-dow-throws, monthly this-month / next-month / strictly-future / null-dom-throws / December→January year roll.
+      - Store.create (16): happy + weekly + monthly nulls, enabled=false, parameters default + echoed, invalid_report_id, invalid_format vs supported_formats, bad cadence, hour_utc bounds, weekly missing dow, dom > 28, empty recipients, > 25 recipients, non-email, cap_reached, missing created_by, non-object parameters.
+      - Store.list/get/delete (4): newest-first, pagination, cross-tenant isolation, delete idempotent.
+      - Store.update (5): name+recipients, cadence recompute, enabled toggle preserves next_run_at, cadence switch clears irrelevant timing, unknown_schedule, invalid recipient.
+      - Store.listDue/markRun (5): due-at-as_of, skip disabled, earliest-first, markRun advances next_run_at + records last_run_at, unknown 404.
+      - POST route (9): admin 201, enveloped, every 400 code, 409 cap, 403 role.
+      - GET list route (2): admin 200, role 403.
+      - GET due route (4): due-at-as_of, default-now, invalid timestamp 400, literal "due" not shadowed.
+      - GET single route (3): 200, 404 with code, cross-tenant 404.
+      - PATCH route (3): updates, 404, 400 on bad patch.
+      - DELETE route (2): 204 then 404, role 403.
+      - POST /mark-run route (2): advances + records, 404 on miss.
+      - No-regression (3): M12.1 GET catalog/`/:id`/jobs still 200 (sub-paths didn't shadow).
+    - **Outcome:** Module 12 now has 2 sub-phases (M12.1 catalog + M12.2 schedules). Combined with M10.1 email channel (template `REPORT_READY` already shipped), the BIL deployment can demo end-to-end recurring delivery: schedule created → tick fires → M12.1 job submitted → email dispatched. Future M12.3 likely covers **quarterly cadence + last-day-of-month + per-recipient delivery channels** (some compliance staff want SMS, not email).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

@@ -319,6 +319,13 @@ import {
   type ReportJobStore,
   type ReportRegulator,
 } from './reports_catalog';
+import {
+  ScheduleError,
+  defaultReportScheduleStore,
+  type ReportScheduleInput,
+  type ReportSchedulePatch,
+  type ReportScheduleStore,
+} from './report_schedules';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -469,6 +476,11 @@ export interface AppDeps {
    */
   reportJobStore?: ReportJobStore;
   /**
+   * Override for tests — recurring report schedule store (T6 M12.2).
+   * Defaults to the module-level InMemoryReportScheduleStore (cap 50).
+   */
+  reportScheduleStore?: ReportScheduleStore;
+  /**
    * Override for tests — BIL case investigation store (T6 M9.1).
    * Defaults to the module-level InMemoryCaseInvestigationStore.
    * Production swaps in a PG-backed store satisfying the same
@@ -569,6 +581,7 @@ export function makeApp(deps: AppDeps = {}) {
   const evidenceStore = deps.evidenceStore ?? defaultEvidencePackageStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
+  const reportScheduleStore = deps.reportScheduleStore ?? defaultReportScheduleStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
@@ -5971,6 +5984,205 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(job, ctx));
+    },
+  );
+
+  // ── Recurring report schedules (T6 M12.2) ───────────────────────────
+  //
+  // Schedules over the M12.1 catalog. SPA polls /due, fans matching
+  // jobs via M12.1 POST /v1/reports/jobs, then calls /mark-run to
+  // advance next_run_at. Schedule machinery decoupled from job tracker.
+  // CRUD = admin (audit:read).
+
+  /** POST /v1/reports/schedules body: ReportScheduleInput → 201. */
+  app.post(
+    '/v1/reports/schedules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = reportScheduleStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as ReportScheduleInput,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof ScheduleError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError({ code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create schedule failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/reports/schedules?page=1&page_size=20 — newest-first. */
+  app.get(
+    '/v1/reports/schedules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = req.query.page ? Math.max(1, Number(req.query.page) || 1) : 1;
+      const page_size = req.query.page_size ? Math.max(1, Math.min(100, Number(req.query.page_size) || 20)) : 20;
+      const out = reportScheduleStore.list(req.tenant!.tenant_id, page, page_size);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/reports/schedules/due?as_of=ISO — schedules ready to fire.
+   *  Declared BEFORE /:schedule_id so the literal "due" wins. */
+  app.get(
+    '/v1/reports/schedules/due',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const asOfRaw = req.query.as_of as string | undefined;
+      const as_of = asOfRaw ? new Date(asOfRaw) : now();
+      if (Number.isNaN(as_of.getTime())) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'as_of must be an ISO timestamp', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = reportScheduleStore.listDue(req.tenant!.tenant_id, as_of);
+      return res.json(wrapResponse({ items, total: items.length, as_of: as_of.toISOString() }, ctx));
+    },
+  );
+
+  /** GET /v1/reports/schedules/:schedule_id — single schedule. */
+  app.get(
+    '/v1/reports/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.schedule_id ?? '';
+      const e = reportScheduleStore.get(req.tenant!.tenant_id, id);
+      if (!e) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_schedule', message: `schedule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(e, ctx));
+    },
+  );
+
+  /** PATCH /v1/reports/schedules/:schedule_id — partial update. */
+  app.patch(
+    '/v1/reports/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.schedule_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const updated = reportScheduleStore.update(
+          req.tenant!.tenant_id,
+          id,
+          (inner ?? {}) as ReportSchedulePatch,
+          now(),
+        );
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof ScheduleError) {
+          if (e.code === 'unknown_schedule') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_schedule', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/reports/schedules/:schedule_id — 204 on success, 404 on miss. */
+  app.delete(
+    '/v1/reports/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.schedule_id ?? '';
+      const removed = reportScheduleStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_schedule', message: `schedule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
+  /** POST /v1/reports/schedules/:schedule_id/mark-run — bumps last_run_at. */
+  app.post(
+    '/v1/reports/schedules/:schedule_id/mark-run',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.schedule_id ?? '';
+      try {
+        const updated = reportScheduleStore.markRun(req.tenant!.tenant_id, id, now());
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof ScheduleError && e.code === 'unknown_schedule') {
+          return res.status(404).json(
+            wrapError({ code: 'EWS_404_unknown_schedule', message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'mark-run failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 
