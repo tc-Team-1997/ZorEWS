@@ -823,6 +823,31 @@
       - Backwards-compat (2): POST /v1/audit/events + GET /v1/audit/events/:id now return hash + prev_hash.
     - **Outcome:** Module 15 now has tamper-evident audit. Combined with the WORM-backed `audit-svc` (Python), the BIL deployment has both the regulatory-grade ledger AND the SPA-friendly query surface — the chain check is one route the SPA can poll on a schedule to catch any silent tampering.
 
+  - **M9.2 — Custom investigation checklists (2026-05-04):**
+    - M9.1 shipped the default BIL §17 8-step claim-fraud checklist; M9.2 lets tenants define custom checklists for non-fraud workflows (KYC reviews, sanctions reviews, complaint investigations, AML escalations).
+    - New `services/bff/src/case_checklists.ts`:
+      - `ChecklistTemplate` shape with `id`, `tenant_id` (`'PLATFORM'` for built-in), `name`, `description`, `category` (one of 5: `claim_fraud / kyc_review / sanctions / complaint / other`), `is_built_in`, `steps[]`.
+      - **`BUILT_IN_TEMPLATE`** wraps M9.1's `defaultSteps()` directly so the platform default checklist tracks any future M9.1 changes — no drift.
+      - `ChecklistTemplateStore` interface + `InMemoryChecklistTemplateStore`. Per-tenant custom map + always-present built-in. Cross-tenant isolation: BIL custom invisible to BANK_DEMO.
+      - **`materialiseSteps(template)`** converts a template's static `ChecklistTemplateStep[]` into the M9.1 runtime `InvestigationStep[]` with `completed=false` + null timestamps. Returns fresh objects per call so concurrent investigations don't share state.
+      - `validateTemplateInput()` enforces: name 1-200 chars, description ≤ 2000 chars, valid category, 1-32 steps, unique step_ids, step_ids match `^[a-z0-9_]+$`.
+      - `ChecklistError` codes routed by the BFF: `unknown_template` → 404, `cannot_delete_builtin` → 409, others → 400.
+    - **Surface change in M9.1**: `OpenInvestigationInput` extended with optional `steps_override?: InvestigationStep[]` + `checklist_template_id?: string`. `CaseInvestigation` shape extended with `checklist_template_id` (defaults to `'BUILT_IN'`). Existing M9.1 callers don't supply these → backwards-compat preserved (all 58 M9.1 tests still pass).
+    - **4 new BFF routes**:
+      - `GET /v1/investigations/checklists?category=` — RBAC `cases:list`. Lists built-in + tenant custom; optional category filter with code-routed 400.
+      - `GET /v1/investigations/checklists/:id` — RBAC `cases:list`. 404 on miss / cross-tenant.
+      - `POST /v1/investigations/checklists` — RBAC `audit:read` (admin). Records `created_by` from `X-APEX-USER`. Code-routed validation 400s.
+      - `DELETE /v1/investigations/checklists/:id` — RBAC `audit:read`. 409 `EWS_409_cannot_delete_builtin` on the platform default; 404 on miss/cross-tenant.
+      - **Plus:** `POST /v1/investigations` now accepts `checklist_template_id` in the body — resolves the template via the store, materialises its steps, and seeds the investigation. Unknown id → 404 `EWS_404_unknown_template` (no investigation created).
+    - **Tests:** BFF 1189/1189 (was 1141 — +48 in `case_checklists.test.ts`):
+      - Type guards + helpers (4): isChecklistCategory, listChecklistCategories canonical order, materialiseSteps shape + isolation between calls.
+      - validateTemplateInput (9): happy path + 8 validation paths (missing name, name+description length caps, invalid category, empty steps, > 32 steps, duplicate step_id, step_id format).
+      - Store list+get+create (6): built-in visibility, built-in steps tracking M9.1 default, create persists, cross-tenant isolation, category filter, create-with-bad-input rejection.
+      - Store delete (4): happy path, cannot_delete_builtin throw, unknown_template throw, cross-tenant delete throw.
+      - Routes for templates (16): list happy + filter + invalid_category 400 + analyst-accepted + 403; single happy + 404 + cross-tenant 404; create happy + envelope body + 2 validation 400s + 403; delete happy + 409 builtin + 404 + 403.
+      - Integration with POST /v1/investigations (6): built-in id → 8 steps + recorded id; omitted template_id → 'BUILT_IN' default; custom template id → custom steps; unknown id → 404 with no investigation created; cross-tenant id → 404; full M9.1 flow (open + complete-step) still works on a custom-checklist investigation.
+    - **Outcome:** Module 9 now supports per-tenant workflow templates beyond claim-fraud. Combined with M9.1, the BIL deployment can drive arbitrary investigation workflows (KYC, sanctions, complaints) end-to-end while preserving the same state machine + audit trail.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

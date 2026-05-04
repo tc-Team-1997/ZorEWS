@@ -181,6 +181,14 @@ import {
   type InvestigationStatus,
 } from './case_investigation';
 import {
+  ChecklistError,
+  defaultChecklistTemplateStore,
+  isChecklistCategory,
+  materialiseSteps,
+  type ChecklistCategory,
+  type ChecklistTemplateStore,
+} from './case_checklists';
+import {
   defaultAiModelRegistry,
   isModelStatus,
   isModelType,
@@ -350,6 +358,11 @@ export interface AppDeps {
    */
   caseInvestigationStore?: CaseInvestigationStore;
   /**
+   * Override for tests — checklist template store (T6 M9.2).
+   * Defaults to module-level singleton; tests pass a fresh store.
+   */
+  checklistTemplateStore?: ChecklistTemplateStore;
+  /**
    * Override for tests — BIL AI/ML model registry (T6 M7.1).
    * Defaults to the module-level InMemoryAiModelRegistry seeded with
    * 8 BIL model versions. Production swaps in an MLflow / Sagemaker
@@ -420,6 +433,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
   const caseInvestigationStore = deps.caseInvestigationStore ?? defaultCaseInvestigationStore;
+  const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -1800,9 +1814,12 @@ export function makeApp(deps: AppDeps = {}) {
   }
 
   /**
-   * POST /v1/investigations body: { case_id, customer_id }
+   * POST /v1/investigations body: { case_id, customer_id, checklist_template_id? }
    * Open a fresh investigation for a case. 409 when the case already
    * has an open one (must close first). 400 on missing fields.
+   * When `checklist_template_id` is supplied, the template's steps
+   * seed the investigation instead of the default 8-step BIL §17 set.
+   * 404 when the template id is unknown / cross-tenant.
    */
   app.post(
     '/v1/investigations',
@@ -1815,10 +1832,44 @@ export function makeApp(deps: AppDeps = {}) {
         raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
           ? (raw as { body: unknown }).body
           : raw;
+      const body = (inner ?? {}) as {
+        case_id?: string;
+        customer_id?: string;
+        checklist_template_id?: string;
+      };
+
+      // Resolve the checklist override before delegating to the store.
+      // M9.1 default behaviour (no template_id) → use defaultSteps()
+      // inside the store. M9.2 with template_id → look up + materialise.
+      let steps_override: ReturnType<typeof materialiseSteps> | undefined;
+      let template_id_for_record: string | undefined;
+      if (typeof body.checklist_template_id === 'string' && body.checklist_template_id) {
+        const tpl = checklistTemplateStore.get(req.tenant!.tenant_id, body.checklist_template_id);
+        if (!tpl) {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_template',
+                message: `unknown checklist template: ${body.checklist_template_id}`,
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        steps_override = materialiseSteps(tpl);
+        template_id_for_record = tpl.id;
+      }
+
       try {
         const inv = caseInvestigationStore.open(
           req.tenant!.tenant_id,
-          (inner ?? {}) as { case_id: string; customer_id: string },
+          {
+            case_id: body.case_id ?? '',
+            customer_id: body.customer_id ?? '',
+            steps_override,
+            checklist_template_id: template_id_for_record,
+          },
           caseInvestigationActor(req),
           now(),
         );
@@ -1827,6 +1878,156 @@ export function makeApp(deps: AppDeps = {}) {
         );
       } catch (e) {
         const m = mapInvestigationError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  // ── Checklist templates (T6 M9.2) ────────────────────────────────────
+  //
+  // 4 routes for managing per-tenant custom investigation checklists.
+  // Read = analyst+ (cases:list); create/delete = admin (cases:log_action
+  // is too narrow — we use audit:read for parity with the rest of the
+  // admin surface).
+
+  function mapChecklistError(e: unknown, ctx: ReturnType<typeof extractCtx>): {
+    status: number;
+    body: ReturnType<typeof wrapError>;
+  } {
+    if (!(e instanceof ChecklistError)) {
+      return {
+        status: 500,
+        body: wrapError(
+          {
+            code: 'EWS_500',
+            message: e instanceof Error ? e.message : 'checklist failed',
+            severity: 'HIGH',
+          },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'unknown_template') {
+      return {
+        status: 404,
+        body: wrapError(
+          { code: 'EWS_404_unknown_template', message: e.message, severity: 'LOW' },
+          ctx,
+        ),
+      };
+    }
+    if (e.code === 'cannot_delete_builtin') {
+      return {
+        status: 409,
+        body: wrapError(
+          { code: 'EWS_409_cannot_delete_builtin', message: e.message, severity: 'MEDIUM' },
+          ctx,
+        ),
+      };
+    }
+    return {
+      status: 400,
+      body: wrapError(
+        { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+        ctx,
+      ),
+    };
+  }
+
+  /** GET /v1/investigations/checklists?category= — list visible templates. */
+  app.get(
+    '/v1/investigations/checklists',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cat = req.query.category as string | undefined;
+      if (cat !== undefined && !isChecklistCategory(cat)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_category', message: `invalid category: ${cat}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = checklistTemplateStore.list(req.tenant!.tenant_id, {
+        category: cat as ChecklistCategory | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/investigations/checklists/:id — single template. */
+  app.get(
+    '/v1/investigations/checklists/:id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const tpl = checklistTemplateStore.get(req.tenant!.tenant_id, id);
+      if (!tpl) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_template', message: `unknown template: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(tpl, ctx));
+    },
+  );
+
+  /**
+   * POST /v1/investigations/checklists body: CreateTemplateInput
+   * Create a custom template for the caller's tenant.
+   */
+  app.post(
+    '/v1/investigations/checklists',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = caseInvestigationActor(req);
+      try {
+        const tpl = checklistTemplateStore.create(
+          req.tenant!.tenant_id,
+          inner,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(tpl, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        const m = mapChecklistError(e, ctx);
+        return res.status(m.status).json(m.body);
+      }
+    },
+  );
+
+  /**
+   * DELETE /v1/investigations/checklists/:id — delete a custom template.
+   * 409 EWS_409_cannot_delete_builtin when targeting the platform default.
+   * 404 EWS_404_unknown_template when id is unknown / cross-tenant.
+   */
+  app.delete(
+    '/v1/investigations/checklists/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      try {
+        checklistTemplateStore.delete(req.tenant!.tenant_id, id);
+        return res.json(wrapResponse({ deleted: true, template_id: id }, ctx));
+      } catch (e) {
+        const m = mapChecklistError(e, ctx);
         return res.status(m.status).json(m.body);
       }
     },

@@ -70,11 +70,32 @@ export interface CaseInvestigation {
   closed_at: string | null;
   steps: InvestigationStep[];
   notes_count: number;
+  /**
+   * Checklist template used to seed this investigation's steps.
+   * 'BUILT_IN' (default) when no template was specified — i.e. the
+   * BIL §17 8-step claim-fraud checklist; explicit template id when a
+   * custom checklist drove the open. (T6 M9.2)
+   */
+  checklist_template_id: string;
 }
 
 export interface OpenInvestigationInput {
   case_id: string;
   customer_id: string;
+  /**
+   * Optional pre-resolved steps to use instead of the BIL §17 default
+   * 8-step checklist. Surface for M9.2 — the route looks up the
+   * requested checklist template via the ChecklistTemplateStore and
+   * passes the materialised steps here. When omitted, defaultSteps()
+   * is used (M9.1 backwards-compat).
+   */
+  steps_override?: InvestigationStep[];
+  /**
+   * Optional template id — surfaced on the resulting investigation so
+   * the audit trail records which checklist drove this work. The store
+   * doesn't fetch this; the route resolves it before calling open().
+   */
+  checklist_template_id?: string;
 }
 
 export interface ListFilters {
@@ -283,8 +304,9 @@ export class InMemoryCaseInvestigationStore implements CaseInvestigationStore {
       last_updated_at: now.toISOString(),
       last_updated_by: opened_by,
       closed_at: null,
-      steps: defaultSteps(),
+      steps: input.steps_override ?? defaultSteps(),
       notes_count: 0,
+      checklist_template_id: input.checklist_template_id ?? 'BUILT_IN',
     };
     ts.byId.set(investigation.investigation_id, investigation);
     ts.notes.set(investigation.investigation_id, []);
