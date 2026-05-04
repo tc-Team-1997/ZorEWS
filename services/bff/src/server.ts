@@ -85,6 +85,11 @@ import {
 import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, TenantConflict, type TenantLookup } from './tenant';
+import {
+  runReadinessChecks,
+  type ReadinessTenantLookup,
+  type ReadinessTenantRecord,
+} from './tenant_readiness';
 import { makeJwtVerifier, type JwtVerifier } from './jwks_client';
 import {
   buildAgentDashboard,
@@ -2135,6 +2140,90 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     res.json(wrapResponse(req.tenant, ctx));
   });
+
+  // ── Tenant readiness check (T6 M2.1) ─────────────────────────────────
+  //
+  // Adapter for the readiness lookup — wraps the production TenantLookup
+  // with the narrower ReadinessTenantLookup shape the readiness module
+  // expects. Tests can supply either the production lookup or a stub
+  // satisfying ReadinessTenantLookup directly.
+  const readinessLookup: ReadinessTenantLookup = {
+    async get(tenant_id: string): Promise<ReadinessTenantRecord | null> {
+      // TenantLookup is callable: tenantLookup(tenant_id) → Tenant | undefined.
+      const t = await tenantLookup(tenant_id);
+      if (!t) return null;
+      return {
+        tenant_id: t.tenant_id,
+        name: t.name,
+        channels: Array.isArray(t.channels_allowed) ? t.channels_allowed : [],
+        active: t.active !== false,
+        vertical: t.vertical,
+      };
+    },
+  };
+
+  /** GET /v1/tenants/me/readiness — readiness for the caller's tenant. */
+  app.get(
+    '/v1/tenants/me/readiness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const report = await runReadinessChecks(req.tenant!.tenant_id, {
+          tenantLookup: readinessLookup,
+          configStore,
+          alertRoutingEngine,
+          auditTrailStore,
+          now,
+        });
+        return res.json(wrapResponse(report, ctx));
+      } catch (e) {
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'readiness failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/tenants/:tenant_id/readiness — admin-only platform view. */
+  app.get(
+    '/v1/tenants/:tenant_id/readiness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      if (!target) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'tenant_id path parameter is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const report = await runReadinessChecks(target, {
+          tenantLookup: readinessLookup,
+          configStore,
+          alertRoutingEngine,
+          auditTrailStore,
+          now,
+        });
+        return res.json(wrapResponse(report, ctx));
+      } catch (e) {
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'readiness failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
 
   /**
    * GET /v1/tenants — admin-only listing of every configured tenant.

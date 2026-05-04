@@ -765,6 +765,27 @@
       - Routes (18): list happy + filters + 2 invalid 400s + 403; single happy + 404 + cross-tenant 404; productivity default + period + invalid_period 400 + 404; history default + months override + clamp + 404; tenant isolation through HTTP.
     - **Outcome:** Module 14 now has 6 shipped adapters covering 23 of the declared 50 APIs. Agent + IFRS9 + Insurance form a tight triangle for any per-customer drill-through workflow.
 
+  - **M2.1 — Tenant readiness check (2026-05-04):**
+    - Module 2 (Multi-Tenancy & API Gateway) had T4.24 surface — tenant CRUD, header gating, OAuth client-credentials. M2.1 lands the onboarding-readiness query: given a tenant id, run a fixed set of structural checks across modules and return a report the SPA renders as "ready / warnings / blocked". 2 of 12 declared APIs.
+    - New `services/bff/src/tenant_readiness.ts`:
+      - `ReadinessCheck` shape with 5 categories (`tenant / config / alerts / audit / security`) and 3 severities (`blocking / warning / info`).
+      - **9 cross-module checks**: tenant_exists / tenant_active / channels_configured / vertical_assigned / config_schema_complete / email_channel_enabled / email_from_address_valid / alert_routing_complete / has_active_routing / audit_trail_active.
+      - Pure function — no I/O. Callers pass in the engines (`tenantLookup`, `configStore`, `alertRoutingEngine`, `auditTrailStore`); deterministic + free of network probes.
+      - **Aggregation rules**: any blocking failure → `blocked`; any warning failure → `warnings`; info-severity failures don't flip the status (informational only). Asserted via `computeOverallStatus`.
+      - Tenant-not-found short-circuit: returns immediately with just the `tenant_exists` failure.
+    - **2 new BFF routes** (both tenant-gated, both enveloped, both RBAC `audit:read`):
+      - `GET /v1/tenants/me/readiness` — auto-resolves to caller's tenant.
+      - `GET /v1/tenants/:tenant_id/readiness` — admin can probe any tenant from any tenant context (e.g. BANK_DEMO admin checking BIL readiness).
+      - Adapter wraps the production callable `TenantLookup` into the narrower `ReadinessTenantLookup` shape so tests can stub the readiness contract directly.
+    - **Tests:** BFF 1103/1103 (was 1080 — +23 in `tenant_readiness.test.ts`):
+      - `computeOverallStatus` (4): all-passing, blocking dominates, warnings without blocking, info-severity-failure-stays-ready.
+      - `summariseChecks` (1).
+      - `runReadinessChecks` happy path (2): all checks pass on a healthy tenant; report shape.
+      - tenant not registered (1): single-check short-circuit.
+      - Individual failure modes (9): one per check covering severity routing.
+      - Routes (6): /me happy + 403; /:tenant_id happy + unknown-tenant short-circuit + 403 + cross-tenant probe.
+    - **Outcome:** The BIL deployment now has a one-call readiness verdict. Combined with M13.1 admin-config + M8.2 routing + M15.1 audit-trail, the SPA can render a green/amber/red tenant onboarding wizard. Future M2.2 — readiness diff + remediation playbook — extends the same primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
