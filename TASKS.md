@@ -432,6 +432,33 @@
       - Routes (13): admin happy paths, risk_analyst accepted, unknown-role 403, null-adapter 404, throwing-adapter 502, tenant divergence, stage filter, invalid-stage 400, pagination disjointness, ECL sort.
     - **Outcome:** Module 14's second adapter shipped. The SPA can now render IFRS9 staging tables + per-customer ECL chips. Two adapters now share the `<Upstream>Adapter` + `Stub<Upstream>Adapter` pattern — future M14.3 AML / M14.4 DMS / M14.5 Bureau adapters follow the same shape.
 
+  - **M13.1 — Admin Configuration registry (2026-05-04):**
+    - Module 13 (Admin Configuration, "central control panel") was empty; M13.1 lands the first slice — a typed, tenant-scoped key-value config store with declared platform defaults.
+    - New `services/bff/src/admin_config.ts`:
+      - `ConfigDef` describes a key (`{key, category, type, description, default_value}`); `DEFAULTS` is the platform-wide schema. The store persists *overrides* only; entries report `is_default: true` until a tenant changes them.
+      - 4 supported value types: `number` (must be finite), `string` (must be non-empty), `boolean` (true/false only), `json` (plain object — arrays + primitives rejected). `validateValue()` enforces this at every `set()`.
+      - **13 default entries across 5 categories** seeded from BIL operational anchors:
+        - `alerts.{red,orange,yellow}_sla_hours` (4/24/72 — mirrors `bil_alert_classification.ts`)
+        - `notifications.{email,sms}.{enabled,from_address}` (email channel toggles)
+        - `reporting.{daily_report_time_utc,retention_days}` (06:00 / 365)
+        - `scoring.default_thresholds.{low_max,medium_max}` (30/70 — mirrors `bil_scoring.ts`)
+        - `features.{scenario_simulation,copilot,maker_checker}_enabled` (UI toggles)
+      - `ConfigStore` interface (`list/get/set/reset`) + `InMemoryConfigStore` (Map<tenant, Map<key, override>>). `ConfigValidationError` carries machine-readable codes (`invalid_value`, `unknown_key`).
+    - **`AppDeps.configStore` injection point** — defaults to the module-level `defaultConfigStore`. Tests pass a fresh store per test.
+    - **5 new BFF routes** (all tenant-gated, all enveloped, all RBAC `audit:read` — config is sensitive ops surface, admin-only):
+      - `GET /v1/admin/config/categories` — list the 5 categories.
+      - `GET /v1/admin/config[?category=X]` — list every entry, optionally filtered. `?category=invalid` → 400 `EWS_400_invalid_category`.
+      - `GET /v1/admin/config/:key` — single entry. 404 `EWS_404_unknown_key` on unknown.
+      - `PUT /v1/admin/config/:key` body `{value}` — set/override. Accepts both raw and enveloped request bodies. Records `updated_by` from `X-APEX-USER` header (default 'admin'). Errors: `EWS_400_invalid_value` (type mismatch), `EWS_404_unknown_key` (key not in schema).
+      - `DELETE /v1/admin/config/:key` — clear override → revert to default. 404 on unknown key. No-op when no override exists.
+    - **Tenant isolation** — BIL overrides do not affect BANK_DEMO reads, asserted both at the store level and through the routes.
+    - **Tests:** BFF 523/523 (was 482 — +41 in `admin_config.test.ts`):
+      - Schema (6): keys unique, every default validates against its declared type, listDefaultKeys count matches DEFAULTS, listCategories order matches schema, every category populated, BIL operational anchors present.
+      - validateValue (5): each of the 4 types — happy + reject paths; ConfigValidationError code surfaced.
+      - Store (11): list initial state, get unknown null, get default, set + read-back, set type-mismatch reject, set unknown_key throw, reset reverts + no-op + throw, tenant isolation, list order preservation.
+      - Routes (19): categories list + 403, list-all + category filter + invalid-category 400 + 403, get single happy + 404, PUT happy + enveloped body + invalid_value + unknown_key + missing-value + default updated_by + 403, DELETE happy + 404 + 403, BIL ↔ BANK_DEMO tenant isolation through HTTP.
+    - **Outcome:** Module 13's first slice shipped. The BIL deployment now has a structured way to override the 13 platform defaults per tenant (e.g. tighter Red SLA, stricter scoring thresholds). The `ConfigStore` interface keeps a future PG-backed swap mechanical. Future sub-phases — M13.2 audit-trail of config changes, M13.3 bulk import/export, M13.4 schema-version metadata — extend this primitive.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

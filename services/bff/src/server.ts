@@ -100,6 +100,14 @@ import {
   type Ifrs9Adapter,
   type Ifrs9StageNum,
 } from './integrations/ifrs9';
+import {
+  ConfigValidationError,
+  defaultConfigStore,
+  listCategories as listConfigCategories,
+  type ConfigCategory,
+  type ConfigStore,
+  type ConfigValue,
+} from './admin_config';
 
 const ROLE_HEADER = 'x-apex-role';
 function defaultGetRole(req: unknown): string | null {
@@ -146,6 +154,12 @@ export interface AppDeps {
    * HTTP-backed adapter pointing at the IFRS 9 engine.
    */
   ifrs9Adapter?: Ifrs9Adapter;
+  /**
+   * Override for tests — admin config registry (T6 M13.1). Defaults
+   * to the module-level InMemoryConfigStore. Tests pass a fresh
+   * store per test so overrides don't leak across runs.
+   */
+  configStore?: ConfigStore;
   /** Override for tests — defaults to the seeded singleton. */
   ruleStore?: RuleStore;
   /**
@@ -199,6 +213,7 @@ export function makeApp(deps: AppDeps = {}) {
   const emailTransport = deps.emailTransport ?? defaultEmailTransport;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
+  const configStore = deps.configStore ?? defaultConfigStore;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
@@ -1573,6 +1588,161 @@ export function makeApp(deps: AppDeps = {}) {
               message: e instanceof Error ? e.message : 'ifrs9 adapter failed',
               severity: 'HIGH',
             },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Admin Configuration registry (T6 M13.1) ──────────────────────────
+  //
+  // Tenant-scoped key-value config store. The schema is platform-wide
+  // (DEFAULTS in admin_config.ts); the store persists overrides only.
+  // All routes are admin-only (audit:read) — config is sensitive ops
+  // surface, not analyst-level.
+
+  /** GET /v1/admin/config/categories — list distinct categories. */
+  app.get(
+    '/v1/admin/config/categories',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listConfigCategories();
+      res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /**
+   * GET /v1/admin/config[?category=alerts]
+   * Returns every config entry for the caller's tenant. Optional
+   * category filter narrows the list. Each entry includes
+   * `is_default` so the SPA can highlight overridden values.
+   */
+  app.get(
+    '/v1/admin/config',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const categoryRaw = req.query.category as string | undefined;
+      let category: ConfigCategory | undefined;
+      if (categoryRaw !== undefined) {
+        const valid = listConfigCategories() as readonly string[];
+        if (!valid.includes(categoryRaw)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_category',
+                message: `category must be one of ${valid.join(',')}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        category = categoryRaw as ConfigCategory;
+      }
+      const all = configStore.list(req.tenant!.tenant_id);
+      const items = category ? all.filter((e) => e.category === category) : all;
+      res.json(wrapResponse({ items, total: items.length, category: category ?? null }, ctx));
+    },
+  );
+
+  /** GET /v1/admin/config/:key — single entry. 404 when key is unknown. */
+  app.get(
+    '/v1/admin/config/:key',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.key ?? '';
+      const entry = configStore.get(req.tenant!.tenant_id, key);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_key', message: `unknown config key: ${key}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /**
+   * PUT /v1/admin/config/:key
+   * body: { value }
+   * Sets the override for the supplied key. Validates the value
+   * against the declared type. Returns the resulting entry.
+   */
+  app.put(
+    '/v1/admin/config/:key',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.key ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object' || !('value' in (inner as object))) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400', message: 'request body must include a value field', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const value = (inner as { value: unknown }).value as ConfigValue;
+      const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const entry = configStore.set(req.tenant!.tenant_id, key, value, updated_by, now());
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof ConfigValidationError) {
+          const status = e.code === 'unknown_key' ? 404 : 400;
+          const code = e.code === 'unknown_key' ? 'EWS_404_unknown_key' : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'set failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/admin/config/:key — clear override → revert to default. */
+  app.delete(
+    '/v1/admin/config/:key',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.key ?? '';
+      try {
+        const entry = configStore.reset(req.tenant!.tenant_id, key);
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof ConfigValidationError && e.code === 'unknown_key') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_key', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'reset failed', severity: 'HIGH' },
             ctx,
           ),
         );
