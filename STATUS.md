@@ -1,7 +1,51 @@
 # APEX EWS — Live Status
 
-**Current phase:** Wave 3 wrapped + UX/auth hardening sweep + Wave 4 UX features + database fill-out. Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice shipped; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV all live. SPA layered with: auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity (clickable KPIs + time-range selector + customer list page), full-fat scenario simulation (IFRS 9 stage migration + 5 templates + saved scenarios + side-by-side compare + segment×risk heatmap + portfolio PD/NPA cards + CSV/PDF/Excel export), outbound webhook subsystem (HMAC-signed delivery with 3-attempt retry + admin SPA), criticality-based alert prioritization (severity × confidence × log-exposure × age boost + customer dedup), rule config UX overhaul (search + sticky list + severity strip + 5-tab unified detail card), and Customer Risk Profile §5.3 360-view (linked alerts + linked cases panels). **Database scaled to 10,000 customers (~731k rows across 9 schemas / 21 tables) with 5 new app_* schemas (app_iam, app_cases, app_alerts, app_bff, app_scenario) populated by synthetic data — service-wiring deferred per Gap 3 part B in `docs/database-gap-analysis.md`.** Only T3.1–T3.3 (CBS/IFRS9/AML real-bank deepening), T2.11 (Fraud-suspicion alert type), T2.12 (real-time streaming), T4.1 (analytics dashboards), T4.3 (mobile RN shell), T4.13–T4.17 (per-service Postgres wiring), T5.x (DR/scale) remain — out of prototype scope or scheduled.
-**Last updated:** 2026-05-03
+**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **48 sub-phases shipped to date · ~140 routes wired · BFF jest 1991 pass / 9 skipped / 2000 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
+**Last updated:** 2026-05-05
+
+## T6 Coverage Matrix — BIL 16-module platform expansion
+
+Every module below has at least one live sub-phase wired into the BFF and covered by jest tests. Each sub-phase = 1 commit + 1 src module + ≥ 1 enveloped route + tenant isolation + RBAC + code-routed `EWS_4xx_<code>` errors.
+
+| #   | Module                       | Sub-phases shipped                          | Surface highlights |
+|-----|------------------------------|---------------------------------------------|--------------------|
+| M1  | Authentication & Identity    | M1.1 + M1.2 + M1.3                          | TOTP 2FA · service-account API keys (provision/revoke/delete with SHA-256 + 12-char prefix; full key shown once) · Bearer-auth middleware (`/v1/svc/*`) with X-Tenant-ID override defense |
+| M2  | Tenant Operations            | M2.1 + M2.2                                 | Cross-module readiness check (9 axes) · 8-step onboarding wizard (`pending → completed | skipped`, `is_complete` honours required vs optional) |
+| M3  | Data Ingestion               | M3.1 + M3.2                                 | 8-connector registry (CBS / Core Insurance / Policy Master / Claims / Agent / AML / Bureau / IFRS9) with run history + pause/resume · Per-connector field schema metadata + pure-function record validator |
+| M4  | Indicators                   | M4.1 + M4.2                                 | 25-indicator BIL insurance KRI catalog · indicator backtest with full confusion matrix |
+| M5  | Rule Engine                  | M5.1 + M5.2                                 | 12-template starter library (5 categories × 3 verticals) · bulk-clone preview (template_ids[] OR filter, name_prefix, draft state) |
+| M6  | Risk Scoring                 | M6.1 + M6.2                                 | `Σ(W×V)` engine bucketed Low/Med/High · catalog-lookup convenience layer with cross-vertical guard |
+| M7  | AI / ML                      | M7.1 + M7.2                                 | 8-model registry × 6 types + SHAP-style top features · explicit promotion state machine (experimental → staging → shadow → prod → retired) with self-approval refusal |
+| M8  | Alerts                       | M8.1 + M8.2 + M8.3                          | BIL Red/Orange/Yellow/Green classification · auto-routing matrix (severity → channel + SLA + escalation) · per-alert ack/unack lifecycle with history |
+| M9  | Cases & Investigations       | M9.1 + M9.2 + M9.3                          | 6-state investigation tracker + BIL §17 8-step claim-fraud checklist · custom checklists store · RBI 4-eyes maker-checker (close/escalate/override) with self-approval segregation |
+| M10 | Notifications                | M10.1 + M10.2 + M10.3                       | Email transport + 4 BIL templates · SMS transport + 4 templates · push transport across fcm/apns/web with deep-link safety |
+| M11 | Dashboards                   | M11.1–M11.6                                 | Claims · Underwriting · Agent · Operational · Executive · per-customer-360 (6-adapter orchestration with panel-level degradation) |
+| M12 | Reports                      | M12.1 + M12.2                               | 9-report catalog + async job tracker · recurring schedules with pure-function `computeNextRun` (daily/weekly/monthly + Dec→Jan year roll) + `/due` poll + `/mark-run` advance |
+| M13 | Admin Configuration          | M13.1 + M13.2 + M13.3                       | 13 BIL operational defaults × 5 categories · audit-trail wiring (every PUT/DELETE writes `config.update / config.reset`) · rollback to prior audit event with `rolled_back_from_event_id` |
+| M14 | Integrations                 | M14.1–M14.8                                 | 8 adapters: Core Insurance · IFRS9 stages · AML watchlist · DMS · Bureau (CIBIL/CRIF/EXPERIAN/EQUIFAX) · Agent productivity · Finance/Treasury · HR — all with deterministic synthesis seeded by (tenant, customer, day) |
+| M15 | Audit & Compliance           | M15.1 + M15.2 + M15.3                       | 7-axis filterable audit log + summary · SHA-256 hash-chain integrity verifier · evidence packaging (filtered + chain-verified frozen snapshot) with capped per-tenant retention |
+| M16 | Scenarios                    | M16.1 + M16.2                               | 10-preset library (RBI Baseline/Adverse/Severely-Adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans) · bulk-run ranking + worst/mean/adverse aggregates |
+
+**Totals:** **16/16 modules live · 48 sub-phases shipped · ~140 routes wired · BFF tests 1991 pass / 9 skipped / 2000 total.**
+
+Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API count is **~38%**; **module coverage is 100%** — no module is missing a working slice. The next sub-phase candidates per module:
+
+- **M1** — auth middleware applied beyond `/v1/svc/*` (M1.4); WebAuthn passkeys (M1.5)
+- **M2** — bulk-tenant onboarding (CSV)
+- **M3** — per-tenant schema overrides (M3.3)
+- **M4** — indicator versioning + deprecation
+- **M5** — rule simulation against scenario library (M5.3)
+- **M6** — scoring weight presets (M6.3)
+- **M7** — model A/B test harness (M7.3)
+- **M8** — alert auto-ack via threshold rules (M8.4)
+- **M9** — apply approved actions to downstream stores (M9.4)
+- **M10** — notification delivery webhook (M10.4)
+- **M11** — custom dashboard builder (M11.7)
+- **M12** — quarterly cadence + last-day-of-month (M12.3)
+- **M13** — bulk config import/export (M13.4)
+- **M14** — adapter health roll-up surface
+- **M15** — PDF/Excel evidence export (M15.4)
+- **M16** — scenario diff (M16.3); scenario history
 
 ## KPI Snapshot
 

@@ -1,6 +1,6 @@
 # APEX EWS
 
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-05
 
 Early-Warning System prototype for credit-risk monitoring. A single platform that ingests CBS + bureau + transaction data, scores every customer with a calibrated PD model, fires rule-based alerts, opens cases, and routes them through a state machine to Collection.
 
@@ -20,6 +20,7 @@ This is a **prototype** — not a deployable bank product. See `project_apex_ews
 - **React SPA** — `web/` — login, dashboard (clickable KPI cards + time-range selector), alert list (criticality scoring + customer dedup + sort dropdown), customer list, customer risk profile (SHAP top-5 + linked alerts + linked cases), rule config (search + sticky list + 5-tab unified detail card), case view, scenario simulator (5 templates + IFRS 9 stage migration + segment×risk heatmap + saved scenarios + side-by-side compare + CSV/PDF/Excel export), profile/sessions, profile/activity, admin/users, admin/audit-log, admin/integrations, admin/webhooks. DMS-style design system. EN + HI i18n.
 - **Outbound webhooks** — `services/bff/src/webhooks/` — admin-managed subscriptions (HMAC-SHA256 signed delivery, 3-attempt retry with 1s/4s/16s back-off, 10s timeout). Fires `alert.created` (on High-risk evaluations) + `scenario.run` events fire-and-forget. Admin SPA at `/admin/webhooks` (admin role only) — create with one-time secret reveal, test-fire button, deliveries log per subscription.
 - **Infra-as-code** — Terraform across 5 layers (`00-landing-zone`, `10-network`, `20-eks`, `30-data`, `40-edge`). VPC + EKS + Aurora + MSK + Glue Schema Registry. `terraform fmt -check && terraform validate` green.
+- **T6 — BIL 16-module platform expansion (in flight)** — All 16 modules have at least one live sub-phase wired into the BFF. **48 sub-phases shipped · ~140 enveloped routes · BFF jest 1991 pass / 9 skipped / 2000 total.** Modules covered: M1 auth (TOTP + service-account API keys + Bearer middleware), M2 tenant ops (readiness + onboarding wizard), M3 ingestion (8-connector registry + schema metadata), M4 indicators (25-KRI catalog + backtest), M5 rules (12-template library + bulk-clone), M6 scoring (Σ(W×V) + catalog lookup), M7 AI/ML (model registry + promotion state machine), M8 alerts (Red/Orange/Yellow/Green classification + routing matrix + ack lifecycle), M9 cases (investigation tracker + custom checklists + RBI 4-eyes maker-checker), M10 notifications (email + SMS + push), M11 dashboards (Claims/Underwriting/Agent/Operational/Executive/360), M12 reports (catalog + recurring schedules), M13 admin config (registry + audit wiring + rollback), M14 integrations (8 adapters), M15 audit (events + hash-chain + evidence packaging), M16 scenarios (10-preset library + bulk-run). See [STATUS.md → T6 Coverage Matrix](STATUS.md) for the full table + per-module follow-on backlog.
 
 ## Quick start
 
