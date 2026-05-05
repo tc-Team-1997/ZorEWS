@@ -574,3 +574,110 @@ describe('POST /v1/rules/templates/custom/clone-from-library', () => {
     expect(u.status).toBe(200);
   });
 });
+
+// ─── M5.10 — Bulk clone-from-library ─────────────────────────────────
+
+describe('POST /v1/rules/templates/custom/bulk-clone-from-library', () => {
+  test('happy: 200 with created[] for valid ids', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        template_ids: ['tpl_dpd_30_60', 'tpl_repeat_claim_180d'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.requested_count).toBe(2);
+    expect(r.body.body.created_count).toBe(2);
+    expect(r.body.body.skipped_count).toBe(0);
+  });
+
+  test('name_prefix applied to clone names', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        template_ids: ['tpl_dpd_30_60'],
+        name_prefix: 'BIL-Q3-',
+      });
+    expect(r.body.body.created[0].name).toMatch(/^BIL-Q3-/);
+  });
+
+  test('mixed valid + unknown: created[] + skipped[]', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        template_ids: ['tpl_dpd_30_60', 'NO-SUCH', 'tpl_repeat_claim_180d'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.created_count).toBe(2);
+    expect(r.body.body.skipped_count).toBe(1);
+    expect(r.body.body.skipped[0].reason).toBe('unknown_source');
+  });
+
+  test('writes rule.create audit per successful clone with bulk=true', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ template_ids: ['tpl_dpd_30_60'] });
+    const newId = r.body.body.created[0].template_id;
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${newId}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.items[0].action).toBe('rule.create');
+    expect(h.body.body.items[0].metadata.bulk).toBe(true);
+    expect(h.body.body.items[0].metadata.cloned_from).toBe('tpl_dpd_30_60');
+  });
+
+  test('empty template_ids[] → 400', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ template_ids: [] });
+    expect(r.status).toBe(400);
+  });
+
+  test('> 10 template_ids → 400', async () => {
+    const { app } = makeTplApp('admin');
+    const ids = new Array(11).fill('tpl_dpd_30_60');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ template_ids: ids });
+    expect(r.status).toBe(400);
+  });
+
+  test('non-string id reported as skipped', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ template_ids: ['tpl_dpd_30_60', 42] });
+    expect(r.status).toBe(200);
+    expect(r.body.body.skipped_count).toBe(1);
+    expect(r.body.body.skipped[0].reason).toBe('invalid_id');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeTplApp('case_owner');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ template_ids: ['tpl_dpd_30_60'] });
+    expect(r.status).toBe(403);
+  });
+
+  test('M5.9 single-clone still works (literal bulk- didn\'t shadow)', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    expect(r.status).toBe(201);
+  });
+});

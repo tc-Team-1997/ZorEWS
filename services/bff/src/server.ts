@@ -8731,6 +8731,128 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/rules/templates/custom/bulk-clone-from-library (T6 M5.10)
+   *  body { template_ids[], name_prefix? } — iterates M5.9 single-clone
+   *  over the list. Cap 10 per call. Per-row outcome surfaced as
+   *  {created[], skipped[]}. Writes rule.create audit per successful
+   *  clone with metadata.bulk=true. */
+  app.post(
+    '/v1/rules/templates/custom/bulk-clone-from-library',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { template_ids?: unknown; name_prefix?: unknown };
+      if (!Array.isArray(wrapper.template_ids) || wrapper.template_ids.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'template_ids[] must be non-empty', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (wrapper.template_ids.length > 10) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'template_ids[] exceeds cap of 10', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const prefix =
+        typeof wrapper.name_prefix === 'string' && wrapper.name_prefix.trim()
+          ? wrapper.name_prefix.trim()
+          : null;
+      const tenantId = req.tenant!.tenant_id;
+      const created: Array<{ source_template_id: string; template_id: string; name: string }> = [];
+      const skipped: Array<{ source_template_id: string; reason: string }> = [];
+
+      for (const sid of wrapper.template_ids) {
+        if (typeof sid !== 'string' || !sid.trim()) {
+          skipped.push({ source_template_id: String(sid), reason: 'invalid_id' });
+          continue;
+        }
+        const source = getRuleTemplate(sid);
+        if (!source) {
+          skipped.push({ source_template_id: sid, reason: 'unknown_source' });
+          continue;
+        }
+        const createInput = {
+          name: prefix ? `${prefix}${source.name}` : `Copy of ${source.name}`,
+          description: source.description,
+          vertical: source.vertical,
+          category: source.category,
+          condition_pseudocode: source.condition_pseudocode,
+          recommended_severity: source.recommended_severity,
+          recommended_actions: [...source.recommended_actions],
+          supporting_indicators: [...source.supporting_indicators],
+          source_doc: `Cloned from ${source.id} by ${created_by}`,
+        };
+        try {
+          const template = customRuleTemplateStore.create(tenantId, createInput, created_by, now());
+          try {
+            auditTrailStore.record(
+              tenantId,
+              {
+                actor_username: created_by,
+                actor_role: 'admin',
+                action: 'rule.create',
+                resource_type: 'rule',
+                resource_id: template.id,
+                outcome: 'success',
+                severity: 'info',
+                metadata: {
+                  name: template.name,
+                  cloned_from: source.id,
+                  vertical: template.vertical,
+                  category: template.category,
+                  bulk: true,
+                },
+              },
+              now(),
+            );
+          } catch {
+            // swallow
+          }
+          created.push({
+            source_template_id: source.id,
+            template_id: template.id,
+            name: template.name,
+          });
+        } catch (e) {
+          if (e instanceof CustomRuleTemplateError) {
+            skipped.push({ source_template_id: sid, reason: e.code });
+          } else {
+            skipped.push({
+              source_template_id: sid,
+              reason: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            requested_count: wrapper.template_ids.length,
+            created_count: created.length,
+            skipped_count: skipped.length,
+            created,
+            skipped,
+            generated_at: now().toISOString(),
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
   /** PUT /v1/rules/templates/custom/:template_id (T6 M5.8) — replace
    *  mutable fields. Writes rule.update audit event with metadata. */
   app.put(
