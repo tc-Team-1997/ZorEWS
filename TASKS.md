@@ -1340,6 +1340,34 @@
       - No-regression (4): M5.1 GET templates + /:id, M5.2 bulk-clone, M16.1 library/:id all still 200.
     - **Outcome:** Module 5 now has 3 sub-phases (M5.1 library + M5.2 bulk-clone + M5.3 simulation). Combined with M16.1 library + M16.2 bulk-run + M16.3 diff, the BIL pre-activation workflow runs end-to-end: pick template → bulk-clone into draft rules → simulate each draft against severely-adverse scenarios → activate only those whose amplification stays manageable. Future M5.4 likely covers **simulation BUNDLES** (run one rule against the full M16.1 preset list at once for a 10-row stress preview).
 
+  - **M6.3 — Scoring weight presets (2026-05-05):**
+    - M6.1 ships the `Σ(W×V)` scorer with explicit weights. M6.2 ships the catalog-lookup convenience layer. M6.3 adds a small library of NAMED weight bundles tenants can apply when the catalog defaults don't match their risk appetite. Pure-data + 1 pure-function score-by-preset entry point — no store, no AppDeps slot. M6.4 will land per-tenant CUSTOM presets with a CRUD store.
+    - 3 modes × 2 verticals = **6 seed presets**:
+      - **Conservative** — boosts the "bad-signal" indicators (DPD, repeat-claim, balance run-down). Multipliers ≥ 1, sparse map only (indicators not listed pass through at 1.0). Higher recall, more alerts, lower precision.
+      - **Balanced** — empty multiplier map; catalog defaults pass through unchanged. Reference posture for new tenants ("use the platform default" UX).
+      - **Aggressive** — tones down softer behavioural / operational signals. Multipliers ≤ 1. Lower volume, useful for ops teams who can't keep up with alert flow.
+    - New `services/bff/src/scoring_presets.ts`:
+      - `WeightPreset.weight_multipliers` — sparse `Record<indicator_id, number>`. Indicators NOT listed default to 1.0 multiplier (catalog passthrough).
+      - `PresetScopedLookup` wraps the base `IndicatorWeightLookup` and applies the preset's multiplier on top. **Forces the preset's vertical** — a banking preset can't successfully resolve insurance indicators (returns null instead).
+      - **`[0, 1]` clamp on effective weights** — conservative multipliers can push effective weight above the catalog max (e.g. `FIN-001` 0.9 × 1.15 = 1.035), so the lookup wrapper clamps to honour M6.1's required range. 1.0 is max severity, so clipping there preserves signal without losing it.
+      - `effective_weights[]` in the result re-resolves catalog defaults from the base lookup (rather than `weight / multiplier` reverse engineering, which is unreliable once the clamp engages).
+      - `WeightPresetError` codes routed: `invalid_input` → 400, `unknown_preset` → 404. M6.2's `IndicatorLookupError` (e.g. unknown_indicator from inside `scoreFromIndicators`) bubbles unchanged.
+    - **3 new BFF routes** (tenant-gated, enveloped, `customers:read_risk_profile` analyst+):
+      - `GET /v1/scoring/presets?vertical=&mode=` — filtered list.
+      - `GET /v1/scoring/presets/:id` — single preset; 404 EWS_404_unknown_preset.
+      - `POST /v1/scoring/risk/by-preset` body `{preset_id, items}` — score using the preset's multipliers on top of catalog defaults. Returns `effective_weights[]` per-indicator transparency for the SPA.
+    - **Tests:** BFF 2133/2133 (was 2090 — +43 in `scoring_presets.test.ts`):
+      - Catalog invariants (5): exactly 6 presets, ids unique, both vertical/mode coverage, balanced has empty multipliers, conservative multipliers ≥ 1, aggressive ≤ 1.
+      - Type guards (2): isWeightPresetMode accept/reject.
+      - listWeightPresets (4): no filter, vertical, mode, vertical+mode.
+      - getWeightPreset (2): hit, miss.
+      - scoreByPreset pure (12): balanced passthrough, conservative boosts, aggressive tones down, missing-from-map → 1.0, vertical filter rejection (banking preset + insurance indicator), every error code, mode echoed, conservative ≥ balanced score, **clamp behaviour** verified at boundary AND headroom.
+      - GET /presets route (6): admin 200, vertical/mode narrows, invalid vertical/mode 400, role 403.
+      - GET /presets/:id route (2): hit, 404.
+      - POST /by-preset route (7): analyst+ 200, enveloped, unknown_preset, unknown_indicator, vertical-mismatch, missing preset_id, role 403.
+      - No-regression (2): M6.1 + M6.2 routes still 200.
+    - **Outcome:** Module 6 now has 3 sub-phases (M6.1 explicit-weights + M6.2 catalog-lookup + M6.3 preset bundles). The BIL operator workflow: pick a preset → pass it + the indicator values → get a calibrated score with effective_weights breakdown shown side-by-side with catalog defaults. Future M6.4 lands per-tenant custom presets (the SPA's "edit weights for this tenant" panel).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

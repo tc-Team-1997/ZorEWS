@@ -150,6 +150,14 @@ import {
   type ScoringVertical,
 } from './bil_scoring_v2';
 import {
+  WeightPresetError,
+  getWeightPreset,
+  isWeightPresetMode,
+  listWeightPresets,
+  scoreByPreset,
+  type WeightPresetMode,
+} from './scoring_presets';
+import {
   BacktestError as IndicatorBacktestError,
   runBacktest as runIndicatorBacktest,
   type BacktestInput as IndicatorBacktestInput,
@@ -3458,6 +3466,125 @@ export function makeApp(deps: AppDeps = {}) {
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'scoring failed', severity: 'HIGH' },
             env,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Scoring weight presets (T6 M6.3) ─────────────────────────────────
+  //
+  // Named bundles of weight-multipliers (conservative/balanced/
+  // aggressive × banking/insurance) tenants can apply on top of the
+  // M6.2 catalog defaults. Pure-data — no store, no tenant overrides
+  // here; M6.4 will land custom presets.
+
+  /** GET /v1/scoring/presets?vertical=&mode= — filtered list of presets. */
+  app.get(
+    '/v1/scoring/presets',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const verticalRaw = req.query.vertical as string | undefined;
+      const modeRaw = req.query.mode as string | undefined;
+      if (verticalRaw && !isScoringVertical(verticalRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_vertical', message: 'vertical must be banking|insurance', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (modeRaw && !isWeightPresetMode(modeRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_mode', message: 'mode must be conservative|balanced|aggressive', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = listWeightPresets({
+        vertical: verticalRaw as ScoringVertical | undefined,
+        mode: modeRaw as WeightPresetMode | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/scoring/presets/:id — single preset. 404 EWS_404_unknown_preset. */
+  app.get(
+    '/v1/scoring/presets/:id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const preset = getWeightPreset(id);
+      if (!preset) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(preset, ctx));
+    },
+  );
+
+  /** POST /v1/scoring/risk/by-preset body { preset_id, items } — score using
+   *  the preset's multipliers on top of catalog defaults. */
+  app.post(
+    '/v1/scoring/risk/by-preset',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = scoreByPreset(
+          (inner ?? {}) as { preset_id: string; items: ByIndicatorItem[] },
+          indicatorWeightLookup,
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof WeightPresetError) {
+          if (e.code === 'unknown_preset') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_preset', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (e instanceof IndicatorLookupError) {
+          const status = e.code === 'unknown_indicator' ? 404 : 400;
+          const code =
+            e.code === 'unknown_indicator'
+              ? 'EWS_404_unknown_indicator'
+              : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (e instanceof ScoringInputError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preset scoring failed', severity: 'HIGH' },
+            ctx,
           ),
         );
       }
