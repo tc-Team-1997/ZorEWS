@@ -467,3 +467,110 @@ describe('M5.8 — custom template PUT + audit history', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// ─── M5.9 — Clone library template into custom ───────────────────────
+
+describe('POST /v1/rules/templates/custom/clone-from-library', () => {
+  test('happy: 201 with custom copy of library template', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    expect(r.status).toBe(201);
+    expect(r.body.body.id).toMatch(/^tpl_custom_/);
+    expect(r.body.body.name).toMatch(/^Copy of /);
+    expect(r.body.body.vertical).toBe('banking');
+  });
+
+  test('caller can override name', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({
+        source_template_id: 'tpl_dpd_30_60',
+        name: 'BIL DPD-30 strict',
+      });
+    expect(r.body.body.name).toBe('BIL DPD-30 strict');
+  });
+
+  test('source_doc carries cloned-from + creator', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    expect(r.body.body.source_doc).toContain('tpl_dpd_30_60');
+    expect(r.body.body.source_doc).toContain('compliance.lead');
+  });
+
+  test('writes rule.create audit with cloned_from metadata', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    const id = c.body.body.id;
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.items[0].action).toBe('rule.create');
+    expect(h.body.body.items[0].metadata.cloned_from).toBe('tpl_dpd_30_60');
+  });
+
+  test('clone is independently editable (PUT works)', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    const id = c.body.body.id;
+    const u = await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Edited clone' });
+    expect(u.status).toBe(200);
+    expect(u.body.body.name).toBe('Edited clone');
+  });
+
+  test('missing source_template_id → 400', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(400);
+  });
+
+  test('unknown source template → 404', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'NO-SUCH' });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_template');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeTplApp('case_owner');
+    const r = await request(app)
+      .post('/v1/rules/templates/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_template_id: 'tpl_dpd_30_60' });
+    expect(r.status).toBe(403);
+  });
+
+  test('PUT /:template_id still works (literal clone-from-library didn\'t shadow)', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const u = await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Still works' });
+    expect(u.status).toBe(200);
+  });
+});

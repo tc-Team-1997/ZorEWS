@@ -8626,6 +8626,111 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/rules/templates/custom/clone-from-library (T6 M5.9)
+   *  body { source_template_id, name? } — reads a library template and
+   *  creates an editable custom copy. Writes rule.create audit with
+   *  `cloned_from` metadata. Declared BEFORE /:template_id so the
+   *  literal `clone-from-library` segment wins. */
+  app.post(
+    '/v1/rules/templates/custom/clone-from-library',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { source_template_id?: unknown; name?: unknown };
+      if (typeof wrapper.source_template_id !== 'string' || !wrapper.source_template_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_template_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const source = getRuleTemplate(wrapper.source_template_id);
+      if (!source) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_template',
+              message: `library template ${wrapper.source_template_id} not found`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const overrideName = typeof wrapper.name === 'string' && wrapper.name.trim()
+        ? wrapper.name.trim()
+        : null;
+      const createInput = {
+        name: overrideName ?? `Copy of ${source.name}`,
+        description: source.description,
+        vertical: source.vertical,
+        category: source.category,
+        condition_pseudocode: source.condition_pseudocode,
+        recommended_severity: source.recommended_severity,
+        recommended_actions: [...source.recommended_actions],
+        supporting_indicators: [...source.supporting_indicators],
+        source_doc: `Cloned from ${source.id} by ${created_by}`,
+      };
+      try {
+        const template = customRuleTemplateStore.create(
+          req.tenant!.tenant_id,
+          createInput,
+          created_by,
+          now(),
+        );
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'rule.create',
+              resource_type: 'rule',
+              resource_id: template.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                name: template.name,
+                cloned_from: source.id,
+                vertical: template.vertical,
+                category: template.category,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.status(201).json(
+          wrapResponse(template, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomRuleTemplateError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** PUT /v1/rules/templates/custom/:template_id (T6 M5.8) — replace
    *  mutable fields. Writes rule.update audit event with metadata. */
   app.put(
