@@ -44,8 +44,8 @@ function makeIngApp(role: string = 'admin', ingestionRegistry?: InMemoryIngestio
 // ─── Seed schema invariants ────────────────────────────────────────────
 
 describe('SEED_CONNECTORS schema', () => {
-  test('exactly 8 connectors covering the BIL upstream list', () => {
-    expect(SEED_CONNECTORS.length).toBe(8);
+  test('10 connectors covering the BIL upstream list (8 from M3.1 + 2 from M3.4)', () => {
+    expect(SEED_CONNECTORS.length).toBe(10);
   });
 
   test('ids are unique', () => {
@@ -65,7 +65,7 @@ describe('SEED_CONNECTORS schema', () => {
     }
   });
 
-  test('source_systems span the 8 BIL upstreams', () => {
+  test('source_systems span the BIL upstreams', () => {
     const systems = new Set(SEED_CONNECTORS.map((c) => c.source_system));
     expect(systems.has('CBS')).toBe(true);
     expect(systems.has('CORE_INSURANCE')).toBe(true);
@@ -75,15 +75,18 @@ describe('SEED_CONNECTORS schema', () => {
     expect(systems.has('AML')).toBe(true);
     expect(systems.has('BUREAU')).toBe(true);
     expect(systems.has('IFRS9')).toBe(true);
+    // M3.4 additions
+    expect(systems.has('BRANCH')).toBe(true);
+    expect(systems.has('COLLECTION')).toBe(true);
   });
 });
 
 // ─── InMemoryIngestionRegistry ─────────────────────────────────────────
 
 describe('InMemoryIngestionRegistry — list + get', () => {
-  test('list() returns all 8 connectors', () => {
+  test('list() returns every seed connector', () => {
     const r = new InMemoryIngestionRegistry();
-    expect(r.list('BIL').length).toBe(8);
+    expect(r.list('BIL').length).toBe(SEED_CONNECTORS.length);
   });
 
   test('default status reflects the seed (healthy or degraded)', () => {
@@ -241,9 +244,10 @@ describe('InMemoryIngestionRegistry — health', () => {
   test('aggregates by_status correctly', () => {
     const r = new InMemoryIngestionRegistry();
     const h = r.health('BIL');
-    expect(h.total_connectors).toBe(8);
-    // 7 healthy + 1 degraded by default
-    expect(h.by_status.healthy).toBe(7);
+    expect(h.total_connectors).toBe(10);
+    // 9 healthy + 1 degraded by default (agent_productivity is the only
+    // degraded seed; M3.4 additions are both healthy)
+    expect(h.by_status.healthy).toBe(9);
     expect(h.by_status.degraded).toBe(1);
     expect(h.by_status.failing).toBe(0);
     expect(h.by_status.paused).toBe(0);
@@ -264,7 +268,7 @@ describe('InMemoryIngestionRegistry — health', () => {
     expect(h.attention_required.find((c) => c.id === 'cbs_loan_book')).toBeDefined();
   });
 
-  test('fleet_records_last_run sums across the 8 connectors', () => {
+  test('fleet_records_last_run sums across every connector', () => {
     const r = new InMemoryIngestionRegistry();
     const h = r.health('BIL');
     const list = r.list('BIL');
@@ -305,11 +309,11 @@ describe('InMemoryIngestionRegistry — setPaused', () => {
 // ─── Routes ────────────────────────────────────────────────────────────
 
 describe('GET /v1/ingestion/health', () => {
-  test('admin: 200 with the 8-connector summary', async () => {
+  test('admin: 200 with the connector summary', async () => {
     const { app } = makeIngApp('admin');
     const r = await request(app).get('/v1/ingestion/health').set(TH_BIL);
     expect(r.status).toBe(200);
-    expect(r.body.body.total_connectors).toBe(8);
+    expect(r.body.body.total_connectors).toBe(10);
     expect(r.body.body.by_status.degraded).toBe(1);
   });
 
@@ -321,11 +325,11 @@ describe('GET /v1/ingestion/health', () => {
 });
 
 describe('GET /v1/ingestion/connectors', () => {
-  test('admin: 200 with all 8 connectors', async () => {
+  test('admin: 200 with every seed connector', async () => {
     const { app } = makeIngApp('admin');
     const r = await request(app).get('/v1/ingestion/connectors').set(TH_BIL);
     expect(r.status).toBe(200);
-    expect(r.body.body.total).toBe(8);
+    expect(r.body.body.total).toBe(10);
   });
 
   test('non-admin → 403', async () => {

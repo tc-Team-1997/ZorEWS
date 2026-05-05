@@ -227,6 +227,42 @@ const IFRS9_STAGE_FEED: ConnectorSchema = {
   ],
 };
 
+// ─── M3.4 — Additional BIL connector schemas ─────────────────────────
+
+const BRANCH_TRANSACTIONS: ConnectorSchema = {
+  connector_id: 'branch_transactions',
+  version: SCHEMA_VERSION,
+  record_format: 'kafka_json',
+  primary_key: ['transaction_id'],
+  fields: [
+    { name: 'transaction_id', type: 'string', required: true, description: 'Unique transaction identifier', sample: 'TXN-700001', max_length: 32 },
+    { name: 'customer_id', type: 'string', required: true, description: 'BIL customer identifier', sample: 'CUST-100123', max_length: 32 },
+    { name: 'branch_code', type: 'string', required: true, description: 'Originating branch', sample: 'BR-MUM-007', max_length: 16 },
+    { name: 'txn_type', type: 'enum', required: true, description: 'Transaction type', sample: 'cash_deposit', enum_values: ['cash_deposit', 'cash_withdrawal', 'transfer_in', 'transfer_out', 'cheque_deposit', 'utility_payment'] },
+    { name: 'amount', type: 'number', required: true, description: 'Transaction amount (INR)', sample: '5000.00', min: 0 },
+    { name: 'currency', type: 'string', required: true, description: 'ISO-4217 currency code', sample: 'INR', max_length: 3 },
+    { name: 'occurred_at', type: 'datetime', required: true, description: 'When the transaction was posted', sample: '2026-05-05T14:23:00Z' },
+    { name: 'channel', type: 'enum', required: true, description: 'Posting channel', sample: 'teller', enum_values: ['teller', 'atm', 'mobile', 'internet', 'agent'] },
+  ],
+};
+
+const COLLECTIONS_OUTBOX: ConnectorSchema = {
+  connector_id: 'collections_outbox',
+  version: SCHEMA_VERSION,
+  record_format: 'rest_json',
+  primary_key: ['action_id'],
+  fields: [
+    { name: 'action_id', type: 'string', required: true, description: 'Collection action identifier', sample: 'COL-A-500001', max_length: 32 },
+    { name: 'case_id', type: 'string', required: true, description: 'Linked case', sample: 'CASE-200001', max_length: 32 },
+    { name: 'customer_id', type: 'string', required: true, description: 'Debtor customer', sample: 'CUST-100123', max_length: 32 },
+    { name: 'action_type', type: 'enum', required: true, description: 'Action category', sample: 'phone_call', enum_values: ['phone_call', 'sms', 'email', 'field_visit', 'demand_notice', 'legal_notice', 'settlement_offer'] },
+    { name: 'outcome', type: 'enum', required: true, description: 'Action outcome', sample: 'no_response', enum_values: ['contact_made', 'no_response', 'promise_to_pay', 'partial_payment', 'full_payment', 'dispute_raised', 'unreachable'] },
+    { name: 'recovered_amount', type: 'number', required: false, description: 'Amount recovered (INR)', sample: '0.00', min: 0 },
+    { name: 'agent_id', type: 'string', required: true, description: 'Collection agent who took the action', sample: 'AGT-001234', max_length: 16 },
+    { name: 'occurred_at', type: 'datetime', required: true, description: 'When the action was completed', sample: '2026-05-05T16:45:00Z' },
+  ],
+};
+
 const SCHEMAS_BY_ID: Record<string, ConnectorSchema> = {
   cbs_loan_book: CBS_LOAN_BOOK,
   core_insurance_policies: CORE_INSURANCE_POLICIES,
@@ -236,6 +272,8 @@ const SCHEMAS_BY_ID: Record<string, ConnectorSchema> = {
   aml_watchlist: AML_WATCHLIST,
   bureau_pull: BUREAU_PULL,
   ifrs9_stage_feed: IFRS9_STAGE_FEED,
+  branch_transactions: BRANCH_TRANSACTIONS,
+  collections_outbox: COLLECTIONS_OUTBOX,
 };
 
 // ─── Public read API ───────────────────────────────────────────────────

@@ -179,6 +179,25 @@ export const SEED_CONNECTORS: readonly ConnectorDef[] = [
     default_status: 'healthy',
     description: 'Daily stage 1/2/3 classification snapshot from IFRS 9 engine',
   },
+  // ─── M3.4 — Additional BIL connectors ────────────────────────────────
+  {
+    id: 'branch_transactions',
+    name: 'Branch Transactions Stream',
+    source_system: 'BRANCH',
+    type: 'kafka_stream',
+    schedule: 'continuous',
+    default_status: 'healthy',
+    description: 'Branch-level transaction events (cash deposit, withdrawal, transfer)',
+  },
+  {
+    id: 'collections_outbox',
+    name: 'Collections Outbox',
+    source_system: 'COLLECTION',
+    type: 'rest_api',
+    schedule: 'every 15 min',
+    default_status: 'healthy',
+    description: 'Collection-action outbox feed (call attempts, recovery actions)',
+  },
 ];
 
 const SEED_BY_ID = new Map<string, ConnectorDef>(SEED_CONNECTORS.map((c) => [c.id, c]));

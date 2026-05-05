@@ -39,9 +39,10 @@ describe('connector schema catalogue', () => {
     expect(() => assertSchemaCoverage(SEED_CONNECTORS)).not.toThrow();
   });
 
-  test('listSchemaConnectorIds returns all 8', () => {
+  test('listSchemaConnectorIds covers every seed connector', () => {
     const ids = listSchemaConnectorIds().sort();
     expect(ids).toEqual(SEED_CONNECTORS.map((s) => s.id).sort());
+    expect(ids.length).toBe(SEED_CONNECTORS.length); // currently 10 (M3.1 + M3.4)
   });
 
   test('every schema declares required header fields', () => {
@@ -347,7 +348,7 @@ describe('validateRecord', () => {
     }
   });
 
-  test('happy path covers all 8 connectors', () => {
+  test('happy path covers every seed connector', () => {
     const samples: Record<string, Record<string, unknown>> = {
       cbs_loan_book: {
         customer_id: 'CUST-100123', account_id: 'LN-9001234', product_type: 'home_loan',
@@ -384,6 +385,18 @@ describe('validateRecord', () => {
         customer_id: 'CUST-100123', stage: 1, pd: 0.012, lgd: 0.45,
         ead: 1250000, ecl: 6750, snapshot_date: '2026-04-30',
       },
+      branch_transactions: {
+        transaction_id: 'TXN-700001', customer_id: 'CUST-100123',
+        branch_code: 'BR-MUM-007', txn_type: 'cash_deposit',
+        amount: 5000, currency: 'INR',
+        occurred_at: '2026-05-05T14:23:00Z', channel: 'teller',
+      },
+      collections_outbox: {
+        action_id: 'COL-A-500001', case_id: 'CASE-200001',
+        customer_id: 'CUST-100123', action_type: 'phone_call',
+        outcome: 'no_response', agent_id: 'AGT-001234',
+        occurred_at: '2026-05-05T16:45:00Z',
+      },
     };
     for (const [id, rec] of Object.entries(samples)) {
       const r = validateRecord(id, rec);
@@ -410,7 +423,7 @@ describe('GET /v1/ingestion/connectors/:id/schema', () => {
     expect(r.status).toBe(403);
   });
 
-  test('all 8 connectors return 200', async () => {
+  test('every seed connector returns 200', async () => {
     const { app } = makeCsApp('admin');
     for (const s of SEED_CONNECTORS) {
       const r = await request(app).get(`/v1/ingestion/connectors/${s.id}/schema`).set(TH_BIL);
@@ -555,7 +568,7 @@ describe('No-regression: M3.1 ingestion routes still work', () => {
     const { app } = makeCsApp('admin');
     const r = await request(app).get('/v1/ingestion/connectors').set(TH_BIL);
     expect(r.status).toBe(200);
-    expect(r.body.body.total).toBe(8);
+    expect(r.body.body.total).toBe(10);
   });
 
   test('GET /v1/ingestion/connectors/:id still 200 (not shadowed by /schema)', async () => {
