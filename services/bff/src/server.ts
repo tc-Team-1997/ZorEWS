@@ -126,6 +126,11 @@ import {
   type OnboardingStore,
 } from './tenant_onboarding';
 import {
+  TenantBulkError,
+  applyBulkTenants,
+  parseTenantCsv,
+} from './tenant_bulk';
+import {
   ApiKeyError,
   defaultApiKeyStore,
   validateInput as validateApiKeyInput,
@@ -4287,6 +4292,50 @@ export function makeApp(deps: AppDeps = {}) {
    * non-empty. 409 envelope on duplicate. 501 envelope when the lookup
    * doesn't support mutations.
    */
+  /** POST /v1/tenants/bulk-import (T6 M2.3) — CSV-driven bulk creation.
+   *  Body: { csv: string, dry_run?: boolean }. Header row required:
+   *    tenant_id,name,vertical,channels_allowed
+   *  channels_allowed cells are `;`-separated. */
+  app.post(
+    '/v1/tenants/bulk-import',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { csv?: unknown; dry_run?: unknown };
+      if (typeof wrapper.csv !== 'string') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'csv body required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const rows = parseTenantCsv(wrapper.csv);
+        const summary = await applyBulkTenants(rows, tenantLookup, {
+          dry_run: wrapper.dry_run === true,
+        });
+        return res.json(wrapResponse(summary, ctx));
+      } catch (e) {
+        if (e instanceof TenantBulkError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   app.post('/v1/tenants', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
     const ctx = extractCtx(req, now);
     if (!tenantLookup.create) {
