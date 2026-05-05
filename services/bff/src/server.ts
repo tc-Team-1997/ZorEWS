@@ -214,6 +214,13 @@ import {
   type AlertAckStore,
 } from './alert_ack';
 import {
+  AutoAckError,
+  defaultAutoAckRuleStore,
+  evaluateAutoAck,
+  type AlertContext,
+  type AutoAckRuleStore,
+} from './alert_auto_ack';
+import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
@@ -429,6 +436,10 @@ export interface AppDeps {
    */
   alertAckStore?: AlertAckStore;
   /**
+   * Override for tests — alert auto-ack rule store (T6 M8.4).
+   */
+  autoAckRuleStore?: AutoAckRuleStore;
+  /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
    * (deterministic synthetic data per (tenant, customer, day)).
@@ -624,6 +635,7 @@ export function makeApp(deps: AppDeps = {}) {
   const pushTransport = deps.pushTransport ?? defaultPushTransport;
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
+  const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -1070,6 +1082,117 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  // ── Alert auto-ack threshold rules (T6 M8.4) ─────────────────────────
+  //
+  // Tenant-scoped policy: which alerts get auto-acked at receipt
+  // time? CRUD + an evaluate endpoint that the future alert-ingest
+  // path (M8.5) will call before persisting an alert.
+
+  /** GET /v1/alerts/auto-ack/rules — list rules. */
+  app.get(
+    '/v1/alerts/auto-ack/rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = autoAckRuleStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/alerts/auto-ack/rules — create rule. */
+  app.post(
+    '/v1/alerts/auto-ack/rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const rule = autoAckRuleStore.create(
+          req.tenant!.tenant_id,
+          inner,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(rule, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof AutoAckError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/alerts/auto-ack/rules/:rule_id — remove rule. */
+  app.delete(
+    '/v1/alerts/auto-ack/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const removed = autoAckRuleStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `auto-ack rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
+  /** POST /v1/alerts/auto-ack/evaluate body { bil_class, source_system?, tags? }
+   *  — return matching rule (if any). */
+  app.post(
+    '/v1/alerts/auto-ack/evaluate',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as AlertContext;
+      if (!wrapper || typeof wrapper !== 'object' || !isBilAlertClass(wrapper.bil_class)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'bil_class is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const rules = autoAckRuleStore.list(req.tenant!.tenant_id);
+      const match = evaluateAutoAck(rules, wrapper);
+      return res.json(
+        wrapResponse({ matched: match !== null, match }, ctx),
+      );
     },
   );
 
