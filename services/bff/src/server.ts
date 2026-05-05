@@ -330,6 +330,11 @@ import {
   type ModelType,
 } from './ai_model_registry';
 import {
+  AbTestError,
+  runAbTest,
+  type AbTestInput,
+} from './ai_model_ab_test';
+import {
   defaultPromotionEngine,
   isPromotionRequestStatus,
   PromotionError,
@@ -1571,6 +1576,48 @@ export function makeApp(deps: AppDeps = {}) {
   // Model registry + ad-hoc inference + metrics. Same RBAC as the
   // per-customer risk-profile route since inference returns a per-
   // customer score (analyst-level data class).
+
+  /** POST /v1/ai/models/ab-test (T6 M7.3) — score the same input
+   *  against TWO models and return both + a delta summary. */
+  app.post(
+    '/v1/ai/models/ab-test',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = runAbTest(
+          aiModelRegistry,
+          (inner ?? {}) as AbTestInput,
+          req.tenant!.tenant_id,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof AbTestError) {
+          if (e.code === 'unknown_model') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_model', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'inference_failed') {
+            return res.status(500).json(
+              wrapError({ code: 'EWS_500_inference_failed', message: e.message, severity: 'HIGH' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
 
   /** GET /v1/ai/models/types — enumerate the closed model-type set. */
   app.get(
