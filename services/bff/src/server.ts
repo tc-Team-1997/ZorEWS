@@ -2257,6 +2257,31 @@ export function makeApp(deps: AppDeps = {}) {
           created_by,
           now(),
         );
+        // T6 M16.6 — write audit event for the create.
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'scenario.create',
+              resource_type: 'scenario',
+              resource_id: preset.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                name: preset.name,
+                vertical: preset.regulator,
+                severity_tier: preset.severity,
+                shocks: preset.shocks,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow — preset created successfully; audit failure
+          // will surface via M15.2 chain check.
+        }
         return res.status(201).json(
           wrapResponse(preset, ctx, { code: 'EWS_201', message: 'Created' }),
         );
@@ -2287,6 +2312,9 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.preset_id ?? '';
+      const deleted_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      // T6 M16.6 — capture the preset for the audit metadata BEFORE delete.
+      const previous = customPresetStore.get(req.tenant!.tenant_id, id);
       const removed = customPresetStore.delete(req.tenant!.tenant_id, id);
       if (!removed) {
         return res.status(404).json(
@@ -2296,7 +2324,61 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+      // Write audit event for the delete.
+      try {
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: deleted_by,
+            actor_role: 'admin',
+            action: 'scenario.delete',
+            resource_type: 'scenario',
+            resource_id: id,
+            outcome: 'success',
+            severity: 'info',
+            metadata: previous
+              ? {
+                  previous_name: previous.name,
+                  previous_severity: previous.severity,
+                }
+              : {},
+          },
+          now(),
+        );
+      } catch {
+        // swallow
+      }
       return res.status(204).send();
+    },
+  );
+
+  /** GET /v1/scenarios/library/custom/:preset_id/history?limit=50 (T6 M16.6)
+   *  — slim audit-history view filtered to scenario events for this id. */
+  app.get(
+    '/v1/scenarios/library/custom/:preset_id/history',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const limitRaw = req.query.limit;
+      const limit =
+        typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
+      const out = auditTrailStore.list(req.tenant!.tenant_id, {
+        resource_type: 'scenario',
+        action: 'scenario.create,scenario.delete',
+        page_size: limit,
+      });
+      const items = out.items
+        .filter((e) => e.resource_id === id)
+        .map((e) => ({
+          event_id: e.event_id,
+          ts: e.ts,
+          actor_username: e.actor_username,
+          action: e.action,
+          metadata: e.metadata,
+        }));
+      return res.json(wrapResponse({ items, total: items.length, preset_id: id, limit }, ctx));
     },
   );
 

@@ -281,3 +281,93 @@ describe('M16.5 — custom presets resolve through diff', () => {
     expect(r.status).toBe(200);
   });
 });
+
+// ─── M16.6 — Scenario history (audit log) ────────────────────────────
+
+describe('M16.6 — scenario history', () => {
+  test('POST custom writes a scenario.create audit event', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app)
+      .post('/v1/scenarios/library/custom')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send(VALID);
+    const id = c.body.body.id;
+    // Read the slim history
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.status).toBe(200);
+    expect(h.body.body.total).toBe(1);
+    expect(h.body.body.items[0].action).toBe('scenario.create');
+    expect(h.body.body.items[0].actor_username).toBe('compliance.lead');
+    expect(h.body.body.items[0].metadata.name).toBe(VALID.name);
+  });
+
+  test('DELETE custom writes a scenario.delete audit event', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .delete(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'admin');
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.total).toBe(2);
+    const actions = h.body.body.items.map((x: { action: string }) => x.action).sort();
+    expect(actions).toEqual(['scenario.create', 'scenario.delete']);
+  });
+
+  test('history endpoint returns empty for never-touched preset id', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .get('/v1/scenarios/library/custom/custom_no_such/history')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.total).toBe(0);
+  });
+
+  test('history filters by preset_id (no leakage from other presets)', async () => {
+    const { app } = makeCustomApp('admin');
+    const c1 = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const c2 = await request(app)
+      .post('/v1/scenarios/library/custom')
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Other preset' });
+    const h1 = await request(app)
+      .get(`/v1/scenarios/library/custom/${c1.body.body.id}/history`)
+      .set(TH_BIL);
+    expect(h1.body.body.total).toBe(1);
+    expect(h1.body.body.items[0].metadata.name).toBe(VALID.name);
+    void c2;
+  });
+
+  test('cross-tenant: history isolated', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API');
+    expect(r.status).toBe(200);
+    expect(r.body.body.total).toBe(0);
+  });
+
+  test('history endpoint declared before /library/:id (literal /custom wins)', async () => {
+    const { app } = makeCustomApp('admin');
+    // GET /v1/scenarios/library/custom/<id>/history should NOT be matched
+    // by the `:id` route; it's a longer literal path.
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    // Library /:id route returns the preset shape, not the history shape
+    // Check the history route returns the history shape:
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body).toHaveProperty('items');
+    expect(h.body.body).toHaveProperty('preset_id');
+  });
+});
