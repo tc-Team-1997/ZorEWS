@@ -101,6 +101,11 @@ import {
   type BulkBreachScanInput,
 } from './customer_breach_scan';
 import {
+  WatchlistError,
+  defaultWatchlistStore,
+  type WatchlistStore,
+} from './customer_watchlist';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -536,6 +541,8 @@ export interface AppDeps {
   customRuleTemplateStore?: CustomRuleTemplateStore;
   /** Override for tests — per-tenant indicator threshold overrides (T6 M4.4). */
   thresholdOverrideStore?: ThresholdOverrideStore;
+  /** Override for tests — per-tenant customer watchlist (T6 M4.7). */
+  watchlistStore?: WatchlistStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -741,6 +748,7 @@ export function makeApp(deps: AppDeps = {}) {
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
   const customRuleTemplateStore = deps.customRuleTemplateStore ?? defaultCustomRuleTemplateStore;
   const thresholdOverrideStore = deps.thresholdOverrideStore ?? defaultThresholdOverrideStore;
+  const watchlistStore = deps.watchlistStore ?? defaultWatchlistStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -5271,6 +5279,150 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  // ── Customer watchlist (T6 M4.7) ────────────────────────────────────
+  //
+  // Tenant-managed list of high-risk customers. Composes with
+  // M4.6 bulk-scan: POST /scan re-evaluates every watched customer
+  // in one shot.
+
+  /** GET /v1/watchlist — list watched customers. */
+  app.get(
+    '/v1/watchlist',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = watchlistStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/watchlist — add a customer.
+   *  body { customer_id, reason, vertical? }. */
+  app.post(
+    '/v1/watchlist',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const added_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const entry = watchlistStore.add(req.tenant!.tenant_id, inner, added_by, now());
+        return res.status(201).json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof WatchlistError) {
+          if (e.code === 'already_watched' || e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/watchlist/scan — run M4.6 bulk breach scan against
+   *  every watched customer. Empty watchlist returns an empty
+   *  result envelope (not 4xx) since "no one to watch" is valid. */
+  app.post(
+    '/v1/watchlist/scan',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { vertical?: unknown };
+      const watched = watchlistStore.list(req.tenant!.tenant_id);
+      if (watched.length === 0) {
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              vertical: (wrapper.vertical as string) ?? 'all',
+              scanned_at: now().toISOString(),
+              watchlist_size: 0,
+              results: [],
+              aggregate: {
+                customer_count: 0,
+                red_total: 0,
+                orange_total: 0,
+                yellow_total: 0,
+                green_total: 0,
+                customers_with_red: 0,
+                customers_attention_required: 0,
+              },
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const result = scanCustomerBreachesBulk(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            customer_ids: watched.map((c) => c.customer_id),
+            vertical: wrapper.vertical as ScoringVertical | undefined,
+          } as BulkBreachScanInput,
+          thresholdOverrideStore,
+          now(),
+        );
+        // Annotate each row with the watchlist `reason` so the SPA
+        // can show "watched because: X" alongside the breach summary.
+        const reasonByCustomer = new Map(watched.map((c) => [c.customer_id, c.reason]));
+        const annotated = {
+          ...result,
+          watchlist_size: watched.length,
+          results: result.results.map((r) => ({
+            ...r,
+            reason: reasonByCustomer.get(r.customer_id) ?? null,
+          })),
+        };
+        return res.json(wrapResponse(annotated, ctx));
+      } catch (e) {
+        if (e instanceof BreachScanError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/watchlist/:customer_id — remove. */
+  app.delete(
+    '/v1/watchlist/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.customer_id ?? '';
+      const ok = watchlistStore.remove(req.tenant!.tenant_id, id);
+      if (!ok) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_customer', message: `customer ${id} not on watchlist`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 
