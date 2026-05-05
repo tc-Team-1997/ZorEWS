@@ -90,6 +90,11 @@ import {
   diffScenariosByIds,
 } from './scenario_diff';
 import {
+  CustomPresetError,
+  defaultCustomPresetStore,
+  type CustomPresetStore,
+} from './scenario_custom';
+import {
   BulkRunError,
   resolveBulkInput,
   runBulkScenarios,
@@ -440,6 +445,11 @@ export interface AppDeps {
    */
   autoAckRuleStore?: AutoAckRuleStore;
   /**
+   * Override for tests — per-tenant custom scenario preset store
+   * (T6 M16.4).
+   */
+  customPresetStore?: CustomPresetStore;
+  /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
    * (deterministic synthetic data per (tenant, customer, day)).
@@ -636,6 +646,7 @@ export function makeApp(deps: AppDeps = {}) {
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
+  const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -2071,6 +2082,84 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Custom user-defined scenario presets (T6 M16.4) ──────────────────
+  // Declared BEFORE /library/:id so the literal "custom" segment wins.
+
+  /** GET /v1/scenarios/library/custom — list custom presets for tenant. */
+  app.get(
+    '/v1/scenarios/library/custom',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = customPresetStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/scenarios/library/custom — create custom preset. */
+  app.post(
+    '/v1/scenarios/library/custom',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const preset = customPresetStore.create(
+          req.tenant!.tenant_id,
+          inner,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(preset, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomPresetError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/scenarios/library/custom/:preset_id — remove custom preset. */
+  app.delete(
+    '/v1/scenarios/library/custom/:preset_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const removed = customPresetStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `custom preset ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
   /** GET /v1/scenarios/library/:id — single preset. 404 EWS_404_unknown_preset. */
   app.get(
     '/v1/scenarios/library/:id',
@@ -2186,6 +2275,12 @@ export function makeApp(deps: AppDeps = {}) {
       }
     },
   );
+
+  // ── Custom user-defined scenario presets (T6 M16.4) ──────────────────
+  //
+  // Per-tenant CRUD for user-authored scenario presets. Same shape
+  // as M16.1 ScenarioPreset so M16.2 bulk-run + M16.3 diff work
+  // unchanged when a custom id is passed in.
 
   app.get('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
     const env = extractCtx(req, now);
