@@ -6,6 +6,7 @@ import request from 'supertest';
 import {
   InMemoryNotificationPreferenceStore,
   PreferenceError,
+  isInQuietHours,
 } from '../src/notification_preferences';
 import { makeApp } from '../src/server';
 import { StaticSource } from '../src/source';
@@ -309,5 +310,150 @@ describe('Tenant defaults (M10.6)', () => {
       .set(TH_BIL)
       .send({ email: false });
     expect(r.status).toBe(403);
+  });
+});
+
+// ─── M10.7 — Quiet hours per-user ────────────────────────────────────
+
+describe('isInQuietHours', () => {
+  test('non-wrap window: 9-17 includes 12 but not 8/17', () => {
+    expect(isInQuietHours({ start_hour: 9, end_hour: 17 }, new Date('2026-05-06T12:00Z'))).toBe(true);
+    expect(isInQuietHours({ start_hour: 9, end_hour: 17 }, new Date('2026-05-06T08:00Z'))).toBe(false);
+    expect(isInQuietHours({ start_hour: 9, end_hour: 17 }, new Date('2026-05-06T17:00Z'))).toBe(false);
+  });
+
+  test('wrap-around window: 22-7 includes 23 + 0 + 6 but not 8 + 21', () => {
+    expect(isInQuietHours({ start_hour: 22, end_hour: 7 }, new Date('2026-05-06T23:00Z'))).toBe(true);
+    expect(isInQuietHours({ start_hour: 22, end_hour: 7 }, new Date('2026-05-06T00:00Z'))).toBe(true);
+    expect(isInQuietHours({ start_hour: 22, end_hour: 7 }, new Date('2026-05-06T06:00Z'))).toBe(true);
+    expect(isInQuietHours({ start_hour: 22, end_hour: 7 }, new Date('2026-05-06T08:00Z'))).toBe(false);
+    expect(isInQuietHours({ start_hour: 22, end_hour: 7 }, new Date('2026-05-06T21:00Z'))).toBe(false);
+  });
+
+  test('start === end: only that single hour matches', () => {
+    expect(isInQuietHours({ start_hour: 12, end_hour: 12 }, new Date('2026-05-06T12:00Z'))).toBe(true);
+    expect(isInQuietHours({ start_hour: 12, end_hour: 12 }, new Date('2026-05-06T13:00Z'))).toBe(false);
+  });
+});
+
+describe('Quiet hours store + isEnabled', () => {
+  test('setQuietHours persists + get returns it', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    expect(s.get('BIL', 'alice').quiet_hours).toEqual({ start_hour: 22, end_hour: 7 });
+  });
+
+  test('setQuietHours(null) clears', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    s.setQuietHours('BIL', 'alice', null, NOW);
+    expect(s.get('BIL', 'alice').quiet_hours).toBeNull();
+  });
+
+  test('isEnabled with asOf inside window: email/sms/push muted', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    const inWindow = new Date('2026-05-06T23:00Z');
+    expect(s.isEnabled('BIL', 'alice', 'email', inWindow)).toBe(false);
+    expect(s.isEnabled('BIL', 'alice', 'sms', inWindow)).toBe(false);
+    expect(s.isEnabled('BIL', 'alice', 'push', inWindow)).toBe(false);
+  });
+
+  test('webhook bypasses quiet hours (transactional)', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    const inWindow = new Date('2026-05-06T23:00Z');
+    expect(s.isEnabled('BIL', 'alice', 'webhook', inWindow)).toBe(true);
+  });
+
+  test('isEnabled outside the window: all 4 channels open', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    const outOfWindow = new Date('2026-05-06T12:00Z');
+    expect(s.isEnabled('BIL', 'alice', 'email', outOfWindow)).toBe(true);
+    expect(s.isEnabled('BIL', 'alice', 'sms', outOfWindow)).toBe(true);
+  });
+
+  test('isEnabled without asOf is back-compat (no quiet-hours check)', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setQuietHours('BIL', 'alice', { start_hour: 0, end_hour: 23 }, NOW);
+    // Without asOf, the QH check is skipped — channel toggles only.
+    expect(s.isEnabled('BIL', 'alice', 'email')).toBe(true);
+  });
+
+  test('user channel disable still wins over QH-open hour', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.update('BIL', 'alice', { email: false }, NOW);
+    s.setQuietHours('BIL', 'alice', { start_hour: 22, end_hour: 7 }, NOW);
+    const out = new Date('2026-05-06T12:00Z');
+    expect(s.isEnabled('BIL', 'alice', 'email', out)).toBe(false);
+  });
+});
+
+describe('PUT /v1/notifications/preferences/me/quiet-hours', () => {
+  test('set window 200', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 22, end_hour: 7 });
+    expect(r.status).toBe(200);
+    expect(r.body.body.quiet_hours).toEqual({ start_hour: 22, end_hour: 7 });
+  });
+
+  test('clear via empty body {}', async () => {
+    const { app } = makePrefApp('admin');
+    await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 22, end_hour: 7 });
+    const r = await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(200);
+    expect(r.body.body.quiet_hours).toBeNull();
+  });
+
+  test('non-integer hour → 400', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 22.5, end_hour: 7 });
+    expect(r.status).toBe(400);
+  });
+
+  test('out-of-range hour → 400', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 22, end_hour: 24 });
+    expect(r.status).toBe(400);
+  });
+
+  test('GET /me reflects the quiet_hours field', async () => {
+    const { app } = makePrefApp('admin');
+    await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 21, end_hour: 6 });
+    const r = await request(app).get('/v1/notifications/preferences/me').set(TH_BIL);
+    expect(r.body.body.quiet_hours).toEqual({ start_hour: 21, end_hour: 6 });
+  });
+
+  test('cross-user via X-APEX-USER: bob does not inherit alice\'s quiet hours', async () => {
+    const { app } = makePrefApp('admin');
+    await request(app)
+      .put('/v1/notifications/preferences/me/quiet-hours')
+      .set(TH_BIL)
+      .send({ start_hour: 22, end_hour: 7 });
+    const r = await request(app)
+      .get('/v1/notifications/preferences/me')
+      .set('X-Tenant-ID', 'BIL')
+      .set('X-Channel', 'API')
+      .set('X-APEX-USER', 'bob');
+    expect(r.body.body.quiet_hours).toBeNull();
   });
 });

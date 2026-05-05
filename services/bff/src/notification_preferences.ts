@@ -21,6 +21,13 @@ export const VALID_CHANNELS: readonly Channel[] = [
   'webhook',
 ] as const;
 
+/** T6 M10.7 — quiet hours window. Hours are UTC 0-23.
+ *  start === end means a 1-hour window starting at start_hour. */
+export interface QuietHours {
+  start_hour: number;
+  end_hour: number;
+}
+
 export interface ChannelPreference {
   tenant_id: string;
   username: string;
@@ -30,6 +37,9 @@ export interface ChannelPreference {
   webhook: boolean;
   /** ISO timestamp of last update — null when defaults still apply. */
   updated_at: string | null;
+  /** Per-user mute window. Null = no quiet hours. Webhook bypasses
+   *  (transactional/system channels). */
+  quiet_hours: QuietHours | null;
 }
 
 export class PreferenceError extends Error {
@@ -48,6 +58,40 @@ function defaultPref(tenant_id: string, username: string): ChannelPreference {
     push: true,
     webhook: true,
     updated_at: null,
+    quiet_hours: null,
+  };
+}
+
+/** Returns true iff `asOf.getUTCHours()` falls inside the quiet
+ *  window. Handles wrap-around (e.g. 22→07 spans midnight). */
+export function isInQuietHours(qh: QuietHours, asOf: Date): boolean {
+  const h = asOf.getUTCHours();
+  const { start_hour: s, end_hour: e } = qh;
+  if (s === e) return h === s;
+  if (s < e) return h >= s && h < e;
+  // Wrap (e.g. start=22, end=7 → 22,23,0,1,…,6 are quiet)
+  return h >= s || h < e;
+}
+
+function validateQuietHoursPatch(input: unknown): QuietHours | null {
+  if (input === null) return null;
+  if (!input || typeof input !== 'object') {
+    throw new PreferenceError('invalid_input', 'quiet_hours must be an object or null');
+  }
+  const i = input as Record<string, unknown>;
+  for (const k of ['start_hour', 'end_hour'] as const) {
+    if (
+      typeof i[k] !== 'number' ||
+      !Number.isInteger(i[k]) ||
+      (i[k] as number) < 0 ||
+      (i[k] as number) > 23
+    ) {
+      throw new PreferenceError('invalid_input', `${k} must be an integer 0-23`);
+    }
+  }
+  return {
+    start_hour: i.start_hour as number,
+    end_hour: i.end_hour as number,
   };
 }
 
@@ -102,9 +146,23 @@ export interface NotificationPreferenceStore {
   ): ChannelPreference;
   /** Pure helper for downstream dispatch logic — returns true iff the
    *  channel is enabled. Resolution order: user override → tenant
-   *  default → hardcoded true (never-touched). */
-  isEnabled(tenant_id: string, username: string, channel: Channel): boolean;
+   *  default → hardcoded true (never-touched). When `asOf` is given
+   *  and the user has quiet hours that contain that hour, the channel
+   *  is also muted (webhook bypasses — transactional). */
+  isEnabled(
+    tenant_id: string,
+    username: string,
+    channel: Channel,
+    asOf?: Date,
+  ): boolean;
   reset(tenant_id: string, username: string): boolean;
+  /** T6 M10.7 — set/clear the user's quiet-hours window. */
+  setQuietHours(
+    tenant_id: string,
+    username: string,
+    qh: QuietHours | null,
+    now: Date,
+  ): ChannelPreference;
 
   // M10.6 — tenant defaults
   getTenantDefault(tenant_id: string): TenantPreferenceDefault;
@@ -155,6 +213,7 @@ export class InMemoryNotificationPreferenceStore implements NotificationPreferen
         push: td.push,
         webhook: td.webhook,
         updated_at: null,
+        quiet_hours: null,
       };
     }
     return defaultPref(tenant_id, username);
@@ -180,12 +239,39 @@ export class InMemoryNotificationPreferenceStore implements NotificationPreferen
     return next;
   }
 
-  isEnabled(tenant_id: string, username: string, channel: Channel): boolean {
+  isEnabled(
+    tenant_id: string,
+    username: string,
+    channel: Channel,
+    asOf?: Date,
+  ): boolean {
     if (!VALID_CHANNELS.includes(channel)) return false;
-    // User override takes precedence (this.get already merges through
-    // tenant default for never-touched users).
     const pref = this.get(tenant_id, username);
-    return pref[channel];
+    if (!pref[channel]) return false;
+    // M10.7 quiet-hours: webhook channels bypass (transactional/system).
+    if (asOf && pref.quiet_hours && channel !== 'webhook') {
+      if (isInQuietHours(pref.quiet_hours, asOf)) return false;
+    }
+    return true;
+  }
+
+  setQuietHours(
+    tenant_id: string,
+    username: string,
+    qh: QuietHours | null,
+    now: Date,
+  ): ChannelPreference {
+    if (!tenant_id || !username) {
+      throw new PreferenceError('invalid_input', 'tenant_id and username required');
+    }
+    const current = this.get(tenant_id, username);
+    const next: ChannelPreference = {
+      ...current,
+      quiet_hours: qh,
+      updated_at: now.toISOString(),
+    };
+    this.map.set(this.k(tenant_id, username), next);
+    return next;
   }
 
   reset(tenant_id: string, username: string): boolean {

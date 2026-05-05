@@ -3583,6 +3583,67 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** PUT /v1/notifications/preferences/me/quiet-hours (T6 M10.7) —
+   *  set or clear the caller's mute window. Body { start_hour, end_hour }
+   *  to set, or `null` to clear. */
+  app.put(
+    '/v1/notifications/preferences/me/quiet-hours',
+    requireTenantMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        // Caller can send `{ start_hour, end_hour }` to set, or `null`
+        // (or `{}`) to clear. Treat empty object as clear too — UX convention.
+        let qh: { start_hour: number; end_hour: number } | null = null;
+        if (
+          inner !== null &&
+          typeof inner === 'object' &&
+          'start_hour' in (inner as object)
+        ) {
+          const i = inner as { start_hour: unknown; end_hour: unknown };
+          for (const k of ['start_hour', 'end_hour'] as const) {
+            if (
+              typeof i[k] !== 'number' ||
+              !Number.isInteger(i[k]) ||
+              (i[k] as number) < 0 ||
+              (i[k] as number) > 23
+            ) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: `${k} must be an integer 0-23`, severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+          }
+          qh = {
+            start_hour: i.start_hour as number,
+            end_hour: i.end_hour as number,
+          };
+        }
+        const pref = notificationPreferenceStore.setQuietHours(
+          req.tenant!.tenant_id,
+          callerUsername(req),
+          qh,
+          now(),
+        );
+        return res.json(wrapResponse(pref, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** POST /v1/notifications/preferences/me/reset — back to all-enabled defaults. */
   app.post(
     '/v1/notifications/preferences/me/reset',
