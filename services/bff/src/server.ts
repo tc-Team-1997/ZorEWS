@@ -8580,6 +8580,30 @@ export function makeApp(deps: AppDeps = {}) {
           created_by,
           now(),
         );
+        // T6 M5.8 — audit event for the create.
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'rule.create',
+              resource_type: 'rule',
+              resource_id: template.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                name: template.name,
+                vertical: template.vertical,
+                category: template.category,
+                recommended_severity: template.recommended_severity,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
         return res.status(201).json(
           wrapResponse(template, ctx, { code: 'EWS_201', message: 'Created' }),
         );
@@ -8602,7 +8626,77 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** DELETE /v1/rules/templates/custom/:template_id — remove custom template. */
+  /** PUT /v1/rules/templates/custom/:template_id (T6 M5.8) — replace
+   *  mutable fields. Writes rule.update audit event with metadata. */
+  app.put(
+    '/v1/rules/templates/custom/:template_id',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      // Capture previous for audit metadata
+      const previous = customRuleTemplateStore.get(req.tenant!.tenant_id, id);
+      try {
+        const next = customRuleTemplateStore.update(
+          req.tenant!.tenant_id,
+          id,
+          inner,
+          updated_by,
+          now(),
+        );
+        // Write rule.update audit event
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'rule.update',
+              resource_type: 'rule',
+              resource_id: id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_name: previous?.name ?? null,
+                new_name: next.name,
+                previous_severity: previous?.recommended_severity ?? null,
+                new_severity: next.recommended_severity,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(next, ctx));
+      } catch (e) {
+        if (e instanceof CustomRuleTemplateError) {
+          if (e.code === 'unknown_template') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_template', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/rules/templates/custom/:template_id — remove custom template.
+   *  T6 M5.8 — writes rule.delete audit event. */
   app.delete(
     '/v1/rules/templates/custom/:template_id',
     requireTenantMw,
@@ -8610,6 +8704,8 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.template_id ?? '';
+      const deleted_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const previous = customRuleTemplateStore.get(req.tenant!.tenant_id, id);
       const removed = customRuleTemplateStore.delete(req.tenant!.tenant_id, id);
       if (!removed) {
         return res.status(404).json(
@@ -8619,7 +8715,63 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+      // Audit
+      try {
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: deleted_by,
+            actor_role: 'admin',
+            action: 'rule.delete',
+            resource_type: 'rule',
+            resource_id: id,
+            outcome: 'success',
+            severity: 'info',
+            metadata: previous
+              ? {
+                  previous_name: previous.name,
+                  previous_severity: previous.recommended_severity,
+                }
+              : {},
+          },
+          now(),
+        );
+      } catch {
+        // swallow
+      }
       return res.status(204).send();
+    },
+  );
+
+  /** GET /v1/rules/templates/custom/:template_id/history?limit=50 (T6 M5.8)
+   *  — slim audit-history view filtered to rule events for this id. */
+  app.get(
+    '/v1/rules/templates/custom/:template_id/history',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const limitRaw = req.query.limit;
+      const limit =
+        typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
+      const out = auditTrailStore.list(req.tenant!.tenant_id, {
+        resource_type: 'rule',
+        action: 'rule.create,rule.update,rule.delete',
+        page_size: limit,
+      });
+      const items = out.items
+        .filter((e) => e.resource_id === id)
+        .map((e) => ({
+          event_id: e.event_id,
+          ts: e.ts,
+          actor_username: e.actor_username,
+          action: e.action,
+          metadata: e.metadata,
+        }));
+      return res.json(
+        wrapResponse({ items, total: items.length, template_id: id, limit }, ctx),
+      );
     },
   );
 

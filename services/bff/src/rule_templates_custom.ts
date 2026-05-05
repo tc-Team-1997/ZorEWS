@@ -175,6 +175,15 @@ export interface CustomRuleTemplateStore {
     created_by: string,
     now: Date,
   ): RuleTemplate;
+  /** Replace mutable fields. id is immutable. Throws unknown_template
+   *  on miss, invalid_input on a bad patch shape. */
+  update(
+    tenant_id: string,
+    template_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): RuleTemplate;
   delete(tenant_id: string, template_id: string): boolean;
 }
 
@@ -230,6 +239,45 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
     arr.push(template);
     this.perTenant.set(tenant_id, arr);
     return template;
+  }
+
+  update(
+    tenant_id: string,
+    template_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): RuleTemplate {
+    if (!updated_by || !updated_by.trim()) {
+      throw new CustomRuleTemplateError('invalid_input', 'updated_by required');
+    }
+    void now;
+    const arr = this.perTenant.get(tenant_id);
+    const idx = arr ? arr.findIndex((t) => t.id === template_id) : -1;
+    if (!arr || idx < 0) {
+      throw new CustomRuleTemplateError(
+        'unknown_template',
+        `custom template ${template_id} not found`,
+      );
+    }
+    const valid = validate(input);
+    const cur = arr[idx]!;
+    const next: RuleTemplate = {
+      // id is immutable
+      id: cur.id,
+      name: valid.name,
+      description: valid.description,
+      vertical: valid.vertical,
+      category: valid.category,
+      condition_pseudocode: valid.condition_pseudocode,
+      recommended_severity: valid.recommended_severity,
+      recommended_actions: valid.recommended_actions,
+      supporting_indicators: valid.supporting_indicators,
+      // Preserve creator's source_doc unless caller supplies a new one
+      source_doc: valid.source_doc ?? cur.source_doc,
+    };
+    arr[idx] = next;
+    return next;
   }
 
   delete(tenant_id: string, template_id: string): boolean {

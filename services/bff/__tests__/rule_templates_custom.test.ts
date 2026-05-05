@@ -334,3 +334,136 @@ describe('M5.7 — custom templates resolve through downstream consumers', () =>
     expect(r.status).toBe(200);
   });
 });
+
+// ─── M5.8 — PUT (edit) + audit history ───────────────────────────────
+
+describe('M5.8 — custom template PUT + audit history', () => {
+  test('PUT replaces mutable fields and preserves id', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Updated rule name', recommended_severity: 'critical' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.id).toBe(id);
+    expect(r.body.body.name).toBe('Updated rule name');
+    expect(r.body.body.recommended_severity).toBe('critical');
+  });
+
+  test('PUT writes rule.update audit event', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send({ ...VALID, name: 'Renamed' });
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${id}/history`)
+      .set(TH_BIL);
+    const update = h.body.body.items.find(
+      (x: { action: string }) => x.action === 'rule.update',
+    );
+    expect(update).toBeDefined();
+    expect(update.actor_username).toBe('compliance.lead');
+    expect(update.metadata.previous_name).toBe(VALID.name);
+    expect(update.metadata.new_name).toBe('Renamed');
+  });
+
+  test('POST writes rule.create audit event', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app)
+      .post('/v1/rules/templates/custom')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'admin')
+      .send(VALID);
+    const id = c.body.body.id;
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.total).toBe(1);
+    expect(h.body.body.items[0].action).toBe('rule.create');
+    expect(h.body.body.items[0].metadata.name).toBe(VALID.name);
+  });
+
+  test('DELETE writes rule.delete audit event', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app).delete(`/v1/rules/templates/custom/${id}`).set(TH_BIL);
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.total).toBe(2); // create + delete
+    const actions = h.body.body.items.map((x: { action: string }) => x.action).sort();
+    expect(actions).toEqual(['rule.create', 'rule.delete']);
+  });
+
+  test('PUT on unknown → 404', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .put('/v1/rules/templates/custom/tpl_custom_no_such')
+      .set(TH_BIL)
+      .send(VALID);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_template');
+  });
+
+  test('PUT validation: bad severity → 400', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, recommended_severity: 'extreme' });
+    expect(r.status).toBe(400);
+  });
+
+  test('cross-tenant: BIL caller cannot PUT BANK_DEMO\'s template', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/rules/templates/custom/${id}`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send(VALID);
+    expect(r.status).toBe(404);
+  });
+
+  test('history empty for never-touched id', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .get('/v1/rules/templates/custom/tpl_custom_no_such/history')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.total).toBe(0);
+  });
+
+  test('history filters by template_id (no leakage from other templates)', async () => {
+    const { app } = makeTplApp('admin');
+    const c1 = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    await request(app)
+      .post('/v1/rules/templates/custom')
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Other rule' });
+    const h = await request(app)
+      .get(`/v1/rules/templates/custom/${c1.body.body.id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.total).toBe(1);
+    expect(h.body.body.items[0].metadata.name).toBe(VALID.name);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeTplApp('case_owner');
+    const r = await request(app)
+      .put('/v1/rules/templates/custom/anything')
+      .set(TH_BIL)
+      .send(VALID);
+    expect(r.status).toBe(403);
+  });
+});
