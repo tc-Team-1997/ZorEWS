@@ -112,6 +112,16 @@ function validate(input: unknown): CustomPresetInput {
 
 // ─── Store ────────────────────────────────────────────────────────────
 
+/** T6 M16.10 — version snapshot. Captured on create + on every
+ *  successful update (snapshot of the PRE-update state). Cap 20
+ *  per preset; oldest evicted on overflow. */
+export interface PresetVersion {
+  version: number; // 1-based
+  captured_at: string;
+  captured_by: string;
+  snapshot: ScenarioPreset;
+}
+
 export interface CustomPresetStore {
   list(tenant_id: string): ScenarioPreset[];
   get(tenant_id: string, preset_id: string): ScenarioPreset | null;
@@ -127,10 +137,55 @@ export interface CustomPresetStore {
     now: Date,
   ): ScenarioPreset;
   delete(tenant_id: string, preset_id: string): boolean;
+  // M16.10 — version history
+  listVersions(tenant_id: string, preset_id: string): PresetVersion[];
+  restoreVersion(
+    tenant_id: string,
+    preset_id: string,
+    version: number,
+    restored_by: string,
+    now: Date,
+  ): { preset: ScenarioPreset; restored_from_version: number };
 }
+
+const VERSION_CAP = 20;
 
 export class InMemoryCustomPresetStore implements CustomPresetStore {
   private readonly perTenant = new Map<string, ScenarioPreset[]>();
+  // (tenant, preset_id) → versions[] (oldest-first; newest at end)
+  private readonly versions = new Map<string, PresetVersion[]>();
+
+  private vk(tenant_id: string, preset_id: string): string {
+    return `${tenant_id}::${preset_id}`;
+  }
+
+  private pushVersion(
+    tenant_id: string,
+    preset_id: string,
+    snapshot: ScenarioPreset,
+    captured_by: string,
+    now: Date,
+  ): void {
+    const key = this.vk(tenant_id, preset_id);
+    const arr = this.versions.get(key) ?? [];
+    // Monotonic — derive from the last entry, not arr.length, so
+    // numbers stay stable after the cap evicts oldest entries.
+    const last = arr[arr.length - 1];
+    const next: PresetVersion = {
+      version: last ? last.version + 1 : 1,
+      captured_at: now.toISOString(),
+      captured_by,
+      snapshot,
+    };
+    arr.push(next);
+    if (arr.length > VERSION_CAP) {
+      // Evict oldest. Note: version numbers stay stable (the v1
+      // snapshot is gone but later snapshots keep their numbers —
+      // 1-based monotonic, not array-index dependent).
+      arr.splice(0, arr.length - VERSION_CAP);
+    }
+    this.versions.set(key, arr);
+  }
 
   list(tenant_id: string): ScenarioPreset[] {
     return [...(this.perTenant.get(tenant_id) ?? [])];
@@ -175,6 +230,8 @@ export class InMemoryCustomPresetStore implements CustomPresetStore {
     }
     arr.push(preset);
     this.perTenant.set(tenant_id, arr);
+    // M16.10 — capture v1 snapshot on create
+    this.pushVersion(tenant_id, preset.id, preset, created_by.trim(), now);
     return preset;
   }
 
@@ -212,7 +269,56 @@ export class InMemoryCustomPresetStore implements CustomPresetStore {
       source_doc: valid.source_doc ?? cur.source_doc,
     };
     arr[idx] = next;
+    // M16.10 — push the NEW state as the next version. (We chose
+    // post-state snapshots so version_n always equals "the state at
+    // version n", not "the state before version n".)
+    this.pushVersion(tenant_id, preset_id, next, updated_by.trim(), now);
     return next;
+  }
+
+  listVersions(tenant_id: string, preset_id: string): PresetVersion[] {
+    return [...(this.versions.get(this.vk(tenant_id, preset_id)) ?? [])];
+  }
+
+  restoreVersion(
+    tenant_id: string,
+    preset_id: string,
+    version: number,
+    restored_by: string,
+    now: Date,
+  ): { preset: ScenarioPreset; restored_from_version: number } {
+    if (!restored_by || !restored_by.trim()) {
+      throw new CustomPresetError('invalid_input', 'restored_by required');
+    }
+    if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+      throw new CustomPresetError('invalid_input', 'version must be a positive integer');
+    }
+    const arr = this.perTenant.get(tenant_id);
+    const idx = arr ? arr.findIndex((p) => p.id === preset_id) : -1;
+    if (!arr || idx < 0) {
+      throw new CustomPresetError(
+        'unknown_preset',
+        `custom preset ${preset_id} not found`,
+      );
+    }
+    const versions = this.versions.get(this.vk(tenant_id, preset_id)) ?? [];
+    const target = versions.find((v) => v.version === version);
+    if (!target) {
+      throw new CustomPresetError(
+        'unknown_version',
+        `version ${version} not found (may have been evicted; cap=${VERSION_CAP})`,
+      );
+    }
+    // Apply the snapshot back as the live state. Push a NEW version
+    // so the restore itself is recorded in history.
+    const restored: ScenarioPreset = {
+      ...target.snapshot,
+      // id is immutable — preserve current id (defensive; should match anyway)
+      id: arr[idx]!.id,
+    };
+    arr[idx] = restored;
+    this.pushVersion(tenant_id, preset_id, restored, restored_by.trim(), now);
+    return { preset: restored, restored_from_version: version };
   }
 
   delete(tenant_id: string, preset_id: string): boolean {

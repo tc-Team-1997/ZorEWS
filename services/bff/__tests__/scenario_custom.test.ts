@@ -677,3 +677,281 @@ describe('POST /v1/scenarios/library/custom/bulk-clone-from-library', () => {
     expect(r.status).toBe(201);
   });
 });
+
+// ─── M16.10 — Preset versioning + restore ────────────────────────────
+
+describe('M16.10 — version snapshots (store)', () => {
+  test('create captures v1', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const versions = s.listVersions('BIL', p.id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]!.version).toBe(1);
+    expect(versions[0]!.captured_by).toBe('admin');
+    expect(versions[0]!.snapshot.name).toBe(VALID.name);
+  });
+
+  test('update appends a new version with post-state snapshot', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    s.update('BIL', p.id, { ...VALID, name: 'Renamed' }, 'lead', NOW);
+    const versions = s.listVersions('BIL', p.id);
+    expect(versions).toHaveLength(2);
+    expect(versions[0]!.snapshot.name).toBe(VALID.name);
+    expect(versions[1]!.snapshot.name).toBe('Renamed');
+    expect(versions[1]!.captured_by).toBe('lead');
+  });
+
+  test('restoreVersion applies prior snapshot and pushes a new history entry', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    s.update('BIL', p.id, { ...VALID, name: 'Renamed' }, 'lead', NOW);
+    const out = s.restoreVersion('BIL', p.id, 1, 'admin', NOW);
+    expect(out.restored_from_version).toBe(1);
+    expect(out.preset.name).toBe(VALID.name);
+    // Live state reflects the restore
+    expect(s.get('BIL', p.id)?.name).toBe(VALID.name);
+    // History grew by one (v1 + Renamed + restored = 3)
+    expect(s.listVersions('BIL', p.id)).toHaveLength(3);
+  });
+
+  test('restoreVersion preserves immutable id', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    s.update('BIL', p.id, { ...VALID, name: 'v2' }, 'admin', NOW);
+    const out = s.restoreVersion('BIL', p.id, 1, 'admin', NOW);
+    expect(out.preset.id).toBe(p.id);
+  });
+
+  test('restoreVersion: unknown_preset', () => {
+    const s = new InMemoryCustomPresetStore();
+    expect(() => s.restoreVersion('BIL', 'custom_nope', 1, 'admin', NOW)).toThrow(
+      /not found/,
+    );
+  });
+
+  test('restoreVersion: unknown_version', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    try {
+      s.restoreVersion('BIL', p.id, 99, 'admin', NOW);
+      fail('expected throw');
+    } catch (e) {
+      expect((e as CustomPresetError).code).toBe('unknown_version');
+    }
+  });
+
+  test('restoreVersion: invalid version arg', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    expect(() => s.restoreVersion('BIL', p.id, 0, 'admin', NOW)).toThrow(/version/);
+    expect(() => s.restoreVersion('BIL', p.id, -1, 'admin', NOW)).toThrow(/version/);
+    expect(() => s.restoreVersion('BIL', p.id, 1.5, 'admin', NOW)).toThrow(/version/);
+  });
+
+  test('restoreVersion: empty restored_by rejected', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    expect(() => s.restoreVersion('BIL', p.id, 1, '   ', NOW)).toThrow(/restored_by/);
+  });
+
+  test('cross-tenant: BANK_DEMO cannot see BIL versions', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    expect(s.listVersions('BANK_DEMO', p.id)).toEqual([]);
+    expect(() => s.restoreVersion('BANK_DEMO', p.id, 1, 'admin', NOW)).toThrow(
+      /not found/,
+    );
+  });
+
+  test('20-version cap evicts oldest snapshots', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW); // v1
+    // 22 updates → 23 total snapshots, capped at 20
+    for (let i = 2; i <= 23; i++) {
+      s.update('BIL', p.id, { ...VALID, name: `v${i}` }, 'admin', NOW);
+    }
+    const versions = s.listVersions('BIL', p.id);
+    expect(versions).toHaveLength(20);
+    // Oldest preserved should be v4 (1,2,3 evicted)
+    expect(versions[0]!.version).toBe(4);
+    expect(versions[versions.length - 1]!.version).toBe(23);
+  });
+
+  test('after eviction, restore of evicted version raises unknown_version', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    for (let i = 2; i <= 23; i++) {
+      s.update('BIL', p.id, { ...VALID, name: `v${i}` }, 'admin', NOW);
+    }
+    try {
+      s.restoreVersion('BIL', p.id, 1, 'admin', NOW);
+      fail('expected throw');
+    } catch (e) {
+      expect((e as CustomPresetError).code).toBe('unknown_version');
+    }
+  });
+});
+
+describe('M16.10 — versioning routes', () => {
+  test('GET /versions returns v1 after create', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const v = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions`)
+      .set(TH_BIL);
+    expect(v.status).toBe(200);
+    expect(v.body.body.total).toBe(1);
+    expect(v.body.body.preset_id).toBe(id);
+    expect(v.body.body.items[0].version).toBe(1);
+    expect(v.body.body.items[0].snapshot.name).toBe(VALID.name);
+  });
+
+  test('GET /versions grows after PUT', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Renamed' });
+    const v = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions`)
+      .set(TH_BIL);
+    expect(v.body.body.total).toBe(2);
+    expect(v.body.body.items[1].snapshot.name).toBe('Renamed');
+  });
+
+  test('GET /versions on unknown preset → 404', async () => {
+    const { app } = makeCustomApp('admin');
+    const v = await request(app)
+      .get('/v1/scenarios/library/custom/custom_no_such/versions')
+      .set(TH_BIL);
+    expect(v.status).toBe(404);
+    expect(v.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('POST /restore/:version rolls live state back', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Renamed' });
+    const r = await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/1`)
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.restored_from_version).toBe(1);
+    expect(r.body.body.preset.name).toBe(VALID.name);
+    // Live state confirms via list
+    const list = await request(app)
+      .get('/v1/scenarios/library/custom')
+      .set(TH_BIL);
+    const live = list.body.body.items.find((x: { id: string }) => x.id === id);
+    expect(live.name).toBe(VALID.name);
+  });
+
+  test('POST /restore writes scenario.update audit with restored_from_version', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Renamed' });
+    await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/1`)
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead');
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    const restoreEvent = h.body.body.items.find(
+      (x: { metadata: { restored_from_version?: number } }) =>
+        x.metadata.restored_from_version === 1,
+    );
+    expect(restoreEvent).toBeDefined();
+    expect(restoreEvent.action).toBe('scenario.update');
+    expect(restoreEvent.actor_username).toBe('compliance.lead');
+    expect(restoreEvent.metadata.previous_name).toBe('Renamed');
+    expect(restoreEvent.metadata.new_name).toBe(VALID.name);
+  });
+
+  test('POST /restore on unknown preset → 404', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/custom_no_such/restore/1')
+      .set(TH_BIL);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('POST /restore on unknown version → 404', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/99`)
+      .set(TH_BIL);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_version');
+  });
+
+  test('POST /restore with non-numeric version → 400', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/abc`)
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  test('cross-tenant: BANK_DEMO cannot see BIL preset versions', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const v = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API');
+    expect(v.status).toBe(404);
+    const r = await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/1`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API');
+    expect(r.status).toBe(404);
+  });
+
+  test('non-allowed role → 403 on /versions', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const v = await request(app)
+      .get('/v1/scenarios/library/custom/custom_anything/versions')
+      .set(TH_BIL);
+    expect(v.status).toBe(403);
+  });
+
+  test('non-allowed role → 403 on /restore', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/custom_anything/restore/1')
+      .set(TH_BIL);
+    expect(r.status).toBe(403);
+  });
+
+  test('M16.7 PUT no-regression: literal /versions and /restore did not shadow PUT :preset_id', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'still works' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.name).toBe('still works');
+  });
+});

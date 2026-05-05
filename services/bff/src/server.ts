@@ -2566,6 +2566,108 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/custom/:preset_id/versions (T6 M16.10)
+   *  — version snapshots in oldest-first order. Cap 20 per preset. */
+  app.get(
+    '/v1/scenarios/library/custom/:preset_id/versions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      // Confirm the preset exists in this tenant first — otherwise
+      // an empty versions list is misleading.
+      const live = customPresetStore.get(req.tenant!.tenant_id, id);
+      if (!live) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `custom preset ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = customPresetStore.listVersions(req.tenant!.tenant_id, id);
+      return res.json(
+        wrapResponse({ items, total: items.length, preset_id: id }, ctx),
+      );
+    },
+  );
+
+  /** POST /v1/scenarios/library/custom/:preset_id/restore/:version
+   *  — apply a prior snapshot as the live state. Records a new
+   *  scenario.update audit event with `restored_from_version`. */
+  app.post(
+    '/v1/scenarios/library/custom/:preset_id/restore/:version',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const versionRaw = req.params.version ?? '';
+      const restored_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const version = Number(versionRaw);
+      if (!Number.isInteger(version) || version < 1) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'version must be a positive integer', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const previous = customPresetStore.get(req.tenant!.tenant_id, id);
+      try {
+        const out = customPresetStore.restoreVersion(
+          req.tenant!.tenant_id,
+          id,
+          version,
+          restored_by,
+          now(),
+        );
+        // Audit event — restored is a kind of update
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: restored_by,
+              actor_role: 'admin',
+              action: 'scenario.update',
+              resource_type: 'scenario',
+              resource_id: id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_name: previous?.name ?? null,
+                new_name: out.preset.name,
+                shocks_before: previous?.shocks ?? null,
+                shocks_after: out.preset.shocks,
+                restored_from_version: out.restored_from_version,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof CustomPresetError) {
+          if (e.code === 'unknown_preset' || e.code === 'unknown_version') {
+            return res.status(404).json(
+              wrapError(
+                { code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** PUT /v1/scenarios/library/custom/:preset_id (T6 M16.7) — replace
    *  mutable fields. Writes scenario.update audit event with metadata. */
   app.put(
