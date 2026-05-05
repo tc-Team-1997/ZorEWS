@@ -3,7 +3,7 @@
 // T6 M7.3 — Model A/B test harness.
 
 import request from 'supertest';
-import { AbTestError, runAbTest } from '../src/ai_model_ab_test';
+import { AbTestError, runAbTest, runAbTestBatch } from '../src/ai_model_ab_test';
 import { defaultAiModelRegistry } from '../src/ai_model_registry';
 import { makeApp } from '../src/server';
 import { StaticSource } from '../src/source';
@@ -231,6 +231,180 @@ describe('POST /v1/ai/models/ab-test', () => {
         champion_model_id: 'churn_xgb_v1',
         candidate_model_id: 'churn_torch_v1',
         customer_id: 'CUST-1',
+      });
+    expect(r.status).toBe(403);
+  });
+});
+
+// ─── M7.4 — Batch A/B test ────────────────────────────────────────────
+
+describe('runAbTestBatch', () => {
+  test('happy: results array + aggregate', () => {
+    const r = runAbTestBatch(
+      defaultAiModelRegistry,
+      {
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-100001', 'CUST-100002', 'CUST-100003'],
+      },
+      'BIL',
+      NOW,
+    );
+    expect(r.results.length).toBe(3);
+    expect(r.aggregate.count).toBe(3);
+    expect(typeof r.aggregate.mean_score_delta).toBe('number');
+    expect(r.aggregate.type_match).toBe(true);
+  });
+
+  test('mean_score_delta = average of per-customer deltas', () => {
+    const r = runAbTestBatch(
+      defaultAiModelRegistry,
+      {
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-100001', 'CUST-100002'],
+      },
+      'BIL',
+      NOW,
+    );
+    const expected =
+      (r.results[0]!.score_delta + r.results[1]!.score_delta) / 2;
+    expect(r.aggregate.mean_score_delta).toBeCloseTo(expected);
+  });
+
+  test('band_match_rate is fraction in [0, 1]', () => {
+    const r = runAbTestBatch(
+      defaultAiModelRegistry,
+      {
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-100001', 'CUST-100002', 'CUST-100003'],
+      },
+      'BIL',
+      NOW,
+    );
+    if (r.aggregate.band_match_rate !== null) {
+      expect(r.aggregate.band_match_rate).toBeGreaterThanOrEqual(0);
+      expect(r.aggregate.band_match_rate).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test('empty customer_ids[] → invalid_input', () => {
+    expect(() =>
+      runAbTestBatch(
+        defaultAiModelRegistry,
+        {
+          champion_model_id: 'churn_xgb_v1',
+          candidate_model_id: 'churn_torch_v1',
+          customer_ids: [],
+        },
+        'BIL',
+        NOW,
+      ),
+    ).toThrow(/non-empty/);
+  });
+
+  test('> 50 customers → invalid_input', () => {
+    const cids = new Array(51).fill(0).map((_, i) => `CUST-${i}`);
+    expect(() =>
+      runAbTestBatch(
+        defaultAiModelRegistry,
+        {
+          champion_model_id: 'churn_xgb_v1',
+          candidate_model_id: 'churn_torch_v1',
+          customer_ids: cids,
+        },
+        'BIL',
+        NOW,
+      ),
+    ).toThrow(/batch cap/);
+  });
+
+  test('duplicate customer_id → invalid_input', () => {
+    expect(() =>
+      runAbTestBatch(
+        defaultAiModelRegistry,
+        {
+          champion_model_id: 'churn_xgb_v1',
+          candidate_model_id: 'churn_torch_v1',
+          customer_ids: ['CUST-1', 'CUST-1'],
+        },
+        'BIL',
+        NOW,
+      ),
+    ).toThrow(/duplicate/);
+  });
+
+  test('unknown model → unknown_model bubbles per-row', () => {
+    try {
+      runAbTestBatch(
+        defaultAiModelRegistry,
+        {
+          champion_model_id: 'NO-SUCH',
+          candidate_model_id: 'churn_torch_v1',
+          customer_ids: ['CUST-1'],
+        },
+        'BIL',
+        NOW,
+      );
+      fail('expected throw');
+    } catch (e) {
+      expect((e as AbTestError).code).toBe('unknown_model');
+    }
+  });
+});
+
+describe('POST /v1/ai/models/ab-test/batch', () => {
+  test('analyst+: 200 with batch body', async () => {
+    const { app } = makeAbApp('risk_analyst');
+    const r = await request(app)
+      .post('/v1/ai/models/ab-test/batch')
+      .set(TH_BIL)
+      .send({
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-100001', 'CUST-100002'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.results.length).toBe(2);
+    expect(r.body.body.aggregate.count).toBe(2);
+  });
+
+  test('empty customer_ids → 400', async () => {
+    const { app } = makeAbApp('admin');
+    const r = await request(app)
+      .post('/v1/ai/models/ab-test/batch')
+      .set(TH_BIL)
+      .send({
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: [],
+      });
+    expect(r.status).toBe(400);
+  });
+
+  test('unknown model → 404', async () => {
+    const { app } = makeAbApp('admin');
+    const r = await request(app)
+      .post('/v1/ai/models/ab-test/batch')
+      .set(TH_BIL)
+      .send({
+        champion_model_id: 'NO-SUCH',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-1'],
+      });
+    expect(r.status).toBe(404);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeAbApp('case_owner');
+    const r = await request(app)
+      .post('/v1/ai/models/ab-test/batch')
+      .set(TH_BIL)
+      .send({
+        champion_model_id: 'churn_xgb_v1',
+        candidate_model_id: 'churn_torch_v1',
+        customer_ids: ['CUST-1'],
       });
     expect(r.status).toBe(403);
   });

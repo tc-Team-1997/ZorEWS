@@ -345,6 +345,8 @@ import {
 import {
   AbTestError,
   runAbTest,
+  runAbTestBatch,
+  type AbTestBatchInput,
   type AbTestInput,
 } from './ai_model_ab_test';
 import {
@@ -1610,6 +1612,48 @@ export function makeApp(deps: AppDeps = {}) {
         const result = runAbTest(
           aiModelRegistry,
           (inner ?? {}) as AbTestInput,
+          req.tenant!.tenant_id,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof AbTestError) {
+          if (e.code === 'unknown_model') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_model', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'inference_failed') {
+            return res.status(500).json(
+              wrapError({ code: 'EWS_500_inference_failed', message: e.message, severity: 'HIGH' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/ai/models/ab-test/batch (T6 M7.4) — same A/B harness
+   *  across N customers; aggregate delta + band-match rate. */
+  app.post(
+    '/v1/ai/models/ab-test/batch',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = runAbTestBatch(
+          aiModelRegistry,
+          (inner ?? {}) as AbTestBatchInput,
           req.tenant!.tenant_id,
           now(),
         );
