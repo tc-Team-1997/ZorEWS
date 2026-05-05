@@ -115,6 +115,13 @@ import {
   type VisitOutcome,
 } from './field_officer';
 import {
+  PreviewError,
+  applyBulkImportPreview,
+  createBulkImportPreview,
+  defaultBulkImportPreviewStore,
+  type BulkImportPreviewStore,
+} from './tenant_bulk_preview';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -554,6 +561,8 @@ export interface AppDeps {
   watchlistStore?: WatchlistStore;
   /** Override for tests — per-tenant field-officer visit ledger (T6 M14.10). */
   fieldVisitStore?: FieldVisitStore;
+  /** Override for tests — per-tenant bulk-import preview store (T6 M2.4). */
+  bulkImportPreviewStore?: BulkImportPreviewStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -761,6 +770,7 @@ export function makeApp(deps: AppDeps = {}) {
   const thresholdOverrideStore = deps.thresholdOverrideStore ?? defaultThresholdOverrideStore;
   const watchlistStore = deps.watchlistStore ?? defaultWatchlistStore;
   const fieldVisitStore = deps.fieldVisitStore ?? defaultFieldVisitStore;
+  const bulkImportPreviewStore = deps.bulkImportPreviewStore ?? defaultBulkImportPreviewStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -5885,6 +5895,160 @@ export function makeApp(deps: AppDeps = {}) {
               { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
               ctx,
             ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Bulk-import staged preview + apply (T6 M2.4) ────────────────────
+  //
+  // Stage the operator's intent in a per-tenant preview store with
+  // a 10-minute TTL, then commit only those exact rows on apply —
+  // no CSV-changed-between-screens race.
+
+  /** POST /v1/tenants/bulk-import/preview — body { csv } → 201
+   *  with preview_id + dry-run summary. */
+  app.post(
+    '/v1/tenants/bulk-import/preview',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { csv?: unknown };
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const preview = await createBulkImportPreview(
+          bulkImportPreviewStore,
+          tenantLookup,
+          {
+            tenant_id: req.tenant!.tenant_id,
+            csv: typeof wrapper.csv === 'string' ? wrapper.csv : '',
+            created_by,
+            now: now(),
+          },
+        );
+        return res.status(201).json(wrapResponse(preview, ctx));
+      } catch (e) {
+        if (e instanceof PreviewError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (e instanceof TenantBulkError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/tenants/bulk-import/previews — list active previews. */
+  app.get(
+    '/v1/tenants/bulk-import/previews',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = bulkImportPreviewStore.list(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/tenants/bulk-import/apply — body { preview_id } →
+   *  consumes the preview + commits the snapshotted rows. */
+  app.post(
+    '/v1/tenants/bulk-import/apply',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { preview_id?: unknown };
+      if (typeof wrapper.preview_id !== 'string' || !wrapper.preview_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'preview_id required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const out = await applyBulkImportPreview(
+          bulkImportPreviewStore,
+          tenantLookup,
+          {
+            tenant_id: req.tenant!.tenant_id,
+            preview_id: wrapper.preview_id.trim(),
+            now: now(),
+          },
+        );
+        return res.json(
+          wrapResponse({ preview: out.preview, result: out.result }, ctx),
+        );
+      } catch (e) {
+        if (e instanceof PreviewError) {
+          if (e.code === 'unknown_preview') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'preview_expired' || e.code === 'preview_not_pending') {
+            return res.status(410).json(
+              wrapError({ code: `EWS_410_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/tenants/bulk-import/preview/:preview_id — cancel. */
+  app.delete(
+    '/v1/tenants/bulk-import/preview/:preview_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preview_id ?? '';
+      try {
+        const cancelled = bulkImportPreviewStore.cancel(req.tenant!.tenant_id, id, now());
+        return res.json(wrapResponse(cancelled, ctx));
+      } catch (e) {
+        if (e instanceof PreviewError) {
+          if (e.code === 'unknown_preview') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'preview_not_pending') {
+            return res.status(410).json(
+              wrapError({ code: `EWS_410_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
           );
         }
         throw e;
