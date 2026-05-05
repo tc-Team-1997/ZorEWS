@@ -567,3 +567,113 @@ describe('POST /v1/scenarios/library/custom/clone-from-library', () => {
     expect(u.body.body.name).toBe('Still works');
   });
 });
+
+// ─── M16.9 — Bulk-clone library presets ──────────────────────────────
+
+describe('POST /v1/scenarios/library/custom/bulk-clone-from-library', () => {
+  test('happy: 200 with created[] for valid ids', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        preset_ids: ['preset_rbi_baseline_stress', 'preset_rbi_severely_adverse'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.requested_count).toBe(2);
+    expect(r.body.body.created_count).toBe(2);
+    expect(r.body.body.skipped_count).toBe(0);
+    expect(r.body.body.created[0].source_preset_id).toBe('preset_rbi_baseline_stress');
+  });
+
+  test('name_prefix applied to clone names', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        preset_ids: ['preset_rbi_baseline_stress'],
+        name_prefix: 'BIL-Q3-',
+      });
+    expect(r.body.body.created[0].name).toMatch(/^BIL-Q3-/);
+  });
+
+  test('mixed valid + unknown: created[] + skipped[]', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({
+        preset_ids: ['preset_rbi_baseline_stress', 'NO-SUCH', 'preset_rbi_severely_adverse'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.created_count).toBe(2);
+    expect(r.body.body.skipped_count).toBe(1);
+    expect(r.body.body.skipped[0].reason).toBe('unknown_source');
+    expect(r.body.body.skipped[0].source_preset_id).toBe('NO-SUCH');
+  });
+
+  test('writes scenario.create audit per successful clone', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ preset_ids: ['preset_rbi_baseline_stress'] });
+    const newId = r.body.body.created[0].preset_id;
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${newId}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.items[0].action).toBe('scenario.create');
+    expect(h.body.body.items[0].metadata.bulk).toBe(true);
+    expect(h.body.body.items[0].metadata.cloned_from).toBe('preset_rbi_baseline_stress');
+  });
+
+  test('empty preset_ids[] → 400', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ preset_ids: [] });
+    expect(r.status).toBe(400);
+  });
+
+  test('> 10 preset_ids → 400', async () => {
+    const { app } = makeCustomApp('admin');
+    const ids = new Array(11).fill('preset_rbi_baseline_stress');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ preset_ids: ids });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  test('non-string id reported as skipped', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ preset_ids: ['preset_rbi_baseline_stress', 42] });
+    expect(r.status).toBe(200);
+    expect(r.body.body.skipped_count).toBe(1);
+    expect(r.body.body.skipped[0].reason).toBe('invalid_id');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/bulk-clone-from-library')
+      .set(TH_BIL)
+      .send({ preset_ids: ['preset_rbi_baseline_stress'] });
+    expect(r.status).toBe(403);
+  });
+
+  test('M16.8 single-clone still works (literal bulk- didn\'t shadow)', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'preset_rbi_baseline_stress' });
+    expect(r.status).toBe(201);
+  });
+});

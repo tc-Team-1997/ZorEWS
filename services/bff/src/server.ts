@@ -2418,6 +2418,126 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scenarios/library/custom/bulk-clone-from-library (T6 M16.9)
+   *  body { preset_ids[], name_prefix? } — iterates M16.8 single-clone
+   *  over the list. Cap 10 per call. Writes one scenario.create audit
+   *  event per successful clone (cloned_from metadata). Per-row
+   *  outcome surfaced as {created[], skipped[]}. */
+  app.post(
+    '/v1/scenarios/library/custom/bulk-clone-from-library',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { preset_ids?: unknown; name_prefix?: unknown };
+      if (!Array.isArray(wrapper.preset_ids) || wrapper.preset_ids.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'preset_ids[] must be non-empty', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (wrapper.preset_ids.length > 10) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'preset_ids[] exceeds cap of 10', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const prefix =
+        typeof wrapper.name_prefix === 'string' && wrapper.name_prefix.trim()
+          ? wrapper.name_prefix.trim()
+          : null;
+      const tenantId = req.tenant!.tenant_id;
+      const created: Array<{ source_preset_id: string; preset_id: string; name: string }> = [];
+      const skipped: Array<{ source_preset_id: string; reason: string }> = [];
+
+      for (const sid of wrapper.preset_ids) {
+        if (typeof sid !== 'string' || !sid.trim()) {
+          skipped.push({ source_preset_id: String(sid), reason: 'invalid_id' });
+          continue;
+        }
+        const source = getScenarioPreset(sid);
+        if (!source) {
+          skipped.push({ source_preset_id: sid, reason: 'unknown_source' });
+          continue;
+        }
+        const createInput = {
+          name: prefix ? `${prefix}${source.name}` : `Copy of ${source.name}`,
+          description: source.description,
+          category: source.category,
+          regulator: source.regulator,
+          severity: source.severity,
+          shocks: source.shocks,
+          source_doc: `Cloned from ${source.id} by ${created_by}`,
+        };
+        try {
+          const preset = customPresetStore.create(tenantId, createInput, created_by, now());
+          // Best-effort audit
+          try {
+            auditTrailStore.record(
+              tenantId,
+              {
+                actor_username: created_by,
+                actor_role: 'admin',
+                action: 'scenario.create',
+                resource_type: 'scenario',
+                resource_id: preset.id,
+                outcome: 'success',
+                severity: 'info',
+                metadata: {
+                  name: preset.name,
+                  cloned_from: source.id,
+                  shocks: preset.shocks,
+                  bulk: true,
+                },
+              },
+              now(),
+            );
+          } catch {
+            // swallow
+          }
+          created.push({
+            source_preset_id: source.id,
+            preset_id: preset.id,
+            name: preset.name,
+          });
+        } catch (e) {
+          if (e instanceof CustomPresetError) {
+            skipped.push({ source_preset_id: sid, reason: e.code });
+          } else {
+            skipped.push({
+              source_preset_id: sid,
+              reason: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            requested_count: wrapper.preset_ids.length,
+            created_count: created.length,
+            skipped_count: skipped.length,
+            created,
+            skipped,
+            generated_at: now().toISOString(),
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
   /** PUT /v1/scenarios/library/custom/:preset_id (T6 M16.7) — replace
    *  mutable fields. Writes scenario.update audit event with metadata. */
   app.put(
