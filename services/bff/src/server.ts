@@ -85,6 +85,12 @@ import {
   type CustomRuleTemplateStore,
 } from './rule_templates_custom';
 import {
+  ThresholdError,
+  checkBreachById,
+  getThreshold,
+  listThresholds,
+} from './indicator_thresholds';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -4871,6 +4877,92 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  // ── KRI threshold breach detection (T6 M4.3) ─────────────────────────
+  //
+  // 3-zone threshold check (yellow/orange/red) over the M6.2 indicator
+  // catalog. Foundational primitive that turns an indicator value into
+  // a breach class — the input the M8.1 alert classifier needs.
+
+  /** GET /v1/indicators/thresholds?vertical=banking|insurance — list. */
+  app.get(
+    '/v1/indicators/thresholds',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const verticalRaw = req.query.vertical as string | undefined;
+      if (verticalRaw && !isScoringVertical(verticalRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_vertical', message: 'vertical must be banking|insurance', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = listThresholds({
+        vertical: verticalRaw as ScoringVertical | undefined,
+      });
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/indicators/thresholds/:indicator_id — single threshold. */
+  app.get(
+    '/v1/indicators/thresholds/:indicator_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.indicator_id ?? '';
+      const t = getThreshold(id);
+      if (!t) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_indicator', message: `unknown indicator: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(t, ctx));
+    },
+  );
+
+  /** POST /v1/indicators/thresholds/check {indicator_id, value} —
+   *  classify a value into green|yellow|orange|red. */
+  app.post(
+    '/v1/indicators/thresholds/check',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { indicator_id?: unknown; value?: unknown };
+      try {
+        const out = checkBreachById(wrapper.indicator_id, wrapper.value);
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ThresholdError) {
+          if (e.code === 'unknown_indicator') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_indicator', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
       }
     },
   );
