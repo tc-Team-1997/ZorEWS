@@ -71,6 +71,10 @@ import {
   type RuleSimulationInput,
 } from './rule_simulation';
 import {
+  simulateRuleBundle,
+  type BundleSimulationInput,
+} from './rule_simulation_bundle';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -7130,6 +7134,42 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'simulate failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/rules/simulate/bundle (T6 M5.4) — one rule × all M16.1 presets. */
+  app.post(
+    '/v1/rules/simulate/bundle',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = simulateRuleBundle((inner ?? {}) as BundleSimulationInput, now());
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof RuleSimulationError) {
+          if (e.code === 'unknown_template' || e.code === 'unknown_scenario') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'bundle failed', severity: 'HIGH' },
             ctx,
           ),
         );
