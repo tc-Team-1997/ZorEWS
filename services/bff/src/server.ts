@@ -455,6 +455,11 @@ import {
   type IngestionRegistry,
 } from './ingestion';
 import {
+  RUN_ANALYTICS_DEFAULT_WINDOW,
+  RUN_ANALYTICS_MAX_WINDOW,
+  aggregateRunAnalytics,
+} from './connector_run_analytics';
+import {
   ConnectorSchemaError,
   getConnectorSchema,
   validateRecord,
@@ -8552,6 +8557,48 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  /** GET /v1/ingestion/connectors/:id/runs/analytics?window=20 (T6 M3.5)
+   *  — aggregate metrics: success rate, mean/p50/p95 latency,
+   *  records processed, last failure. */
+  app.get(
+    '/v1/ingestion/connectors/:id/runs/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const windowRaw = req.query.window as string | undefined;
+      const window = windowRaw === undefined
+        ? RUN_ANALYTICS_DEFAULT_WINDOW
+        : Number(windowRaw);
+      if (!Number.isInteger(window) || window < 1 || window > RUN_ANALYTICS_MAX_WINDOW) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `window must be 1..${RUN_ANALYTICS_MAX_WINDOW}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const runs = ingestionRegistry.listRuns(req.tenant!.tenant_id, id, window);
+        const analytics = aggregateRunAnalytics(runs);
+        return res.json(
+          wrapResponse({ connector_id: id, window, analytics }, ctx),
+        );
+      } catch (e) {
+        if (e instanceof IngestionError && e.code === 'unknown_connector') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
       }
     },
   );
