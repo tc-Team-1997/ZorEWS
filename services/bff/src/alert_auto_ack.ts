@@ -26,6 +26,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { type BilAlertClass, isBilAlertClass } from './bil_alert_classification';
+import {
+  type AlertAckState,
+  type AlertAckStore,
+  AlertAckError,
+} from './alert_ack';
 
 // ─── Public types ─────────────────────────────────────────────────────
 
@@ -244,3 +249,134 @@ export class InMemoryAutoAckRuleStore implements AutoAckRuleStore {
 }
 
 export const defaultAutoAckRuleStore: AutoAckRuleStore = new InMemoryAutoAckRuleStore();
+
+// ─── M8.5 — Alert ingest with auto-ack composition ────────────────────
+
+/** Synthetic actor stamped on the ack history when auto-ack fires. */
+export const AUTO_ACK_ACTOR = 'system:auto-ack';
+
+export type AutoAckSkipReason = 'already_acknowledged';
+
+export interface AlertIngestInput {
+  alert_id: string;
+  bil_class: BilAlertClass;
+  source_system?: string;
+  tags?: string[];
+}
+
+export interface AlertIngestResult {
+  alert_id: string;
+  tenant_id: string;
+  bil_class: BilAlertClass;
+  ingested_at: string;
+  /** True iff a rule matched AND the auto-ack call succeeded. */
+  auto_acked: boolean;
+  /** When auto-ack didn't fire — null if no rule matched, else
+   *  the reason it was skipped (e.g. already_acknowledged). */
+  auto_ack_skipped: AutoAckSkipReason | null;
+  /** The rule that matched (if any). Set even when skipped, since
+   *  the policy still resolved — only the side effect was suppressed. */
+  match: AutoAckMatch | null;
+  /** Live ack state after this ingest call. */
+  ack_state: AlertAckState;
+}
+
+/**
+ * Pure-function alert ingest. Composes M8.4 evaluateAutoAck with
+ * M8.3 alertAckStore.acknowledge:
+ *   1. evaluate auto-ack rules against the alert context
+ *   2. if a rule matched AND the alert isn't already acked → ack
+ *      via `AUTO_ACK_ACTOR` with the rule's reason
+ *   3. return the resolved policy decision + live ack state
+ *
+ * Validates: alert_id non-empty ≤ 64 chars; bil_class enum;
+ * source_system/tags shapes (cap 32 tags).
+ */
+export function ingestAlertWithAutoAck(
+  rules: readonly AutoAckRule[],
+  ackStore: AlertAckStore,
+  tenant_id: string,
+  input: unknown,
+  now: Date,
+): AlertIngestResult {
+  if (!input || typeof input !== 'object') {
+    throw new AutoAckError('invalid_input', 'request body required');
+  }
+  const i = input as Record<string, unknown>;
+  if (typeof i.alert_id !== 'string' || !i.alert_id.trim()) {
+    throw new AutoAckError('invalid_input', 'alert_id is required');
+  }
+  if (i.alert_id.length > 64) {
+    throw new AutoAckError('invalid_input', 'alert_id ≤ 64 chars');
+  }
+  if (!isBilAlertClass(i.bil_class)) {
+    throw new AutoAckError(
+      'invalid_input',
+      'bil_class must be red|orange|yellow|green',
+    );
+  }
+  if (i.source_system !== undefined) {
+    if (typeof i.source_system !== 'string' || !i.source_system.trim()) {
+      throw new AutoAckError('invalid_input', 'source_system must be a non-empty string');
+    }
+  }
+  if (i.tags !== undefined) {
+    if (!Array.isArray(i.tags)) {
+      throw new AutoAckError('invalid_input', 'tags must be an array');
+    }
+    if (i.tags.length > 32) {
+      throw new AutoAckError('invalid_input', 'at most 32 tags per alert');
+    }
+    for (const t of i.tags) {
+      if (typeof t !== 'string' || !t.trim()) {
+        throw new AutoAckError('invalid_input', 'tags must be non-empty strings');
+      }
+    }
+  }
+
+  const alert_id = i.alert_id.trim();
+  const bil_class = i.bil_class as BilAlertClass;
+  const ctx: AlertContext = {
+    bil_class,
+    source_system: typeof i.source_system === 'string' ? i.source_system.trim() : undefined,
+    tags: Array.isArray(i.tags) ? (i.tags as string[]).map((t) => t.trim()) : undefined,
+  };
+
+  const match = evaluateAutoAck(rules, ctx);
+  let auto_acked = false;
+  let auto_ack_skipped: AutoAckSkipReason | null = null;
+  let ack_state: AlertAckState;
+
+  if (match) {
+    try {
+      ack_state = ackStore.acknowledge(
+        tenant_id,
+        alert_id,
+        AUTO_ACK_ACTOR,
+        match.reason,
+        now,
+      );
+      auto_acked = true;
+    } catch (e) {
+      if (e instanceof AlertAckError && e.code === 'already_acknowledged') {
+        auto_ack_skipped = 'already_acknowledged';
+        ack_state = ackStore.get(tenant_id, alert_id);
+      } else {
+        throw e;
+      }
+    }
+  } else {
+    ack_state = ackStore.get(tenant_id, alert_id);
+  }
+
+  return {
+    alert_id,
+    tenant_id,
+    bil_class,
+    ingested_at: now.toISOString(),
+    auto_acked,
+    auto_ack_skipped,
+    match,
+    ack_state,
+  };
+}

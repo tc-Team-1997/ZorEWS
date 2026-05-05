@@ -271,6 +271,7 @@ import {
   AutoAckError,
   defaultAutoAckRuleStore,
   evaluateAutoAck,
+  ingestAlertWithAutoAck,
   type AlertContext,
   type AutoAckRuleStore,
 } from './alert_auto_ack';
@@ -1297,6 +1298,42 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(
         wrapResponse({ matched: match !== null, match }, ctx),
       );
+    },
+  );
+
+  /** POST /v1/alerts/ingest (T6 M8.5) — ingest a single alert and
+   *  auto-ack it if a tenant rule matches. body
+   *  { alert_id, bil_class, source_system?, tags? } → returns the
+   *  resolved policy decision + live ack state. */
+  app.post(
+    '/v1/alerts/ingest',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const rules = autoAckRuleStore.list(req.tenant!.tenant_id);
+      try {
+        const result = ingestAlertWithAutoAck(
+          rules,
+          alertAckStore,
+          req.tenant!.tenant_id,
+          inner,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof AutoAckError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
     },
   );
 

@@ -4,10 +4,13 @@
 
 import request from 'supertest';
 import {
+  AUTO_ACK_ACTOR,
   AutoAckError,
   InMemoryAutoAckRuleStore,
   evaluateAutoAck,
+  ingestAlertWithAutoAck,
 } from '../src/alert_auto_ack';
+import { InMemoryAlertAckStore } from '../src/alert_ack';
 import { makeApp } from '../src/server';
 import { StaticSource } from '../src/source';
 import { StubEvaluator } from '../src/score';
@@ -19,16 +22,18 @@ const TH_BIL = { 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' };
 
 function makeAutoAckApp(role = 'admin') {
   const store = new InMemoryAutoAckRuleStore();
+  const ackStore = new InMemoryAlertAckStore();
   const built = makeApp({
     source: new StaticSource([]),
     evaluator: new StubEvaluator(),
     riskProfile: new StubRiskProfileSource(),
     caseAction: new UnavailableCaseActionSink(),
     autoAckRuleStore: store,
+    alertAckStore: ackStore,
     now: () => NOW,
     getRole: () => role,
   });
-  return { ...built, store };
+  return { ...built, store, ackStore };
 }
 
 const VALID_INPUT = {
@@ -305,5 +310,314 @@ describe('Auto-ack routes', () => {
     const { app } = makeAutoAckApp('case_owner');
     const r = await request(app).get('/v1/alerts/auto-ack/rules').set(TH_BIL);
     expect(r.status).toBe(403);
+  });
+});
+
+// ─── M8.5 — ingest pipeline ──────────────────────────────────────────
+
+describe('M8.5 ingestAlertWithAutoAck (pure)', () => {
+  function seededRules() {
+    const s = new InMemoryAutoAckRuleStore();
+    s.create('BIL', VALID_INPUT, 'admin', NOW); // bil_class=green
+    return s.list('BIL');
+  }
+
+  test('match → auto-acks via system actor', () => {
+    const ack = new InMemoryAlertAckStore();
+    const r = ingestAlertWithAutoAck(
+      seededRules(),
+      ack,
+      'BIL',
+      { alert_id: 'alrt-1', bil_class: 'green' },
+      NOW,
+    );
+    expect(r.auto_acked).toBe(true);
+    expect(r.match?.rule_name).toBe('auto-ack green alerts');
+    expect(r.ack_state.status).toBe('acknowledged');
+    expect(r.ack_state.acked_by).toBe(AUTO_ACK_ACTOR);
+    expect(r.ack_state.ack_notes).toBe(VALID_INPUT.reason);
+    expect(r.auto_ack_skipped).toBeNull();
+  });
+
+  test('no match → not auto-acked, ack_state stays open', () => {
+    const ack = new InMemoryAlertAckStore();
+    const r = ingestAlertWithAutoAck(
+      seededRules(),
+      ack,
+      'BIL',
+      { alert_id: 'alrt-2', bil_class: 'red' },
+      NOW,
+    );
+    expect(r.auto_acked).toBe(false);
+    expect(r.match).toBeNull();
+    expect(r.ack_state.status).toBe('open');
+  });
+
+  test('already-acked alert: skip with reason, ack_state preserved', () => {
+    const ack = new InMemoryAlertAckStore();
+    ack.acknowledge('BIL', 'alrt-3', 'analyst.jane', 'manual ack first', NOW);
+    const r = ingestAlertWithAutoAck(
+      seededRules(),
+      ack,
+      'BIL',
+      { alert_id: 'alrt-3', bil_class: 'green' },
+      NOW,
+    );
+    expect(r.auto_acked).toBe(false);
+    expect(r.auto_ack_skipped).toBe('already_acknowledged');
+    expect(r.match).not.toBeNull(); // rule did match
+    expect(r.ack_state.acked_by).toBe('analyst.jane');
+  });
+
+  test('missing alert_id → invalid_input', () => {
+    const ack = new InMemoryAlertAckStore();
+    expect(() =>
+      ingestAlertWithAutoAck(seededRules(), ack, 'BIL', { bil_class: 'green' }, NOW),
+    ).toThrow(/alert_id/);
+  });
+
+  test('alert_id > 64 chars → invalid_input', () => {
+    const ack = new InMemoryAlertAckStore();
+    expect(() =>
+      ingestAlertWithAutoAck(
+        seededRules(),
+        ack,
+        'BIL',
+        { alert_id: 'x'.repeat(65), bil_class: 'green' },
+        NOW,
+      ),
+    ).toThrow(/64/);
+  });
+
+  test('bad bil_class → invalid_input', () => {
+    const ack = new InMemoryAlertAckStore();
+    expect(() =>
+      ingestAlertWithAutoAck(
+        seededRules(),
+        ack,
+        'BIL',
+        { alert_id: 'a', bil_class: 'pink' },
+        NOW,
+      ),
+    ).toThrow(/bil_class/);
+  });
+
+  test('tags > 32 → invalid_input', () => {
+    const ack = new InMemoryAlertAckStore();
+    expect(() =>
+      ingestAlertWithAutoAck(
+        seededRules(),
+        ack,
+        'BIL',
+        {
+          alert_id: 'a',
+          bil_class: 'green',
+          tags: Array.from({ length: 33 }, (_, i) => `t${i}`),
+        },
+        NOW,
+      ),
+    ).toThrow(/32/);
+  });
+
+  test('non-string tag → invalid_input', () => {
+    const ack = new InMemoryAlertAckStore();
+    expect(() =>
+      ingestAlertWithAutoAck(
+        seededRules(),
+        ack,
+        'BIL',
+        { alert_id: 'a', bil_class: 'green', tags: ['ok', 7 as unknown as string] },
+        NOW,
+      ),
+    ).toThrow(/tags/);
+  });
+
+  test('cross-tenant: BIL rule does not match BANK_DEMO ingest', () => {
+    const s = new InMemoryAutoAckRuleStore();
+    s.create('BIL', VALID_INPUT, 'admin', NOW);
+    const ack = new InMemoryAlertAckStore();
+    const r = ingestAlertWithAutoAck(
+      s.list('BANK_DEMO'),
+      ack,
+      'BANK_DEMO',
+      { alert_id: 'a', bil_class: 'green' },
+      NOW,
+    );
+    expect(r.auto_acked).toBe(false);
+    expect(r.match).toBeNull();
+  });
+
+  test('writes a single history entry on auto-ack', () => {
+    const ack = new InMemoryAlertAckStore();
+    const r = ingestAlertWithAutoAck(
+      seededRules(),
+      ack,
+      'BIL',
+      { alert_id: 'alrt-h', bil_class: 'green' },
+      NOW,
+    );
+    expect(r.ack_state.history).toHaveLength(1);
+    expect(r.ack_state.history[0]!.action).toBe('acknowledged');
+    expect(r.ack_state.history[0]!.actor_username).toBe(AUTO_ACK_ACTOR);
+  });
+
+  test('disabled rule: no match', () => {
+    const s = new InMemoryAutoAckRuleStore();
+    s.create('BIL', { ...VALID_INPUT, enabled: false }, 'admin', NOW);
+    const ack = new InMemoryAlertAckStore();
+    const r = ingestAlertWithAutoAck(
+      s.list('BIL'),
+      ack,
+      'BIL',
+      { alert_id: 'a', bil_class: 'green' },
+      NOW,
+    );
+    expect(r.auto_acked).toBe(false);
+    expect(r.match).toBeNull();
+  });
+
+  test('source_system + tags filter compose AND', () => {
+    const s = new InMemoryAutoAckRuleStore();
+    s.create(
+      'BIL',
+      {
+        name: 'low-pri AML',
+        bil_class: 'green',
+        source_system: 'aml',
+        tags_any: ['internal'],
+        reason: 'low-pri AML noise',
+      },
+      'admin',
+      NOW,
+    );
+    const ack = new InMemoryAlertAckStore();
+    // Wrong source_system → no match
+    const r1 = ingestAlertWithAutoAck(
+      s.list('BIL'),
+      ack,
+      'BIL',
+      { alert_id: 'a1', bil_class: 'green', source_system: 'cbs', tags: ['internal'] },
+      NOW,
+    );
+    expect(r1.auto_acked).toBe(false);
+    // Right source + tag → match
+    const r2 = ingestAlertWithAutoAck(
+      s.list('BIL'),
+      ack,
+      'BIL',
+      { alert_id: 'a2', bil_class: 'green', source_system: 'aml', tags: ['internal'] },
+      NOW,
+    );
+    expect(r2.auto_acked).toBe(true);
+  });
+});
+
+describe('M8.5 — POST /v1/alerts/ingest', () => {
+  test('match → 200 auto_acked=true; ack history written', async () => {
+    const { app, store, ackStore } = makeAutoAckApp('admin');
+    store.create('BIL', VALID_INPUT, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a-200', bil_class: 'green' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.auto_acked).toBe(true);
+    expect(r.body.body.match.rule_name).toBe('auto-ack green alerts');
+    expect(r.body.body.ack_state.acked_by).toBe(AUTO_ACK_ACTOR);
+    // Live store also reflects it
+    expect(ackStore.get('BIL', 'a-200').status).toBe('acknowledged');
+  });
+
+  test('no match → 200 auto_acked=false; ack stays open', async () => {
+    const { app } = makeAutoAckApp('admin');
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a-201', bil_class: 'red' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.auto_acked).toBe(false);
+    expect(r.body.body.match).toBeNull();
+    expect(r.body.body.ack_state.status).toBe('open');
+  });
+
+  test('already-acked → 200 skipped=already_acknowledged', async () => {
+    const { app, store, ackStore } = makeAutoAckApp('admin');
+    store.create('BIL', VALID_INPUT, 'admin', NOW);
+    ackStore.acknowledge('BIL', 'a-skip', 'analyst.jane', 'manual ack', NOW);
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a-skip', bil_class: 'green' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.auto_acked).toBe(false);
+    expect(r.body.body.auto_ack_skipped).toBe('already_acknowledged');
+    expect(r.body.body.ack_state.acked_by).toBe('analyst.jane');
+  });
+
+  test('missing alert_id → 400', async () => {
+    const { app } = makeAutoAckApp('admin');
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ bil_class: 'green' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  test('bad bil_class → 400', async () => {
+    const { app } = makeAutoAckApp('admin');
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a', bil_class: 'pink' });
+    expect(r.status).toBe(400);
+  });
+
+  test('cross-tenant: BIL rules do not auto-ack BANK_DEMO ingest', async () => {
+    const { app, store } = makeAutoAckApp('admin');
+    store.create('BIL', VALID_INPUT, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({ alert_id: 'a-xtnt', bil_class: 'green' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.auto_acked).toBe(false);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeAutoAckApp('case_owner');
+    const r = await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a', bil_class: 'green' });
+    expect(r.status).toBe(403);
+  });
+
+  test('M8.4 evaluate route still works (no regression)', async () => {
+    const { app, store } = makeAutoAckApp('admin');
+    store.create('BIL', VALID_INPUT, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/alerts/auto-ack/evaluate')
+      .set(TH_BIL)
+      .send({ bil_class: 'green' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.matched).toBe(true);
+  });
+
+  test('GET ack/history reflects auto-ack actor after ingest', async () => {
+    const { app, store } = makeAutoAckApp('admin');
+    store.create('BIL', VALID_INPUT, 'admin', NOW);
+    await request(app)
+      .post('/v1/alerts/ingest')
+      .set(TH_BIL)
+      .send({ alert_id: 'a-h2', bil_class: 'green' });
+    const h = await request(app)
+      .get('/v1/alerts/a-h2/ack/history')
+      .set(TH_BIL);
+    expect(h.status).toBe(200);
+    expect(h.body.body.items).toHaveLength(1);
+    expect(h.body.body.items[0].actor_username).toBe(AUTO_ACK_ACTOR);
+    expect(h.body.body.items[0].action).toBe('acknowledged');
   });
 });
