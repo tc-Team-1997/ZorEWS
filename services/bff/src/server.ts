@@ -122,6 +122,13 @@ import {
   type BulkImportPreviewStore,
 } from './tenant_bulk_preview';
 import {
+  CASE_EVENT_DEFAULT_LIMIT,
+  CASE_EVENT_MAX_LIMIT,
+  CaseEventError,
+  defaultCaseEventStore,
+  type CaseEventStore,
+} from './case_events';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -563,6 +570,8 @@ export interface AppDeps {
   fieldVisitStore?: FieldVisitStore;
   /** Override for tests — per-tenant bulk-import preview store (T6 M2.4). */
   bulkImportPreviewStore?: BulkImportPreviewStore;
+  /** Override for tests — per-tenant case event journal (T6 M9.4). */
+  caseEventStore?: CaseEventStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -771,6 +780,7 @@ export function makeApp(deps: AppDeps = {}) {
   const watchlistStore = deps.watchlistStore ?? defaultWatchlistStore;
   const fieldVisitStore = deps.fieldVisitStore ?? defaultFieldVisitStore;
   const bulkImportPreviewStore = deps.bulkImportPreviewStore ?? defaultBulkImportPreviewStore;
+  const caseEventStore = deps.caseEventStore ?? defaultCaseEventStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -4351,6 +4361,118 @@ export function makeApp(deps: AppDeps = {}) {
         const m = mapMakerCheckerError(e, ctx);
         return res.status(m.status).json(m.body);
       }
+    },
+  );
+
+  // ── Case event journal (T6 M9.4) ────────────────────────────────────
+  //
+  // Append-only event stream that downstream systems poll via
+  // ?since_seq=N&limit=50. Sequence numbers are per-tenant
+  // monotonic and stay stable across the 1000-entry FIFO cap.
+  //
+  // Route ordering: the literal `/events` and `/events/:event_id`
+  // segments are declared BEFORE `/v1/cases/:case_id/events` so
+  // the param route doesn't shadow them.
+
+  /** POST /v1/cases/events — record a case event explicitly.
+   *  body { case_id, action, actor, payload? }. */
+  app.post(
+    '/v1/cases/events',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const event = caseEventStore.record(req.tenant!.tenant_id, inner, now());
+        return res.status(201).json(wrapResponse(event, ctx));
+      } catch (e) {
+        if (e instanceof CaseEventError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/cases/events?since_seq=N&limit=50 — cursor poll. */
+  app.get(
+    '/v1/cases/events',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sinceRaw = req.query.since_seq;
+      const limitRaw = req.query.limit;
+      const since_seq = sinceRaw === undefined ? 0 : Number(sinceRaw);
+      const limit = limitRaw === undefined ? CASE_EVENT_DEFAULT_LIMIT : Number(limitRaw);
+      if (!Number.isInteger(since_seq) || since_seq < 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'since_seq must be a non-negative integer', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (!Number.isInteger(limit) || limit < 1 || limit > CASE_EVENT_MAX_LIMIT) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `limit must be 1..${CASE_EVENT_MAX_LIMIT}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const page = caseEventStore.fetchSince(req.tenant!.tenant_id, since_seq, limit);
+        return res.json(wrapResponse(page, ctx));
+      } catch (e) {
+        if (e instanceof CaseEventError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/cases/events/:event_id — single event lookup. */
+  app.get(
+    '/v1/cases/events/:event_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.event_id ?? '';
+      const event = caseEventStore.get(req.tenant!.tenant_id, id);
+      if (!event) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_event', message: `event ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(event, ctx));
+    },
+  );
+
+  /** GET /v1/cases/:case_id/events — case-specific timeline. */
+  app.get(
+    '/v1/cases/:case_id/events',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const case_id = req.params.case_id ?? '';
+      const items = caseEventStore.forCase(req.tenant!.tenant_id, case_id);
+      return res.json(wrapResponse({ case_id, items, total: items.length }, ctx));
     },
   );
 
