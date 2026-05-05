@@ -452,3 +452,118 @@ describe('M16.7 — preset edit', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// ─── M16.8 — Clone library preset into custom ────────────────────────
+
+describe('POST /v1/scenarios/library/custom/clone-from-library', () => {
+  test('happy: 201 with custom copy of library preset', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'preset_rbi_severely_adverse' });
+    expect(r.status).toBe(201);
+    expect(r.body.body.id).toMatch(/^custom_/);
+    expect(r.body.body.name).toBe('Copy of RBI Severely Adverse');
+    expect(r.body.body.shocks).toEqual({ gdp: -4, rate: 300, fx: 12 });
+  });
+
+  test('caller can override name', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({
+        source_preset_id: 'preset_rbi_baseline_stress',
+        name: 'BIL Q3 Stress Run',
+      });
+    expect(r.body.body.name).toBe('BIL Q3 Stress Run');
+  });
+
+  test('source_doc carries cloned-from + creator', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send({ source_preset_id: 'preset_rbi_baseline_stress' });
+    expect(r.body.body.source_doc).toContain('preset_rbi_baseline_stress');
+    expect(r.body.body.source_doc).toContain('compliance.lead');
+  });
+
+  test('writes scenario.create audit with cloned_from metadata', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'preset_rbi_severely_adverse' });
+    const id = c.body.body.id;
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    expect(h.body.body.items[0].action).toBe('scenario.create');
+    expect(h.body.body.items[0].metadata.cloned_from).toBe('preset_rbi_severely_adverse');
+  });
+
+  test('clone is independently editable (PUT works on it)', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'preset_rbi_baseline_stress' });
+    const id = c.body.body.id;
+    const u = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({
+        name: 'Edited clone',
+        description: 'Tweaked',
+        category: 'business',
+        regulator: 'INTERNAL',
+        severity: 'mild',
+        shocks: { gdp: -0.5, rate: 25, fx: 1 },
+      });
+    expect(u.status).toBe(200);
+    expect(u.body.body.name).toBe('Edited clone');
+  });
+
+  test('missing source_preset_id → 400', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(400);
+  });
+
+  test('unknown source preset → 404', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'NO-SUCH' });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scenarios/library/custom/clone-from-library')
+      .set(TH_BIL)
+      .send({ source_preset_id: 'preset_rbi_baseline_stress' });
+    expect(r.status).toBe(403);
+  });
+
+  test('PUT /:preset_id still works (literal clone-from-library didn\'t shadow)', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const u = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Still works' });
+    expect(u.status).toBe(200);
+    expect(u.body.body.name).toBe('Still works');
+  });
+});

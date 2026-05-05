@@ -2313,6 +2313,111 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scenarios/library/custom/clone-from-library (T6 M16.8)
+   *  body { source_preset_id, name? } — reads a library preset and
+   *  creates an editable custom copy. Writes scenario.create audit
+   *  with `cloned_from` metadata. Declared BEFORE /:preset_id so the
+   *  literal `clone-from-library` segment wins. */
+  app.post(
+    '/v1/scenarios/library/custom/clone-from-library',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { source_preset_id?: unknown; name?: unknown };
+      if (typeof wrapper.source_preset_id !== 'string' || !wrapper.source_preset_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_preset_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const source = getScenarioPreset(wrapper.source_preset_id);
+      if (!source) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_preset',
+              message: `library preset ${wrapper.source_preset_id} not found`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      // Build the create input from the source preset; override name
+      // when caller supplies one, else default to "Copy of <name>".
+      const overrideName = typeof wrapper.name === 'string' && wrapper.name.trim()
+        ? wrapper.name.trim()
+        : null;
+      const createInput = {
+        name: overrideName ?? `Copy of ${source.name}`,
+        description: source.description,
+        category: source.category,
+        regulator: source.regulator,
+        severity: source.severity,
+        shocks: source.shocks,
+        source_doc: `Cloned from ${source.id} by ${created_by}`,
+      };
+      try {
+        const preset = customPresetStore.create(
+          req.tenant!.tenant_id,
+          createInput,
+          created_by,
+          now(),
+        );
+        // Write scenario.create audit event with cloned_from metadata.
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'scenario.create',
+              resource_type: 'scenario',
+              resource_id: preset.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                name: preset.name,
+                cloned_from: source.id,
+                shocks: preset.shocks,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.status(201).json(
+          wrapResponse(preset, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomPresetError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** PUT /v1/scenarios/library/custom/:preset_id (T6 M16.7) — replace
    *  mutable fields. Writes scenario.update audit event with metadata. */
   app.put(
