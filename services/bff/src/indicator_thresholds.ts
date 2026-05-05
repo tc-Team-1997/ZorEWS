@@ -191,17 +191,150 @@ export function checkBreach(threshold: IndicatorThreshold, value: number): Breac
  *   - missing/blank id     → invalid_input (400)
  *   - unknown indicator    → unknown_indicator (404)
  *   - value not in [0, 1]  → invalid_input (400)
+ *
+ * Optional `lookup` callback (M4.4) extends resolution beyond the
+ * platform defaults — e.g. server threads getEffectiveThreshold so
+ * per-tenant overrides resolve too. Defaults to library-only.
  */
-export function checkBreachById(indicator_id: unknown, value: unknown): BreachResult {
+export type ThresholdLookup = (id: string) => IndicatorThreshold | null;
+
+export function checkBreachById(
+  indicator_id: unknown,
+  value: unknown,
+  lookup: ThresholdLookup = getThreshold,
+): BreachResult {
   if (typeof indicator_id !== 'string' || !indicator_id.trim()) {
     throw new ThresholdError('invalid_input', 'indicator_id required');
   }
   if (typeof value !== 'number') {
     throw new ThresholdError('invalid_input', 'value must be a number');
   }
-  const t = getThreshold(indicator_id);
+  const t = lookup(indicator_id);
   if (!t) {
     throw new ThresholdError('unknown_indicator', `unknown indicator: ${indicator_id}`);
   }
   return checkBreach(t, value);
+}
+
+// ─── M4.4 — Per-tenant override store ─────────────────────────────────
+
+export interface ThresholdOverrideInput {
+  yellow_at: number;
+  orange_at: number;
+  red_at: number;
+}
+
+function validateOverride(input: unknown): ThresholdOverrideInput {
+  if (!input || typeof input !== 'object') {
+    throw new ThresholdError('invalid_input', 'request body required');
+  }
+  const i = input as Record<string, unknown>;
+  for (const k of ['yellow_at', 'orange_at', 'red_at'] as const) {
+    if (typeof i[k] !== 'number' || !Number.isFinite(i[k])) {
+      throw new ThresholdError('invalid_input', `${k} must be a finite number`);
+    }
+    const v = i[k] as number;
+    if (v < 0 || v > 1) {
+      throw new ThresholdError('invalid_input', `${k} must be in [0, 1]`);
+    }
+  }
+  const ya = i.yellow_at as number;
+  const oa = i.orange_at as number;
+  const ra = i.red_at as number;
+  if (!(ya <= oa && oa <= ra)) {
+    throw new ThresholdError(
+      'invalid_input',
+      'thresholds must be monotonic: yellow_at ≤ orange_at ≤ red_at',
+    );
+  }
+  return { yellow_at: ya, orange_at: oa, red_at: ra };
+}
+
+export interface ThresholdOverrideStore {
+  /** Returns the override (if any) merged with library defaults to
+   *  produce a complete IndicatorThreshold. Falls through to the
+   *  library when no override exists. Null when the indicator_id
+   *  isn't even in the platform catalog. */
+  effective(tenant_id: string, indicator_id: string): IndicatorThreshold | null;
+  /** Returns just the override entry (or null). */
+  getOverride(tenant_id: string, indicator_id: string): IndicatorThreshold | null;
+  /** List all overrides for a tenant. */
+  listOverrides(tenant_id: string): IndicatorThreshold[];
+  /** Set an override. Throws on bad shape, missing indicator id, or
+   *  monotonicity violation. */
+  setOverride(
+    tenant_id: string,
+    indicator_id: string,
+    input: unknown,
+  ): IndicatorThreshold;
+  /** Delete an override. Returns true on hit, false on miss. */
+  deleteOverride(tenant_id: string, indicator_id: string): boolean;
+}
+
+export class InMemoryThresholdOverrideStore implements ThresholdOverrideStore {
+  // (tenant, indicator) → override
+  private readonly map = new Map<string, IndicatorThreshold>();
+
+  private k(tenant: string, indicator: string): string {
+    return `${tenant}::${indicator}`;
+  }
+
+  effective(tenant_id: string, indicator_id: string): IndicatorThreshold | null {
+    const lib = getThreshold(indicator_id);
+    if (!lib) return null;
+    const ov = this.map.get(this.k(tenant_id, indicator_id));
+    return ov ?? lib;
+  }
+
+  getOverride(tenant_id: string, indicator_id: string): IndicatorThreshold | null {
+    return this.map.get(this.k(tenant_id, indicator_id)) ?? null;
+  }
+
+  listOverrides(tenant_id: string): IndicatorThreshold[] {
+    const out: IndicatorThreshold[] = [];
+    const prefix = `${tenant_id}::`;
+    for (const [k, v] of this.map.entries()) {
+      if (k.startsWith(prefix)) out.push(v);
+    }
+    return out;
+  }
+
+  setOverride(
+    tenant_id: string,
+    indicator_id: string,
+    input: unknown,
+  ): IndicatorThreshold {
+    const lib = getThreshold(indicator_id);
+    if (!lib) {
+      throw new ThresholdError('unknown_indicator', `unknown indicator: ${indicator_id}`);
+    }
+    const valid = validateOverride(input);
+    const next: IndicatorThreshold = {
+      indicator_id,
+      vertical: lib.vertical,
+      name: lib.name,
+      yellow_at: valid.yellow_at,
+      orange_at: valid.orange_at,
+      red_at: valid.red_at,
+    };
+    this.map.set(this.k(tenant_id, indicator_id), next);
+    return next;
+  }
+
+  deleteOverride(tenant_id: string, indicator_id: string): boolean {
+    return this.map.delete(this.k(tenant_id, indicator_id));
+  }
+}
+
+export const defaultThresholdOverrideStore: ThresholdOverrideStore =
+  new InMemoryThresholdOverrideStore();
+
+/** Helper for downstream consumers (mirrors getEffectivePreset
+ *  pattern from M16.5 / M5.7 / M6.5). */
+export function getEffectiveThreshold(
+  store: ThresholdOverrideStore,
+  tenant_id: string,
+  indicator_id: string,
+): IndicatorThreshold | null {
+  return store.effective(tenant_id, indicator_id);
 }

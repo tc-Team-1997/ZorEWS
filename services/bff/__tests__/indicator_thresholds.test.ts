@@ -4,10 +4,12 @@
 
 import request from 'supertest';
 import {
+  InMemoryThresholdOverrideStore,
   ThresholdError,
   assertThresholdCoverage,
   checkBreach,
   checkBreachById,
+  getEffectiveThreshold,
   getThreshold,
   listThresholds,
 } from '../src/indicator_thresholds';
@@ -267,6 +269,230 @@ describe('POST /v1/indicators/thresholds/check', () => {
       .post('/v1/indicators/thresholds/check')
       .set(TH_BIL)
       .send({ indicator_id: 'FIN-001', value: 0.5 });
+    expect(r.status).toBe(403);
+  });
+});
+
+// ─── M4.4 — Per-tenant override store ────────────────────────────────
+
+describe('InMemoryThresholdOverrideStore', () => {
+  test('effective falls through to library default when no override', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    const t = s.effective('BIL', 'FIN-001');
+    expect(t).not.toBeNull();
+    expect(t!.red_at).toBe(0.80);
+  });
+
+  test('effective null on unknown indicator', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    expect(s.effective('BIL', 'NO-SUCH')).toBeNull();
+  });
+
+  test('setOverride persists + effective returns it', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    s.setOverride('BIL', 'FIN-001', {
+      yellow_at: 0.10,
+      orange_at: 0.20,
+      red_at: 0.30,
+    });
+    const t = s.effective('BIL', 'FIN-001');
+    expect(t!.red_at).toBe(0.30);
+  });
+
+  test('setOverride rejects unknown indicator', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    try {
+      s.setOverride('BIL', 'NO-SUCH', {
+        yellow_at: 0.1,
+        orange_at: 0.2,
+        red_at: 0.3,
+      });
+      fail('expected throw');
+    } catch (e) {
+      expect((e as ThresholdError).code).toBe('unknown_indicator');
+    }
+  });
+
+  test('setOverride rejects non-monotonic values', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    expect(() =>
+      s.setOverride('BIL', 'FIN-001', {
+        yellow_at: 0.7,
+        orange_at: 0.5, // out of order
+        red_at: 0.9,
+      }),
+    ).toThrow(/monotonic/);
+  });
+
+  test('setOverride rejects out-of-range', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    expect(() =>
+      s.setOverride('BIL', 'FIN-001', {
+        yellow_at: 0.1,
+        orange_at: 0.5,
+        red_at: 1.5,
+      }),
+    ).toThrow(/\[0, 1\]/);
+  });
+
+  test('cross-tenant isolation', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    s.setOverride('BIL', 'FIN-001', {
+      yellow_at: 0.10,
+      orange_at: 0.20,
+      red_at: 0.30,
+    });
+    expect(s.effective('BIL', 'FIN-001')!.red_at).toBe(0.30);
+    // BANK_DEMO falls through to library default 0.80
+    expect(s.effective('BANK_DEMO', 'FIN-001')!.red_at).toBe(0.80);
+  });
+
+  test('listOverrides scoped to tenant', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    s.setOverride('BIL', 'FIN-001', {
+      yellow_at: 0.1,
+      orange_at: 0.2,
+      red_at: 0.3,
+    });
+    s.setOverride('BANK_DEMO', 'FIN-002', {
+      yellow_at: 0.4,
+      orange_at: 0.5,
+      red_at: 0.6,
+    });
+    expect(s.listOverrides('BIL').length).toBe(1);
+    expect(s.listOverrides('BIL')[0]!.indicator_id).toBe('FIN-001');
+    expect(s.listOverrides('BANK_DEMO').length).toBe(1);
+  });
+
+  test('deleteOverride: hit then miss', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    s.setOverride('BIL', 'FIN-001', {
+      yellow_at: 0.1,
+      orange_at: 0.2,
+      red_at: 0.3,
+    });
+    expect(s.deleteOverride('BIL', 'FIN-001')).toBe(true);
+    expect(s.deleteOverride('BIL', 'FIN-001')).toBe(false);
+    expect(s.effective('BIL', 'FIN-001')!.red_at).toBe(0.80); // back to default
+  });
+
+  test('checkBreachById with effective lookup uses override', () => {
+    const s = new InMemoryThresholdOverrideStore();
+    s.setOverride('BIL', 'FIN-001', {
+      yellow_at: 0.10,
+      orange_at: 0.20,
+      red_at: 0.30,
+    });
+    // value 0.35 — green under default (0.80 red), red under override (0.30 red)
+    const r = checkBreachById(
+      'FIN-001',
+      0.35,
+      (id) => getEffectiveThreshold(s, 'BIL', id),
+    );
+    expect(r.breach_class).toBe('red');
+  });
+});
+
+describe('M4.4 routes', () => {
+  test('PUT override → 200 with stored shape', async () => {
+    const { app } = makeThrApp('admin');
+    const r = await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    expect(r.status).toBe(200);
+    expect(r.body.body.red_at).toBe(0.3);
+    expect(r.body.body.indicator_id).toBe('FIN-001');
+  });
+
+  test('GET /:id reflects override', async () => {
+    const { app } = makeThrApp('admin');
+    await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    const r = await request(app).get('/v1/indicators/thresholds/FIN-001').set(TH_BIL);
+    expect(r.body.body.red_at).toBe(0.3);
+  });
+
+  test('POST /check uses effective threshold', async () => {
+    const { app } = makeThrApp('admin');
+    await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    const r = await request(app)
+      .post('/v1/indicators/thresholds/check')
+      .set(TH_BIL)
+      .send({ indicator_id: 'FIN-001', value: 0.35 });
+    // 0.35 > red_at=0.3 → red
+    expect(r.body.body.breach_class).toBe('red');
+  });
+
+  test('GET /overrides lists tenant-scoped overrides', async () => {
+    const { app } = makeThrApp('admin');
+    await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    const r = await request(app).get('/v1/indicators/thresholds/overrides').set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.total).toBe(1);
+  });
+
+  test('DELETE 204 then 404 then GET reverts to default', async () => {
+    const { app } = makeThrApp('admin');
+    await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    const d1 = await request(app).delete('/v1/indicators/thresholds/FIN-001').set(TH_BIL);
+    expect(d1.status).toBe(204);
+    const d2 = await request(app).delete('/v1/indicators/thresholds/FIN-001').set(TH_BIL);
+    expect(d2.status).toBe(404);
+    expect(d2.body.error.code).toBe('EWS_404_no_override');
+    const g = await request(app).get('/v1/indicators/thresholds/FIN-001').set(TH_BIL);
+    expect(g.body.body.red_at).toBe(0.80); // default restored
+  });
+
+  test('PUT non-monotonic → 400', async () => {
+    const { app } = makeThrApp('admin');
+    const r = await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.7, orange_at: 0.5, red_at: 0.9 });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  test('PUT unknown indicator → 404', async () => {
+    const { app } = makeThrApp('admin');
+    const r = await request(app)
+      .put('/v1/indicators/thresholds/NO-SUCH')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    expect(r.status).toBe(404);
+  });
+
+  test('cross-tenant: BIL override not visible from BANK_DEMO', async () => {
+    const { app } = makeThrApp('admin');
+    await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
+    const r = await request(app)
+      .get('/v1/indicators/thresholds/FIN-001')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API');
+    expect(r.body.body.red_at).toBe(0.80); // BANK_DEMO sees default
+  });
+
+  test('PUT non-allowed role → 403', async () => {
+    const { app } = makeThrApp('case_owner');
+    const r = await request(app)
+      .put('/v1/indicators/thresholds/FIN-001')
+      .set(TH_BIL)
+      .send({ yellow_at: 0.1, orange_at: 0.2, red_at: 0.3 });
     expect(r.status).toBe(403);
   });
 });

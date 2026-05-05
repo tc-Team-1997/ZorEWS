@@ -87,8 +87,11 @@ import {
 import {
   ThresholdError,
   checkBreachById,
+  defaultThresholdOverrideStore,
+  getEffectiveThreshold,
   getThreshold,
   listThresholds,
+  type ThresholdOverrideStore,
 } from './indicator_thresholds';
 import {
   getScenarioPreset,
@@ -523,6 +526,8 @@ export interface AppDeps {
   schemaOverrideStore?: SchemaOverrideStore;
   /** Override for tests — per-tenant custom rule template store (T6 M5.6). */
   customRuleTemplateStore?: CustomRuleTemplateStore;
+  /** Override for tests — per-tenant indicator threshold overrides (T6 M4.4). */
+  thresholdOverrideStore?: ThresholdOverrideStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -727,6 +732,7 @@ export function makeApp(deps: AppDeps = {}) {
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
   const customRuleTemplateStore = deps.customRuleTemplateStore ?? defaultCustomRuleTemplateStore;
+  const thresholdOverrideStore = deps.thresholdOverrideStore ?? defaultThresholdOverrideStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -4910,7 +4916,21 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** GET /v1/indicators/thresholds/:indicator_id — single threshold. */
+  /** GET /v1/indicators/thresholds/overrides — list per-tenant
+   *  overrides (T6 M4.4). Declared BEFORE /:indicator_id. */
+  app.get(
+    '/v1/indicators/thresholds/overrides',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = thresholdOverrideStore.listOverrides(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/indicators/thresholds/:indicator_id — single threshold
+   *  resolved through tenant overrides (M4.4 wires getEffectiveThreshold). */
   app.get(
     '/v1/indicators/thresholds/:indicator_id',
     requireTenantMw,
@@ -4918,7 +4938,7 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.indicator_id ?? '';
-      const t = getThreshold(id);
+      const t = getEffectiveThreshold(thresholdOverrideStore, req.tenant!.tenant_id, id);
       if (!t) {
         return res.status(404).json(
           wrapError(
@@ -4928,6 +4948,65 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(t, ctx));
+    },
+  );
+
+  /** PUT /v1/indicators/thresholds/:indicator_id (T6 M4.4) — set
+   *  per-tenant override. Body { yellow_at, orange_at, red_at } —
+   *  monotonic + [0,1] enforced. */
+  app.put(
+    '/v1/indicators/thresholds/:indicator_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.indicator_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const t = thresholdOverrideStore.setOverride(req.tenant!.tenant_id, id, inner);
+        return res.json(wrapResponse(t, ctx));
+      } catch (e) {
+        if (e instanceof ThresholdError) {
+          if (e.code === 'unknown_indicator') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_indicator', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/indicators/thresholds/:indicator_id — clear override
+   *  → revert to platform default. 204 / 404. */
+  app.delete(
+    '/v1/indicators/thresholds/:indicator_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.indicator_id ?? '';
+      const removed = thresholdOverrideStore.deleteOverride(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_no_override', message: `no override for ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 
@@ -4946,7 +5025,12 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const wrapper = (inner ?? {}) as { indicator_id?: unknown; value?: unknown };
       try {
-        const out = checkBreachById(wrapper.indicator_id, wrapper.value);
+        const tenantId = req.tenant!.tenant_id;
+        const out = checkBreachById(
+          wrapper.indicator_id,
+          wrapper.value,
+          (id) => getEffectiveThreshold(thresholdOverrideStore, tenantId, id),
+        );
         return res.json(wrapResponse(out, ctx));
       } catch (e) {
         if (e instanceof ThresholdError) {
