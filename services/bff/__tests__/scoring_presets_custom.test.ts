@@ -240,3 +240,58 @@ describe('Routes', () => {
     expect(r.body.body.total).toBe(6);
   });
 });
+
+// ─── M6.5 — Custom weight presets through scoreByPreset ──────────────
+
+describe('M6.5 — custom presets resolve through scoreByPreset', () => {
+  test('score-by-preset accepts a custom preset id', async () => {
+    const { app } = makeApp4Test('admin');
+    const c = await request(app).post('/v1/scoring/presets/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset')
+      .set(TH_BIL)
+      .send({
+        preset_id: customId,
+        items: [{ indicator_id: 'FIN-001', value: 0.8 }],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.preset_id).toBe(customId);
+    expect(r.body.body.preset_mode).toBe('conservative');
+    // FIN-001 catalog 0.9 × 1.4 = 1.26 → clamped to 1.0
+    const fin = r.body.body.effective_weights.find(
+      (e: { indicator_id: string }) => e.indicator_id === 'FIN-001',
+    );
+    expect(fin.multiplier).toBe(1.4);
+    expect(fin.effective_weight).toBe(1);
+  });
+
+  test('cross-tenant: BIL custom id not visible from BANK_DEMO', async () => {
+    const { app } = makeApp4Test('admin');
+    const c = await request(app).post('/v1/scoring/presets/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({
+        preset_id: customId,
+        items: [{ indicator_id: 'FIN-001', value: 0.8 }],
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('library presets still work (M6.3 no-regression)', async () => {
+    const { app } = makeApp4Test('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        items: [{ indicator_id: 'FIN-001', value: 0.5 }],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.preset_id).toBe('preset_banking_balanced');
+  });
+});

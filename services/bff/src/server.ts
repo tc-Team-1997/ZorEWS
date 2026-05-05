@@ -180,6 +180,7 @@ import {
 import {
   CustomWeightPresetError,
   defaultCustomWeightPresetStore,
+  getEffectiveWeightPreset,
   type CustomWeightPresetStore,
 } from './scoring_presets_custom';
 import {
@@ -4067,9 +4068,11 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       try {
+        const tenantId = req.tenant!.tenant_id;
         const result = scoreByPreset(
           (inner ?? {}) as { preset_id: string; items: ByIndicatorItem[] },
           indicatorWeightLookup,
+          (id) => getEffectiveWeightPreset(customWeightPresetStore, tenantId, id),
         );
         return res.json(wrapResponse(result, ctx));
       } catch (e) {

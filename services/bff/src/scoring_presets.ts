@@ -222,6 +222,13 @@ class PresetScopedLookup implements IndicatorWeightLookup {
 }
 
 /**
+ * Optional callback to extend resolution beyond the platform
+ * library — M6.5 wires the customWeightPresetStore so tenant-
+ * authored ids resolve too. Defaults to library-only.
+ */
+export type WeightPresetLookup = (id: string) => WeightPreset | null;
+
+/**
  * Score using a named preset's multipliers on top of the base
  * lookup. Code-routed:
  *   - bad input shape         → invalid_input (400)
@@ -231,6 +238,7 @@ class PresetScopedLookup implements IndicatorWeightLookup {
 export function scoreByPreset(
   input: ScoreByPresetInput,
   baseLookup: IndicatorWeightLookup,
+  presetLookup: WeightPresetLookup = getWeightPreset,
 ): ScoreByPresetResult {
   if (!input || typeof input !== 'object') {
     throw new WeightPresetError('invalid_input', 'request body required');
@@ -241,7 +249,7 @@ export function scoreByPreset(
   if (!Array.isArray(input.items)) {
     throw new WeightPresetError('invalid_input', 'items must be an array');
   }
-  const preset = getWeightPreset(input.preset_id);
+  const preset = presetLookup(input.preset_id);
   if (!preset) {
     throw new WeightPresetError('unknown_preset', `unknown preset: ${input.preset_id}`);
   }
