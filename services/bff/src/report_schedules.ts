@@ -46,12 +46,41 @@ export const VALID_CADENCES: readonly ScheduleCadence[] = [
   'last_day_of_month',
 ] as const;
 
+// T6 M12.4 — schedule timezones beyond UTC.
+//
+// Whitelisted zones for the prototype. Open-ended IANA strings
+// would force us to ship the tzdata, so we cap the surface to the
+// dozen zones BIL operations actually run in.
+export const SUPPORTED_TZ = [
+  'UTC',
+  'Asia/Kolkata',
+  'Asia/Singapore',
+  'Asia/Dubai',
+  'Asia/Tokyo',
+  'Asia/Hong_Kong',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+  'Australia/Sydney',
+] as const;
+
+export type ScheduleTz = (typeof SUPPORTED_TZ)[number];
+
+export function isScheduleTz(s: unknown): s is ScheduleTz {
+  return typeof s === 'string' && (SUPPORTED_TZ as readonly string[]).includes(s);
+}
+
 export interface ReportScheduleInput {
   report_id: string;
   format: ReportFormat;
   name: string;
   cadence: ScheduleCadence;
-  /** UTC hour 0-23. */
+  /** Wall-clock hour 0-23 in the schedule's configured `tz`.
+   *  Field name kept for backwards compat — when `tz` is omitted
+   *  (or 'UTC') this is literally the UTC hour. */
   hour_utc: number;
   /** 0=Sun … 6=Sat. Required when cadence='weekly'. */
   day_of_week?: number;
@@ -63,6 +92,9 @@ export interface ReportScheduleInput {
   enabled?: boolean;
   /** Forwarded to M12.1's report job parameters. */
   parameters?: Record<string, unknown>;
+  /** T6 M12.4 — IANA zone the wall-clock fields are in.
+   *  Defaults to 'UTC'. Must be one of `SUPPORTED_TZ`. */
+  tz?: ScheduleTz;
 }
 
 export interface ReportScheduleEntry {
@@ -83,11 +115,13 @@ export interface ReportScheduleEntry {
   updated_at: string;
   next_run_at: string;
   last_run_at: string | null;
+  /** T6 M12.4 — always set; legacy schedules default to 'UTC'. */
+  tz: ScheduleTz;
 }
 
 export type ReportSchedulePatch = Partial<Pick<
   ReportScheduleInput,
-  'name' | 'cadence' | 'hour_utc' | 'day_of_week' | 'day_of_month' | 'recipients' | 'enabled' | 'parameters' | 'format'
+  'name' | 'cadence' | 'hour_utc' | 'day_of_week' | 'day_of_month' | 'recipients' | 'enabled' | 'parameters' | 'format' | 'tz'
 >>;
 
 export interface ReportSchedulePage {
@@ -127,8 +161,73 @@ function isEmail(s: unknown): s is string {
 // ─── Pure-function next-run computation ────────────────────────────────
 
 /**
+ * Returns the offset (in minutes) of `tz` from UTC at the given
+ * instant. Positive when the zone is ahead of UTC (e.g. Asia/Kolkata
+ * → +330). Uses Intl.DateTimeFormat to extract wall-clock parts in
+ * the target zone, then recomposes them as a UTC instant.
+ */
+function offsetMinutesAt(instant: Date, tz: ScheduleTz): number {
+  if (tz === 'UTC') return 0;
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(instant);
+  const get = (t: string) => parseInt(parts.find((p) => p.type === t)!.value, 10);
+  // 'en-US' with hour12:false sometimes returns "24" for midnight.
+  let hour = get('hour');
+  if (hour === 24) hour = 0;
+  const zonedAsIfUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    hour,
+    get('minute'),
+    get('second'),
+  );
+  return Math.round((zonedAsIfUtc - instant.getTime()) / 60_000);
+}
+
+/**
+ * Given a wall-clock (year/month/day/hour) in `tz`, return the UTC
+ * instant. Iterates to converge across DST transitions (DST shifts
+ * make the offset itself a function of the instant; two passes are
+ * always enough for hourly granularity).
+ */
+function utcFromZoned(
+  year: number,
+  month0: number,
+  day: number,
+  hour: number,
+  tz: ScheduleTz,
+): Date {
+  if (tz === 'UTC') {
+    return new Date(Date.UTC(year, month0, day, hour, 0, 0, 0));
+  }
+  // First guess: pretend the wall clock IS UTC.
+  let utcMs = Date.UTC(year, month0, day, hour, 0, 0, 0);
+  for (let i = 0; i < 3; i++) {
+    const offsetMin = offsetMinutesAt(new Date(utcMs), tz);
+    const corrected = Date.UTC(year, month0, day, hour, 0, 0, 0) - offsetMin * 60_000;
+    if (corrected === utcMs) break;
+    utcMs = corrected;
+  }
+  return new Date(utcMs);
+}
+
+/**
  * Given a cadence + clock anchor + an `after` instant, compute the
  * next strictly-future fire time. Pure — no I/O, no clock side-effects.
+ *
+ * `tz` (T6 M12.4) treats `hour_utc`, day_of_week, day_of_month as
+ * wall-clock fields in that zone. Defaults to 'UTC' so legacy
+ * callers see no behavior change.
  */
 export function computeNextRun(
   cadence: ScheduleCadence,
@@ -136,16 +235,43 @@ export function computeNextRun(
   day_of_month: number | null,
   hour_utc: number,
   after: Date,
+  tz: ScheduleTz = 'UTC',
 ): Date {
+  // Helper: zoned year/month/day for the `after` instant — used
+  // when we anchor candidates to "today/this-month in the zone".
+  const zonedAnchor = (() => {
+    if (tz === 'UTC') {
+      return {
+        year: after.getUTCFullYear(),
+        month: after.getUTCMonth(),
+        day: after.getUTCDate(),
+        weekday: after.getUTCDay(),
+      };
+    }
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(after);
+    const get = (t: string) => parseInt(parts.find((p) => p.type === t)!.value, 10);
+    const wkMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const weekday = wkMap[parts.find((p) => p.type === 'weekday')!.value] ?? 0;
+    return {
+      year: get('year'),
+      month: get('month') - 1,
+      day: get('day'),
+      weekday,
+    };
+  })();
+
   if (cadence === 'daily') {
-    const d = new Date(Date.UTC(
-      after.getUTCFullYear(),
-      after.getUTCMonth(),
-      after.getUTCDate(),
-      hour_utc, 0, 0, 0,
-    ));
+    const d = utcFromZoned(zonedAnchor.year, zonedAnchor.month, zonedAnchor.day, hour_utc, tz);
     if (d.getTime() <= after.getTime()) {
-      d.setUTCDate(d.getUTCDate() + 1);
+      return utcFromZoned(zonedAnchor.year, zonedAnchor.month, zonedAnchor.day + 1, hour_utc, tz);
     }
     return d;
   }
@@ -153,63 +279,61 @@ export function computeNextRun(
     if (day_of_week === null) {
       throw new ScheduleError('invalid_input', 'weekly cadence requires day_of_week');
     }
-    const d = new Date(Date.UTC(
-      after.getUTCFullYear(),
-      after.getUTCMonth(),
-      after.getUTCDate(),
-      hour_utc, 0, 0, 0,
-    ));
-    let delta = (day_of_week - d.getUTCDay() + 7) % 7;
-    d.setUTCDate(d.getUTCDate() + delta);
+    const delta = (day_of_week - zonedAnchor.weekday + 7) % 7;
+    let d = utcFromZoned(
+      zonedAnchor.year,
+      zonedAnchor.month,
+      zonedAnchor.day + delta,
+      hour_utc,
+      tz,
+    );
     if (d.getTime() <= after.getTime()) {
-      d.setUTCDate(d.getUTCDate() + 7);
+      d = utcFromZoned(
+        zonedAnchor.year,
+        zonedAnchor.month,
+        zonedAnchor.day + delta + 7,
+        hour_utc,
+        tz,
+      );
     }
     return d;
   }
   if (cadence === 'last_day_of_month') {
-    // Last day of THIS month at hour_utc; if already past, last day
-    // of next month. The classic `Date(y, m+1, 0)` idiom returns the
-    // last day of month m.
-    const lastDayThis = new Date(
-      Date.UTC(after.getUTCFullYear(), after.getUTCMonth() + 1, 0, hour_utc, 0, 0, 0),
-    );
+    // Last day = day 0 of NEXT month (works in zoned arithmetic too).
+    const lastDayThis = utcFromZoned(zonedAnchor.year, zonedAnchor.month + 1, 0, hour_utc, tz);
     if (lastDayThis.getTime() > after.getTime()) return lastDayThis;
-    return new Date(
-      Date.UTC(after.getUTCFullYear(), after.getUTCMonth() + 2, 0, hour_utc, 0, 0, 0),
-    );
+    return utcFromZoned(zonedAnchor.year, zonedAnchor.month + 2, 0, hour_utc, tz);
   }
 
   if (cadence === 'quarterly') {
-    // Quarterly fires every 3 months on day_of_month, anchored to the
-    // FIRST month of each calendar quarter (Jan/Apr/Jul/Oct).
     if (day_of_month === null) {
       throw new ScheduleError('invalid_input', 'quarterly cadence requires day_of_month');
     }
-    const month = after.getUTCMonth(); // 0-11
-    const quarterStartMonth = Math.floor(month / 3) * 3; // 0,3,6,9
-    const candidate = new Date(
-      Date.UTC(after.getUTCFullYear(), quarterStartMonth, day_of_month, hour_utc, 0, 0, 0),
+    const quarterStartMonth = Math.floor(zonedAnchor.month / 3) * 3;
+    const candidate = utcFromZoned(
+      zonedAnchor.year,
+      quarterStartMonth,
+      day_of_month,
+      hour_utc,
+      tz,
     );
     if (candidate.getTime() > after.getTime()) return candidate;
-    return new Date(
-      Date.UTC(after.getUTCFullYear(), quarterStartMonth + 3, day_of_month, hour_utc, 0, 0, 0),
-    );
+    return utcFromZoned(zonedAnchor.year, quarterStartMonth + 3, day_of_month, hour_utc, tz);
   }
 
   // monthly
   if (day_of_month === null) {
     throw new ScheduleError('invalid_input', 'monthly cadence requires day_of_month');
   }
-  const candidate = new Date(Date.UTC(
-    after.getUTCFullYear(),
-    after.getUTCMonth(),
+  const candidate = utcFromZoned(
+    zonedAnchor.year,
+    zonedAnchor.month,
     day_of_month,
-    hour_utc, 0, 0, 0,
-  ));
+    hour_utc,
+    tz,
+  );
   if (candidate.getTime() <= after.getTime()) {
-    candidate.setUTCMonth(candidate.getUTCMonth() + 1);
-    candidate.setUTCDate(day_of_month);
-    candidate.setUTCHours(hour_utc, 0, 0, 0);
+    return utcFromZoned(zonedAnchor.year, zonedAnchor.month + 1, day_of_month, hour_utc, tz);
   }
   return candidate;
 }
@@ -299,6 +423,12 @@ function validateInput(input: ReportScheduleInput): void {
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') {
     throw new ScheduleError('invalid_input', 'enabled must be a boolean');
   }
+  if (input.tz !== undefined && !isScheduleTz(input.tz)) {
+    throw new ScheduleError(
+      'invalid_tz',
+      `tz must be one of ${SUPPORTED_TZ.join(', ')}`,
+    );
+  }
 }
 
 function validatePatch(patch: ReportSchedulePatch, base: ReportScheduleEntry): void {
@@ -316,6 +446,7 @@ function validatePatch(patch: ReportSchedulePatch, base: ReportScheduleEntry): v
     recipients: patch.recipients ?? base.recipients,
     enabled: patch.enabled ?? base.enabled,
     parameters: patch.parameters ?? base.parameters,
+    tz: patch.tz ?? base.tz,
   };
   validateInput(merged);
 }
@@ -377,12 +508,14 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       );
     }
     const usesDom = input.cadence === 'monthly' || input.cadence === 'quarterly';
+    const tz: ScheduleTz = input.tz ?? 'UTC';
     const next = computeNextRun(
       input.cadence,
       input.cadence === 'weekly' ? input.day_of_week! : null,
       usesDom ? input.day_of_month! : null,
       input.hour_utc,
       now,
+      tz,
     );
     const entry: ReportScheduleEntry = {
       schedule_id: `sch-${randomUUID()}`,
@@ -402,6 +535,7 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       updated_at: now.toISOString(),
       next_run_at: next.toISOString(),
       last_run_at: null,
+      tz,
     };
     bucket.set(entry.schedule_id, entry);
     return { ...entry, recipients: [...entry.recipients], parameters: { ...entry.parameters } };
@@ -460,6 +594,7 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       recipients: patch.recipients ? [...patch.recipients] : cur.recipients,
       enabled: patch.enabled !== undefined ? patch.enabled : cur.enabled,
       parameters: patch.parameters !== undefined ? patch.parameters : cur.parameters,
+      tz: patch.tz ?? cur.tz,
       updated_at: now.toISOString(),
     };
     // Recompute next_run_at if any timing field changed.
@@ -467,7 +602,8 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       patch.cadence !== undefined ||
       patch.hour_utc !== undefined ||
       patch.day_of_week !== undefined ||
-      patch.day_of_month !== undefined;
+      patch.day_of_month !== undefined ||
+      patch.tz !== undefined;
     if (timingChanged) {
       const usesDomNext = next.cadence === 'monthly' || next.cadence === 'quarterly';
       next.next_run_at = computeNextRun(
@@ -476,6 +612,7 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
         usesDomNext ? next.day_of_month : null,
         next.hour_utc,
         now,
+        next.tz,
       ).toISOString();
     }
     bucket.set(schedule_id, next);
@@ -512,6 +649,7 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       usesDom ? cur.day_of_month : null,
       cur.hour_utc,
       now,
+      cur.tz,
     );
     const updated: ReportScheduleEntry = {
       ...cur,

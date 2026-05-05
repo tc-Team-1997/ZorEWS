@@ -6,8 +6,10 @@ import request from 'supertest';
 import {
   InMemoryReportScheduleStore,
   ScheduleError,
+  SUPPORTED_TZ,
   computeNextRun,
   isScheduleCadence,
+  isScheduleTz,
   type ReportScheduleInput,
 } from '../src/report_schedules';
 import { makeApp } from '../src/server';
@@ -836,5 +838,250 @@ describe('No-regression: M12.1 reports routes still work', () => {
     const { app } = makeSchedApp('admin');
     const r = await request(app).get('/v1/reports/jobs').set(TH_BIL);
     expect(r.status).toBe(200);
+  });
+});
+
+// ─── M12.4 — schedule timezones beyond UTC ───────────────────────────
+
+describe('M12.4 — isScheduleTz', () => {
+  test('UTC + each whitelisted zone is recognised', () => {
+    for (const z of SUPPORTED_TZ) expect(isScheduleTz(z)).toBe(true);
+  });
+
+  test('open-ended IANA strings are rejected', () => {
+    expect(isScheduleTz('Pacific/Auckland')).toBe(false);
+    expect(isScheduleTz('GMT+05:30')).toBe(false);
+    expect(isScheduleTz('')).toBe(false);
+    expect(isScheduleTz(null)).toBe(false);
+    expect(isScheduleTz(undefined)).toBe(false);
+  });
+});
+
+describe('M12.4 — computeNextRun with tz', () => {
+  // 2026-05-05 12:00 UTC ≈ 2026-05-05 17:30 IST (Asia/Kolkata is +05:30, no DST).
+  const NOW_LOCAL = new Date('2026-05-05T12:00:00.000Z');
+
+  test('UTC default == legacy behaviour (no tz arg)', () => {
+    const a = computeNextRun('daily', null, null, 6, NOW_LOCAL);
+    const b = computeNextRun('daily', null, null, 6, NOW_LOCAL, 'UTC');
+    expect(a.toISOString()).toBe(b.toISOString());
+  });
+
+  test('daily 09:00 IST → 03:30 UTC same day if before 17:30 local, else next day', () => {
+    // It's 17:30 IST on 5 May. 09:00 IST has passed → next is 6 May 09:00 IST = 6 May 03:30 UTC.
+    const next = computeNextRun('daily', null, null, 9, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-05-06T03:30:00.000Z');
+  });
+
+  test('daily 22:00 IST today fires today (still future locally)', () => {
+    // 17:30 IST on 5 May; 22:00 IST today → 16:30 UTC today.
+    const next = computeNextRun('daily', null, null, 22, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-05-05T16:30:00.000Z');
+  });
+
+  test('Asia/Tokyo (+09:00) daily 09:00 = 00:00 UTC', () => {
+    // 21:00 JST on 5 May (12:00 UTC = 21:00 JST). 09:00 JST passed → 6 May 09:00 JST = 6 May 00:00 UTC.
+    const next = computeNextRun('daily', null, null, 9, NOW_LOCAL, 'Asia/Tokyo');
+    expect(next.toISOString()).toBe('2026-05-06T00:00:00.000Z');
+  });
+
+  test('America/New_York (UTC-4 in May, DST) daily 09:00 = 13:00 UTC', () => {
+    // NY is in EDT in May → UTC-4. At 12:00 UTC it's 08:00 NY. 09:00 NY today still in future → 13:00 UTC today.
+    const next = computeNextRun('daily', null, null, 9, NOW_LOCAL, 'America/New_York');
+    expect(next.toISOString()).toBe('2026-05-05T13:00:00.000Z');
+  });
+
+  test('weekly Friday 09:00 IST in mid-week resolves to upcoming Friday', () => {
+    // Tue 5 May 17:30 IST → upcoming Friday = 8 May → 8 May 09:00 IST = 8 May 03:30 UTC.
+    const next = computeNextRun('weekly', 5, null, 9, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-05-08T03:30:00.000Z');
+  });
+
+  test('monthly day-15 06:00 IST (15 May) = 15 May 00:30 UTC', () => {
+    const next = computeNextRun('monthly', null, 15, 6, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-05-15T00:30:00.000Z');
+  });
+
+  test('quarterly day-1 06:00 IST anchored to quarter start; May → Apr 1 already past → next Jul 1', () => {
+    const next = computeNextRun('quarterly', null, 1, 6, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-07-01T00:30:00.000Z');
+  });
+
+  test('last_day_of_month 23:00 IST May = 31 May 17:30 UTC', () => {
+    const next = computeNextRun('last_day_of_month', null, null, 23, NOW_LOCAL, 'Asia/Kolkata');
+    expect(next.toISOString()).toBe('2026-05-31T17:30:00.000Z');
+  });
+
+  test('zonal day-rollover: hour matches local wall-clock, not UTC', () => {
+    // Sao_Paulo is UTC-3 in May (no DST since 2019). At 12:00 UTC it's 09:00 SP.
+    // daily 22:00 SP → 22:00 SP today = 01:00 UTC NEXT day.
+    const next = computeNextRun('daily', null, null, 22, NOW_LOCAL, 'America/Sao_Paulo');
+    expect(next.toISOString()).toBe('2026-05-06T01:00:00.000Z');
+  });
+
+  test('Sydney +10/+11 — May = AEST (+10): daily 09:00 fires at 23:00 UTC previous day', () => {
+    // 12:00 UTC = 22:00 AEST (May). 09:00 AEST today already passed → tomorrow 09:00 AEST = tomorrow 23:00 UTC PREVIOUS day = 5 May 23:00 UTC.
+    const next = computeNextRun('daily', null, null, 9, NOW_LOCAL, 'Australia/Sydney');
+    expect(next.toISOString()).toBe('2026-05-05T23:00:00.000Z');
+  });
+});
+
+describe('M12.4 — store create + update with tz', () => {
+  const VALID_LOCAL = {
+    report_id: 'portfolio_snapshot_daily',
+    format: 'json' as const,
+    name: 'Daily 09:00 IST',
+    cadence: 'daily' as const,
+    hour_utc: 9, // wall clock in tz
+    recipients: ['ops@bil.example.com'],
+    tz: 'Asia/Kolkata' as const,
+  };
+
+  const NOW_LOCAL = new Date('2026-05-05T12:00:00.000Z');
+
+  test('create persists tz and computes next_run in zone', () => {
+    const s = new InMemoryReportScheduleStore();
+    const e = s.create('BIL', VALID_LOCAL, 'admin', NOW_LOCAL);
+    expect(e.tz).toBe('Asia/Kolkata');
+    expect(e.next_run_at).toBe('2026-05-06T03:30:00.000Z');
+  });
+
+  test('omitted tz defaults to UTC and behavior is unchanged', () => {
+    const s = new InMemoryReportScheduleStore();
+    const e = s.create('BIL', { ...VALID_LOCAL, tz: undefined }, 'admin', NOW_LOCAL);
+    expect(e.tz).toBe('UTC');
+    // 09:00 UTC on 5 May is before 12:00 UTC anchor → next fire is 6 May 09:00 UTC.
+    expect(e.next_run_at).toBe('2026-05-06T09:00:00.000Z');
+  });
+
+  test('invalid tz → invalid_tz error', () => {
+    const s = new InMemoryReportScheduleStore();
+    expect(() =>
+      s.create('BIL', { ...VALID_LOCAL, tz: 'Mars/Olympus' as never }, 'admin', NOW_LOCAL),
+    ).toThrow(/tz/);
+  });
+
+  test('update tz recomputes next_run_at', () => {
+    const s = new InMemoryReportScheduleStore();
+    const e = s.create('BIL', { ...VALID_LOCAL, tz: 'UTC' }, 'admin', NOW_LOCAL);
+    const before = e.next_run_at;
+    const updated = s.update('BIL', e.schedule_id, { tz: 'Asia/Kolkata' }, NOW_LOCAL);
+    expect(updated.tz).toBe('Asia/Kolkata');
+    expect(updated.next_run_at).not.toBe(before);
+    expect(updated.next_run_at).toBe('2026-05-06T03:30:00.000Z');
+  });
+
+  test('markRun re-uses stored tz (next_run_at advances correctly)', () => {
+    const s = new InMemoryReportScheduleStore();
+    const e = s.create('BIL', VALID_LOCAL, 'admin', NOW_LOCAL);
+    // Pretend we ran the scheduled job 1 minute after fire time.
+    const after = new Date('2026-05-06T03:31:00.000Z');
+    const advanced = s.markRun('BIL', e.schedule_id, after);
+    expect(advanced.tz).toBe('Asia/Kolkata');
+    expect(advanced.next_run_at).toBe('2026-05-07T03:30:00.000Z');
+    expect(advanced.last_run_at).toBe('2026-05-06T03:31:00.000Z');
+  });
+
+  test('cross-tenant tz isolation: BIL Kolkata schedule does not leak into BANK_DEMO', () => {
+    const s = new InMemoryReportScheduleStore();
+    const e = s.create('BIL', VALID_LOCAL, 'admin', NOW_LOCAL);
+    expect(s.get('BANK_DEMO', e.schedule_id)).toBeNull();
+    expect(s.list('BANK_DEMO', 1, 50).total).toBe(0);
+  });
+});
+
+describe('M12.4 — routes carry tz', () => {
+  function makeSchedAppLocal(role = 'admin') {
+    const store = new InMemoryReportScheduleStore();
+    const built = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      reportScheduleStore: store,
+      now: () => new Date('2026-05-05T12:00:00.000Z'),
+      getRole: () => role,
+    });
+    return { ...built, store };
+  }
+
+  test('POST /v1/reports/schedules with tz is persisted + reflected in GET', async () => {
+    const { app } = makeSchedAppLocal('admin');
+    const c = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({
+        report_id: 'portfolio_snapshot_daily',
+        format: 'json',
+        name: 'IST 9 AM',
+        cadence: 'daily',
+        hour_utc: 9,
+        recipients: ['ops@bil.example.com'],
+        tz: 'Asia/Kolkata',
+      });
+    expect(c.status).toBe(201);
+    expect(c.body.body.tz).toBe('Asia/Kolkata');
+    expect(c.body.body.next_run_at).toBe('2026-05-06T03:30:00.000Z');
+
+    const id = c.body.body.schedule_id;
+    const g = await request(app).get(`/v1/reports/schedules/${id}`).set(TH_BIL);
+    expect(g.body.body.tz).toBe('Asia/Kolkata');
+  });
+
+  test('POST with bogus tz → 400', async () => {
+    const { app } = makeSchedAppLocal('admin');
+    const r = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({
+        report_id: 'portfolio_snapshot_daily',
+        format: 'json',
+        name: 'bad',
+        cadence: 'daily',
+        hour_utc: 9,
+        recipients: ['ops@bil.example.com'],
+        tz: 'Pacific/Auckland',
+      });
+    expect(r.status).toBe(400);
+  });
+
+  test('PATCH tz on existing UTC schedule recomputes next_run_at', async () => {
+    const { app } = makeSchedAppLocal('admin');
+    const c = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({
+        report_id: 'portfolio_snapshot_daily',
+        format: 'json',
+        name: 'utc-then-local',
+        cadence: 'daily',
+        hour_utc: 9,
+        recipients: ['ops@bil.example.com'],
+      });
+    expect(c.body.body.tz).toBe('UTC');
+    const id = c.body.body.schedule_id;
+    const p = await request(app)
+      .patch(`/v1/reports/schedules/${id}`)
+      .set(TH_BIL)
+      .send({ tz: 'Asia/Kolkata' });
+    expect(p.status).toBe(200);
+    expect(p.body.body.tz).toBe('Asia/Kolkata');
+    expect(p.body.body.next_run_at).toBe('2026-05-06T03:30:00.000Z');
+  });
+
+  test('legacy POST without tz field defaults to UTC', async () => {
+    const { app } = makeSchedAppLocal('admin');
+    const r = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({
+        report_id: 'portfolio_snapshot_daily',
+        format: 'json',
+        name: 'legacy',
+        cadence: 'daily',
+        hour_utc: 6,
+        recipients: ['ops@bil.example.com'],
+      });
+    expect(r.body.body.tz).toBe('UTC');
   });
 });
