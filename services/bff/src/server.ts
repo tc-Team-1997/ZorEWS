@@ -136,6 +136,11 @@ import {
   rollbackConfig,
 } from './config_rollback';
 import {
+  ConfigBulkError,
+  exportConfig,
+  importConfig,
+} from './config_bulk';
+import {
   optionalApiKeyAuth,
   requireApiKey,
   requireScope,
@@ -5656,6 +5661,56 @@ export function makeApp(deps: AppDeps = {}) {
       const all = configStore.list(req.tenant!.tenant_id);
       const items = category ? all.filter((e) => e.category === category) : all;
       res.json(wrapResponse({ items, total: items.length, category: category ?? null }, ctx));
+    },
+  );
+
+  // ── Bulk config import/export (T6 M13.4) ───────────────────────────
+  // Declared BEFORE /v1/admin/config/:key so the literal path wins.
+
+  /** GET /v1/admin/config/_export — snapshot all overrides. */
+  app.get(
+    '/v1/admin/config/_export',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const snap = exportConfig(configStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(snap, ctx));
+    },
+  );
+
+  /** POST /v1/admin/config/_import body { snapshot, dry_run? } */
+  app.post(
+    '/v1/admin/config/_import',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const applied_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { snapshot?: unknown; dry_run?: boolean };
+      try {
+        const summary = importConfig(
+          configStore,
+          req.tenant!.tenant_id,
+          wrapper.snapshot,
+          applied_by,
+          wrapper.dry_run === true,
+          now(),
+        );
+        return res.json(wrapResponse(summary, ctx));
+      } catch (e) {
+        if (e instanceof ConfigBulkError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
     },
   );
 
