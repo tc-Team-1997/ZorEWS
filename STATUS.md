@@ -1,6 +1,6 @@
 # APEX EWS — Live Status
 
-**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **62 sub-phases shipped to date · ~178 routes wired · BFF jest 2315 pass / 9 skipped / 2324 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
+**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **63 sub-phases shipped to date · ~178 routes wired · BFF jest 2321 pass / 9 skipped / 2330 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
 **Last updated:** 2026-05-05
 
 ## T6 Coverage Matrix — BIL 16-module platform expansion
@@ -24,9 +24,9 @@ Every module below has at least one live sub-phase wired into the BFF and covere
 | M13 | Admin Configuration          | M13.1 + M13.2 + M13.3 + M13.4               | 13 BIL operational defaults × 5 categories · audit-trail wiring (every PUT/DELETE writes `config.update / config.reset`) · rollback to prior audit event with `rolled_back_from_event_id` · bulk import/export (additive merge; dry_run mode; per-key skipped/applied/unchanged summary) |
 | M14 | Integrations                 | M14.1–M14.9                                 | 8 adapters: Core Insurance · IFRS9 stages · AML watchlist · DMS · Bureau (CIBIL/CRIF/EXPERIAN/EQUIFAX) · Agent productivity · Finance/Treasury · HR — all with deterministic synthesis seeded by (tenant, customer, day) · plus parallel fleet-health roll-up at `/v1/integrations/adapters/health` (Promise.all probes, never-throws degraded entries, aggregate up/degraded counters) |
 | M15 | Audit & Compliance           | M15.1 + M15.2 + M15.3                       | 7-axis filterable audit log + summary · SHA-256 hash-chain integrity verifier · evidence packaging (filtered + chain-verified frozen snapshot) with capped per-tenant retention |
-| M16 | Scenarios                    | M16.1 + M16.2 + M16.3 + M16.4               | 10-preset library (RBI Baseline/Adverse/Severely-Adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans) · bulk-run ranking + worst/mean/adverse aggregates · pure-function side-by-side diff with sorted-by-|delta_abs| changed-entries view · per-tenant CUSTOM presets CRUD (50 cap; same shape as library so M16.2 + M16.3 work unchanged) |
+| M16 | Scenarios                    | M16.1 + M16.2 + M16.3 + M16.4 + M16.5       | 10-preset library (RBI Baseline/Adverse/Severely-Adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans) · bulk-run ranking + worst/mean/adverse aggregates · pure-function side-by-side diff with sorted-by-|delta_abs| changed-entries view · per-tenant CUSTOM presets CRUD (50 cap) · M16.5 wires custom presets through bulk-run + diff via getEffectivePreset (library-then-custom merge; cross-tenant isolation verified) |
 
-**Totals:** **16/16 modules live · 62 sub-phases shipped · ~178 routes wired · BFF tests 2315 pass / 9 skipped / 2324 total.**
+**Totals:** **16/16 modules live · 63 sub-phases shipped · ~178 routes wired · BFF tests 2321 pass / 9 skipped / 2330 total.**
 
 Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API count is **~38%**; **module coverage is 100%** — no module is missing a working slice. The next sub-phase candidates per module:
 
@@ -45,7 +45,7 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 - **M13** — config diff between tenants (M13.5)
 - **M14** — wider field-officer mobile surface (M14.10); per-adapter SLA dashboards
 - **M15** — PDF/Excel evidence export (M15.4)
-- **M16** — wire custom presets through M16.2 bulk-run + M16.3 diff (M16.5); scenario history
+- **M16** — scenario history (audit log per preset edit, M16.6)
 
 ## KPI Snapshot
 

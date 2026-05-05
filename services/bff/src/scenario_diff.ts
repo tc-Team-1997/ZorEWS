@@ -164,6 +164,13 @@ export function diffScenarios(left: ScenarioPreset, right: ScenarioPreset, now: 
 }
 
 /**
+ * Optional lookup callback to extend resolution beyond the M16.1
+ * platform library (M16.5 — wires the customPresetStore so
+ * tenant-authored ids resolve too).
+ */
+export type DiffPresetLookup = (id: string) => ScenarioPreset | null;
+
+/**
  * Resolve preset ids to ScenarioPreset records and run the diff.
  * Code-routed validation:
  *   - missing/blank left_id|right_id → invalid_input (400)
@@ -174,6 +181,7 @@ export function diffScenariosByIds(
   left_id: unknown,
   right_id: unknown,
   now: Date,
+  lookup: DiffPresetLookup = getScenarioPreset,
 ): ScenarioDiffResult {
   if (typeof left_id !== 'string' || !left_id.trim()) {
     throw new ScenarioDiffError('invalid_input', 'left_id is required');
@@ -187,11 +195,11 @@ export function diffScenariosByIds(
       'left_id and right_id are the same preset — diff would be empty',
     );
   }
-  const left = getScenarioPreset(left_id);
+  const left = lookup(left_id);
   if (!left) {
     throw new ScenarioDiffError('unknown_preset', `unknown preset: ${left_id}`);
   }
-  const right = getScenarioPreset(right_id);
+  const right = lookup(right_id);
   if (!right) {
     throw new ScenarioDiffError('unknown_preset', `unknown preset: ${right_id}`);
   }

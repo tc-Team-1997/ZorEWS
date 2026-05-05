@@ -201,3 +201,83 @@ describe('Routes', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// ─── M16.5 — Custom presets through bulk-run + diff ──────────────────
+
+describe('M16.5 — custom presets resolve through bulk-run', () => {
+  test('bulk-run accepts a custom preset id', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scenarios/bulk-run')
+      .set(TH_BIL)
+      .send({ preset_ids: [customId] });
+    expect(r.status).toBe(200);
+    expect(r.body.body.results.length).toBe(1);
+  });
+
+  test('bulk-run mixes library + custom ids', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scenarios/bulk-run')
+      .set(TH_BIL)
+      .send({ preset_ids: [customId, 'preset_baseline_no_shock'] });
+    expect(r.status).toBe(200);
+    expect(r.body.body.results.length).toBe(2);
+  });
+
+  test('bulk-run cross-tenant: BIL custom id not visible from BANK_DEMO', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scenarios/bulk-run')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({ preset_ids: [customId] });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+});
+
+describe('M16.5 — custom presets resolve through diff', () => {
+  test('diff accepts custom-vs-library', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scenarios/diff')
+      .set(TH_BIL)
+      .send({ left_id: customId, right_id: 'preset_rbi_severely_adverse' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.left.id).toBe(customId);
+  });
+
+  test('diff cross-tenant: BIL custom id not visible from BANK_DEMO', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const customId = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/scenarios/diff')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({ left_id: customId, right_id: 'preset_baseline_no_shock' });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('diff library-only ids still work (M16.3 no-regression)', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .post('/v1/scenarios/diff')
+      .set(TH_BIL)
+      .send({
+        left_id: 'preset_rbi_baseline_stress',
+        right_id: 'preset_rbi_severely_adverse',
+      });
+    expect(r.status).toBe(200);
+  });
+});

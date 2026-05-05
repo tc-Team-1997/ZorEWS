@@ -92,6 +92,7 @@ import {
 import {
   CustomPresetError,
   defaultCustomPresetStore,
+  getEffectivePreset,
   type CustomPresetStore,
 } from './scenario_custom';
 import {
@@ -2282,7 +2283,11 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       try {
-        const { presets, selection } = resolveBulkInput((inner ?? {}) as BulkRunInput);
+        const tenantId = req.tenant!.tenant_id;
+        const { presets, selection } = resolveBulkInput(
+          (inner ?? {}) as BulkRunInput,
+          (id) => getEffectivePreset(customPresetStore, tenantId, id),
+        );
         const result = runBulkScenarios(
           req.tenant!.tenant_id,
           presets,
@@ -2334,7 +2339,13 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const wrapper = (inner ?? {}) as { left_id?: unknown; right_id?: unknown };
       try {
-        const result = diffScenariosByIds(wrapper.left_id, wrapper.right_id, now());
+        const tenantId = req.tenant!.tenant_id;
+        const result = diffScenariosByIds(
+          wrapper.left_id,
+          wrapper.right_id,
+          now(),
+          (id) => getEffectivePreset(customPresetStore, tenantId, id),
+        );
         return res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof ScenarioDiffError) {

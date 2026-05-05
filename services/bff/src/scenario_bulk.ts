@@ -80,7 +80,17 @@ export class BulkRunError extends Error {
  * invalid combinations. Exactly one of `preset_ids` / `category` must
  * be supplied.
  */
-export function resolveBulkInput(input: BulkRunInput): {
+/**
+ * Optional lookup callback to extend resolution beyond the M16.1
+ * platform library — e.g. M16.5 wires the customPresetStore so
+ * tenant-authored ids resolve. Defaults to library-only.
+ */
+export type PresetLookup = (id: string) => ScenarioPreset | null;
+
+export function resolveBulkInput(
+  input: BulkRunInput,
+  lookup: PresetLookup = getScenarioPreset,
+): {
   presets: ScenarioPreset[];
   selection: BulkRunResult['selection'];
 } {
@@ -113,7 +123,7 @@ export function resolveBulkInput(input: BulkRunInput): {
       if (typeof id !== 'string' || !id.trim()) {
         throw new BulkRunError('invalid_input', 'every preset_id must be a non-empty string');
       }
-      const p = getScenarioPreset(id);
+      const p = lookup(id);
       if (!p) {
         throw new BulkRunError('unknown_preset', `unknown preset: ${id}`);
       }
