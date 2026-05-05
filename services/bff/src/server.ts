@@ -96,7 +96,9 @@ import {
 import {
   BreachScanError,
   scanCustomerBreaches,
+  scanCustomerBreachesBulk,
   type BreachScanInput,
+  type BulkBreachScanInput,
 } from './customer_breach_scan';
 import {
   getScenarioPreset,
@@ -5079,6 +5081,45 @@ export function makeApp(deps: AppDeps = {}) {
             customer_id: typeof wrapper.customer_id === 'string' ? wrapper.customer_id : '',
             vertical: wrapper.vertical as ScoringVertical | undefined,
           } as BreachScanInput,
+          thresholdOverrideStore,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof BreachScanError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/indicators/scan-customers (T6 M4.6) — bulk variant of
+   *  M4.5: scan up to 50 customers in one shot, return ranked
+   *  per-customer summary + portfolio aggregate. */
+  app.post(
+    '/v1/indicators/scan-customers',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { customer_ids?: unknown; vertical?: unknown };
+      try {
+        const result = scanCustomerBreachesBulk(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            customer_ids: Array.isArray(wrapper.customer_ids)
+              ? (wrapper.customer_ids as string[])
+              : [],
+            vertical: wrapper.vertical as ScoringVertical | undefined,
+          } as BulkBreachScanInput,
           thresholdOverrideStore,
           now(),
         );

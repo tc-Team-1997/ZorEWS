@@ -210,3 +210,142 @@ export function scanCustomerBreaches(
     summary,
   };
 }
+
+// ─── M4.6 — Bulk customer breach scan ────────────────────────────────
+
+export interface BulkBreachScanInput {
+  tenant_id: string;
+  customer_ids: string[];
+  vertical?: ScoringVertical;
+}
+
+export interface BulkBreachScanRow {
+  customer_id: string;
+  summary: BreachScanSummary;
+}
+
+export interface BulkBreachScanAggregate {
+  customer_count: number;
+  red_total: number;
+  orange_total: number;
+  yellow_total: number;
+  green_total: number;
+  /** Customers with ≥ 1 red breach. */
+  customers_with_red: number;
+  /** Customers with ≥ 1 orange OR red breach. */
+  customers_attention_required: number;
+}
+
+export interface BulkBreachScanResult {
+  tenant_id: string;
+  vertical: ScoringVertical | 'all';
+  scanned_at: string;
+  results: BulkBreachScanRow[];
+  aggregate: BulkBreachScanAggregate;
+}
+
+const MAX_BATCH = 50;
+
+const ROW_CLASS_ORDER: Record<BreachClass, number> = CLASS_ORDER;
+
+function compareRows(a: BulkBreachScanRow, b: BulkBreachScanRow): number {
+  // Worst-class first; null worst (no indicators) sorts last.
+  const aw = a.summary.worst_class;
+  const bw = b.summary.worst_class;
+  if (aw === null && bw === null) return 0;
+  if (aw === null) return 1;
+  if (bw === null) return -1;
+  return ROW_CLASS_ORDER[aw] - ROW_CLASS_ORDER[bw];
+}
+
+/**
+ * Pure-function bulk scan. Iterates scanCustomerBreaches per id;
+ * surfaces a slim per-customer summary + portfolio aggregate.
+ * Cap 50 customers per call; duplicates rejected.
+ */
+export function scanCustomerBreachesBulk(
+  input: BulkBreachScanInput,
+  store: ThresholdOverrideStore,
+  asOf: Date,
+): BulkBreachScanResult {
+  if (!input || typeof input !== 'object') {
+    throw new BreachScanError('invalid_input', 'request body required');
+  }
+  if (typeof input.tenant_id !== 'string' || !input.tenant_id.trim()) {
+    throw new BreachScanError('invalid_input', 'tenant_id required');
+  }
+  if (!Array.isArray(input.customer_ids) || input.customer_ids.length === 0) {
+    throw new BreachScanError('invalid_input', 'customer_ids[] must be non-empty');
+  }
+  if (input.customer_ids.length > MAX_BATCH) {
+    throw new BreachScanError(
+      'invalid_input',
+      `customer_ids exceeds batch cap of ${MAX_BATCH}`,
+    );
+  }
+  if (
+    input.vertical !== undefined &&
+    input.vertical !== 'banking' &&
+    input.vertical !== 'insurance'
+  ) {
+    throw new BreachScanError(
+      'invalid_input',
+      "vertical must be 'banking' or 'insurance'",
+    );
+  }
+  const seen = new Set<string>();
+  for (const cid of input.customer_ids) {
+    if (typeof cid !== 'string' || !cid.trim()) {
+      throw new BreachScanError(
+        'invalid_input',
+        'every customer_id must be a non-empty string',
+      );
+    }
+    if (seen.has(cid)) {
+      throw new BreachScanError('invalid_input', `duplicate customer_id: ${cid}`);
+    }
+    seen.add(cid);
+  }
+
+  const results: BulkBreachScanRow[] = input.customer_ids.map((cid) => {
+    const r = scanCustomerBreaches(
+      { tenant_id: input.tenant_id, customer_id: cid, vertical: input.vertical },
+      store,
+      asOf,
+    );
+    return { customer_id: cid, summary: r.summary };
+  });
+
+  results.sort(compareRows);
+
+  let red = 0;
+  let orange = 0;
+  let yellow = 0;
+  let green = 0;
+  let withRed = 0;
+  let attention = 0;
+  for (const row of results) {
+    red += row.summary.red_count;
+    orange += row.summary.orange_count;
+    yellow += row.summary.yellow_count;
+    green += row.summary.green_count;
+    if (row.summary.red_count > 0) withRed += 1;
+    if (row.summary.red_count > 0 || row.summary.orange_count > 0) attention += 1;
+  }
+
+  return {
+    tenant_id: input.tenant_id,
+    vertical: input.vertical ?? 'all',
+    scanned_at: asOf.toISOString(),
+    results,
+    aggregate: {
+      customer_count: results.length,
+      red_total: red,
+      orange_total: orange,
+      yellow_total: yellow,
+      green_total: green,
+      customers_with_red: withRed,
+      customers_attention_required: attention,
+    },
+  };
+}
