@@ -370,6 +370,11 @@ import {
   validateRecord,
 } from './connector_schema';
 import {
+  SchemaOverrideError,
+  defaultSchemaOverrideStore,
+  type SchemaOverrideStore,
+} from './connector_schema_overrides';
+import {
   defaultReportJobStore,
   isJobStatus,
   isReportCategory,
@@ -459,6 +464,8 @@ export interface AppDeps {
    * (T6 M6.4).
    */
   customWeightPresetStore?: CustomWeightPresetStore;
+  /** Override for tests — per-tenant connector schema overrides (T6 M3.3). */
+  schemaOverrideStore?: SchemaOverrideStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -658,6 +665,7 @@ export function makeApp(deps: AppDeps = {}) {
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
+  const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -6566,6 +6574,113 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── Per-tenant connector schema overrides (T6 M3.3) ─────────────────
+  // Add additional fields on top of the platform-default schema. Existing
+  // fields are NOT overridable; only ADDITIONS allowed.
+
+  /** GET /v1/ingestion/connectors/:id/schema/overrides — tenant additions. */
+  app.get(
+    '/v1/ingestion/connectors/:id/schema/overrides',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      if (!getConnectorSchema(id)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = schemaOverrideStore.list(req.tenant!.tenant_id, id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/ingestion/connectors/:id/schema/overrides — add a field. */
+  app.post(
+    '/v1/ingestion/connectors/:id/schema/overrides',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const field = schemaOverrideStore.add(req.tenant!.tenant_id, id, inner);
+        return res.status(201).json(
+          wrapResponse(field, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof SchemaOverrideError) {
+          if (e.code === 'unknown_connector') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'cap_reached' || e.code === 'duplicate_field' || e.code === 'reserved_field') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/ingestion/connectors/:id/schema/overrides/:field_name */
+  app.delete(
+    '/v1/ingestion/connectors/:id/schema/overrides/:field_name',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const fname = req.params.field_name ?? '';
+      const removed = schemaOverrideStore.remove(req.tenant!.tenant_id, id, fname);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_field', message: `field ${fname} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
+  /** GET /v1/ingestion/connectors/:id/schema/effective — platform + tenant additions. */
+  app.get(
+    '/v1/ingestion/connectors/:id/schema/effective',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const eff = schemaOverrideStore.effective(req.tenant!.tenant_id, id);
+      if (!eff) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(eff, ctx));
     },
   );
 
