@@ -455,6 +455,7 @@ import {
   type EvidenceFilters,
   type EvidencePackageStore,
 } from './audit_evidence';
+import { renderEvidenceSummary } from './audit_evidence_summary';
 import {
   defaultIngestionRegistry,
   IngestionError,
@@ -8601,6 +8602,37 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(pkg, ctx));
+    },
+  );
+
+  /** GET /v1/audit/evidence/:package_id/summary.txt (T6 M15.4)
+   *  — printable plain-text summary suitable for browser print-to-PDF.
+   *  Returns text/plain (NOT the T4.24 envelope) so the SPA can pipe
+   *  it straight to a print preview. */
+  app.get(
+    '/v1/audit/evidence/:package_id/summary.txt',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const package_id = req.params.package_id ?? '';
+      const pkg = evidenceStore.get(req.tenant!.tenant_id, package_id);
+      if (!pkg) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_package', message: `evidence package ${package_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const text = renderEvidenceSummary(pkg);
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.set(
+        'Content-Disposition',
+        `inline; filename="${package_id}.summary.txt"`,
+      );
+      void ctx;
+      return res.status(200).send(text);
     },
   );
 
