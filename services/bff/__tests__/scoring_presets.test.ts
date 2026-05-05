@@ -452,3 +452,152 @@ describe('No-regression: M6.1 + M6.2 routes still work', () => {
     expect(r.status).toBe(200);
   });
 });
+
+// ─── M6.6 — Batch score by preset ────────────────────────────────────
+
+describe('POST /v1/scoring/risk/by-preset/batch', () => {
+  const BATCH_BODY = {
+    preset_id: 'preset_banking_balanced',
+    customers: [
+      {
+        customer_id: 'CUST-1',
+        items: [
+          { indicator_id: 'FIN-001', value: 0.9 },
+          { indicator_id: 'FIN-002', value: 0.7 },
+        ],
+      },
+      {
+        customer_id: 'CUST-2',
+        items: [
+          { indicator_id: 'FIN-001', value: 0.1 },
+          { indicator_id: 'FIN-002', value: 0.2 },
+        ],
+      },
+    ],
+  };
+
+  test('analyst+: 200 with batch body + aggregate', async () => {
+    const { app } = makePresetApp('risk_analyst');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send(BATCH_BODY);
+    expect(r.status).toBe(200);
+    expect(r.body.body.results.length).toBe(2);
+    expect(r.body.body.aggregate.count).toBe(2);
+    expect(typeof r.body.body.aggregate.mean_score).toBe('number');
+  });
+
+  test('aggregate band counters add to count', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send(BATCH_BODY);
+    const a = r.body.body.aggregate;
+    expect(a.low_count + a.medium_count + a.high_count).toBe(a.count);
+  });
+
+  test('high-value customer bands as high', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        customers: [
+          {
+            customer_id: 'HIGH-1',
+            items: [
+              { indicator_id: 'FIN-001', value: 1.0 },
+              { indicator_id: 'FIN-002', value: 1.0 },
+            ],
+          },
+        ],
+      });
+    expect(r.body.body.results[0].category).toBe('high');
+  });
+
+  test('empty customers[] → 400', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({ preset_id: 'preset_banking_balanced', customers: [] });
+    expect(r.status).toBe(400);
+  });
+
+  test('> 50 customers → 400', async () => {
+    const { app } = makePresetApp('admin');
+    const customers = Array.from({ length: 51 }, (_, i) => ({
+      customer_id: `CUST-${i}`,
+      items: [{ indicator_id: 'FIN-001', value: 0.5 }],
+    }));
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({ preset_id: 'preset_banking_balanced', customers });
+    expect(r.status).toBe(400);
+  });
+
+  test('duplicate customer_id → 400', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        customers: [
+          {
+            customer_id: 'DUP-1',
+            items: [{ indicator_id: 'FIN-001', value: 0.5 }],
+          },
+          {
+            customer_id: 'DUP-1',
+            items: [{ indicator_id: 'FIN-002', value: 0.5 }],
+          },
+        ],
+      });
+    expect(r.status).toBe(400);
+  });
+
+  test('unknown preset → 404', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'NO-SUCH',
+        customers: [{ customer_id: 'C1', items: [] }],
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('unknown indicator inside items → 404 EWS_404_unknown_indicator', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        customers: [
+          {
+            customer_id: 'C1',
+            items: [{ indicator_id: 'XXX-9999', value: 0.5 }],
+          },
+        ],
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_indicator');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makePresetApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send(BATCH_BODY);
+    expect(r.status).toBe(403);
+  });
+});

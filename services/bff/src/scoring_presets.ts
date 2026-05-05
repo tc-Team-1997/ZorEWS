@@ -286,3 +286,130 @@ export function scoreByPreset(
 
 // Re-export so the route handler doesn't need a separate import.
 export { IndicatorLookupError };
+
+// ─── M6.6 — Batch score by preset across N customers ─────────────────
+
+export interface ScoreBatchCustomerInput {
+  customer_id: string;
+  items: ByIndicatorItem[];
+}
+
+export interface ScoreBatchInput {
+  preset_id: string;
+  customers: ScoreBatchCustomerInput[];
+}
+
+export interface ScoreBatchRow {
+  customer_id: string;
+  score: number;
+  category: 'low' | 'medium' | 'high';
+}
+
+export interface ScoreBatchAggregate {
+  count: number;
+  mean_score: number;
+  low_count: number;
+  medium_count: number;
+  high_count: number;
+}
+
+export interface ScoreBatchResult {
+  preset_id: string;
+  preset_name: string;
+  preset_mode: WeightPresetMode;
+  results: ScoreBatchRow[];
+  aggregate: ScoreBatchAggregate;
+  scored_at: string;
+}
+
+const MAX_BATCH = 50;
+
+/**
+ * Pure-function batch score. Calls scoreByPreset per customer and
+ * aggregates. Bounded at 50 customers per call.
+ */
+export function scoreByPresetBatch(
+  input: ScoreBatchInput,
+  baseLookup: IndicatorWeightLookup,
+  presetLookup: WeightPresetLookup = getWeightPreset,
+  asOf: Date = new Date(),
+): ScoreBatchResult {
+  if (!input || typeof input !== 'object') {
+    throw new WeightPresetError('invalid_input', 'request body required');
+  }
+  if (typeof input.preset_id !== 'string' || !input.preset_id.trim()) {
+    throw new WeightPresetError('invalid_input', 'preset_id is required');
+  }
+  if (!Array.isArray(input.customers) || input.customers.length === 0) {
+    throw new WeightPresetError('invalid_input', 'customers[] must be non-empty');
+  }
+  if (input.customers.length > MAX_BATCH) {
+    throw new WeightPresetError(
+      'invalid_input',
+      `customers exceeds batch cap of ${MAX_BATCH}`,
+    );
+  }
+  const seen = new Set<string>();
+  for (const c of input.customers) {
+    if (!c || typeof c !== 'object') {
+      throw new WeightPresetError('invalid_input', 'each customer entry must be an object');
+    }
+    if (typeof c.customer_id !== 'string' || !c.customer_id.trim()) {
+      throw new WeightPresetError('invalid_input', 'customer_id is required for every entry');
+    }
+    if (seen.has(c.customer_id)) {
+      throw new WeightPresetError('invalid_input', `duplicate customer_id: ${c.customer_id}`);
+    }
+    seen.add(c.customer_id);
+    if (!Array.isArray(c.items)) {
+      throw new WeightPresetError('invalid_input', `items must be an array (customer ${c.customer_id})`);
+    }
+  }
+
+  // Resolve preset once (avoid N lookups for the same id).
+  const preset = presetLookup(input.preset_id);
+  if (!preset) {
+    throw new WeightPresetError('unknown_preset', `unknown preset: ${input.preset_id}`);
+  }
+
+  const results: ScoreBatchRow[] = [];
+  for (const c of input.customers) {
+    const r = scoreByPreset(
+      { preset_id: preset.id, items: c.items },
+      baseLookup,
+      // Reuse the resolved preset for every row instead of re-looking-up.
+      () => preset,
+    );
+    results.push({
+      customer_id: c.customer_id,
+      score: r.score,
+      category: r.category,
+    });
+  }
+
+  let scoreSum = 0;
+  let low = 0;
+  let medium = 0;
+  let high = 0;
+  for (const r of results) {
+    scoreSum += r.score;
+    if (r.category === 'low') low += 1;
+    else if (r.category === 'medium') medium += 1;
+    else if (r.category === 'high') high += 1;
+  }
+
+  return {
+    preset_id: preset.id,
+    preset_name: preset.name,
+    preset_mode: preset.mode,
+    results,
+    aggregate: {
+      count: results.length,
+      mean_score: scoreSum / results.length,
+      low_count: low,
+      medium_count: medium,
+      high_count: high,
+    },
+    scored_at: asOf.toISOString(),
+  };
+}
