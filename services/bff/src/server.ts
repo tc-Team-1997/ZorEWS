@@ -241,6 +241,11 @@ import {
   type AutoAckRuleStore,
 } from './alert_auto_ack';
 import {
+  WebhookChannelError,
+  defaultNotificationWebhookStore,
+  type NotificationWebhookStore,
+} from './notification_webhook';
+import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
@@ -469,6 +474,8 @@ export interface AppDeps {
    * Override for tests — alert auto-ack rule store (T6 M8.4).
    */
   autoAckRuleStore?: AutoAckRuleStore;
+  /** Override for tests — notification webhook channel store (T6 M10.4). */
+  notificationWebhookStore?: NotificationWebhookStore;
   /**
    * Override for tests — per-tenant custom scenario preset store
    * (T6 M16.4).
@@ -678,6 +685,7 @@ export function makeApp(deps: AppDeps = {}) {
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
+  const notificationWebhookStore = deps.notificationWebhookStore ?? defaultNotificationWebhookStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
@@ -2873,6 +2881,130 @@ export function makeApp(deps: AppDeps = {}) {
       const limit = typeof limitRaw === 'string' ? Math.max(1, Math.min(500, Number(limitRaw) || 50)) : 50;
       const items = pushTransport.recent(req.tenant!.tenant_id, limit);
       res.json(wrapResponse({ items, total: items.length, limit }, ctx));
+    },
+  );
+
+  // ── Notification webhook channel (T6 M10.4) ──────────────────────────
+  // Sibling to M10.1/2/3 (email/SMS/push). BIL admins register an
+  // outbound URL that receives every notification as JSON POST.
+
+  /** GET /v1/notifications/webhook/subscriptions */
+  app.get(
+    '/v1/notifications/webhook/subscriptions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = notificationWebhookStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/notifications/webhook/subscriptions {name, url, enabled?} */
+  app.post(
+    '/v1/notifications/webhook/subscriptions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const sub = notificationWebhookStore.create(
+          req.tenant!.tenant_id,
+          inner,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(sub, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof WebhookChannelError) {
+          if (e.code === 'cap_reached' || e.code === 'duplicate_url') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/notifications/webhook/subscriptions/:webhook_id */
+  app.delete(
+    '/v1/notifications/webhook/subscriptions/:webhook_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.webhook_id ?? '';
+      const removed = notificationWebhookStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_webhook', message: `webhook ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
+  /** POST /v1/notifications/webhook/send {event_type, payload} — fan to all enabled subs. */
+  app.post(
+    '/v1/notifications/webhook/send',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { event_type?: string; payload?: Record<string, unknown> };
+      try {
+        const items = notificationWebhookStore.send(
+          req.tenant!.tenant_id,
+          wrapper.event_type ?? '',
+          wrapper.payload ?? {},
+          now(),
+        );
+        return res.json(wrapResponse({ items, total: items.length }, ctx));
+      } catch (e) {
+        if (e instanceof WebhookChannelError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/notifications/webhook/subscriptions/:webhook_id/deliveries */
+  app.get(
+    '/v1/notifications/webhook/subscriptions/:webhook_id/deliveries',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.webhook_id ?? '';
+      const limitRaw = req.query.limit;
+      const limit =
+        typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
+      const items = notificationWebhookStore.listDeliveries(req.tenant!.tenant_id, id, limit);
+      return res.json(wrapResponse({ items, total: items.length, limit }, ctx));
     },
   );
 
