@@ -36,9 +36,15 @@ import {
 
 // ─── Public types ──────────────────────────────────────────────────────
 
-export type ScheduleCadence = 'daily' | 'weekly' | 'monthly';
+export type ScheduleCadence = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'last_day_of_month';
 
-export const VALID_CADENCES: readonly ScheduleCadence[] = ['daily', 'weekly', 'monthly'] as const;
+export const VALID_CADENCES: readonly ScheduleCadence[] = [
+  'daily',
+  'weekly',
+  'monthly',
+  'quarterly',
+  'last_day_of_month',
+] as const;
 
 export interface ReportScheduleInput {
   report_id: string;
@@ -160,6 +166,36 @@ export function computeNextRun(
     }
     return d;
   }
+  if (cadence === 'last_day_of_month') {
+    // Last day of THIS month at hour_utc; if already past, last day
+    // of next month. The classic `Date(y, m+1, 0)` idiom returns the
+    // last day of month m.
+    const lastDayThis = new Date(
+      Date.UTC(after.getUTCFullYear(), after.getUTCMonth() + 1, 0, hour_utc, 0, 0, 0),
+    );
+    if (lastDayThis.getTime() > after.getTime()) return lastDayThis;
+    return new Date(
+      Date.UTC(after.getUTCFullYear(), after.getUTCMonth() + 2, 0, hour_utc, 0, 0, 0),
+    );
+  }
+
+  if (cadence === 'quarterly') {
+    // Quarterly fires every 3 months on day_of_month, anchored to the
+    // FIRST month of each calendar quarter (Jan/Apr/Jul/Oct).
+    if (day_of_month === null) {
+      throw new ScheduleError('invalid_input', 'quarterly cadence requires day_of_month');
+    }
+    const month = after.getUTCMonth(); // 0-11
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0,3,6,9
+    const candidate = new Date(
+      Date.UTC(after.getUTCFullYear(), quarterStartMonth, day_of_month, hour_utc, 0, 0, 0),
+    );
+    if (candidate.getTime() > after.getTime()) return candidate;
+    return new Date(
+      Date.UTC(after.getUTCFullYear(), quarterStartMonth + 3, day_of_month, hour_utc, 0, 0, 0),
+    );
+  }
+
   // monthly
   if (day_of_month === null) {
     throw new ScheduleError('invalid_input', 'monthly cadence requires day_of_month');
@@ -227,16 +263,20 @@ function validateInput(input: ReportScheduleInput): void {
       throw new ScheduleError('invalid_input', 'day_of_week must be integer 0-6 (Sun=0) for weekly cadence');
     }
   }
-  if (input.cadence === 'monthly') {
+  if (input.cadence === 'monthly' || input.cadence === 'quarterly') {
     if (
       typeof input.day_of_month !== 'number' ||
       !Number.isInteger(input.day_of_month) ||
       input.day_of_month < 1 ||
       input.day_of_month > 28
     ) {
-      throw new ScheduleError('invalid_input', 'day_of_month must be integer 1-28 for monthly cadence');
+      throw new ScheduleError(
+        'invalid_input',
+        `day_of_month must be integer 1-28 for ${input.cadence} cadence`,
+      );
     }
   }
+  // last_day_of_month doesn't take day_of_month (it's always last)
   if (!Array.isArray(input.recipients) || input.recipients.length === 0) {
     throw new ScheduleError('invalid_recipients', 'recipients[] must contain at least 1 email');
   }
@@ -336,10 +376,11 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
         `tenant ${tenant_id} already has ${this.cap} schedules — delete or disable one first`,
       );
     }
+    const usesDom = input.cadence === 'monthly' || input.cadence === 'quarterly';
     const next = computeNextRun(
       input.cadence,
       input.cadence === 'weekly' ? input.day_of_week! : null,
-      input.cadence === 'monthly' ? input.day_of_month! : null,
+      usesDom ? input.day_of_month! : null,
       input.hour_utc,
       now,
     );
@@ -352,7 +393,7 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       cadence: input.cadence,
       hour_utc: input.hour_utc,
       day_of_week: input.cadence === 'weekly' ? input.day_of_week! : null,
-      day_of_month: input.cadence === 'monthly' ? input.day_of_month! : null,
+      day_of_month: usesDom ? input.day_of_month! : null,
       recipients: [...input.recipients],
       enabled: input.enabled ?? true,
       parameters: input.parameters ?? {},
@@ -428,10 +469,11 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       patch.day_of_week !== undefined ||
       patch.day_of_month !== undefined;
     if (timingChanged) {
+      const usesDomNext = next.cadence === 'monthly' || next.cadence === 'quarterly';
       next.next_run_at = computeNextRun(
         next.cadence,
         next.cadence === 'weekly' ? next.day_of_week : null,
-        next.cadence === 'monthly' ? next.day_of_month : null,
+        usesDomNext ? next.day_of_month : null,
         next.hour_utc,
         now,
       ).toISOString();
@@ -463,10 +505,11 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
     if (!cur) {
       throw new ScheduleError('unknown_schedule', `schedule ${schedule_id} not found`);
     }
+    const usesDom = cur.cadence === 'monthly' || cur.cadence === 'quarterly';
     const next = computeNextRun(
       cur.cadence,
       cur.cadence === 'weekly' ? cur.day_of_week : null,
-      cur.cadence === 'monthly' ? cur.day_of_month : null,
+      usesDom ? cur.day_of_month : null,
       cur.hour_utc,
       now,
     );

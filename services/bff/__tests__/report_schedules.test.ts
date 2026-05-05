@@ -50,9 +50,13 @@ describe('isScheduleCadence', () => {
     expect(isScheduleCadence('weekly')).toBe(true);
     expect(isScheduleCadence('monthly')).toBe(true);
   });
+  test('accepts quarterly + last_day_of_month (M12.3 additive)', () => {
+    expect(isScheduleCadence('quarterly')).toBe(true);
+    expect(isScheduleCadence('last_day_of_month')).toBe(true);
+  });
   test('rejects others', () => {
     expect(isScheduleCadence('hourly')).toBe(false);
-    expect(isScheduleCadence('quarterly')).toBe(false);
+    expect(isScheduleCadence('annual')).toBe(false);
     expect(isScheduleCadence(42)).toBe(false);
   });
 });
@@ -132,6 +136,64 @@ describe('computeNextRun', () => {
     const after = new Date('2026-12-20T06:00:00Z');
     const next = computeNextRun('monthly', null, 15, 6, after);
     expect(next.toISOString()).toBe('2027-01-15T06:00:00.000Z');
+  });
+
+  // ── M12.3 — Quarterly + last_day_of_month cadences ─────────────────
+  test('quarterly — fires on quarter-start month at day_of_month', () => {
+    // 2026-05-05 is in Q2 (Apr-Jun). Quarter start = April. day_of_month=15 has passed?
+    // Apr 15 06:00 vs May 5 12:00 → past → next quarter (Jul 15)
+    const after = new Date('2026-05-05T12:00:00Z');
+    const next = computeNextRun('quarterly', null, 15, 6, after);
+    expect(next.toISOString()).toBe('2026-07-15T06:00:00.000Z');
+  });
+
+  test('quarterly — same quarter when day_of_month is in the future', () => {
+    // 2026-04-01 in Q2. Quarter start month = April. dom=15 not yet passed.
+    const after = new Date('2026-04-01T00:00:00Z');
+    const next = computeNextRun('quarterly', null, 15, 6, after);
+    expect(next.toISOString()).toBe('2026-04-15T06:00:00.000Z');
+  });
+
+  test('quarterly — Q4 → Q1 year roll', () => {
+    const after = new Date('2026-11-15T00:00:00Z');
+    const next = computeNextRun('quarterly', null, 1, 6, after);
+    // Q4 starts Oct. Oct 1 06:00 past → next Q1 = Jan 1 2027
+    expect(next.toISOString()).toBe('2027-01-01T06:00:00.000Z');
+  });
+
+  test('quarterly — throws when day_of_month is null', () => {
+    expect(() => computeNextRun('quarterly', null, null, 6, new Date())).toThrow(/day_of_month/);
+  });
+
+  test('last_day_of_month — fires on last day of THIS month', () => {
+    const after = new Date('2026-05-05T00:00:00Z');
+    const next = computeNextRun('last_day_of_month', null, null, 23, after);
+    // May has 31 days
+    expect(next.toISOString()).toBe('2026-05-31T23:00:00.000Z');
+  });
+
+  test('last_day_of_month — Feb non-leap year (28 days)', () => {
+    const after = new Date('2026-02-01T00:00:00Z');
+    const next = computeNextRun('last_day_of_month', null, null, 6, after);
+    expect(next.toISOString()).toBe('2026-02-28T06:00:00.000Z');
+  });
+
+  test('last_day_of_month — leap-year Feb (29 days)', () => {
+    const after = new Date('2024-02-01T00:00:00Z');
+    const next = computeNextRun('last_day_of_month', null, null, 6, after);
+    expect(next.toISOString()).toBe('2024-02-29T06:00:00.000Z');
+  });
+
+  test('last_day_of_month — past last day rolls to next month', () => {
+    const after = new Date('2026-05-31T23:00:01Z');
+    const next = computeNextRun('last_day_of_month', null, null, 23, after);
+    expect(next.toISOString()).toBe('2026-06-30T23:00:00.000Z');
+  });
+
+  test('last_day_of_month — December → January', () => {
+    const after = new Date('2026-12-31T23:00:01Z');
+    const next = computeNextRun('last_day_of_month', null, null, 23, after);
+    expect(next.toISOString()).toBe('2027-01-31T23:00:00.000Z');
   });
 });
 
@@ -560,6 +622,38 @@ describe('POST /v1/reports/schedules', () => {
     const { app } = makeSchedApp('case_owner');
     const r = await request(app).post('/v1/reports/schedules').set(TH_BIL).send(VALID);
     expect(r.status).toBe(403);
+  });
+
+  // ── M12.3 — quarterly + last_day_of_month cadences via routes ──────
+  test('quarterly cadence accepted with day_of_month', async () => {
+    const { app } = makeSchedApp('admin');
+    const r = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({ ...VALID, cadence: 'quarterly', day_of_month: 1, hour_utc: 6 });
+    expect(r.status).toBe(201);
+    expect(r.body.body.cadence).toBe('quarterly');
+    expect(r.body.body.day_of_month).toBe(1);
+  });
+
+  test('quarterly without day_of_month → 400', async () => {
+    const { app } = makeSchedApp('admin');
+    const r = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({ ...VALID, cadence: 'quarterly', hour_utc: 6 });
+    expect(r.status).toBe(400);
+  });
+
+  test('last_day_of_month cadence accepted (no day_of_month)', async () => {
+    const { app } = makeSchedApp('admin');
+    const r = await request(app)
+      .post('/v1/reports/schedules')
+      .set(TH_BIL)
+      .send({ ...VALID, cadence: 'last_day_of_month', hour_utc: 23 });
+    expect(r.status).toBe(201);
+    expect(r.body.body.cadence).toBe('last_day_of_month');
+    expect(r.body.body.day_of_month).toBeNull();
   });
 });
 
