@@ -249,6 +249,11 @@ import {
   type EmployeeStatus,
   type HrAdapter,
 } from './integrations/hr';
+import {
+  listFleetAdapters,
+  runFleetHealth,
+  type AdapterFleet,
+} from './adapter_health';
 import { buildCustomer360, Customer360Error } from './customer_360';
 import {
   defaultCaseInvestigationStore,
@@ -5101,6 +5106,49 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── Adapter fleet health roll-up (T6 M14.9) ──────────────────────────
+  //
+  // Cross-module orchestrator probing all 8 M14.x adapters in parallel
+  // via their existing list/get methods. Returns per-adapter
+  // status + latency + sample_count + aggregate counters. Never
+  // throws — failures surface as `degraded` entries so one bad
+  // upstream doesn't take the whole fleet view down.
+
+  const fleetForHealth: AdapterFleet = {
+    insurance: insuranceAdapter,
+    ifrs9: ifrs9Adapter,
+    aml: amlAdapter,
+    dms: dmsAdapter,
+    bureau: bureauAdapter,
+    agent: agentAdapter,
+    finance: financeAdapter,
+    hr: hrAdapter,
+  };
+
+  /** GET /v1/integrations/adapters — static catalog (no probes). */
+  app.get(
+    '/v1/integrations/adapters',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = listFleetAdapters();
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/integrations/adapters/health — probe all 8 in parallel. */
+  app.get(
+    '/v1/integrations/adapters/health',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const report = await runFleetHealth(req.tenant!.tenant_id, now(), fleetForHealth);
+      return res.json(wrapResponse(report, ctx));
     },
   );
 

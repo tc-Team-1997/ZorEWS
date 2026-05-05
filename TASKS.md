@@ -1297,6 +1297,26 @@
       - No-regression (4): M16.1 GET /v1/scenarios/library + /:id + M16.2 POST /bulk-run + saved-scenario GET still all 200/404 — `/diff` literal didn't shadow `/:id`.
     - **Outcome:** Module 16 now has 3 sub-phases (M16.1 library + M16.2 bulk-run + M16.3 diff). Combined the BIL stress-testing UX runs end-to-end: pick presets from library → bulk-run them against the portfolio → diff any two side-by-side to inspect the assumption delta. Future M16.4 likely covers **scenario authoring** (custom user-defined presets that survive across sessions).
 
+  - **M14.9 — Adapter fleet health roll-up (2026-05-05):**
+    - M14.1–M14.8 ship the BIL adapter family (Insurance / IFRS9 stages / AML / DMS / Bureau / Agent / Finance / HR). M14.9 ships a single cross-module endpoint that probes all 8 in parallel and returns a unified fleet-health view — drives the ops dashboard's "is anything degraded?" indicator. Note: the existing `/v1/integrations/health` route pings *external* upstreams (CBS / IFRS9-engine / AML / Collection) via integration-mocks and is preserved unchanged. M14.9 lives at a new `/v1/integrations/adapters{,/health}` path so the two surfaces are distinct.
+    - New `services/bff/src/adapter_health.ts`:
+      - `AdapterFleet` shape — typed bag of all 8 adapter interfaces (insurance, ifrs9, aml, dms, bureau, agent, finance, hr). Pure DI — no module-level singleton coupling.
+      - **`runFleetHealth(tenant_id, asOf, fleet)`** — `Promise.all` fan-out across 8 probes wrapped in try/catch. Each probe calls the adapter's existing list/get method (no new health-method addition; that'd be a breaking change to the adapter interfaces). Insurance: `listPolicies`. IFRS9: `listStages`. AML: `screenCustomer`. DMS / Bureau / Finance: `listByCustomer`. Agent / HR: `list`. All probes use the same representative `CUST-100001` customer id (deterministic across stubs).
+      - Per-adapter result: `{adapter_id, label, base_path, status: 'up'|'degraded', latency_ms, sample_count, error?}`. `degraded` entries carry the error message but never block — one bad adapter doesn't take the fleet view down.
+      - Aggregate: `total + up_count + degraded_count + total_latency_ms` (Promise.all wall-clock).
+      - **Never throws** — even non-Error thrown values (e.g. raw strings) get caught and stringified into the `error` field. Defensive against adapters that violate the Error-throwing contract.
+      - `listFleetAdapters()` — static catalog (no probes). Useful for the SPA to render the fleet panel header before the first probe completes.
+    - **2 new BFF routes** (tenant-gated, enveloped, `audit:read` admin-only):
+      - `GET /v1/integrations/adapters` — static catalog (8 entries: id, label, base_path).
+      - `GET /v1/integrations/adapters/health` — runs the parallel probe + returns the full report.
+    - **Tests:** BFF 2049/2049 (was 2026 — +23 in `adapter_health.test.ts`):
+      - listFleetAdapters (2): all 8 ids, label + base_path on every entry.
+      - runFleetHealth (10): all-up happy, aggregate adds to total, total_latency_ms ≥ 0, generated_at echo, one-bad-adapter → 7 up + 1 degraded, multi-bad → multi-degraded, non-Error thrown values surface, cross-tenant scoping, label + base_path on every adapter, parallel-execution timing (2 × 50ms slow probes finish in <150ms total — proves Promise.all not sequential).
+      - GET /adapters route (3): admin 200 with 8-catalog, role 403, no-tenant.
+      - GET /adapters/health route (5): admin all-up 200, every probe up, tenant_id echoed, role 403, cross-tenant BANK_DEMO scoping.
+      - No-regression (3): M14.1 insurance + M14.2 IFRS9 routes still 200, **existing `/v1/integrations/health` (banking upstream pings) returns a different shape** so the new route didn't shadow it.
+    - **Outcome:** Module 14 now has 9 sub-phases (M14.1–M14.8 adapters + M14.9 fleet health). The BIL ops dashboard can now render an at-a-glance "8/8 adapters healthy" badge backed by real probes against every M14 stub. Aligns with how production monitoring would surface upstream incidents — swapping in real adapter implementations preserves the same `/adapters/health` contract.
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
