@@ -129,6 +129,12 @@ import {
   type CaseEventStore,
 } from './case_events';
 import {
+  DashboardError,
+  WIDGET_CATALOG,
+  defaultCustomDashboardStore,
+  type CustomDashboardStore,
+} from './custom_dashboards';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -577,6 +583,8 @@ export interface AppDeps {
   bulkImportPreviewStore?: BulkImportPreviewStore;
   /** Override for tests — per-tenant case event journal (T6 M9.4). */
   caseEventStore?: CaseEventStore;
+  /** Override for tests — per-tenant custom dashboard store (T6 M11.7). */
+  customDashboardStore?: CustomDashboardStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -786,6 +794,7 @@ export function makeApp(deps: AppDeps = {}) {
   const fieldVisitStore = deps.fieldVisitStore ?? defaultFieldVisitStore;
   const bulkImportPreviewStore = deps.bulkImportPreviewStore ?? defaultBulkImportPreviewStore;
   const caseEventStore = deps.caseEventStore ?? defaultCaseEventStore;
+  const customDashboardStore = deps.customDashboardStore ?? defaultCustomDashboardStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -4742,6 +4751,145 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const watchlist = buildExecutiveWatchlist(req.tenant!.tenant_id, now());
       res.json(wrapResponse(watchlist, ctx));
+    },
+  );
+
+  // ── Custom dashboard builder (T6 M11.7) ──────────────────────────────
+  //
+  // Operator-authored layouts on a 12-col grid. Widget catalog is
+  // platform-static — operators only choose from the 7 we ship.
+  //
+  // Route ordering: literal `/widgets/catalog` declared BEFORE
+  // `/custom/:dashboard_id` so the param doesn't shadow.
+
+  /** GET /v1/dashboards/widgets/catalog — list widget types. */
+  app.get(
+    '/v1/dashboards/widgets/catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = Object.values(WIDGET_CATALOG);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/dashboards/custom — list custom dashboards. */
+  app.get(
+    '/v1/dashboards/custom',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = customDashboardStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/dashboards/custom — create. */
+  app.post(
+    '/v1/dashboards/custom',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const d = customDashboardStore.create(req.tenant!.tenant_id, inner, created_by, now());
+        return res.status(201).json(wrapResponse(d, ctx));
+      } catch (e) {
+        if (e instanceof DashboardError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/dashboards/custom/:dashboard_id — single. */
+  app.get(
+    '/v1/dashboards/custom/:dashboard_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.dashboard_id ?? '';
+      const d = customDashboardStore.get(req.tenant!.tenant_id, id);
+      if (!d) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_dashboard', message: `dashboard ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(d, ctx));
+    },
+  );
+
+  /** PUT /v1/dashboards/custom/:dashboard_id — replace + bump version. */
+  app.put(
+    '/v1/dashboards/custom/:dashboard_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.dashboard_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const d = customDashboardStore.replace(req.tenant!.tenant_id, id, inner, updated_by, now());
+        return res.json(wrapResponse(d, ctx));
+      } catch (e) {
+        if (e instanceof DashboardError) {
+          if (e.code === 'unknown_dashboard') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/dashboards/custom/:dashboard_id — remove. */
+  app.delete(
+    '/v1/dashboards/custom/:dashboard_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.dashboard_id ?? '';
+      const ok = customDashboardStore.delete(req.tenant!.tenant_id, id);
+      if (!ok) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_dashboard', message: `dashboard ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 
