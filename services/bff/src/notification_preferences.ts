@@ -80,6 +80,18 @@ function validatePatch(input: unknown): Partial<Record<Channel, boolean>> {
 
 // ─── Store ────────────────────────────────────────────────────────────
 
+/** T6 M10.6 — per-tenant default carried on the store. Admins set
+ *  these via PUT /tenant-defaults; user prefs still override. */
+export interface TenantPreferenceDefault {
+  tenant_id: string;
+  email: boolean;
+  sms: boolean;
+  push: boolean;
+  webhook: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
 export interface NotificationPreferenceStore {
   get(tenant_id: string, username: string): ChannelPreference;
   update(
@@ -89,14 +101,38 @@ export interface NotificationPreferenceStore {
     now: Date,
   ): ChannelPreference;
   /** Pure helper for downstream dispatch logic — returns true iff the
-   *  user has the channel enabled (defaults to true on never-touched). */
+   *  channel is enabled. Resolution order: user override → tenant
+   *  default → hardcoded true (never-touched). */
   isEnabled(tenant_id: string, username: string, channel: Channel): boolean;
   reset(tenant_id: string, username: string): boolean;
+
+  // M10.6 — tenant defaults
+  getTenantDefault(tenant_id: string): TenantPreferenceDefault;
+  setTenantDefault(
+    tenant_id: string,
+    patch: unknown,
+    updated_by: string,
+    now: Date,
+  ): TenantPreferenceDefault;
+}
+
+function defaultTenantPref(tenant_id: string): TenantPreferenceDefault {
+  return {
+    tenant_id,
+    email: true,
+    sms: true,
+    push: true,
+    webhook: true,
+    updated_at: null,
+    updated_by: null,
+  };
 }
 
 export class InMemoryNotificationPreferenceStore implements NotificationPreferenceStore {
   // (tenant, username) → preference
   private readonly map = new Map<string, ChannelPreference>();
+  // tenant → tenant-default (M10.6)
+  private readonly tenantDefaults = new Map<string, TenantPreferenceDefault>();
 
   private k(tenant: string, user: string): string {
     return `${tenant}::${user}`;
@@ -106,9 +142,22 @@ export class InMemoryNotificationPreferenceStore implements NotificationPreferen
     if (!tenant_id || !username) {
       throw new PreferenceError('invalid_input', 'tenant_id and username required');
     }
-    return (
-      this.map.get(this.k(tenant_id, username)) ?? defaultPref(tenant_id, username)
-    );
+    const stored = this.map.get(this.k(tenant_id, username));
+    if (stored) return stored;
+    // Tenant defaults populate the never-touched user view.
+    const td = this.tenantDefaults.get(tenant_id);
+    if (td) {
+      return {
+        tenant_id,
+        username,
+        email: td.email,
+        sms: td.sms,
+        push: td.push,
+        webhook: td.webhook,
+        updated_at: null,
+      };
+    }
+    return defaultPref(tenant_id, username);
   }
 
   update(
@@ -133,12 +182,47 @@ export class InMemoryNotificationPreferenceStore implements NotificationPreferen
 
   isEnabled(tenant_id: string, username: string, channel: Channel): boolean {
     if (!VALID_CHANNELS.includes(channel)) return false;
+    // User override takes precedence (this.get already merges through
+    // tenant default for never-touched users).
     const pref = this.get(tenant_id, username);
     return pref[channel];
   }
 
   reset(tenant_id: string, username: string): boolean {
     return this.map.delete(this.k(tenant_id, username));
+  }
+
+  // ── M10.6 tenant defaults ────────────────────────────────────────────
+
+  getTenantDefault(tenant_id: string): TenantPreferenceDefault {
+    if (!tenant_id) {
+      throw new PreferenceError('invalid_input', 'tenant_id required');
+    }
+    return this.tenantDefaults.get(tenant_id) ?? defaultTenantPref(tenant_id);
+  }
+
+  setTenantDefault(
+    tenant_id: string,
+    patch: unknown,
+    updated_by: string,
+    now: Date,
+  ): TenantPreferenceDefault {
+    if (!tenant_id) {
+      throw new PreferenceError('invalid_input', 'tenant_id required');
+    }
+    if (!updated_by || !updated_by.trim()) {
+      throw new PreferenceError('invalid_input', 'updated_by required');
+    }
+    const valid = validatePatch(patch);
+    const current = this.getTenantDefault(tenant_id);
+    const next: TenantPreferenceDefault = {
+      ...current,
+      ...valid,
+      updated_at: now.toISOString(),
+      updated_by: updated_by.trim(),
+    };
+    this.tenantDefaults.set(tenant_id, next);
+    return next;
   }
 }
 

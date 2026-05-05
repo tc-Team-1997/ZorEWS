@@ -3473,6 +3473,61 @@ export function makeApp(deps: AppDeps = {}) {
   // policy: all enabled. Stored only when the user has changed at least
   // one toggle.
 
+  /** GET /v1/notifications/preferences/tenant-defaults (T6 M10.6) —
+   *  per-tenant defaults; admin-only. */
+  app.get(
+    '/v1/notifications/preferences/tenant-defaults',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const td = notificationPreferenceStore.getTenantDefault(req.tenant!.tenant_id);
+        return res.json(wrapResponse(td, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** PUT /v1/notifications/preferences/tenant-defaults — admin sets
+   *  defaults via partial patch. */
+  app.put(
+    '/v1/notifications/preferences/tenant-defaults',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const td = notificationPreferenceStore.setTenantDefault(
+          req.tenant!.tenant_id,
+          inner,
+          updated_by,
+          now(),
+        );
+        return res.json(wrapResponse(td, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/notifications/preferences/me — returns the caller's prefs.
    *  Always 200 (defaults to all-enabled for never-touched users). */
   app.get(

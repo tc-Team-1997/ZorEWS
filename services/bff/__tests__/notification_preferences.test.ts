@@ -211,3 +211,103 @@ describe('Routes', () => {
     expect(r.status).toBe(200);
   });
 });
+
+// ─── M10.6 — Tenant-default channel preferences ──────────────────────
+
+describe('Tenant defaults (M10.6)', () => {
+  test('GET tenant-defaults returns all-true on never-touched tenant', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .get('/v1/notifications/preferences/tenant-defaults')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body).toEqual({
+      tenant_id: 'BIL',
+      email: true,
+      sms: true,
+      push: true,
+      webhook: true,
+      updated_at: null,
+      updated_by: null,
+    });
+  });
+
+  test('PUT sets tenant defaults', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/tenant-defaults')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send({ sms: false, webhook: false });
+    expect(r.status).toBe(200);
+    expect(r.body.body.sms).toBe(false);
+    expect(r.body.body.webhook).toBe(false);
+    expect(r.body.body.email).toBe(true); // unchanged
+    expect(r.body.body.updated_by).toBe('compliance.lead');
+    expect(r.body.body.updated_at).toBe(NOW.toISOString());
+  });
+
+  test('user inherits tenant defaults until they override', async () => {
+    const { app, store } = makePrefApp('admin');
+    // Tenant default disables sms
+    store.setTenantDefault('BIL', { sms: false }, 'admin', NOW);
+    // Never-touched user picks up the tenant default
+    const r = await request(app).get('/v1/notifications/preferences/me').set(TH_BIL);
+    expect(r.body.body.sms).toBe(false);
+    expect(r.body.body.email).toBe(true);
+  });
+
+  test('user override beats tenant default', async () => {
+    const { app, store } = makePrefApp('admin');
+    store.setTenantDefault('BIL', { sms: false }, 'admin', NOW);
+    // User explicitly enables sms
+    await request(app)
+      .put('/v1/notifications/preferences/me')
+      .set(TH_BIL)
+      .send({ sms: true });
+    const r = await request(app).get('/v1/notifications/preferences/me').set(TH_BIL);
+    expect(r.body.body.sms).toBe(true);
+  });
+
+  test('isEnabled() resolution order: user override → tenant default → true', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    expect(s.isEnabled('BIL', 'alice', 'sms')).toBe(true); // hardcoded default
+    s.setTenantDefault('BIL', { sms: false }, 'admin', NOW);
+    expect(s.isEnabled('BIL', 'alice', 'sms')).toBe(false); // tenant default
+    s.update('BIL', 'alice', { sms: true }, NOW);
+    expect(s.isEnabled('BIL', 'alice', 'sms')).toBe(true); // user override beats default
+  });
+
+  test('cross-tenant: BIL tenant defaults do not affect BANK_DEMO', () => {
+    const s = new InMemoryNotificationPreferenceStore();
+    s.setTenantDefault('BIL', { email: false }, 'admin', NOW);
+    expect(s.getTenantDefault('BANK_DEMO').email).toBe(true);
+    expect(s.isEnabled('BANK_DEMO', 'alice', 'email')).toBe(true);
+  });
+
+  test('PUT validation: bad shape → 400', async () => {
+    const { app } = makePrefApp('admin');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/tenant-defaults')
+      .set(TH_BIL)
+      .send({ rss: true });
+    expect(r.status).toBe(400);
+  });
+
+  test('GET non-allowed role → 403', async () => {
+    const { app } = makePrefApp('case_owner');
+    const r = await request(app)
+      .get('/v1/notifications/preferences/tenant-defaults')
+      .set(TH_BIL);
+    expect(r.status).toBe(403);
+  });
+
+  test('PUT non-allowed role → 403', async () => {
+    const { app } = makePrefApp('case_owner');
+    const r = await request(app)
+      .put('/v1/notifications/preferences/tenant-defaults')
+      .set(TH_BIL)
+      .send({ email: false });
+    expect(r.status).toBe(403);
+  });
+});
