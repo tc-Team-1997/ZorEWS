@@ -1,6 +1,6 @@
 # APEX EWS — Live Status
 
-**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **57 sub-phases shipped to date · ~160 routes wired · BFF jest 2229 pass / 9 skipped / 2238 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
+**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **62 sub-phases shipped to date · ~178 routes wired · BFF jest 2315 pass / 9 skipped / 2324 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
 **Last updated:** 2026-05-05
 
 ## T6 Coverage Matrix — BIL 16-module platform expansion
@@ -10,39 +10,39 @@ Every module below has at least one live sub-phase wired into the BFF and covere
 | #   | Module                       | Sub-phases shipped                          | Surface highlights |
 |-----|------------------------------|---------------------------------------------|--------------------|
 | M1  | Authentication & Identity    | M1.1 + M1.2 + M1.3                          | TOTP 2FA · service-account API keys (provision/revoke/delete with SHA-256 + 12-char prefix; full key shown once) · Bearer-auth middleware (`/v1/svc/*`) with X-Tenant-ID override defense |
-| M2  | Tenant Operations            | M2.1 + M2.2                                 | Cross-module readiness check (9 axes) · 8-step onboarding wizard (`pending → completed | skipped`, `is_complete` honours required vs optional) |
-| M3  | Data Ingestion               | M3.1 + M3.2                                 | 8-connector registry (CBS / Core Insurance / Policy Master / Claims / Agent / AML / Bureau / IFRS9) with run history + pause/resume · Per-connector field schema metadata + pure-function record validator |
+| M2  | Tenant Operations            | M2.1 + M2.2 + M2.3                          | Cross-module readiness check (9 axes) · 8-step onboarding wizard (`pending → completed | skipped`, `is_complete` honours required vs optional) · CSV-driven bulk-tenant onboarding (dry-run + per-row outcomes; `duplicate_in_csv` / `tenant_exists` / `lookup_does_not_support_create` surfaces; cap 100 rows) |
+| M3  | Data Ingestion               | M3.1 + M3.2 + M3.3                          | 8-connector registry (CBS / Core Insurance / Policy Master / Claims / Agent / AML / Bureau / IFRS9) with run history + pause/resume · Per-connector field schema metadata + pure-function record validator · Per-tenant schema overrides — additive only (existing fields locked); `reserved_field` / `duplicate_field` / `cap_reached` 409 codes · `/schema/effective` merges platform + tenant additions |
 | M4  | Indicators                   | M4.1 + M4.2                                 | 25-indicator BIL insurance KRI catalog · indicator backtest with full confusion matrix |
 | M5  | Rule Engine                  | M5.1 + M5.2 + M5.3 + M5.4                   | 12-template starter library (5 categories × 3 verticals) · bulk-clone preview (template_ids[] OR filter, name_prefix, draft state) · pure-function rule simulation against M16.1 scenarios (deterministic per (template, scenario, day) — fire-rate + amplification vs baseline + by-severity bucketing) · simulation BUNDLE (one rule × all 10 presets, ranked + worst/best/mean) |
 | M6  | Risk Scoring                 | M6.1 + M6.2 + M6.3 + M6.4                   | `Σ(W×V)` engine bucketed Low/Med/High · catalog-lookup convenience layer with cross-vertical guard · 6 named weight presets (conservative/balanced/aggressive × banking/insurance) with sparse multiplier maps + [0,1] clamp + per-indicator transparency breakdown · per-tenant CUSTOM weight presets CRUD (30 cap; multipliers 0.1-5.0; getEffectiveWeightPreset() merges library + custom) |
-| M7  | AI / ML                      | M7.1 + M7.2                                 | 8-model registry × 6 types + SHAP-style top features · explicit promotion state machine (experimental → staging → shadow → prod → retired) with self-approval refusal |
+| M7  | AI / ML                      | M7.1 + M7.2 + M7.3                          | 8-model registry × 6 types + SHAP-style top features · explicit promotion state machine (experimental → staging → shadow → prod → retired) with self-approval refusal · A/B test harness — score same input against TWO models + return delta + band_match + type_match for pre-promotion screen |
 | M8  | Alerts                       | M8.1 + M8.2 + M8.3 + M8.4                   | BIL Red/Orange/Yellow/Green classification · auto-routing matrix (severity → channel + SLA + escalation) · per-alert ack/unack lifecycle with history · auto-ack threshold rules (CRUD + evaluate) for low-priority noise reduction |
 | M9  | Cases & Investigations       | M9.1 + M9.2 + M9.3                          | 6-state investigation tracker + BIL §17 8-step claim-fraud checklist · custom checklists store · RBI 4-eyes maker-checker (close/escalate/override) with self-approval segregation |
-| M10 | Notifications                | M10.1 + M10.2 + M10.3                       | Email transport + 4 BIL templates · SMS transport + 4 templates · push transport across fcm/apns/web with deep-link safety |
+| M10 | Notifications                | M10.1 + M10.2 + M10.3 + M10.4               | Email transport + 4 BIL templates · SMS transport + 4 templates · push transport across fcm/apns/web with deep-link safety · webhook channel (https-only URLs, duplicate-URL guard, in-memory delivery ledger; production swap to existing HMAC dispatcher) |
 | M11 | Dashboards                   | M11.1–M11.6                                 | Claims · Underwriting · Agent · Operational · Executive · per-customer-360 (6-adapter orchestration with panel-level degradation) |
 | M12 | Reports                      | M12.1 + M12.2 + M12.3                       | 9-report catalog + async job tracker · recurring schedules with pure-function `computeNextRun` (daily/weekly/monthly + Dec→Jan year roll) + `/due` poll + `/mark-run` advance · quarterly + last-day-of-month cadences (handles Feb 28/29 leap-year + Q4→Q1 year roll) |
-| M13 | Admin Configuration          | M13.1 + M13.2 + M13.3                       | 13 BIL operational defaults × 5 categories · audit-trail wiring (every PUT/DELETE writes `config.update / config.reset`) · rollback to prior audit event with `rolled_back_from_event_id` |
+| M13 | Admin Configuration          | M13.1 + M13.2 + M13.3 + M13.4               | 13 BIL operational defaults × 5 categories · audit-trail wiring (every PUT/DELETE writes `config.update / config.reset`) · rollback to prior audit event with `rolled_back_from_event_id` · bulk import/export (additive merge; dry_run mode; per-key skipped/applied/unchanged summary) |
 | M14 | Integrations                 | M14.1–M14.9                                 | 8 adapters: Core Insurance · IFRS9 stages · AML watchlist · DMS · Bureau (CIBIL/CRIF/EXPERIAN/EQUIFAX) · Agent productivity · Finance/Treasury · HR — all with deterministic synthesis seeded by (tenant, customer, day) · plus parallel fleet-health roll-up at `/v1/integrations/adapters/health` (Promise.all probes, never-throws degraded entries, aggregate up/degraded counters) |
 | M15 | Audit & Compliance           | M15.1 + M15.2 + M15.3                       | 7-axis filterable audit log + summary · SHA-256 hash-chain integrity verifier · evidence packaging (filtered + chain-verified frozen snapshot) with capped per-tenant retention |
 | M16 | Scenarios                    | M16.1 + M16.2 + M16.3 + M16.4               | 10-preset library (RBI Baseline/Adverse/Severely-Adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans) · bulk-run ranking + worst/mean/adverse aggregates · pure-function side-by-side diff with sorted-by-|delta_abs| changed-entries view · per-tenant CUSTOM presets CRUD (50 cap; same shape as library so M16.2 + M16.3 work unchanged) |
 
-**Totals:** **16/16 modules live · 57 sub-phases shipped · ~160 routes wired · BFF tests 2229 pass / 9 skipped / 2238 total.**
+**Totals:** **16/16 modules live · 62 sub-phases shipped · ~178 routes wired · BFF tests 2315 pass / 9 skipped / 2324 total.**
 
 Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API count is **~38%**; **module coverage is 100%** — no module is missing a working slice. The next sub-phase candidates per module:
 
 - **M1** — auth middleware applied beyond `/v1/svc/*` (M1.4); WebAuthn passkeys (M1.5)
-- **M2** — bulk-tenant onboarding (CSV)
-- **M3** — per-tenant schema overrides (M3.3)
+- **M2** — admin SPA wizard wiring for bulk-import preview
+- **M3** — wider connector library (production-side adapters)
 - **M4** — indicator versioning + deprecation
 - **M5** — rule-vs-rule comparison (M5.5)
 - **M6** — wire custom presets through scoreByPreset (M6.5)
-- **M7** — model A/B test harness (M7.3)
+- **M7** — bulk A/B run across N customers (M7.4)
 - **M8** — wire M8.4 evaluate into the alert-ingest path (M8.5)
 - **M9** — apply approved actions to downstream stores (M9.4)
-- **M10** — notification delivery webhook (M10.4)
+- **M10** — channel preference per-user (M10.5)
 - **M11** — custom dashboard builder (M11.7)
 - **M12** — schedule timezones beyond UTC (M12.4)
-- **M13** — bulk config import/export (M13.4)
+- **M13** — config diff between tenants (M13.5)
 - **M14** — wider field-officer mobile surface (M14.10); per-adapter SLA dashboards
 - **M15** — PDF/Excel evidence export (M15.4)
 - **M16** — wire custom presets through M16.2 bulk-run + M16.3 diff (M16.5); scenario history
