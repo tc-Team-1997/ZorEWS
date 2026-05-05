@@ -249,6 +249,11 @@ import {
   type NotificationWebhookStore,
 } from './notification_webhook';
 import {
+  PreferenceError,
+  defaultNotificationPreferenceStore,
+  type NotificationPreferenceStore,
+} from './notification_preferences';
+import {
   defaultInsuranceAdapter,
   type InsuranceAdapter,
 } from './integrations/insurance';
@@ -481,6 +486,8 @@ export interface AppDeps {
   autoAckRuleStore?: AutoAckRuleStore;
   /** Override for tests — notification webhook channel store (T6 M10.4). */
   notificationWebhookStore?: NotificationWebhookStore;
+  /** Override for tests — per-user notification preference store (T6 M10.5). */
+  notificationPreferenceStore?: NotificationPreferenceStore;
   /**
    * Override for tests — per-tenant custom scenario preset store
    * (T6 M16.4).
@@ -691,6 +698,8 @@ export function makeApp(deps: AppDeps = {}) {
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
   const notificationWebhookStore = deps.notificationWebhookStore ?? defaultNotificationWebhookStore;
+  const notificationPreferenceStore =
+    deps.notificationPreferenceStore ?? defaultNotificationPreferenceStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
@@ -3062,6 +3071,81 @@ export function makeApp(deps: AppDeps = {}) {
         typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
       const items = notificationWebhookStore.listDeliveries(req.tenant!.tenant_id, id, limit);
       return res.json(wrapResponse({ items, total: items.length, limit }, ctx));
+    },
+  );
+
+  // ── Notification channel preference per-user (T6 M10.5) ─────────────
+  // Per-(tenant, user) opt-in/out for the 4 M10.x channels. Default
+  // policy: all enabled. Stored only when the user has changed at least
+  // one toggle.
+
+  /** GET /v1/notifications/preferences/me — returns the caller's prefs.
+   *  Always 200 (defaults to all-enabled for never-touched users). */
+  app.get(
+    '/v1/notifications/preferences/me',
+    requireTenantMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const pref = notificationPreferenceStore.get(
+          req.tenant!.tenant_id,
+          callerUsername(req),
+        );
+        return res.json(wrapResponse(pref, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** PUT /v1/notifications/preferences/me body { email?, sms?, push?, webhook? } —
+   *  partial update; at least one channel must be supplied. */
+  app.put(
+    '/v1/notifications/preferences/me',
+    requireTenantMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const pref = notificationPreferenceStore.update(
+          req.tenant!.tenant_id,
+          callerUsername(req),
+          inner,
+          now(),
+        );
+        return res.json(wrapResponse(pref, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/notifications/preferences/me/reset — back to all-enabled defaults. */
+  app.post(
+    '/v1/notifications/preferences/me/reset',
+    requireTenantMw,
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      notificationPreferenceStore.reset(req.tenant!.tenant_id, callerUsername(req));
+      const pref = notificationPreferenceStore.get(
+        req.tenant!.tenant_id,
+        callerUsername(req),
+      );
+      return res.json(wrapResponse(pref, ctx));
     },
   );
 
