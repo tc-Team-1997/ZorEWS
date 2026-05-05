@@ -75,6 +75,10 @@ import {
   type BundleSimulationInput,
 } from './rule_simulation_bundle';
 import {
+  RuleTemplateDiffError,
+  diffRuleTemplatesByIds,
+} from './rule_template_diff';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -8089,6 +8093,47 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  /** POST /v1/rules/templates/diff (T6 M5.5) — field-by-field
+   *  comparison of two templates. Declared BEFORE /:id so the
+   *  literal "diff" segment wins. */
+  app.post(
+    '/v1/rules/templates/diff',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { left_id?: unknown; right_id?: unknown };
+      try {
+        const result = diffRuleTemplatesByIds(
+          wrapper.left_id,
+          wrapper.right_id,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof RuleTemplateDiffError) {
+          if (e.code === 'unknown_template') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_template', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
       }
     },
   );
