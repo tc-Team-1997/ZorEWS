@@ -106,6 +106,15 @@ import {
   type WatchlistStore,
 } from './customer_watchlist';
 import {
+  FieldVisitError,
+  aggregateByOutcome,
+  defaultFieldVisitStore,
+  isVisitTz,
+  type FieldVisitStore,
+  type VisitFilter,
+  type VisitOutcome,
+} from './field_officer';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -543,6 +552,8 @@ export interface AppDeps {
   thresholdOverrideStore?: ThresholdOverrideStore;
   /** Override for tests — per-tenant customer watchlist (T6 M4.7). */
   watchlistStore?: WatchlistStore;
+  /** Override for tests — per-tenant field-officer visit ledger (T6 M14.10). */
+  fieldVisitStore?: FieldVisitStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -749,6 +760,7 @@ export function makeApp(deps: AppDeps = {}) {
   const customRuleTemplateStore = deps.customRuleTemplateStore ?? defaultCustomRuleTemplateStore;
   const thresholdOverrideStore = deps.thresholdOverrideStore ?? defaultThresholdOverrideStore;
   const watchlistStore = deps.watchlistStore ?? defaultWatchlistStore;
+  const fieldVisitStore = deps.fieldVisitStore ?? defaultFieldVisitStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -5423,6 +5435,92 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.status(204).send();
+    },
+  );
+
+  // ── Field-officer mobile (T6 M14.10) ────────────────────────────────
+  //
+  // Append-only visit ledger surfaced to the field-officer mobile
+  // app. Visits get an outcome enum that downstream M9 case
+  // workflows can hook into.
+
+  /** POST /v1/field/visits — log a new visit. body
+   *  {officer_id, customer_id, visit_at, outcome, note, location?}. */
+  app.post(
+    '/v1/field/visits',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const visit = fieldVisitStore.log(req.tenant!.tenant_id, inner, created_by, now());
+        return res.status(201).json(wrapResponse(visit, ctx));
+      } catch (e) {
+        if (e instanceof FieldVisitError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/field/visits — list with optional filters
+   *  ?customer_id=&officer_id=&outcome=&since=ISO&until=ISO. */
+  app.get(
+    '/v1/field/visits',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      const filter: VisitFilter = {};
+      if (typeof q.customer_id === 'string' && q.customer_id) filter.customer_id = q.customer_id;
+      if (typeof q.officer_id === 'string' && q.officer_id) filter.officer_id = q.officer_id;
+      if (typeof q.outcome === 'string' && q.outcome) filter.outcome = q.outcome as VisitOutcome;
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      const items = fieldVisitStore.list(req.tenant!.tenant_id, filter);
+      const aggregate = aggregateByOutcome(items);
+      return res.json(wrapResponse({ items, total: items.length, aggregate }, ctx));
+    },
+  );
+
+  /** GET /v1/field/officers/:officer_id/today?tz=Asia/Kolkata
+   *  — visits logged "today" in the requested zone. */
+  app.get(
+    '/v1/field/officers/:officer_id/today',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const officer_id = req.params.officer_id ?? '';
+      const tzRaw = (req.query.tz as string | undefined) ?? 'UTC';
+      if (!isVisitTz(tzRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_tz', message: `tz '${tzRaw}' is not in the supported list`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = fieldVisitStore.todayForOfficer(
+        req.tenant!.tenant_id,
+        officer_id,
+        now(),
+        tzRaw,
+      );
+      const aggregate = aggregateByOutcome(items);
+      return res.json(
+        wrapResponse({ officer_id, tz: tzRaw, items, total: items.length, aggregate }, ctx),
+      );
     },
   );
 
