@@ -79,6 +79,11 @@ import {
   diffRuleTemplatesByIds,
 } from './rule_template_diff';
 import {
+  CustomRuleTemplateError,
+  defaultCustomRuleTemplateStore,
+  type CustomRuleTemplateStore,
+} from './rule_templates_custom';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -509,6 +514,8 @@ export interface AppDeps {
   customWeightPresetStore?: CustomWeightPresetStore;
   /** Override for tests — per-tenant connector schema overrides (T6 M3.3). */
   schemaOverrideStore?: SchemaOverrideStore;
+  /** Override for tests — per-tenant custom rule template store (T6 M5.6). */
+  customRuleTemplateStore?: CustomRuleTemplateStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -712,6 +719,7 @@ export function makeApp(deps: AppDeps = {}) {
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
+  const customRuleTemplateStore = deps.customRuleTemplateStore ?? defaultCustomRuleTemplateStore;
   const insuranceAdapter = deps.insuranceAdapter ?? defaultInsuranceAdapter;
   const ifrs9Adapter = deps.ifrs9Adapter ?? defaultIfrs9Adapter;
   const amlAdapter = deps.amlAdapter ?? defaultAmlAdapter;
@@ -8530,6 +8538,85 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  // ── Custom rule templates per-tenant (T6 M5.6) ───────────────────────
+  // Mirrors M16.4 (custom scenarios). Declared BEFORE /v1/rules/templates/:id
+  // so the literal "custom" segment wins.
+
+  /** GET /v1/rules/templates/custom — list per-tenant custom templates. */
+  app.get(
+    '/v1/rules/templates/custom',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = customRuleTemplateStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/rules/templates/custom — create custom template. */
+  app.post(
+    '/v1/rules/templates/custom',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const template = customRuleTemplateStore.create(
+          req.tenant!.tenant_id,
+          inner,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(template, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomRuleTemplateError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/rules/templates/custom/:template_id — remove custom template. */
+  app.delete(
+    '/v1/rules/templates/custom/:template_id',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const removed = customRuleTemplateStore.delete(req.tenant!.tenant_id, id);
+      if (!removed) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_template', message: `custom template ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 
