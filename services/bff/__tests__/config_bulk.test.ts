@@ -3,7 +3,12 @@
 // T6 M13.4 — Bulk config import/export.
 
 import request from 'supertest';
-import { ConfigBulkError, exportConfig, importConfig } from '../src/config_bulk';
+import {
+  ConfigBulkError,
+  diffTenantConfig,
+  exportConfig,
+  importConfig,
+} from '../src/config_bulk';
 import { InMemoryConfigStore } from '../src/admin_config';
 import { makeApp } from '../src/server';
 import { StaticSource } from '../src/source';
@@ -215,6 +220,126 @@ describe('Routes', () => {
   });
 
   test('M13.1 GET /:key still works (literal _export didn\'t shadow)', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app).get('/v1/admin/config/alerts.red_sla_hours').set(TH_BIL);
+    expect(r.status).toBe(200);
+  });
+});
+
+// ─── M13.5 — Config diff between tenants ─────────────────────────────
+
+describe('diffTenantConfig', () => {
+  test('all-default both → all entries status=same', () => {
+    const cfg = new InMemoryConfigStore();
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    expect(r.tenant_a).toBe('BIL');
+    expect(r.tenant_b).toBe('BANK_DEMO');
+    expect(r.same_count).toBe(r.entries.length);
+    expect(r.different_count).toBe(0);
+    expect(r.changed_entries).toEqual([]);
+  });
+
+  test('a_only when tenant_a has override, tenant_b at default', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BIL', 'alerts.red_sla_hours', 6, 'admin', NOW);
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    const e = r.changed_entries.find((x) => x.key === 'alerts.red_sla_hours')!;
+    expect(e.status).toBe('a_only');
+    expect(e.value_a).toBe(6);
+    expect(e.value_b).toBeNull();
+    expect(e.is_default_b).toBe(true);
+    expect(r.a_only_count).toBe(1);
+  });
+
+  test('b_only mirrored', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 12, 'admin', NOW);
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    const e = r.changed_entries.find((x) => x.key === 'alerts.red_sla_hours')!;
+    expect(e.status).toBe('b_only');
+    expect(e.value_b).toBe(12);
+    expect(r.b_only_count).toBe(1);
+  });
+
+  test('different when both override but with distinct values', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BIL', 'alerts.red_sla_hours', 6, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 12, 'admin', NOW);
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    const e = r.changed_entries.find((x) => x.key === 'alerts.red_sla_hours')!;
+    expect(e.status).toBe('different');
+    expect(r.different_count).toBe(1);
+  });
+
+  test('same when both override to identical values', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BIL', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    const e = r.entries.find((x) => x.key === 'alerts.red_sla_hours')!;
+    expect(e.status).toBe('same');
+    expect(r.different_count).toBe(0);
+  });
+
+  test('rejects same-tenant compare', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() => diffTenantConfig(cfg, 'BIL', 'BIL', NOW)).toThrow(/must differ/);
+  });
+
+  test('rejects empty tenant ids', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() => diffTenantConfig(cfg, '', 'BANK_DEMO', NOW)).toThrow(ConfigBulkError);
+    expect(() => diffTenantConfig(cfg, 'BIL', '', NOW)).toThrow(ConfigBulkError);
+  });
+
+  test('counters add to total', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BIL', 'alerts.red_sla_hours', 6, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 36, 'admin', NOW);
+    const r = diffTenantConfig(cfg, 'BIL', 'BANK_DEMO', NOW);
+    const total =
+      r.same_count + r.a_only_count + r.b_only_count + r.different_count;
+    expect(total).toBe(r.entries.length);
+  });
+});
+
+describe('GET /v1/admin/config/_diff', () => {
+  test('200 with diff body', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BIL', 'alerts.red_sla_hours', 5, 'admin', NOW);
+    const r = await request(app)
+      .get('/v1/admin/config/_diff?tenant_a=BIL&tenant_b=BANK_DEMO')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.tenant_a).toBe('BIL');
+    expect(r.body.body.a_only_count).toBe(1);
+  });
+
+  test('missing tenant_a → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .get('/v1/admin/config/_diff?tenant_b=BANK_DEMO')
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+  });
+
+  test('same-tenant compare → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .get('/v1/admin/config/_diff?tenant_a=BIL&tenant_b=BIL')
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeBulkApp('case_owner');
+    const r = await request(app)
+      .get('/v1/admin/config/_diff?tenant_a=BIL&tenant_b=BANK_DEMO')
+      .set(TH_BIL);
+    expect(r.status).toBe(403);
+  });
+
+  test('M13.1 GET /:key still works (literal _diff didn\'t shadow)', async () => {
     const { app } = makeBulkApp('admin');
     const r = await request(app).get('/v1/admin/config/alerts.red_sla_hours').set(TH_BIL);
     expect(r.status).toBe(200);

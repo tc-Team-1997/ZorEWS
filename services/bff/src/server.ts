@@ -143,6 +143,7 @@ import {
 } from './config_rollback';
 import {
   ConfigBulkError,
+  diffTenantConfig,
   exportConfig,
   importConfig,
 } from './config_bulk';
@@ -5945,6 +5946,31 @@ export function makeApp(deps: AppDeps = {}) {
           now(),
         );
         return res.json(wrapResponse(summary, ctx));
+      } catch (e) {
+        if (e instanceof ConfigBulkError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/admin/config/_diff?tenant_a=X&tenant_b=Y (T6 M13.5) —
+   *  per-key comparison of two tenants' override states. Admin-only.
+   *  Declared before /:key so the literal _diff segment wins. */
+  app.get(
+    '/v1/admin/config/_diff',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_a = (req.query.tenant_a as string | undefined) ?? '';
+      const tenant_b = (req.query.tenant_b as string | undefined) ?? '';
+      try {
+        const result = diffTenantConfig(configStore, tenant_a, tenant_b, now());
+        return res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof ConfigBulkError) {
           return res.status(400).json(

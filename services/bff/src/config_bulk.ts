@@ -19,6 +19,102 @@
 
 import { type ConfigStore, type ConfigValue, ConfigValidationError } from './admin_config';
 
+// ─── M13.5 — Config diff between tenants ─────────────────────────────
+
+export type DiffKeyStatus = 'same' | 'a_only' | 'b_only' | 'different';
+
+export interface ConfigDiffEntry {
+  key: string;
+  status: DiffKeyStatus;
+  /** Override value for tenant A (null when default OR a_only doesn't apply). */
+  value_a: ConfigValue | null;
+  value_b: ConfigValue | null;
+  is_default_a: boolean;
+  is_default_b: boolean;
+}
+
+export interface ConfigDiffResult {
+  tenant_a: string;
+  tenant_b: string;
+  generated_at: string;
+  /** Every schema key, regardless of override status, in declared order. */
+  entries: ConfigDiffEntry[];
+  /** Filtered subset where status !== 'same'. */
+  changed_entries: ConfigDiffEntry[];
+  /** Aggregate counters. */
+  same_count: number;
+  a_only_count: number;
+  b_only_count: number;
+  different_count: number;
+}
+
+function valuesEqual(a: ConfigValue, b: ConfigValue): boolean {
+  if (typeof a !== typeof b) return false;
+  if (typeof a === 'object' || typeof b === 'object') {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return a === b;
+}
+
+export function diffTenantConfig(
+  configStore: ConfigStore,
+  tenant_a: string,
+  tenant_b: string,
+  now: Date,
+): ConfigDiffResult {
+  if (!tenant_a || typeof tenant_a !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'tenant_a is required');
+  }
+  if (!tenant_b || typeof tenant_b !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'tenant_b is required');
+  }
+  if (tenant_a === tenant_b) {
+    throw new ConfigBulkError('invalid_input', 'tenant_a and tenant_b must differ');
+  }
+  const aEntries = configStore.list(tenant_a);
+  const bEntries = configStore.list(tenant_b);
+  const bByKey = new Map(bEntries.map((e) => [e.key, e]));
+
+  const entries: ConfigDiffEntry[] = [];
+  for (const a of aEntries) {
+    const b = bByKey.get(a.key);
+    if (!b) continue; // platform schema is shared; this should never happen
+    let status: DiffKeyStatus;
+    if (a.is_default && b.is_default) {
+      status = 'same';
+    } else if (!a.is_default && b.is_default) {
+      status = 'a_only';
+    } else if (a.is_default && !b.is_default) {
+      status = 'b_only';
+    } else {
+      // both have overrides — same value or different?
+      status = valuesEqual(a.value, b.value) ? 'same' : 'different';
+    }
+    entries.push({
+      key: a.key,
+      status,
+      value_a: a.is_default ? null : a.value,
+      value_b: b.is_default ? null : b.value,
+      is_default_a: a.is_default,
+      is_default_b: b.is_default,
+    });
+  }
+
+  const changed_entries = entries.filter((e) => e.status !== 'same');
+
+  return {
+    tenant_a,
+    tenant_b,
+    generated_at: now.toISOString(),
+    entries,
+    changed_entries,
+    same_count: entries.filter((e) => e.status === 'same').length,
+    a_only_count: entries.filter((e) => e.status === 'a_only').length,
+    b_only_count: entries.filter((e) => e.status === 'b_only').length,
+    different_count: entries.filter((e) => e.status === 'different').length,
+  };
+}
+
 export interface ConfigSnapshot {
   /** ISO timestamp of when the snapshot was generated. */
   generated_at: string;
