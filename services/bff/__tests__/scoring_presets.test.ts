@@ -601,3 +601,110 @@ describe('POST /v1/scoring/risk/by-preset/batch', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// ─── M6.7 — Preset comparison ────────────────────────────────────────
+
+describe('POST /v1/scoring/risk/by-preset/compare', () => {
+  const COMPARE_BODY = {
+    left_preset_id: 'preset_banking_balanced',
+    right_preset_id: 'preset_banking_conservative',
+    items: [
+      { indicator_id: 'FIN-001', value: 0.7 },
+      { indicator_id: 'BEH-001', value: 0.4 },
+    ],
+  };
+
+  test('analyst+: 200 with left/right/delta', async () => {
+    const { app } = makePresetApp('risk_analyst');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send(COMPARE_BODY);
+    expect(r.status).toBe(200);
+    expect(r.body.body.left.preset_id).toBe('preset_banking_balanced');
+    expect(r.body.body.right.preset_id).toBe('preset_banking_conservative');
+    expect(typeof r.body.body.score_delta).toBe('number');
+    expect(typeof r.body.body.category_match).toBe('boolean');
+  });
+
+  test('score_delta = right.score - left.score', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send(COMPARE_BODY);
+    expect(r.body.body.score_delta).toBeCloseTo(
+      r.body.body.right.score - r.body.body.left.score,
+    );
+  });
+
+  test('vertical_match=true when both presets share vertical', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send(COMPARE_BODY);
+    expect(r.body.body.vertical_match).toBe(true);
+  });
+
+  test('cross-vertical mismatch: vertical_match=false (insurance preset rejects banking indicators → 404 first)', async () => {
+    // Banking indicators against an insurance preset → unknown_indicator
+    // Confirms the cross-vertical guard fires inside scoreByPreset.
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send({
+        left_preset_id: 'preset_banking_balanced',
+        right_preset_id: 'preset_insurance_balanced',
+        items: [{ indicator_id: 'FIN-001', value: 0.5 }],
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_indicator');
+  });
+
+  test('same id for both → 400', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send({ ...COMPARE_BODY, right_preset_id: 'preset_banking_balanced' });
+    expect(r.status).toBe(400);
+  });
+
+  test('unknown preset → 404', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send({ ...COMPARE_BODY, left_preset_id: 'NO-SUCH' });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makePresetApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send(COMPARE_BODY);
+    expect(r.status).toBe(403);
+  });
+
+  test('compare /batch route still works (literal /compare didn\'t shadow)', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/batch')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        customers: [
+          {
+            customer_id: 'C1',
+            items: [{ indicator_id: 'FIN-001', value: 0.5 }],
+          },
+        ],
+      });
+    expect(r.status).toBe(200);
+  });
+});

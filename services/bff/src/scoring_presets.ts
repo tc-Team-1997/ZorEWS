@@ -413,3 +413,78 @@ export function scoreByPresetBatch(
     scored_at: asOf.toISOString(),
   };
 }
+
+// ─── M6.7 — Preset comparison ────────────────────────────────────────
+
+export interface CompareByPresetsInput {
+  left_preset_id: string;
+  right_preset_id: string;
+  items: ByIndicatorItem[];
+}
+
+export interface CompareByPresetsResult {
+  left: ScoreByPresetResult;
+  right: ScoreByPresetResult;
+  /** right.score - left.score (positive = right is more severe). */
+  score_delta: number;
+  /** True iff both presets bucketed into the same category. */
+  category_match: boolean;
+  /** True iff both presets share the same vertical (else compare is
+   *  not really apples-to-apples). */
+  vertical_match: boolean;
+  compared_at: string;
+}
+
+/**
+ * Apply two presets to the same items[] and return a side-by-side
+ * comparison. Validation matches scoreByPreset (composes it twice).
+ */
+export function compareByPresets(
+  input: CompareByPresetsInput,
+  baseLookup: IndicatorWeightLookup,
+  presetLookup: WeightPresetLookup = getWeightPreset,
+  asOf: Date = new Date(),
+): CompareByPresetsResult {
+  if (!input || typeof input !== 'object') {
+    throw new WeightPresetError('invalid_input', 'request body required');
+  }
+  if (typeof input.left_preset_id !== 'string' || !input.left_preset_id.trim()) {
+    throw new WeightPresetError('invalid_input', 'left_preset_id is required');
+  }
+  if (typeof input.right_preset_id !== 'string' || !input.right_preset_id.trim()) {
+    throw new WeightPresetError('invalid_input', 'right_preset_id is required');
+  }
+  if (input.left_preset_id === input.right_preset_id) {
+    throw new WeightPresetError(
+      'invalid_input',
+      'left_preset_id and right_preset_id must differ',
+    );
+  }
+
+  const left = scoreByPreset(
+    { preset_id: input.left_preset_id, items: input.items },
+    baseLookup,
+    presetLookup,
+  );
+  const right = scoreByPreset(
+    { preset_id: input.right_preset_id, items: input.items },
+    baseLookup,
+    presetLookup,
+  );
+
+  // Resolve presets again to inspect verticals (cheap — already cached).
+  const leftPreset = presetLookup(left.preset_id);
+  const rightPreset = presetLookup(right.preset_id);
+
+  return {
+    left,
+    right,
+    score_delta: right.score - left.score,
+    category_match: left.category === right.category,
+    vertical_match:
+      leftPreset !== null &&
+      rightPreset !== null &&
+      leftPreset.vertical === rightPreset.vertical,
+    compared_at: asOf.toISOString(),
+  };
+}

@@ -177,11 +177,13 @@ import {
 } from './bil_scoring_v2';
 import {
   WeightPresetError,
+  compareByPresets,
   getWeightPreset,
   isWeightPresetMode,
   listWeightPresets,
   scoreByPreset,
   scoreByPresetBatch,
+  type CompareByPresetsInput,
   type ScoreBatchInput,
   type WeightPresetMode,
 } from './scoring_presets';
@@ -4455,6 +4457,67 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'batch preset scoring failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/scoring/risk/by-preset/compare (T6 M6.7) — apply two
+   *  presets to the same items[]; return left + right + delta. */
+  app.post(
+    '/v1/scoring/risk/by-preset/compare',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const tenantId = req.tenant!.tenant_id;
+        const result = compareByPresets(
+          (inner ?? {}) as CompareByPresetsInput,
+          indicatorWeightLookup,
+          (id) => getEffectiveWeightPreset(customWeightPresetStore, tenantId, id),
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof WeightPresetError) {
+          if (e.code === 'unknown_preset') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_preset', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (e instanceof IndicatorLookupError) {
+          const status = e.code === 'unknown_indicator' ? 404 : 400;
+          const code =
+            e.code === 'unknown_indicator'
+              ? 'EWS_404_unknown_indicator'
+              : `EWS_400_${e.code}`;
+          return res.status(status).json(
+            wrapError({ code, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (e instanceof ScoringInputError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preset compare failed', severity: 'HIGH' },
             ctx,
           ),
         );
