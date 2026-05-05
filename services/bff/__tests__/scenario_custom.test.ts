@@ -371,3 +371,84 @@ describe('M16.6 — scenario history', () => {
     expect(h.body.body).toHaveProperty('preset_id');
   });
 });
+
+// ─── M16.7 — Preset edit (PUT) ───────────────────────────────────────
+
+describe('M16.7 — preset edit', () => {
+  test('PUT replaces mutable fields and preserves id', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Updated name', shocks: { gdp: -2, rate: 100, fx: 5 } });
+    expect(r.status).toBe(200);
+    expect(r.body.body.id).toBe(id);
+    expect(r.body.body.name).toBe('Updated name');
+    expect(r.body.body.shocks.gdp).toBe(-2);
+  });
+
+  test('PUT writes scenario.update audit event', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'compliance.lead')
+      .send({ ...VALID, name: 'Renamed' });
+    const h = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/history`)
+      .set(TH_BIL);
+    const update = h.body.body.items.find(
+      (x: { action: string }) => x.action === 'scenario.update',
+    );
+    expect(update).toBeDefined();
+    expect(update.actor_username).toBe('compliance.lead');
+    expect(update.metadata.previous_name).toBe(VALID.name);
+    expect(update.metadata.new_name).toBe('Renamed');
+  });
+
+  test('PUT on unknown preset → 404', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .put('/v1/scenarios/library/custom/custom_no_such')
+      .set(TH_BIL)
+      .send(VALID);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('PUT validation: bad gdp → 400', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, shocks: { gdp: 999, rate: 0, fx: 0 } });
+    expect(r.status).toBe(400);
+  });
+
+  test('cross-tenant: BIL caller cannot PUT BANK_DEMO\'s preset', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send(VALID);
+    expect(r.status).toBe(404);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const r = await request(app)
+      .put('/v1/scenarios/library/custom/anything')
+      .set(TH_BIL)
+      .send(VALID);
+    expect(r.status).toBe(403);
+  });
+});

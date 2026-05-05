@@ -2310,6 +2310,75 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** PUT /v1/scenarios/library/custom/:preset_id (T6 M16.7) — replace
+   *  mutable fields. Writes scenario.update audit event with metadata. */
+  app.put(
+    '/v1/scenarios/library/custom/:preset_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const updated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      // Capture previous for audit metadata
+      const previous = customPresetStore.get(req.tenant!.tenant_id, id);
+      try {
+        const next = customPresetStore.update(
+          req.tenant!.tenant_id,
+          id,
+          inner,
+          updated_by,
+          now(),
+        );
+        // Write scenario.update audit event
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'scenario.update',
+              resource_type: 'scenario',
+              resource_id: id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_name: previous?.name ?? null,
+                new_name: next.name,
+                shocks_before: previous?.shocks ?? null,
+                shocks_after: next.shocks,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(next, ctx));
+      } catch (e) {
+        if (e instanceof CustomPresetError) {
+          if (e.code === 'unknown_preset') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_preset', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** DELETE /v1/scenarios/library/custom/:preset_id — remove custom preset. */
   app.delete(
     '/v1/scenarios/library/custom/:preset_id',
@@ -2372,7 +2441,7 @@ export function makeApp(deps: AppDeps = {}) {
         typeof limitRaw === 'string' ? Math.max(1, Math.min(200, Number(limitRaw) || 50)) : 50;
       const out = auditTrailStore.list(req.tenant!.tenant_id, {
         resource_type: 'scenario',
-        action: 'scenario.create,scenario.delete',
+        action: 'scenario.create,scenario.update,scenario.delete',
         page_size: limit,
       });
       const items = out.items

@@ -116,6 +116,16 @@ export interface CustomPresetStore {
   list(tenant_id: string): ScenarioPreset[];
   get(tenant_id: string, preset_id: string): ScenarioPreset | null;
   create(tenant_id: string, input: unknown, created_by: string, now: Date): ScenarioPreset;
+  /** Replace mutable fields of an existing custom preset. Throws
+   *  unknown_preset on miss, invalid_input on a bad patch shape.
+   *  The id and tenant_id are immutable. */
+  update(
+    tenant_id: string,
+    preset_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): ScenarioPreset;
   delete(tenant_id: string, preset_id: string): boolean;
 }
 
@@ -166,6 +176,43 @@ export class InMemoryCustomPresetStore implements CustomPresetStore {
     arr.push(preset);
     this.perTenant.set(tenant_id, arr);
     return preset;
+  }
+
+  update(
+    tenant_id: string,
+    preset_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): ScenarioPreset {
+    if (!updated_by || !updated_by.trim()) {
+      throw new CustomPresetError('invalid_input', 'updated_by required');
+    }
+    void now;
+    const arr = this.perTenant.get(tenant_id);
+    const idx = arr ? arr.findIndex((p) => p.id === preset_id) : -1;
+    if (!arr || idx < 0) {
+      throw new CustomPresetError(
+        'unknown_preset',
+        `custom preset ${preset_id} not found`,
+      );
+    }
+    const valid = validate(input);
+    const cur = arr[idx]!;
+    const next: ScenarioPreset = {
+      // Immutable id + source_doc-creator preserved unless caller
+      // explicitly supplied a new source_doc.
+      id: cur.id,
+      name: valid.name,
+      description: valid.description,
+      category: valid.category,
+      regulator: valid.regulator,
+      severity: valid.severity,
+      shocks: valid.shocks,
+      source_doc: valid.source_doc ?? cur.source_doc,
+    };
+    arr[idx] = next;
+    return next;
   }
 
   delete(tenant_id: string, preset_id: string): boolean {
