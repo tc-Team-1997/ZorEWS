@@ -147,6 +147,7 @@ import {
 } from './config_rollback';
 import {
   ConfigBulkError,
+  cloneTenantConfig,
   diffTenantConfig,
   exportConfig,
   importConfig,
@@ -6317,6 +6318,43 @@ export function makeApp(deps: AppDeps = {}) {
       try {
         const result = diffTenantConfig(configStore, tenant_a, tenant_b, now());
         return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof ConfigBulkError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/admin/config/_clone (T6 M13.6) — copy source tenant's
+   *  overrides into the caller's tenant. Body { source_tenant_id,
+   *  dry_run? }. Returns ImportSummary shape. Admin-only. */
+  app.post(
+    '/v1/admin/config/_clone',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const applied_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { source_tenant_id?: unknown; dry_run?: unknown };
+      try {
+        const summary = cloneTenantConfig(
+          configStore,
+          typeof wrapper.source_tenant_id === 'string' ? wrapper.source_tenant_id : '',
+          req.tenant!.tenant_id,
+          applied_by,
+          wrapper.dry_run === true,
+          now(),
+        );
+        return res.json(wrapResponse(summary, ctx));
       } catch (e) {
         if (e instanceof ConfigBulkError) {
           return res.status(400).json(

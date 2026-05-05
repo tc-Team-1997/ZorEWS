@@ -5,6 +5,7 @@
 import request from 'supertest';
 import {
   ConfigBulkError,
+  cloneTenantConfig,
   diffTenantConfig,
   exportConfig,
   importConfig,
@@ -343,5 +344,112 @@ describe('GET /v1/admin/config/_diff', () => {
     const { app } = makeBulkApp('admin');
     const r = await request(app).get('/v1/admin/config/alerts.red_sla_hours').set(TH_BIL);
     expect(r.status).toBe(200);
+  });
+});
+
+// ─── M13.6 — Clone tenant config ─────────────────────────────────────
+
+describe('cloneTenantConfig', () => {
+  test('happy: copies source overrides into target', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 36, 'admin', NOW);
+    const r = cloneTenantConfig(cfg, 'BANK_DEMO', 'BIL', 'admin', false, NOW);
+    expect(r.applied.sort()).toEqual(['alerts.orange_sla_hours', 'alerts.red_sla_hours']);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.value).toBe(8);
+    expect(cfg.get('BIL', 'alerts.orange_sla_hours')?.value).toBe(36);
+  });
+
+  test('dry_run: no mutation', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 5, 'admin', NOW);
+    const r = cloneTenantConfig(cfg, 'BANK_DEMO', 'BIL', 'admin', true, NOW);
+    expect(r.dry_run).toBe(true);
+    expect(r.applied).toEqual(['alerts.red_sla_hours']);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('source has no overrides → empty summary, no mutation', () => {
+    const cfg = new InMemoryConfigStore();
+    const r = cloneTenantConfig(cfg, 'BANK_DEMO', 'BIL', 'admin', false, NOW);
+    expect(r.applied).toEqual([]);
+    expect(r.skipped).toEqual([]);
+    expect(r.unchanged).toEqual([]);
+    expect(r.total_input).toBe(0);
+  });
+
+  test('target already has matching value → unchanged', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 7, 'admin', NOW);
+    cfg.set('BIL', 'alerts.red_sla_hours', 7, 'admin', NOW);
+    const r = cloneTenantConfig(cfg, 'BANK_DEMO', 'BIL', 'admin', false, NOW);
+    expect(r.unchanged).toEqual(['alerts.red_sla_hours']);
+    expect(r.applied).toEqual([]);
+  });
+
+  test('rejects same source + target', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() =>
+      cloneTenantConfig(cfg, 'BIL', 'BIL', 'admin', false, NOW),
+    ).toThrow(/must differ/);
+  });
+
+  test('rejects empty ids', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() => cloneTenantConfig(cfg, '', 'BIL', 'admin', false, NOW)).toThrow(
+      ConfigBulkError,
+    );
+    expect(() => cloneTenantConfig(cfg, 'BIL', '', 'admin', false, NOW)).toThrow(
+      ConfigBulkError,
+    );
+  });
+});
+
+describe('POST /v1/admin/config/_clone', () => {
+  test('200 with summary applies source overrides', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 9, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.applied).toContain('alerts.red_sla_hours');
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.value).toBe(9);
+  });
+
+  test('dry_run honoured', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 11, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO', dry_run: true });
+    expect(r.body.body.dry_run).toBe(true);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('missing source_tenant_id → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app).post('/v1/admin/config/_clone').set(TH_BIL).send({});
+    expect(r.status).toBe(400);
+  });
+
+  test('clone-into-self → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BIL' });
+    expect(r.status).toBe(400);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeBulkApp('case_owner');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO' });
+    expect(r.status).toBe(403);
   });
 });

@@ -115,6 +115,44 @@ export function diffTenantConfig(
   };
 }
 
+// ─── M13.6 — Clone tenant config ─────────────────────────────────────
+
+/**
+ * Pure composition of exportConfig + importConfig: snapshot the
+ * source tenant's overrides, apply them to the target tenant.
+ * Reuses importConfig's per-key skipped/applied/unchanged shape.
+ */
+export function cloneTenantConfig(
+  configStore: ConfigStore,
+  source_tenant_id: string,
+  target_tenant_id: string,
+  applied_by: string,
+  dry_run: boolean,
+  now: Date,
+): ImportSummary {
+  if (!source_tenant_id || typeof source_tenant_id !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'source_tenant_id required');
+  }
+  if (!target_tenant_id || typeof target_tenant_id !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'target_tenant_id required');
+  }
+  if (source_tenant_id === target_tenant_id) {
+    throw new ConfigBulkError(
+      'invalid_input',
+      'source and target tenants must differ',
+    );
+  }
+  const snapshot = exportConfig(configStore, source_tenant_id, now);
+  return importConfig(
+    configStore,
+    target_tenant_id,
+    snapshot,
+    applied_by,
+    dry_run,
+    now,
+  );
+}
+
 export interface ConfigSnapshot {
   /** ISO timestamp of when the snapshot was generated. */
   generated_at: string;
