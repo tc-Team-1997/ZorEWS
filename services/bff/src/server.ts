@@ -66,6 +66,11 @@ import {
   type BulkCloneInput,
 } from './rule_bulk_clone';
 import {
+  RuleSimulationError,
+  simulateRuleByIds,
+  type RuleSimulationInput,
+} from './rule_simulation';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -6956,6 +6961,52 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(tpl, ctx));
+    },
+  );
+
+  // ── Rule simulation against scenario (T6 M5.3) ───────────────────────
+  //
+  // Pure-function fire-rate simulator combining M5.1 templates with
+  // M16.1 scenarios. Drives the SPA's "what would this rule do under
+  // RBI Severely Adverse?" pre-activation check.
+  app.post(
+    '/v1/rules/simulate',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const result = simulateRuleByIds(
+          (inner ?? {}) as RuleSimulationInput,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof RuleSimulationError) {
+          if (e.code === 'unknown_template' || e.code === 'unknown_scenario') {
+            return res.status(404).json(
+              wrapError(
+                { code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'simulate failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

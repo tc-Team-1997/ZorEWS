@@ -1317,6 +1317,29 @@
       - No-regression (3): M14.1 insurance + M14.2 IFRS9 routes still 200, **existing `/v1/integrations/health` (banking upstream pings) returns a different shape** so the new route didn't shadow it.
     - **Outcome:** Module 14 now has 9 sub-phases (M14.1–M14.8 adapters + M14.9 fleet health). The BIL ops dashboard can now render an at-a-glance "8/8 adapters healthy" badge backed by real probes against every M14 stub. Aligns with how production monitoring would surface upstream incidents — swapping in real adapter implementations preserves the same `/adapters/health` contract.
 
+  - **M5.3 — Rule simulation against scenario library (2026-05-05):**
+    - M5.1 ships the BIL rule template library (12 templates × 5 categories × 3 verticals); M16.1 ships the named scenario library (10 presets). M5.3 ties them together: an admin picks a rule template + a scenario preset, and the BFF returns an expected fire-rate forecast plus a per-severity breakdown. Drives the SPA's *"what would this rule do under RBI Severely Adverse?"* pre-activation check. Lighter than the existing `services/regulatory-svc/rules/` simulator (which runs against synthetic event streams) — M5.3 is the "expected fire-rate" view that doesn't need actual events.
+    - New `services/bff/src/rule_simulation.ts`:
+      - **Pure function**, no store, no AppDeps slot. Synthesis is **deterministic per (template, scenario, asOf-day)** so the SPA can re-issue and get stable numbers.
+      - **Fire rate built from three factors:**
+        - `templateBaseRate(template)` — depends on template id hash + category. Compliance/UW templates fire less (~1.5–2%) than risk_monitoring (~6%) on baseline. Bounded `[0.005, 0.12]`.
+        - `scenarioStress(scenario)` — magnitude-only mapping of `(gdp, rate, fx)` shocks to `[0, 1]` weighted 0.4/0.4/0.2. Reference points: gdp -4, rate 300, fx 12 (severely-adverse → stress=1.0).
+        - `CATEGORY_SENSITIVITY[category]` — risk_monitoring 1.8 (most stress-sensitive), fraud_detection 1.5, underwriting 0.8, operational 0.6, compliance 0.4 (KYC/AML barely move with shocks).
+        - `fire_rate = clamp(base * (1 + sensitivity * stress), 0, 1)` with ±5% per-day jitter.
+      - **`amplification = fire_rate / baseline_fire_rate`** (capped at 99 to dodge divide-by-near-zero); always ~1.0 for the all-zero-shock baseline scenario.
+      - **`by_severity` bucketing**: 60% of fired_count maps to `recommended_severity`, 25% one notch below, 15% two below. Floors at 'low'. Round-off drift assigned to recommended bucket so buckets always sum to fired_count.
+      - `customer_count` defaults to 200, capped at 10000.
+      - `RuleSimulationError` codes routed: `invalid_input` → 400, `unknown_template` → 404, `unknown_scenario` → 404.
+    - **1 new BFF route** (tenant-gated, enveloped):
+      - `POST /v1/rules/simulate` body `{rule_template_id, scenario_preset_id, customer_count?}` — RBAC `rules:list` (analyst+, matches M5.1+M5.2). 200 happy.
+    - **Tests:** BFF 2090/2090 (was 2049 — +41 in `rule_simulation.test.ts`):
+      - scenarioStress (4): zero baseline, severe → 1.0, mild < severe, sign-magnitude only.
+      - simulateRule pure (12): shape + fired/rate consistency, fire_rate ∈ [0,1] across all templates × severe, amplification > 1 on stressed-sensitive rules, ~1 on baseline, capped at 99 across worst-case combos, determinism (same call = same answer), different-scenario→different-fire-rate, by_severity sums to fired_count, peak at recommended_severity, fired=0 → buckets 0, compliance < risk_monitoring amplification.
+      - simulateRuleByIds (10): happy + customer_count default + override + non-object body + missing/blank ids + non-integer count + count out-of-range + unknown template/scenario.
+      - Route (10): analyst+ 200, enveloped, customer_count honoured, amplification > 1 on sensitive+severe, missing template_id 400, count out-of-range 400, unknown template 404, unknown scenario 404, role 403, determinism via two same-call requests.
+      - No-regression (4): M5.1 GET templates + /:id, M5.2 bulk-clone, M16.1 library/:id all still 200.
+    - **Outcome:** Module 5 now has 3 sub-phases (M5.1 library + M5.2 bulk-clone + M5.3 simulation). Combined with M16.1 library + M16.2 bulk-run + M16.3 diff, the BIL pre-activation workflow runs end-to-end: pick template → bulk-clone into draft rules → simulate each draft against severely-adverse scenarios → activate only those whose amplification stays manageable. Future M5.4 likely covers **simulation BUNDLES** (run one rule against the full M16.1 preset list at once for a 10-row stress preview).
+
 ## Phase 5 — Optimisation & DR (M18–24)
 
 - [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**

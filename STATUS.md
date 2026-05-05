@@ -1,6 +1,6 @@
 # APEX EWS — Live Status
 
-**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **50 sub-phases shipped to date · ~143 routes wired · BFF jest 2049 pass / 9 skipped / 2058 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
+**Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **51 sub-phases shipped to date · ~144 routes wired · BFF jest 2090 pass / 9 skipped / 2099 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
 **Last updated:** 2026-05-05
 
 ## T6 Coverage Matrix — BIL 16-module platform expansion
@@ -13,7 +13,7 @@ Every module below has at least one live sub-phase wired into the BFF and covere
 | M2  | Tenant Operations            | M2.1 + M2.2                                 | Cross-module readiness check (9 axes) · 8-step onboarding wizard (`pending → completed | skipped`, `is_complete` honours required vs optional) |
 | M3  | Data Ingestion               | M3.1 + M3.2                                 | 8-connector registry (CBS / Core Insurance / Policy Master / Claims / Agent / AML / Bureau / IFRS9) with run history + pause/resume · Per-connector field schema metadata + pure-function record validator |
 | M4  | Indicators                   | M4.1 + M4.2                                 | 25-indicator BIL insurance KRI catalog · indicator backtest with full confusion matrix |
-| M5  | Rule Engine                  | M5.1 + M5.2                                 | 12-template starter library (5 categories × 3 verticals) · bulk-clone preview (template_ids[] OR filter, name_prefix, draft state) |
+| M5  | Rule Engine                  | M5.1 + M5.2 + M5.3                          | 12-template starter library (5 categories × 3 verticals) · bulk-clone preview (template_ids[] OR filter, name_prefix, draft state) · pure-function rule simulation against M16.1 scenarios (deterministic per (template, scenario, day) — fire-rate + amplification vs baseline + by-severity bucketing) |
 | M6  | Risk Scoring                 | M6.1 + M6.2                                 | `Σ(W×V)` engine bucketed Low/Med/High · catalog-lookup convenience layer with cross-vertical guard |
 | M7  | AI / ML                      | M7.1 + M7.2                                 | 8-model registry × 6 types + SHAP-style top features · explicit promotion state machine (experimental → staging → shadow → prod → retired) with self-approval refusal |
 | M8  | Alerts                       | M8.1 + M8.2 + M8.3                          | BIL Red/Orange/Yellow/Green classification · auto-routing matrix (severity → channel + SLA + escalation) · per-alert ack/unack lifecycle with history |
@@ -26,7 +26,7 @@ Every module below has at least one live sub-phase wired into the BFF and covere
 | M15 | Audit & Compliance           | M15.1 + M15.2 + M15.3                       | 7-axis filterable audit log + summary · SHA-256 hash-chain integrity verifier · evidence packaging (filtered + chain-verified frozen snapshot) with capped per-tenant retention |
 | M16 | Scenarios                    | M16.1 + M16.2 + M16.3                       | 10-preset library (RBI Baseline/Adverse/Severely-Adverse, IRDAI Solvency, business shocks, pandemic + stagflation black-swans) · bulk-run ranking + worst/mean/adverse aggregates · pure-function side-by-side diff with sorted-by-|delta_abs| changed-entries view |
 
-**Totals:** **16/16 modules live · 50 sub-phases shipped · ~143 routes wired · BFF tests 2049 pass / 9 skipped / 2058 total.**
+**Totals:** **16/16 modules live · 51 sub-phases shipped · ~144 routes wired · BFF tests 2090 pass / 9 skipped / 2099 total.**
 
 Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API count is **~38%**; **module coverage is 100%** — no module is missing a working slice. The next sub-phase candidates per module:
 
@@ -34,7 +34,7 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 - **M2** — bulk-tenant onboarding (CSV)
 - **M3** — per-tenant schema overrides (M3.3)
 - **M4** — indicator versioning + deprecation
-- **M5** — rule simulation against scenario library (M5.3)
+- **M5** — simulation BUNDLES (single rule × full preset list, M5.4)
 - **M6** — scoring weight presets (M6.3)
 - **M7** — model A/B test harness (M7.3)
 - **M8** — alert auto-ack via threshold rules (M8.4)
