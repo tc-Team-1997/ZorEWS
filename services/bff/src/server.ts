@@ -135,6 +135,15 @@ import {
   type CustomDashboardStore,
 } from './custom_dashboards';
 import {
+  InMemoryModelPerformanceStore,
+  ModelPerformanceError,
+  isPerformanceMetric,
+  summarizePerformance,
+  type ModelPerformanceStore,
+  type PerformanceFilter,
+  type PerformanceMetric,
+} from './model_performance';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -586,6 +595,8 @@ export interface AppDeps {
   caseEventStore?: CaseEventStore;
   /** Override for tests — per-tenant custom dashboard store (T6 M11.7). */
   customDashboardStore?: CustomDashboardStore;
+  /** Override for tests — per-tenant per-model performance ledger (T6 M7.5). */
+  modelPerformanceStore?: ModelPerformanceStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -817,6 +828,8 @@ export function makeApp(deps: AppDeps = {}) {
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
+  const modelPerformanceStore =
+    deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -1987,6 +2000,124 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+    },
+  );
+
+  // ── Model performance ledger (T6 M7.5) ──────────────────────────────
+  //
+  // Per-tenant per-model time-series of quality metrics (precision,
+  // recall, AUC, drift_score, calibration_err). Append-only with
+  // FIFO retention at 200 entries/model.
+  //
+  // Route ordering: literal `/performance/summary` declared BEFORE
+  // `/performance` so the param doesn't shadow.
+
+  /** GET /v1/ai/models/:model_id/performance/summary — aggregate
+   *  per-metric latest + mean/p50/p95 over the queried window
+   *  (?since=ISO&until=ISO). */
+  app.get(
+    '/v1/ai/models/:model_id/performance/summary',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const q = req.query;
+      const filter: PerformanceFilter = {};
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      try {
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, filter);
+        const summary = summarizePerformance(req.tenant!.tenant_id, id, entries);
+        return res.json(wrapResponse(summary, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceError && e.code === 'unknown_model') {
+          return res.status(404).json(
+            wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** GET /v1/ai/models/:model_id/performance?metric=&since=&until=
+   *  — list raw entries, newest-first by recorded_at. */
+  app.get(
+    '/v1/ai/models/:model_id/performance',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const q = req.query;
+      const filter: PerformanceFilter = {};
+      if (typeof q.metric === 'string' && q.metric) {
+        if (!isPerformanceMetric(q.metric)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `unknown metric: ${q.metric}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.metric = q.metric as PerformanceMetric;
+      }
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      try {
+        const items = modelPerformanceStore
+          .list(req.tenant!.tenant_id, id, filter)
+          .sort((a, b) =>
+            a.recorded_at < b.recorded_at ? 1 : a.recorded_at > b.recorded_at ? -1 : 0,
+          );
+        return res.json(wrapResponse({ items, total: items.length, model_id: id }, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceError && e.code === 'unknown_model') {
+          return res.status(404).json(
+            wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/ai/models/:model_id/performance — record a metric
+   *  observation. body { metric, value, sample_size, notes? }. */
+  app.post(
+    '/v1/ai/models/:model_id/performance',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = modelPerformanceStore.record(
+          req.tenant!.tenant_id,
+          id,
+          inner,
+          now(),
+        );
+        return res.status(201).json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceError) {
+          if (e.code === 'unknown_model') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
       }
     },
   );
