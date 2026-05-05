@@ -9,6 +9,7 @@
 
 import {
   type RuleSimulationResult,
+  type RuleTemplateLookup,
   RuleSimulationError,
   simulateRule,
 } from './rule_simulation';
@@ -41,6 +42,7 @@ const MAX_CUSTOMER_COUNT = 10_000;
 export function simulateRuleBundle(
   input: BundleSimulationInput,
   asOf: Date,
+  templateLookup: RuleTemplateLookup = getRuleTemplate,
 ): BundleSimulationResult {
   if (!input || typeof input !== 'object') {
     throw new RuleSimulationError('invalid_input', 'request body required');
@@ -64,7 +66,7 @@ export function simulateRuleBundle(
     }
     customer_count = input.customer_count;
   }
-  const template = getRuleTemplate(input.rule_template_id);
+  const template = templateLookup(input.rule_template_id);
   if (!template) {
     throw new RuleSimulationError(
       'unknown_template',

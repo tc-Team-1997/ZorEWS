@@ -44,6 +44,11 @@ import {
   type RecommendedSeverity,
   getTemplate as getRuleTemplate,
 } from './rule_templates';
+
+/** Optional callback to extend template resolution beyond the
+ *  M5.1 platform library (M5.7 — wires customRuleTemplateStore so
+ *  tenant-authored ids resolve too). */
+export type RuleTemplateLookup = (id: string) => RuleTemplate | null;
 import {
   type ScenarioPreset,
   getScenarioPreset,
@@ -270,6 +275,7 @@ export function simulateRule(
 export function simulateRuleByIds(
   input: RuleSimulationInput,
   asOf: Date,
+  templateLookup: RuleTemplateLookup = getRuleTemplate,
 ): RuleSimulationResult {
   if (!input || typeof input !== 'object') {
     throw new RuleSimulationError('invalid_input', 'request body required');
@@ -298,7 +304,7 @@ export function simulateRuleByIds(
     customer_count = input.customer_count;
   }
 
-  const template = getRuleTemplate(input.rule_template_id);
+  const template = templateLookup(input.rule_template_id);
   if (!template) {
     throw new RuleSimulationError(
       'unknown_template',

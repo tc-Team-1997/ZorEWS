@@ -81,6 +81,7 @@ import {
 import {
   CustomRuleTemplateError,
   defaultCustomRuleTemplateStore,
+  getEffectiveRuleTemplate,
   type CustomRuleTemplateStore,
 } from './rule_templates_custom';
 import {
@@ -8516,10 +8517,12 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const wrapper = (inner ?? {}) as { left_id?: unknown; right_id?: unknown };
       try {
+        const tenantId = req.tenant!.tenant_id;
         const result = diffRuleTemplatesByIds(
           wrapper.left_id,
           wrapper.right_id,
           now(),
+          (id) => getEffectiveRuleTemplate(customRuleTemplateStore, tenantId, id),
         );
         return res.json(wrapResponse(result, ctx));
       } catch (e) {
@@ -8658,9 +8661,11 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       try {
+        const tenantId = req.tenant!.tenant_id;
         const result = simulateRuleByIds(
           (inner ?? {}) as RuleSimulationInput,
           now(),
+          (id) => getEffectiveRuleTemplate(customRuleTemplateStore, tenantId, id),
         );
         return res.json(wrapResponse(result, ctx));
       } catch (e) {
@@ -8700,7 +8705,12 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       try {
-        const result = simulateRuleBundle((inner ?? {}) as BundleSimulationInput, now());
+        const tenantId = req.tenant!.tenant_id;
+        const result = simulateRuleBundle(
+          (inner ?? {}) as BundleSimulationInput,
+          now(),
+          (id) => getEffectiveRuleTemplate(customRuleTemplateStore, tenantId, id),
+        );
         return res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof RuleSimulationError) {

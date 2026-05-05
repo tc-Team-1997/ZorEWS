@@ -18,6 +18,11 @@ import {
   getTemplate as getRuleTemplate,
 } from './rule_templates';
 
+/** Optional callback to extend resolution beyond the M5.1 platform
+ *  library (M5.7 — wires customRuleTemplateStore so tenant-authored
+ *  ids resolve too). */
+export type DiffRuleTemplateLookup = (id: string) => RuleTemplate | null;
+
 // ─── Public types ─────────────────────────────────────────────────────
 
 export type DiffFieldKind = 'enum' | 'string' | 'array';
@@ -146,6 +151,7 @@ export function diffRuleTemplatesByIds(
   left_id: unknown,
   right_id: unknown,
   now: Date,
+  lookup: DiffRuleTemplateLookup = getRuleTemplate,
 ): RuleTemplateDiffResult {
   if (typeof left_id !== 'string' || !left_id.trim()) {
     throw new RuleTemplateDiffError('invalid_input', 'left_id is required');
@@ -159,11 +165,11 @@ export function diffRuleTemplatesByIds(
       'left_id and right_id are the same template — diff would be empty',
     );
   }
-  const left = getRuleTemplate(left_id);
+  const left = lookup(left_id);
   if (!left) {
     throw new RuleTemplateDiffError('unknown_template', `unknown rule template: ${left_id}`);
   }
-  const right = getRuleTemplate(right_id);
+  const right = lookup(right_id);
   if (!right) {
     throw new RuleTemplateDiffError('unknown_template', `unknown rule template: ${right_id}`);
   }

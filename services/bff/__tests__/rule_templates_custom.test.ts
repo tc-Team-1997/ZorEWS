@@ -251,3 +251,86 @@ describe('Routes', () => {
     expect(r.body.body.id).toBe('tpl_dpd_30_60');
   });
 });
+
+// ─── M5.7 — Custom templates through simulation + diff ───────────────
+
+describe('M5.7 — custom templates resolve through downstream consumers', () => {
+  test('simulate accepts a custom template id', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/rules/simulate')
+      .set(TH_BIL)
+      .send({
+        rule_template_id: id,
+        scenario_preset_id: 'preset_rbi_baseline_stress',
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.rule_template_id).toBe(id);
+  });
+
+  test('simulate cross-tenant: BIL custom id invisible from BANK_DEMO → 404', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/rules/simulate')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({
+        rule_template_id: id,
+        scenario_preset_id: 'preset_rbi_baseline_stress',
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_template');
+  });
+
+  test('simulate-bundle accepts custom template id', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/rules/simulate/bundle')
+      .set(TH_BIL)
+      .send({ rule_template_id: id });
+    expect(r.status).toBe(200);
+    expect(r.body.body.rule_template_id).toBe(id);
+  });
+
+  test('diff custom-vs-library', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/rules/templates/diff')
+      .set(TH_BIL)
+      .send({ left_id: id, right_id: 'tpl_dpd_30_60' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.left.id).toBe(id);
+  });
+
+  test('diff cross-tenant: BIL custom id invisible from BANK_DEMO → 404', async () => {
+    const { app } = makeTplApp('admin');
+    const c = await request(app).post('/v1/rules/templates/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .post('/v1/rules/templates/diff')
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .send({ left_id: id, right_id: 'tpl_dpd_30_60' });
+    expect(r.status).toBe(404);
+  });
+
+  test('library-only ids still work (no-regression)', async () => {
+    const { app } = makeTplApp('admin');
+    const r = await request(app)
+      .post('/v1/rules/simulate')
+      .set(TH_BIL)
+      .send({
+        rule_template_id: 'tpl_dpd_30_60',
+        scenario_preset_id: 'preset_rbi_baseline_stress',
+      });
+    expect(r.status).toBe(200);
+  });
+});
