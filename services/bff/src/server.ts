@@ -94,6 +94,11 @@ import {
   type ThresholdOverrideStore,
 } from './indicator_thresholds';
 import {
+  BreachScanError,
+  scanCustomerBreaches,
+  type BreachScanInput,
+} from './customer_breach_scan';
+import {
   getScenarioPreset,
   isScenarioCategory,
   isScenarioRegulator,
@@ -5042,6 +5047,44 @@ export function makeApp(deps: AppDeps = {}) {
               ),
             );
           }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/indicators/scan-customer (T6 M4.5) — synthesise all
+   *  applicable indicator values for a customer, run each through
+   *  effective thresholds (M4.4), return ranked breaches + summary.
+   *  Closes the M4.1 catalog → M4.3 thresholds → M4.4 overrides chain. */
+  app.post(
+    '/v1/indicators/scan-customer',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { customer_id?: unknown; vertical?: unknown };
+      try {
+        const result = scanCustomerBreaches(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            customer_id: typeof wrapper.customer_id === 'string' ? wrapper.customer_id : '',
+            vertical: wrapper.vertical as ScoringVertical | undefined,
+          } as BreachScanInput,
+          thresholdOverrideStore,
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof BreachScanError) {
           return res.status(400).json(
             wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
           );
