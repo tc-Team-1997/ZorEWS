@@ -1,0 +1,198 @@
+{
+  "info": {
+    "name": "APEX EWS — Copilot v2",
+    "description": "Postman collection for the hardened copilot route (Copilot-1 + Copilot-2). Walks a conversation through why_flagged → explain_kri → suggest_case_steps + checks quota and audit.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8084" },
+    { "key": "tenantId", "value": "BIL" },
+    { "key": "channel", "value": "API" },
+    { "key": "apexUser", "value": "jane.analyst" },
+    { "key": "apexRole", "value": "risk_analyst" },
+    { "key": "adminRole", "value": "admin" },
+    { "key": "conversationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Quota — initial empty state",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/quota"
+      }
+    },
+    {
+      "name": "1. Why is this customer high risk? (auto-create conversation)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Why is this customer flagged as high risk?\",\n  \"context\": {\n    \"page\": \"customer\",\n    \"entity\": {\n      \"type\": \"customer\",\n      \"id\": \"cust-001\",\n      \"label\": \"Acme Pvt Ltd\",\n      \"facts\": { \"pd\": 0.72, \"dpd_max_90d\": 60, \"utilization\": 0.95, \"top_driver\": \"dpd_max_90d\" }\n    }\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Explain the KRI breakdown (reuse {{conversationId}})",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Explain the KRI breakdown\",\n  \"conversation_id\": \"{{conversationId}}\",\n  \"context\": {\n    \"page\": \"customer\",\n    \"entity\": {\n      \"type\": \"customer\", \"id\": \"cust-001\", \"label\": \"Acme Pvt Ltd\",\n      \"facts\": { \"red_count\": 4, \"orange_count\": 6, \"top_driver\": \"FIN-001\", \"kri_FIN_001\": 0.88 }\n    }\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Summarize this alert in 2 lines",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Summarize this alert in 2 lines\",\n  \"context\": {\n    \"page\": \"alerts\",\n    \"entity\": {\n      \"type\": \"alert\", \"id\": \"alrt-007\",\n      \"label\": \"Payment bounce alert\",\n      \"facts\": { \"severity\": \"high\", \"customer_id\": \"cust-002\", \"rule_name\": \"High EMI Bounce Risk\", \"reason_summary\": \"5 EMI bounces in last 90 days\" }\n    }\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Suggest next steps for this case (SLA warn)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What are the next steps for this case?\",\n  \"context\": {\n    \"page\": \"case\",\n    \"entity\": {\n      \"type\": \"case\", \"id\": \"EWS-2026-00001\",\n      \"label\": \"EWS-2026-00001 — Acme EMI bounce\",\n      \"facts\": { \"status\": \"INVESTIGATING\", \"priority\": \"P1\", \"sla_progress_pct\": 87, \"sla_breached\": \"false\" }\n    }\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "5. PII leak example — masker fires",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Email jane@bil.com about cust-001 (PAN ABCDE1234F, phone +91 9876543210)\"\n}"
+        }
+      }
+    },
+    {
+      "name": "6. Quota — after 5 turns",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/quota"
+      }
+    },
+    {
+      "name": "7. List my conversations",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/conversations"
+      }
+    },
+    {
+      "name": "8. Get conversation detail (uses {{conversationId}})",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/conversations/{{conversationId}}"
+      }
+    },
+    {
+      "name": "9. Admin audit review — all queries by jane.analyst",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{adminRole}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/copilot/v2/audit?user_id=jane.analyst&limit=50",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "copilot", "v2", "audit"],
+          "query": [
+            { "key": "user_id", "value": "jane.analyst" },
+            { "key": "limit", "value": "50" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "10. Forbidden role check (collection_officer → 403)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "carlos.collection" },
+          { "key": "x-apex-role", "value": "collection_officer" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/copilot/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"message\": \"hi\" }"
+        }
+      }
+    }
+  ]
+}
