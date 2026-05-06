@@ -85,6 +85,11 @@ import {
   type CustomRuleTemplateStore,
 } from './rule_templates_custom';
 import {
+  BundleError,
+  exportBundle as exportRuleTemplateBundle,
+  importBundle as importRuleTemplateBundle,
+} from './rule_template_bundle';
+import {
   ThresholdError,
   checkBreachById,
   defaultThresholdOverrideStore,
@@ -143,6 +148,26 @@ import {
   type PerformanceFilter,
   type PerformanceMetric,
 } from './model_performance';
+import {
+  EWS_RULE_CATEGORIES,
+  EWS_RULE_STATES,
+  EwsRuleError,
+  defaultEwsRuleStore,
+  isEwsRuleCategory,
+  isEwsRuleState,
+  type EwsRuleStore,
+} from './ews_rules';
+import {
+  EWS_INDICATOR_CATALOG,
+  type EwsIndicator,
+} from './ews_indicators';
+import {
+  evaluateRules,
+  ruleMatches,
+  firingIndicators,
+  type EntityType,
+  type IndicatorValues,
+} from './ews_rules_executor';
 import {
   getScenarioPreset,
   isScenarioCategory,
@@ -597,6 +622,8 @@ export interface AppDeps {
   customDashboardStore?: CustomDashboardStore;
   /** Override for tests — per-tenant per-model performance ledger (T6 M7.5). */
   modelPerformanceStore?: ModelPerformanceStore;
+  /** Override for tests — per-tenant EWS rules store (EWS-2). */
+  ewsRuleStore?: EwsRuleStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -830,6 +857,7 @@ export function makeApp(deps: AppDeps = {}) {
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
+  const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -10262,6 +10290,89 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Custom rule template export/import bundle (T6 M5.11) ────────────
+  //
+  // JSON envelope for migrating custom templates between tenants.
+  // Both routes are literal segments — declared BEFORE the
+  // `:template_id` PUT/DELETE so the param doesn't shadow.
+
+  /** POST /v1/rules/templates/custom/export-bundle (T6 M5.11)
+   *  body { template_ids: string[] } → bundle envelope. */
+  app.post(
+    '/v1/rules/templates/custom/export-bundle',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { template_ids?: unknown };
+      const exported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const bundle = exportRuleTemplateBundle(customRuleTemplateStore, {
+          tenant_id: req.tenant!.tenant_id,
+          template_ids: Array.isArray(wrapper.template_ids)
+            ? (wrapper.template_ids as string[])
+            : [],
+          exported_by,
+          now: now(),
+        });
+        return res.json(wrapResponse(bundle, ctx));
+      } catch (e) {
+        if (e instanceof BundleError) {
+          if (e.code === 'unknown_template') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/rules/templates/custom/import-bundle (T6 M5.11)
+   *  body { bundle, name_prefix? } → per-row import outcomes. */
+  app.post(
+    '/v1/rules/templates/custom/import-bundle',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { bundle?: unknown; name_prefix?: unknown };
+      const imported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const result = importRuleTemplateBundle(customRuleTemplateStore, {
+          target_tenant_id: req.tenant!.tenant_id,
+          bundle: wrapper.bundle,
+          imported_by,
+          name_prefix:
+            typeof wrapper.name_prefix === 'string' ? wrapper.name_prefix : undefined,
+          now: now(),
+        });
+        return res.status(201).json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof BundleError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** PUT /v1/rules/templates/custom/:template_id (T6 M5.8) — replace
    *  mutable fields. Writes rule.update audit event with metadata. */
   app.put(
@@ -10429,6 +10540,504 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(tpl, ctx));
+    },
+  );
+
+  // ── EWS rules engine (EWS-3) ─────────────────────────────────────────
+  //
+  // CRUD + lifecycle + ad-hoc test + bulk evaluate + execution history,
+  // all under /v1/ews/rules/*. Audit-trail wired on every mutation;
+  // case-event journal recorded on every match.
+  //
+  // Route ordering: literal /indicators and /evaluate declared BEFORE
+  // /:rule_id paths so the param doesn't shadow.
+
+  function ewsApexUser(req: Request): string {
+    return ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+  }
+
+  function ewsErrorResponse(
+    e: unknown,
+    ctx: ReturnType<typeof extractCtx>,
+  ): { status: number; body: ReturnType<typeof wrapError> } {
+    if (e instanceof EwsRuleError) {
+      const code = e.code;
+      const status =
+        code === 'unknown_rule' ? 404 :
+        code === 'duplicate_rule_id' || code === 'cap_reached' ? 409 :
+        code === 'illegal_state' || code === 'illegal_transition' ? 409 :
+        400;
+      const httpCode =
+        status === 404
+          ? `EWS_404_${code}`
+          : status === 409
+            ? `EWS_409_${code}`
+            : `EWS_400_${code}`;
+      return {
+        status,
+        body: wrapError(
+          { code: httpCode, message: e.message, severity: status >= 500 ? 'HIGH' : 'MEDIUM' },
+          ctx,
+        ),
+      };
+    }
+    throw e;
+  }
+
+  /** GET /v1/ews/rules/indicators — EWS indicator catalog. */
+  app.get(
+    '/v1/ews/rules/indicators',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items: EwsIndicator[] = Object.values(EWS_INDICATOR_CATALOG);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/ews/rules/evaluate — bulk evaluate one entity against
+   *  all active rules. Body { entity_type, entity_id, values }. */
+  app.post(
+    '/v1/ews/rules/evaluate',
+    requireTenantMw,
+    requireRole('rules:simulate'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as {
+        entity_type?: unknown;
+        entity_id?: unknown;
+        values?: unknown;
+      };
+      if (
+        w.entity_type !== 'customer' &&
+        w.entity_type !== 'policy' &&
+        w.entity_type !== 'claim'
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: "entity_type must be 'customer' | 'policy' | 'claim'",
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      if (typeof w.entity_id !== 'string' || !w.entity_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'entity_id required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (!w.values || typeof w.values !== 'object' || Array.isArray(w.values)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'values must be an object {indicator_name: number|string}',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenant_id = req.tenant!.tenant_id;
+      const activeRules = ewsRuleStore
+        .list(tenant_id, { state: 'active', is_active: true });
+      const result = evaluateRules({
+        tenant_id,
+        entity_type: w.entity_type as EntityType,
+        entity_id: (w.entity_id as string).trim(),
+        values: w.values as IndicatorValues,
+        rules: activeRules,
+        now: now(),
+      });
+      // Per RFC sign-off Q5 — write a case-event for every match so
+      // downstream M9.4 consumers can fan out.
+      for (const m of result.matches) {
+        try {
+          ewsRuleStore.recordExecution(tenant_id, {
+            rule_id: m.rule_id,
+            entity_type: result.entity_type,
+            entity_id: result.entity_id,
+            matched: true,
+            matched_indicators: m.matched_indicators,
+            score_impact: m.weight,
+            alert_id: null,
+            evaluated_at: result.evaluated_at,
+            duration_us: result.duration_us,
+          });
+          caseEventStore.record(
+            tenant_id,
+            {
+              case_id: `${result.entity_type}-${result.entity_id}`,
+              action: 'opened',
+              actor: 'system:ews-rules-engine',
+              payload: {
+                rule_id: m.rule_id,
+                rule_name: m.name,
+                alert_severity: m.alert_severity,
+                weight: m.weight,
+                matched_indicators: m.matched_indicators,
+                aggregate_severity: result.aggregate_severity,
+                cumulative_score: result.cumulative_score,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // best-effort — telemetry failures must not break evaluation
+        }
+      }
+      return res.json(wrapResponse(result, ctx));
+    },
+  );
+
+  /** GET /v1/ews/rules — list with category/state/is_active filters. */
+  app.get(
+    '/v1/ews/rules',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filter: { category?: ReturnType<typeof isEwsRuleCategory> extends boolean ? string : never; state?: string; is_active?: boolean } = {} as never;
+      if (typeof q.category === 'string' && q.category) {
+        if (!isEwsRuleCategory(q.category)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: `category must be one of ${EWS_RULE_CATEGORIES.join(', ')}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        (filter as { category: string }).category = q.category;
+      }
+      if (typeof q.state === 'string' && q.state) {
+        if (!isEwsRuleState(q.state)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: `state must be one of ${EWS_RULE_STATES.join(', ')}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        (filter as { state: string }).state = q.state;
+      }
+      if (typeof q.is_active === 'string') {
+        if (q.is_active !== 'true' && q.is_active !== 'false') {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'is_active must be true or false',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        (filter as { is_active: boolean }).is_active = q.is_active === 'true';
+      }
+      const items = ewsRuleStore.list(req.tenant!.tenant_id, filter as Parameters<EwsRuleStore['list']>[1]);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/ews/rules — create draft rule. */
+  app.post(
+    '/v1/ews/rules',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = ewsApexUser(req);
+      try {
+        const rule = ewsRuleStore.create(req.tenant!.tenant_id, inner, created_by, now());
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'rule.create',
+              resource_type: 'rule',
+              resource_id: rule.rule_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { name: rule.name, category: rule.category },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.status(201).json(wrapResponse(rule, ctx));
+      } catch (e) {
+        const r = ewsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/ews/rules/:rule_id — single rule. */
+  app.get(
+    '/v1/ews/rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const r = ewsRuleStore.get(req.tenant!.tenant_id, id);
+      if (!r) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(r, ctx));
+    },
+  );
+
+  /** PUT /v1/ews/rules/:rule_id — replace + bump version. */
+  app.put(
+    '/v1/ews/rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const updated_by = ewsApexUser(req);
+      try {
+        const rule = ewsRuleStore.replace(req.tenant!.tenant_id, id, inner, updated_by, now());
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'rule.update',
+              resource_type: 'rule',
+              resource_id: rule.rule_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { version: rule.version },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(rule, ctx));
+      } catch (e) {
+        const r = ewsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** DELETE /v1/ews/rules/:rule_id — soft-delete (state→deprecated). */
+  app.delete(
+    '/v1/ews/rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:retire'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const updated_by = ewsApexUser(req);
+      try {
+        const rule = ewsRuleStore.deprecate(req.tenant!.tenant_id, id, now());
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'rule.retire',
+              resource_type: 'rule',
+              resource_id: rule.rule_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { deprecated_at: rule.deprecated_at },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(rule, ctx));
+      } catch (e) {
+        const r = ewsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/test — evaluate rule against ad-hoc
+   *  sample values (does NOT record telemetry). */
+  app.post(
+    '/v1/ews/rules/:rule_id/test',
+    requireTenantMw,
+    requireRole('rules:simulate'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const rule = ewsRuleStore.get(req.tenant!.tenant_id, id);
+      if (!rule) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { values?: unknown };
+      if (!w.values || typeof w.values !== 'object' || Array.isArray(w.values)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'values must be an object',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const values = w.values as IndicatorValues;
+      const matched = ruleMatches(rule, values);
+      const fired = firingIndicators(rule, values);
+      return res.json(
+        wrapResponse(
+          {
+            rule_id: rule.rule_id,
+            matched,
+            matched_indicators: fired,
+            score_impact: matched ? rule.action.weight : 0,
+            alert_severity: rule.action.alert_severity,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/activate — promote draft→pending_review→active. */
+  app.post(
+    '/v1/ews/rules/:rule_id/activate',
+    requireTenantMw,
+    requireRole('rules:retire'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const updated_by = ewsApexUser(req);
+      const cur = ewsRuleStore.get(tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        // Caller can call /activate from either draft or pending_review.
+        // From draft we need to submit() first to land in pending_review.
+        let rule = cur;
+        if (rule.state === 'draft') {
+          rule = ewsRuleStore.submit(tenant_id, id, now());
+        }
+        rule = ewsRuleStore.activate(tenant_id, id, now());
+        try {
+          auditTrailStore.record(
+            tenant_id,
+            {
+              actor_username: updated_by,
+              actor_role: 'admin',
+              action: 'rule.activate',
+              resource_type: 'rule',
+              resource_id: rule.rule_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { version: rule.version },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(rule, ctx));
+      } catch (e) {
+        const r = ewsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/ews/rules/:rule_id/hits?limit=50 — recent execution telemetry. */
+  app.get(
+    '/v1/ews/rules/:rule_id/hits',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw === undefined ? 50 : Number(limitRaw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'limit must be 1..1000', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const cur = ewsRuleStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = ewsRuleStore.listExecutionsForRule(req.tenant!.tenant_id, id, limit);
+      return res.json(wrapResponse({ items, total: items.length, rule_id: id }, ctx));
     },
   );
 

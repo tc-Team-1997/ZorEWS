@@ -78,14 +78,14 @@ describe('InMemoryEwsRuleStore — CRUD', () => {
     expect(() => s.create('BANK_DEMO', VALID, 'admin', NOW)).not.toThrow();
   });
 
-  test('cap_reached after 200 rules', () => {
+  test('cap_reached after EWS_RULES_CAP_PER_TENANT rules', () => {
     const s = new InMemoryEwsRuleStore();
     for (let i = 0; i < EWS_RULES_CAP_PER_TENANT; i++) {
-      const id = `RULE_CREDIT_${String(i + 1).padStart(3, '0')}`;
+      const id = `RULE_CREDIT_${String(i + 1).padStart(4, '0')}`;
       s.create('BIL', { ...VALID, rule_id: id, name: `Rule ${i}` }, 'admin', NOW);
     }
     try {
-      s.create('BIL', { ...VALID, rule_id: 'RULE_CREDIT_999' }, 'admin', NOW);
+      s.create('BIL', { ...VALID, rule_id: 'RULE_CREDIT_9999' }, 'admin', NOW);
       fail('expected throw');
     } catch (e) {
       expect((e as EwsRuleError).code).toBe('cap_reached');

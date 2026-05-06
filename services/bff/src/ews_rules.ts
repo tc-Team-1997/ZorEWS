@@ -450,7 +450,7 @@ export interface EwsRuleExecution {
 
 // ─── Store ────────────────────────────────────────────────────────────
 
-const RULES_CAP_PER_TENANT = 200;
+const RULES_CAP_PER_TENANT = 2000;
 const EXECUTIONS_CAP_PER_TENANT = 5000;
 
 export interface EwsRuleStore {
