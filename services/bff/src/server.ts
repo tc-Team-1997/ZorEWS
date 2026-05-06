@@ -164,6 +164,13 @@ import {
   type CmsListFilter,
 } from './cms_store';
 import {
+  autoCreateCaseFromAlert,
+  defaultAssigneePoolStore,
+  findInactiveCases,
+  type AssigneePoolStore,
+  type AutoCreateInput,
+} from './cms_automation';
+import {
   InMemoryModelPerformanceStore,
   ModelPerformanceError,
   isPerformanceMetric,
@@ -650,6 +657,8 @@ export interface AppDeps {
   ewsRuleStore?: EwsRuleStore;
   /** Override for tests — per-tenant CMS case store (CMS-2). */
   cmsCaseStore?: CmsCaseStore;
+  /** Override for tests — per-tenant assignee pool (CMS-4). */
+  cmsAssigneePoolStore?: AssigneePoolStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -885,6 +894,7 @@ export function makeApp(deps: AppDeps = {}) {
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
   const cmsCaseStore = deps.cmsCaseStore ?? defaultCmsCaseStore;
+  const cmsAssigneePoolStore = deps.cmsAssigneePoolStore ?? defaultAssigneePoolStore;
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -4785,6 +4795,183 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const items = cmsCaseStore.listHistory(req.tenant!.tenant_id, id, limit);
       return res.json(wrapResponse({ items, total: items.length, case_id: id }, ctx));
+    },
+  );
+
+  // ── CMS-4 — automation surface ───────────────────────────────────────
+  //
+  // 4 new routes wired against cms_automation.ts. All literal segments
+  // (/automation/auto-create-from-alert, /automation/pool, /cases/
+  // inactive) live BEFORE the :case_id param routes already declared
+  // above — Express dispatches by registration order, and registering
+  // these LATER means a request to /v1/cms/cases/inactive would have
+  // matched the earlier `:case_id` GET route. Fix: declare these BELOW
+  // but with literal-segment paths that don't collide with /:case_id
+  // (the `inactive` would match :case_id with id='inactive', which is
+  // wrong). So we rely on the fact that the GET /:case_id handler
+  // returns 404 for an unknown id — but that's a worse UX than a 200
+  // listing. Instead, mount /v1/cms/cases/inactive UNDER a sibling path
+  // /v1/cms/automation/inactive-cases to avoid the collision entirely.
+
+  /** POST /v1/cms/automation/auto-create-from-alert
+   *  body { alert_id, alert_severity, customer_id?, rule_id?, rule_name?, context? }
+   *  Idempotent on alert_id. Returns {case, created, matched_case_id?}. */
+  app.post(
+    '/v1/cms/automation/auto-create-from-alert',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = cmsApexUser(req);
+      try {
+        const pool = cmsAssigneePoolStore.get(req.tenant!.tenant_id).members;
+        const result = autoCreateCaseFromAlert(
+          inner as AutoCreateInput,
+          cmsCaseStore,
+          req.tenant!.tenant_id,
+          pool,
+          created_by,
+          now(),
+        );
+        if (result.created) {
+          writeCmsAuditEvents(
+            req.tenant!.tenant_id,
+            'create',
+            created_by,
+            result.case,
+            { auto_created: true, alert_id: result.case.alert_id },
+          );
+        }
+        return res.status(result.created ? 201 : 200).json(wrapResponse(result, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/automation/pool — current assignee pool. */
+  app.get(
+    '/v1/cms/automation/pool',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const pool = cmsAssigneePoolStore.get(req.tenant!.tenant_id);
+      return res.json(wrapResponse(pool, ctx));
+    },
+  );
+
+  /** PUT /v1/cms/automation/pool body { members: string[] } */
+  app.put(
+    '/v1/cms/automation/pool',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { members?: unknown };
+      if (!Array.isArray(w.members)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'members[] required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const updated_by = cmsApexUser(req);
+      try {
+        const pool = cmsAssigneePoolStore.setMembers(
+          req.tenant!.tenant_id,
+          w.members as string[],
+          updated_by,
+          now(),
+        );
+        return res.json(wrapResponse(pool, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/assign-from-pool
+   *  Round-robin from the tenant's assignee pool. Updates last
+   *  assignment + advances rotation deterministically. */
+  app.post(
+    '/v1/cms/cases/:case_id/assign-from-pool',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const pool = cmsAssigneePoolStore.get(req.tenant!.tenant_id).members;
+      if (pool.length === 0) {
+        return res.status(409).json(
+          wrapError(
+            {
+              code: 'EWS_409_pool_empty',
+              message: 'tenant assignee pool is empty — set members via PUT /v1/cms/automation/pool',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const assigned_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.assignRoundRobin(
+          req.tenant!.tenant_id,
+          id,
+          pool,
+          assigned_by,
+          now(),
+        );
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'assign', assigned_by, c, {
+          assigned_to: c.assigned_to,
+          via: 'round-robin',
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/automation/inactive-cases?threshold_hours=48
+   *  Cases with status != CLOSED + updated_at older than threshold,
+   *  sorted longest-inactive first. */
+  app.get(
+    '/v1/cms/automation/inactive-cases',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.query.threshold_hours;
+      const threshold_hours = raw === undefined ? 48 : Number(raw);
+      if (!Number.isInteger(threshold_hours) || threshold_hours < 1 || threshold_hours > 720) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'threshold_hours must be 1..720', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const cases = cmsCaseStore.list(req.tenant!.tenant_id, {});
+      const items = findInactiveCases(cases, now(), threshold_hours);
+      return res.json(
+        wrapResponse({ items, total: items.length, threshold_hours }, ctx),
+      );
     },
   );
 
