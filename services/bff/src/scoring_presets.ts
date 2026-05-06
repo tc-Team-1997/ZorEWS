@@ -488,3 +488,223 @@ export function compareByPresets(
     compared_at: asOf.toISOString(),
   };
 }
+
+// ─── M6.8 — Preset effectiveness back-test ───────────────────────────
+//
+// Take a labeled historical sample (customer items + ground-truth
+// outcome — e.g. did this customer go NPA in the next 90 days), run
+// the preset's scorer on each sample, and compare its predictions to
+// reality at a chosen score threshold. Reports precision / recall /
+// F1 / accuracy plus a per-sample breakdown so the operator can see
+// which customers the preset got right or wrong.
+//
+// Default threshold is 50 (matches the M6.1 medium/high cutoff). The
+// caller can pass any value in [0, 100] to scan the curve. We do NOT
+// scan the curve here — that's a follow-up for an SPA-side ROC view.
+
+export interface BackTestSample {
+  customer_id: string;
+  items: ByIndicatorItem[];
+  /** Ground-truth label: did this customer eventually realise the
+   *  high-risk outcome the preset is meant to predict (NPA, churn,
+   *  fraud, etc.). Caller decides what "outcome=true" means; the
+   *  back-test treats it as a black-box positive class. */
+  outcome: boolean;
+}
+
+export interface BackTestInput {
+  preset_id: string;
+  samples: BackTestSample[];
+  /** Score threshold in [0, 100]. Predictions with score >= threshold
+   *  are positive. Defaults to 50. */
+  threshold?: number;
+}
+
+export interface BackTestPerSampleRow {
+  customer_id: string;
+  score: number;
+  category: 'low' | 'medium' | 'high';
+  predicted: boolean;
+  outcome: boolean;
+  /** True iff predicted === outcome. */
+  correct: boolean;
+}
+
+export interface BackTestResult {
+  preset_id: string;
+  preset_name: string;
+  preset_mode: WeightPresetMode;
+  threshold: number;
+  sample_count: number;
+  positive_count: number;
+  negative_count: number;
+  predicted_positive_count: number;
+  predicted_negative_count: number;
+  true_positive: number;
+  true_negative: number;
+  false_positive: number;
+  false_negative: number;
+  /** TP / (TP + FP). 0 when no positive predictions. */
+  precision: number;
+  /** TP / (TP + FN). 0 when no actual positives. */
+  recall: number;
+  /** 2·P·R / (P + R). 0 when both P and R are 0. */
+  f1_score: number;
+  /** (TP + TN) / total. */
+  accuracy: number;
+  /** Per-sample breakdown, in input order. */
+  per_sample: BackTestPerSampleRow[];
+  evaluated_at: string;
+}
+
+const MAX_BACKTEST_SAMPLES = 200;
+
+/**
+ * Pure-function back-test. Composes scoreByPreset per sample, then
+ * walks the resulting score column to compute the confusion-matrix
+ * stats at the given threshold.
+ *
+ * Validation:
+ *   - preset_id non-empty string
+ *   - samples non-empty array, ≤ MAX_BACKTEST_SAMPLES
+ *   - each sample has customer_id (non-empty), items array, outcome
+ *     boolean
+ *   - no duplicate customer_id
+ *   - threshold (when supplied) is a number in [0, 100]
+ */
+export function backtestPreset(
+  input: BackTestInput,
+  baseLookup: IndicatorWeightLookup,
+  presetLookup: WeightPresetLookup = getWeightPreset,
+  asOf: Date = new Date(),
+): BackTestResult {
+  if (!input || typeof input !== 'object') {
+    throw new WeightPresetError('invalid_input', 'request body required');
+  }
+  if (typeof input.preset_id !== 'string' || !input.preset_id.trim()) {
+    throw new WeightPresetError('invalid_input', 'preset_id is required');
+  }
+  if (!Array.isArray(input.samples) || input.samples.length === 0) {
+    throw new WeightPresetError('invalid_input', 'samples[] must be non-empty');
+  }
+  if (input.samples.length > MAX_BACKTEST_SAMPLES) {
+    throw new WeightPresetError(
+      'invalid_input',
+      `samples exceeds back-test cap of ${MAX_BACKTEST_SAMPLES}`,
+    );
+  }
+  let threshold = 50;
+  if (input.threshold !== undefined) {
+    if (
+      typeof input.threshold !== 'number' ||
+      !Number.isFinite(input.threshold) ||
+      input.threshold < 0 ||
+      input.threshold > 100
+    ) {
+      throw new WeightPresetError(
+        'invalid_input',
+        'threshold must be a number in [0, 100]',
+      );
+    }
+    threshold = input.threshold;
+  }
+
+  const seen = new Set<string>();
+  for (const s of input.samples) {
+    if (!s || typeof s !== 'object') {
+      throw new WeightPresetError('invalid_input', 'each sample must be an object');
+    }
+    if (typeof s.customer_id !== 'string' || !s.customer_id.trim()) {
+      throw new WeightPresetError('invalid_input', 'customer_id is required for every sample');
+    }
+    if (seen.has(s.customer_id)) {
+      throw new WeightPresetError('invalid_input', `duplicate customer_id: ${s.customer_id}`);
+    }
+    seen.add(s.customer_id);
+    if (!Array.isArray(s.items)) {
+      throw new WeightPresetError(
+        'invalid_input',
+        `items must be an array (sample ${s.customer_id})`,
+      );
+    }
+    if (typeof s.outcome !== 'boolean') {
+      throw new WeightPresetError(
+        'invalid_input',
+        `outcome must be a boolean (sample ${s.customer_id})`,
+      );
+    }
+  }
+
+  // Resolve preset once.
+  const preset = presetLookup(input.preset_id);
+  if (!preset) {
+    throw new WeightPresetError('unknown_preset', `unknown preset: ${input.preset_id}`);
+  }
+
+  let tp = 0;
+  let tn = 0;
+  let fp = 0;
+  let fn = 0;
+  let positive_count = 0;
+  let negative_count = 0;
+  let predicted_positive_count = 0;
+  let predicted_negative_count = 0;
+  const per_sample: BackTestPerSampleRow[] = [];
+
+  for (const s of input.samples) {
+    const r = scoreByPreset(
+      { preset_id: preset.id, items: s.items },
+      baseLookup,
+      () => preset,
+    );
+    const predicted = r.score >= threshold;
+    const correct = predicted === s.outcome;
+    if (s.outcome) positive_count += 1;
+    else negative_count += 1;
+    if (predicted) predicted_positive_count += 1;
+    else predicted_negative_count += 1;
+    if (predicted && s.outcome) tp += 1;
+    else if (!predicted && !s.outcome) tn += 1;
+    else if (predicted && !s.outcome) fp += 1;
+    else fn += 1;
+    per_sample.push({
+      customer_id: s.customer_id,
+      score: r.score,
+      category: r.category,
+      predicted,
+      outcome: s.outcome,
+      correct,
+    });
+  }
+
+  const total = input.samples.length;
+  const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+  const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+  const f1_score =
+    precision + recall === 0
+      ? 0
+      : (2 * precision * recall) / (precision + recall);
+  const accuracy = (tp + tn) / total;
+
+  return {
+    preset_id: preset.id,
+    preset_name: preset.name,
+    preset_mode: preset.mode,
+    threshold,
+    sample_count: total,
+    positive_count,
+    negative_count,
+    predicted_positive_count,
+    predicted_negative_count,
+    true_positive: tp,
+    true_negative: tn,
+    false_positive: fp,
+    false_negative: fn,
+    precision,
+    recall,
+    f1_score,
+    accuracy,
+    per_sample,
+    evaluated_at: asOf.toISOString(),
+  };
+}

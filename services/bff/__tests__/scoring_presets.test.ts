@@ -7,6 +7,7 @@ import {
   VALID_PRESET_MODES,
   WEIGHT_PRESETS,
   WeightPresetError,
+  backtestPreset,
   getWeightPreset,
   isWeightPresetMode,
   listWeightPresets,
@@ -704,6 +705,361 @@ describe('POST /v1/scoring/risk/by-preset/compare', () => {
             items: [{ indicator_id: 'FIN-001', value: 0.5 }],
           },
         ],
+      });
+    expect(r.status).toBe(200);
+  });
+});
+
+// ─── M6.8 — Preset effectiveness back-test ───────────────────────────
+
+describe('backtestPreset (M6.8 pure helper)', () => {
+  // High-value items consistently end up in the "high" band (score >> 70);
+  // low-value items in "low" (score << 30). With default threshold=50,
+  // the perfect labels = (high → outcome:true, low → outcome:false)
+  // gives 100% accuracy.
+  const HIGH_ITEMS = [
+    { indicator_id: 'FIN-001', value: 1 },
+    { indicator_id: 'FIN-002', value: 1 },
+  ];
+  const LOW_ITEMS = [
+    { indicator_id: 'FIN-001', value: 0 },
+    { indicator_id: 'FIN-002', value: 0 },
+  ];
+
+  test('happy: perfectly-labeled samples → precision=recall=F1=accuracy=1', () => {
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        samples: [
+          { customer_id: 'C1', items: HIGH_ITEMS, outcome: true },
+          { customer_id: 'C2', items: HIGH_ITEMS, outcome: true },
+          { customer_id: 'C3', items: LOW_ITEMS, outcome: false },
+          { customer_id: 'C4', items: LOW_ITEMS, outcome: false },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.sample_count).toBe(4);
+    expect(r.positive_count).toBe(2);
+    expect(r.negative_count).toBe(2);
+    expect(r.true_positive).toBe(2);
+    expect(r.true_negative).toBe(2);
+    expect(r.false_positive).toBe(0);
+    expect(r.false_negative).toBe(0);
+    expect(r.precision).toBe(1);
+    expect(r.recall).toBe(1);
+    expect(r.f1_score).toBe(1);
+    expect(r.accuracy).toBe(1);
+    expect(r.threshold).toBe(50);
+    expect(r.preset_id).toBe('preset_banking_balanced');
+    expect(r.per_sample.length).toBe(4);
+    for (const row of r.per_sample) expect(row.correct).toBe(true);
+  });
+
+  test('false-positive case: high score but outcome=false → reduces precision', () => {
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        samples: [
+          { customer_id: 'tp', items: HIGH_ITEMS, outcome: true },
+          { customer_id: 'fp', items: HIGH_ITEMS, outcome: false }, // FP
+          { customer_id: 'tn', items: LOW_ITEMS, outcome: false },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.true_positive).toBe(1);
+    expect(r.false_positive).toBe(1);
+    expect(r.true_negative).toBe(1);
+    expect(r.false_negative).toBe(0);
+    expect(r.precision).toBeCloseTo(1 / 2);
+    expect(r.recall).toBe(1);
+    // F1 = 2*(0.5*1)/(0.5+1) = 1/1.5 ≈ 0.6667
+    expect(r.f1_score).toBeCloseTo(2 / 3);
+    expect(r.accuracy).toBeCloseTo(2 / 3);
+    const fpRow = r.per_sample.find((p) => p.customer_id === 'fp')!;
+    expect(fpRow.correct).toBe(false);
+    expect(fpRow.predicted).toBe(true);
+    expect(fpRow.outcome).toBe(false);
+  });
+
+  test('false-negative case: low score but outcome=true → reduces recall', () => {
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        samples: [
+          { customer_id: 'tp', items: HIGH_ITEMS, outcome: true },
+          { customer_id: 'fn', items: LOW_ITEMS, outcome: true }, // FN
+          { customer_id: 'tn', items: LOW_ITEMS, outcome: false },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.false_negative).toBe(1);
+    expect(r.precision).toBe(1);
+    expect(r.recall).toBeCloseTo(1 / 2);
+  });
+
+  test('precision/recall=0 when no positive predictions and no actual positives', () => {
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        samples: [
+          { customer_id: 'C1', items: LOW_ITEMS, outcome: false },
+          { customer_id: 'C2', items: LOW_ITEMS, outcome: false },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.true_positive).toBe(0);
+    expect(r.precision).toBe(0);
+    expect(r.recall).toBe(0);
+    expect(r.f1_score).toBe(0);
+    expect(r.accuracy).toBe(1);
+  });
+
+  test('threshold=0 makes everything predicted-positive', () => {
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        threshold: 0,
+        samples: [
+          { customer_id: 'C1', items: HIGH_ITEMS, outcome: true },
+          { customer_id: 'C2', items: LOW_ITEMS, outcome: false },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.threshold).toBe(0);
+    expect(r.predicted_positive_count).toBe(2);
+    expect(r.predicted_negative_count).toBe(0);
+    expect(r.recall).toBe(1);
+    expect(r.precision).toBeCloseTo(1 / 2);
+  });
+
+  test('threshold=99 excludes mid-band scores (predicted=false)', () => {
+    // FIN-001 v=0.9 + FIN-002 v=0.9 → score ≈ 90. Below threshold=99.
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        threshold: 99,
+        samples: [
+          {
+            customer_id: 'C1',
+            items: [
+              { indicator_id: 'FIN-001', value: 0.9 },
+              { indicator_id: 'FIN-002', value: 0.9 },
+            ],
+            outcome: true,
+          },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    expect(r.predicted_positive_count).toBe(0);
+    expect(r.recall).toBe(0);
+  });
+
+  test('threshold honoured at edge: score exactly at threshold predicts true', () => {
+    // FIN-001 (w=0.9) at value 0.5 → contributes 45 to score after the 100/totalweight
+    // normalisation with only FIN-001: raw=0.45, total_weight=0.9, score = 0.45/0.9*100 = 50.
+    const r = backtestPreset(
+      {
+        preset_id: 'preset_banking_balanced',
+        threshold: 50,
+        samples: [
+          { customer_id: 'edge', items: [{ indicator_id: 'FIN-001', value: 0.5 }], outcome: true },
+        ],
+      },
+      defaultIndicatorWeightLookup,
+    );
+    const row = r.per_sample[0]!;
+    expect(row.score).toBeCloseTo(50);
+    expect(row.predicted).toBe(true); // >= threshold
+  });
+
+  test('rejects empty samples', () => {
+    expect(() =>
+      backtestPreset(
+        { preset_id: 'preset_banking_balanced', samples: [] },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/non-empty/);
+  });
+
+  test('rejects > 200 samples', () => {
+    const samples = Array.from({ length: 201 }, (_, i) => ({
+      customer_id: `C-${i}`,
+      items: HIGH_ITEMS,
+      outcome: true,
+    }));
+    expect(() =>
+      backtestPreset(
+        { preset_id: 'preset_banking_balanced', samples },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/cap of 200/);
+  });
+
+  test('rejects duplicate customer_id', () => {
+    expect(() =>
+      backtestPreset(
+        {
+          preset_id: 'preset_banking_balanced',
+          samples: [
+            { customer_id: 'X', items: HIGH_ITEMS, outcome: true },
+            { customer_id: 'X', items: HIGH_ITEMS, outcome: true },
+          ],
+        },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/duplicate/);
+  });
+
+  test('rejects non-boolean outcome', () => {
+    expect(() =>
+      backtestPreset(
+        {
+          preset_id: 'preset_banking_balanced',
+          samples: [{ customer_id: 'C1', items: HIGH_ITEMS, outcome: 'yes' as unknown as boolean }],
+        },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/outcome must be a boolean/);
+  });
+
+  test('rejects threshold out of [0,100]', () => {
+    expect(() =>
+      backtestPreset(
+        {
+          preset_id: 'preset_banking_balanced',
+          threshold: 101,
+          samples: [{ customer_id: 'C1', items: HIGH_ITEMS, outcome: true }],
+        },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/threshold/);
+    expect(() =>
+      backtestPreset(
+        {
+          preset_id: 'preset_banking_balanced',
+          threshold: -1,
+          samples: [{ customer_id: 'C1', items: HIGH_ITEMS, outcome: true }],
+        },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(/threshold/);
+  });
+
+  test('rejects unknown preset_id with WeightPresetError', () => {
+    expect(() =>
+      backtestPreset(
+        {
+          preset_id: 'preset_does_not_exist',
+          samples: [{ customer_id: 'C1', items: HIGH_ITEMS, outcome: true }],
+        },
+        defaultIndicatorWeightLookup,
+      ),
+    ).toThrow(WeightPresetError);
+  });
+});
+
+describe('POST /v1/scoring/risk/by-preset/backtest (M6.8 route)', () => {
+  const HIGH_ITEMS = [
+    { indicator_id: 'FIN-001', value: 1 },
+    { indicator_id: 'FIN-002', value: 1 },
+  ];
+  const LOW_ITEMS = [
+    { indicator_id: 'FIN-001', value: 0 },
+    { indicator_id: 'FIN-002', value: 0 },
+  ];
+  const PERFECT_BODY = {
+    preset_id: 'preset_banking_balanced',
+    samples: [
+      { customer_id: 'C1', items: HIGH_ITEMS, outcome: true },
+      { customer_id: 'C2', items: LOW_ITEMS, outcome: false },
+    ],
+  };
+
+  test('analyst+: 200 with all confusion-matrix fields', async () => {
+    const { app } = makePresetApp('risk_analyst');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send(PERFECT_BODY);
+    expect(r.status).toBe(200);
+    expect(r.body.body.precision).toBe(1);
+    expect(r.body.body.recall).toBe(1);
+    expect(r.body.body.f1_score).toBe(1);
+    expect(r.body.body.accuracy).toBe(1);
+    expect(r.body.body.per_sample.length).toBe(2);
+  });
+
+  test('threshold echoed back', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send({ ...PERFECT_BODY, threshold: 30 });
+    expect(r.body.body.threshold).toBe(30);
+  });
+
+  test('unknown preset → 404', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send({ ...PERFECT_BODY, preset_id: 'preset_nope' });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('unknown indicator → 404', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send({
+        preset_id: 'preset_banking_balanced',
+        samples: [
+          {
+            customer_id: 'C1',
+            items: [{ indicator_id: 'NOT-A-THING', value: 0.5 }],
+            outcome: true,
+          },
+        ],
+      });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_indicator');
+  });
+
+  test('empty samples → 400', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send({ preset_id: 'preset_banking_balanced', samples: [] });
+    expect(r.status).toBe(400);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makePresetApp('case_owner');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/backtest')
+      .set(TH_BIL)
+      .send(PERFECT_BODY);
+    expect(r.status).toBe(403);
+  });
+
+  test('M6.7 compare route still works alongside M6.8', async () => {
+    const { app } = makePresetApp('admin');
+    const r = await request(app)
+      .post('/v1/scoring/risk/by-preset/compare')
+      .set(TH_BIL)
+      .send({
+        left_preset_id: 'preset_banking_balanced',
+        right_preset_id: 'preset_banking_conservative',
+        items: HIGH_ITEMS,
       });
     expect(r.status).toBe(200);
   });

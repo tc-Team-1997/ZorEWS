@@ -39,7 +39,7 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 - **M3** — async connector validation pipeline (M3.5)
 - **M4** — wire bulk scan into M11.5 executive watchlist (M4.7)
 - **M5** — template effectiveness back-test (precision/recall over historical alerts) (M5.11)
-- **M6** — preset effectiveness back-test (run preset against historical alerts, report precision/recall) (M6.8)
+- **M6** — ~~preset effectiveness back-test (run preset against historical alerts, report precision/recall) (M6.8)~~ shipped 2026-05-06
 - **M7** — A/B segmented by customer attribute (M7.5)
 - **M8** — wire M8.4 evaluate into the alert-ingest path (M8.5)
 - **M9** — apply approved actions to downstream stores (M9.4)
