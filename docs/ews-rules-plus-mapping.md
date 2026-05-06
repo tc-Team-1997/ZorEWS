@@ -1,6 +1,6 @@
 # EWS Rules Engine — "Plus" extensions (8-task brief)
 
-**Status:** RFC — informs RP-1. Sign-off needed on §4 before RP-2 (SPA wizard) lands.
+**Status:** **RP-1 + RP-2 + RP-3 SHIPPED 2026-05-06.** All 8 tasks delivered. See [`ews-rules-plus-readme.md`](./ews-rules-plus-readme.md) for the operator-facing checklist mapping.
 **Date:** 2026-05-06.
 **Brief:** 8 tasks — Add Rule (4-step modal), Edit (versioning), Delete/Deprecate, Clone, Maker-Checker (4-eyes), 15 backend APIs, 3 DB tables, UI/UX (auto-save, keyboard shortcuts, diff viewer, test rule).
 
@@ -162,13 +162,13 @@ CREATE TABLE app.ews_rule_approvals (
 
 ## 5. Implementation sub-phases
 
-| Commit | Scope | Tests |
-|---|---|---|
-| **RP-1** (this commit) | Versions store + clone + approve/reject + diff + DB migration. ZERO modifications to existing EWS routes. | ~50 |
-| **RP-2** | SPA — 4-step modal wizard + auto-save 30s + keyboard shortcuts (Cmd+S, Esc) + diff viewer + clone-from-3-dot-menu + Test Rule button | ~25 |
-| **RP-3** | README + Postman + sample audit walkthrough + 8-task checklist mapping | ~5 |
+| Commit | Scope | Tests | Status |
+|---|---|---|---|
+| **RP-1** (`2e828cf`) | Versions store + clone + submit/approve/reject + diff + approvals + DB migration. ZERO modifications to existing EWS routes. | 51 | ✓ shipped |
+| **RP-2** (`bb2e72d`) | SPA — 4-step modal wizard + auto-save 30s + Cmd+S/Esc/Cmd+Enter + diff viewer + per-row clone modal + inline pure-client Test Rule | 14 | ✓ shipped |
+| **RP-3** (this commit) | README + Postman + 8-task checklist mapping in operator-friendly form + STATUS.md | – | ✓ shipped |
 
-Total ≈ 80 new tests. Combined with existing EWS-1..5 → 200+ total rules-engine coverage.
+Total = **65 new tests**. Combined with existing EWS-1..5 (124 tests) → **189 total rules-engine coverage**.
 
 ---
 

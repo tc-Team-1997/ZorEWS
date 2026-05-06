@@ -1,0 +1,240 @@
+{
+  "info": {
+    "name": "APEX EWS — Rules-Plus (RP-1)",
+    "description": "Postman collection for the Rules-Plus extensions (RP-1). Walks a rule through the 4-eyes maker-checker flow, then versions/diff, then clone, plus a self-approval refusal example. Run sequentially against a fresh BFF.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001" },
+    { "key": "tenantId", "value": "BIL" },
+    { "key": "channel", "value": "API" },
+    { "key": "maker", "value": "jane.maker" },
+    { "key": "makerRole", "value": "risk_analyst" },
+    { "key": "checker", "value": "bob.checker" },
+    { "key": "checkerRole", "value": "rules_admin" },
+    { "key": "ruleId", "value": "RULE_RP_001" },
+    { "key": "cloneRuleId", "value": "RULE_RP_001_COPY" }
+  ],
+  "auth": { "type": "noauth" },
+  "item": [
+    {
+      "name": "0. Maker — create the rule (DRAFT v0.1.0)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rule_id\": \"{{ruleId}}\",\n  \"name\": \"RP demo — High EMI bounce\",\n  \"category\": \"credit\",\n  \"description\": \"3+ EMI bounces in last 90 days.\",\n  \"conditions\": [\n    { \"field\": \"emi_bounce_count_90d\", \"operator\": \">=\", \"value\": 3 }\n  ],\n  \"logic\": \"AND\",\n  \"action\": { \"alert_severity\": \"RED\", \"weight\": 25 }\n}"
+        }
+      }
+    },
+    {
+      "name": "1. Maker — submit for review (DRAFT → PENDING_REVIEW)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/submit",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"reason\": \"Threshold tuned per April loss review\" }"
+        }
+      }
+    },
+    {
+      "name": "2. Maker tries to approve own rule → 403 self_approval_refused",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/approve",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"reason\": \"self-approval should fail\" }"
+        }
+      }
+    },
+    {
+      "name": "3. Checker — approves (PENDING_REVIEW → ACTIVE)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{checker}}" },
+          { "key": "x-apex-role", "value": "{{checkerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/approve",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"reason\": \"Reviewed; aligns with policy 4.2\" }"
+        }
+      }
+    },
+    {
+      "name": "4. Maker — edits the rule (substantive → MINOR bump 0.1.0 → 0.2.0)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conditions\": [\n    { \"field\": \"emi_bounce_count_90d\", \"operator\": \">=\", \"value\": 4 }\n  ],\n  \"action\": { \"alert_severity\": \"RED\", \"weight\": 30 }\n}"
+        }
+      }
+    },
+    {
+      "name": "5. List version snapshots (newest first)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/versions"
+      }
+    },
+    {
+      "name": "6. Get a single version snapshot",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/versions/0.1.0"
+      }
+    },
+    {
+      "name": "7. Diff 0.1.0 → 0.2.0 (field-by-field)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/versions/diff",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"from\": \"0.1.0\", \"to\": \"0.2.0\" }"
+        }
+      }
+    },
+    {
+      "name": "8. List approvals (audit trail)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/approvals"
+      }
+    },
+    {
+      "name": "9. Clone the rule (new DRAFT at 0.1.0)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/clone",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"new_rule_id\": \"{{cloneRuleId}}\", \"new_name\": \"RP demo — tighter clone\" }"
+        }
+      }
+    },
+    {
+      "name": "10. Reject path — submit then checker rejects",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{cloneRuleId}}/submit",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"reason\": \"Promote to ACTIVE\" }"
+        }
+      }
+    },
+    {
+      "name": "11. Checker — rejects (stays in PENDING_REVIEW; rejection logged)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{checker}}" },
+          { "key": "x-apex-role", "value": "{{checkerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{cloneRuleId}}/reject",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"reason\": \"Threshold too aggressive — revisit after May data\" }"
+        }
+      }
+    },
+    {
+      "name": "12. Test rule (the /test path the wizard uses post-save)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{maker}}" },
+          { "key": "x-apex-role", "value": "{{makerRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/test",
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"values\": { \"emi_bounce_count_90d\": 5 } }"
+        }
+      }
+    }
+  ]
+}
