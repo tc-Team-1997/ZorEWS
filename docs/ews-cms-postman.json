@@ -1,0 +1,375 @@
+{
+  "info": {
+    "name": "APEX EWS — Case Management System (CMS)",
+    "description": "Postman collection for the EWS CMS — covers all 23 routes shipped in CMS-3 + CMS-4. Run requests in order to walk a case through the full lifecycle.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8084" },
+    { "key": "tenantId", "value": "BIL" },
+    { "key": "channel", "value": "API" },
+    { "key": "apexUser", "value": "compliance.lead" },
+    { "key": "apexRole", "value": "admin" },
+    { "key": "caseId", "value": "" },
+    { "key": "alertId", "value": "alrt-demo-001" }
+  ],
+  "item": [
+    {
+      "name": "0. Stats — empty store",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/stats"
+      }
+    },
+    {
+      "name": "1. Set assignee pool",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/automation/pool",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"members\": [\"alice\", \"bob\", \"carol\"]\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Auto-create from RED alert",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/automation/auto-create-from-alert",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"alert_id\": \"{{alertId}}\",\n  \"alert_severity\": \"RED\",\n  \"customer_id\": \"cust-001\",\n  \"rule_id\": \"RULE_CREDIT_001\",\n  \"rule_name\": \"High EMI Bounce Risk\",\n  \"context\": \"5 EMI bounces in last 90 days\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Manual create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Customer cust-002 KYC overdue\",\n  \"description\": \"KYC docs expired 45 days ago\",\n  \"priority\": \"P3\",\n  \"alert_id\": \"alrt-demo-002\",\n  \"tags\": [\"kyc\"]\n}"
+        }
+      }
+    },
+    {
+      "name": "4. List with filters",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/cms/cases?priority=P1&status=ASSIGNED",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "cms", "cases"],
+          "query": [
+            { "key": "priority", "value": "P1" },
+            { "key": "status", "value": "ASSIGNED" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. Get case detail (uses {{caseId}})",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}"
+      }
+    },
+    {
+      "name": "6. Update title + priority",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Customer cust-001 — escalated\",\n  \"priority\": \"P1\"\n}"
+        }
+      }
+    },
+    {
+      "name": "7. Transition INVESTIGATING",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/transition",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"target\": \"INVESTIGATING\"\n}"
+        }
+      }
+    },
+    {
+      "name": "8. Assign-from-pool (round-robin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/assign-from-pool"
+      }
+    },
+    {
+      "name": "9. Manual assign",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/assign",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assigned_to\": \"jane.analyst\",\n  \"reason\": \"specialist for this rule\"\n}"
+        }
+      }
+    },
+    {
+      "name": "10. Add note",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/notes",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"note_text\": \"Met customer at branch — they confirmed payment plan\",\n  \"is_internal\": false\n}"
+        }
+      }
+    },
+    {
+      "name": "11. List notes",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/notes"
+      }
+    },
+    {
+      "name": "12. Upload attachment metadata",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/attachments",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"file_name\": \"branch_visit_evidence.pdf\",\n  \"file_size\": 524288,\n  \"mime_type\": \"application/pdf\"\n}"
+        }
+      }
+    },
+    {
+      "name": "13. List attachments",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/attachments"
+      }
+    },
+    {
+      "name": "14. Escalate",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/escalate",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Customer threatening litigation\"\n}"
+        }
+      }
+    },
+    {
+      "name": "15. Close case",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/close",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"resolution_category\": \"mitigated\",\n  \"resolution_notes\": \"Customer settled outstanding EMI; payment plan in place\"\n}"
+        }
+      }
+    },
+    {
+      "name": "16. Get history (audit trail)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/history"
+      }
+    },
+    {
+      "name": "17. Reopen case",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/{{caseId}}/transition",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"target\": \"OPEN\"\n}"
+        }
+      }
+    },
+    {
+      "name": "18. SLA breaches list",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/sla-breaches"
+      }
+    },
+    {
+      "name": "19. Inactive cases (48h)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/automation/inactive-cases?threshold_hours=48"
+      }
+    },
+    {
+      "name": "20. Bulk-assign",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/bulk-assign",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"case_ids\": [\"{{caseId}}\"],\n  \"assigned_to\": \"alice\",\n  \"reason\": \"team rotation\"\n}"
+        }
+      }
+    },
+    {
+      "name": "21. Final stats",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/cases/stats"
+      }
+    },
+    {
+      "name": "22. Get pool",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/cms/automation/pool"
+      }
+    }
+  ]
+}

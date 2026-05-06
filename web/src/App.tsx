@@ -17,6 +17,9 @@ import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
 import { RuleConfigPage } from '@/modules/rules/RuleConfigPage';
 import { EwsRuleBuilderPage } from '@/modules/rules/EwsRuleBuilderPage';
+import { CmsCaseListPage } from '@/modules/cms/CmsCaseListPage';
+import { CmsCaseKanbanPage } from '@/modules/cms/CmsCaseKanbanPage';
+import { CmsCaseDetailPage } from '@/modules/cms/CmsCaseDetailPage';
 import { CaseListPage } from '@/modules/cases/CaseListPage';
 import { CaseDetailPage } from '@/modules/cases/CaseDetailPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
@@ -69,6 +72,9 @@ export function App() {
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
             <Route path="rules" element={<RuleConfigPage />} />
             <Route path="rules/ews" element={<EwsRuleBuilderPage />} />
+            <Route path="cms/cases" element={<CmsCaseListPage />} />
+            <Route path="cms/cases/kanban" element={<CmsCaseKanbanPage />} />
+            <Route path="cms/cases/:id" element={<CmsCaseDetailPage />} />
             <Route path="cases" element={<CaseListPage />} />
             <Route path="cases/:id" element={<CaseDetailPage />} />
             <Route path="scenario" element={<ScenarioPage />} />
