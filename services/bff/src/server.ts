@@ -291,6 +291,7 @@ import {
 import {
   ConfigBulkError,
   cloneTenantConfig,
+  cloneTenantConfigSelective,
   diffTenantConfig,
   exportConfig,
   importConfig,
@@ -9512,6 +9513,59 @@ export function makeApp(deps: AppDeps = {}) {
         if (e instanceof ConfigBulkError) {
           return res.status(400).json(
             wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/admin/config/_clone/selective (T6 M13.7) — copy ONLY the
+   *  listed keys from the source tenant's overrides into the caller's
+   *  tenant. Body { source_tenant_id, keys: string[], dry_run? }.
+   *  Returns SelectiveCloneSummary (ImportSummary + not_in_source +
+   *  requested_keys). Admin-only.
+   *
+   *  M13.6 stays as the full-snapshot variant; this is a strict
+   *  additive sibling for the operator who wants to migrate a SUBSET
+   *  of tunables (e.g. just the threshold overrides, not the channel
+   *  toggles). */
+  app.post(
+    '/v1/admin/config/_clone/selective',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const applied_by =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as {
+        source_tenant_id?: unknown;
+        keys?: unknown;
+        dry_run?: unknown;
+      };
+      try {
+        const summary = cloneTenantConfigSelective(
+          configStore,
+          typeof wrapper.source_tenant_id === 'string' ? wrapper.source_tenant_id : '',
+          req.tenant!.tenant_id,
+          Array.isArray(wrapper.keys) ? (wrapper.keys as unknown[]) : [],
+          applied_by,
+          wrapper.dry_run === true,
+          now(),
+        );
+        return res.json(wrapResponse(summary, ctx));
+      } catch (e) {
+        if (e instanceof ConfigBulkError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
           );
         }
         throw e;

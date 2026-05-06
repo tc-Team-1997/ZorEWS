@@ -6,6 +6,7 @@ import request from 'supertest';
 import {
   ConfigBulkError,
   cloneTenantConfig,
+  cloneTenantConfigSelective,
   diffTenantConfig,
   exportConfig,
   importConfig,
@@ -451,5 +452,284 @@ describe('POST /v1/admin/config/_clone', () => {
       .set(TH_BIL)
       .send({ source_tenant_id: 'BANK_DEMO' });
     expect(r.status).toBe(403);
+  });
+});
+
+// ─── M13.7 — Selective-key clone ─────────────────────────────────────
+
+describe('cloneTenantConfigSelective (M13.7)', () => {
+  test('happy: copies ONLY listed keys', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 36, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.yellow_sla_hours', 72, 'admin', NOW);
+    const r = cloneTenantConfigSelective(
+      cfg,
+      'BANK_DEMO',
+      'BIL',
+      ['alerts.red_sla_hours'],
+      'admin',
+      false,
+      NOW,
+    );
+    expect(r.applied).toEqual(['alerts.red_sla_hours']);
+    expect(r.requested_keys).toEqual(['alerts.red_sla_hours']);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.value).toBe(8);
+    // Not requested → not copied
+    expect(cfg.get('BIL', 'alerts.orange_sla_hours')?.is_default).toBe(true);
+    expect(cfg.get('BIL', 'alerts.yellow_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('keys requested but not in source → not_in_source', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    const r = cloneTenantConfigSelective(
+      cfg,
+      'BANK_DEMO',
+      'BIL',
+      ['alerts.red_sla_hours', 'alerts.orange_sla_hours'],
+      'admin',
+      false,
+      NOW,
+    );
+    expect(r.applied).toEqual(['alerts.red_sla_hours']);
+    expect(r.not_in_source).toEqual(['alerts.orange_sla_hours']);
+    expect(r.requested_keys).toEqual([
+      'alerts.red_sla_hours',
+      'alerts.orange_sla_hours',
+    ]);
+  });
+
+  test('dry_run: not_in_source still reported, no mutation', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 5, 'admin', NOW);
+    const r = cloneTenantConfigSelective(
+      cfg,
+      'BANK_DEMO',
+      'BIL',
+      ['alerts.red_sla_hours', 'unknown.never.set'],
+      'admin',
+      true,
+      NOW,
+    );
+    expect(r.dry_run).toBe(true);
+    expect(r.applied).toEqual(['alerts.red_sla_hours']);
+    expect(r.not_in_source).toEqual(['unknown.never.set']);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('target already has matching value → unchanged', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 7, 'admin', NOW);
+    cfg.set('BIL', 'alerts.red_sla_hours', 7, 'admin', NOW);
+    const r = cloneTenantConfigSelective(
+      cfg,
+      'BANK_DEMO',
+      'BIL',
+      ['alerts.red_sla_hours'],
+      'admin',
+      false,
+      NOW,
+    );
+    expect(r.unchanged).toEqual(['alerts.red_sla_hours']);
+    expect(r.applied).toEqual([]);
+  });
+
+  test('keys schema-unknown to target → skipped (validation reuse)', () => {
+    const cfg = new InMemoryConfigStore();
+    // Forge an entry on source that isn't in the platform schema.
+    // We can't via the public API; verify behaviour instead by listing
+    // keys that ARE in the schema but absent on source.
+    const r = cloneTenantConfigSelective(
+      cfg,
+      'BANK_DEMO',
+      'BIL',
+      ['alerts.red_sla_hours'],
+      'admin',
+      false,
+      NOW,
+    );
+    // Source had no overrides → not_in_source captures it
+    expect(r.not_in_source).toEqual(['alerts.red_sla_hours']);
+    expect(r.applied).toEqual([]);
+  });
+
+  test('rejects empty keys array', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() =>
+      cloneTenantConfigSelective(cfg, 'BANK_DEMO', 'BIL', [], 'admin', false, NOW),
+    ).toThrow(/cannot be empty/);
+  });
+
+  test('rejects non-string key', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() =>
+      cloneTenantConfigSelective(
+        cfg,
+        'BANK_DEMO',
+        'BIL',
+        ['valid.key', 42 as unknown as string],
+        'admin',
+        false,
+        NOW,
+      ),
+    ).toThrow(/non-empty strings/);
+  });
+
+  test('rejects duplicate key in filter', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() =>
+      cloneTenantConfigSelective(
+        cfg,
+        'BANK_DEMO',
+        'BIL',
+        ['alerts.red_sla_hours', 'alerts.red_sla_hours'],
+        'admin',
+        false,
+        NOW,
+      ),
+    ).toThrow(/duplicate/);
+  });
+
+  test('rejects > 100 keys', () => {
+    const cfg = new InMemoryConfigStore();
+    const tooMany = Array.from({ length: 101 }, (_, i) => `k.${i}`);
+    expect(() =>
+      cloneTenantConfigSelective(cfg, 'BANK_DEMO', 'BIL', tooMany, 'admin', false, NOW),
+    ).toThrow(/cap is 100/);
+  });
+
+  test('rejects same source + target', () => {
+    const cfg = new InMemoryConfigStore();
+    expect(() =>
+      cloneTenantConfigSelective(cfg, 'BIL', 'BIL', ['x.y'], 'admin', false, NOW),
+    ).toThrow(/must differ/);
+  });
+
+  test('M13.6 still works unchanged — full clone copies everything', () => {
+    const cfg = new InMemoryConfigStore();
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 8, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 36, 'admin', NOW);
+    const r = cloneTenantConfig(cfg, 'BANK_DEMO', 'BIL', 'admin', false, NOW);
+    expect(r.applied.sort()).toEqual([
+      'alerts.orange_sla_hours',
+      'alerts.red_sla_hours',
+    ]);
+  });
+});
+
+describe('POST /v1/admin/config/_clone/selective (M13.7)', () => {
+  test('200 — copies only the listed keys, leaves others untouched', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 9, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 30, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({
+        source_tenant_id: 'BANK_DEMO',
+        keys: ['alerts.red_sla_hours'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.applied).toEqual(['alerts.red_sla_hours']);
+    expect(r.body.body.requested_keys).toEqual(['alerts.red_sla_hours']);
+    expect(r.body.body.not_in_source).toEqual([]);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.value).toBe(9);
+    expect(cfg.get('BIL', 'alerts.orange_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('200 — not_in_source surfaced for keys missing on source', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 9, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({
+        source_tenant_id: 'BANK_DEMO',
+        keys: ['alerts.red_sla_hours', 'alerts.orange_sla_hours'],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.body.applied).toEqual(['alerts.red_sla_hours']);
+    expect(r.body.body.not_in_source).toEqual(['alerts.orange_sla_hours']);
+  });
+
+  test('dry_run honoured — no mutation', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 11, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({
+        source_tenant_id: 'BANK_DEMO',
+        keys: ['alerts.red_sla_hours'],
+        dry_run: true,
+      });
+    expect(r.body.body.dry_run).toBe(true);
+    expect(cfg.get('BIL', 'alerts.red_sla_hours')?.is_default).toBe(true);
+  });
+
+  test('missing keys array → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO' });
+    expect(r.status).toBe(400);
+  });
+
+  test('empty keys array → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO', keys: [] });
+    expect(r.status).toBe(400);
+  });
+
+  test('clone-into-self → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BIL', keys: ['alerts.red_sla_hours'] });
+    expect(r.status).toBe(400);
+  });
+
+  test('duplicate key in filter → 400', async () => {
+    const { app } = makeBulkApp('admin');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({
+        source_tenant_id: 'BANK_DEMO',
+        keys: ['alerts.red_sla_hours', 'alerts.red_sla_hours'],
+      });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/duplicate/);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeBulkApp('case_owner');
+    const r = await request(app)
+      .post('/v1/admin/config/_clone/selective')
+      .set(TH_BIL)
+      .send({
+        source_tenant_id: 'BANK_DEMO',
+        keys: ['alerts.red_sla_hours'],
+      });
+    expect(r.status).toBe(403);
+  });
+
+  test('M13.6 full clone path still works alongside M13.7', async () => {
+    const { app, cfg } = makeBulkApp('admin');
+    cfg.set('BANK_DEMO', 'alerts.red_sla_hours', 9, 'admin', NOW);
+    cfg.set('BANK_DEMO', 'alerts.orange_sla_hours', 36, 'admin', NOW);
+    const r = await request(app)
+      .post('/v1/admin/config/_clone')
+      .set(TH_BIL)
+      .send({ source_tenant_id: 'BANK_DEMO' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.applied).toContain('alerts.red_sla_hours');
+    expect(r.body.body.applied).toContain('alerts.orange_sla_hours');
   });
 });

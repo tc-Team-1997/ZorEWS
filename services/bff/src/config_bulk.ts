@@ -153,6 +153,109 @@ export function cloneTenantConfig(
   );
 }
 
+// ─── M13.7 — Selective-key clone ─────────────────────────────────────
+
+export interface SelectiveCloneSummary extends ImportSummary {
+  /** Keys requested by the caller that were NOT in the source's
+   *  overrides (so nothing to copy). Reported back so the operator
+   *  can fix typos / understand what was a no-op. */
+  not_in_source: string[];
+  /** Echo of the keys filter the caller supplied. */
+  requested_keys: string[];
+}
+
+/**
+ * Like cloneTenantConfig but copies ONLY the listed keys. Useful when
+ * the operator wants to migrate a subset of tunables (e.g. just the
+ * threshold overrides, not the channel toggles) from one tenant to
+ * another. Keys in the filter that are NOT in the source's overrides
+ * are reported under `not_in_source` rather than skipped — they're
+ * not errors, just no-ops.
+ *
+ * Validates: source ≠ target; keys is a non-empty array of non-empty
+ * strings; cap 100 keys; no duplicates within the filter.
+ */
+export function cloneTenantConfigSelective(
+  configStore: ConfigStore,
+  source_tenant_id: string,
+  target_tenant_id: string,
+  keys: readonly unknown[],
+  applied_by: string,
+  dry_run: boolean,
+  now: Date,
+): SelectiveCloneSummary {
+  if (!source_tenant_id || typeof source_tenant_id !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'source_tenant_id required');
+  }
+  if (!target_tenant_id || typeof target_tenant_id !== 'string') {
+    throw new ConfigBulkError('invalid_input', 'target_tenant_id required');
+  }
+  if (source_tenant_id === target_tenant_id) {
+    throw new ConfigBulkError(
+      'invalid_input',
+      'source and target tenants must differ',
+    );
+  }
+  if (!Array.isArray(keys)) {
+    throw new ConfigBulkError('invalid_input', 'keys must be an array');
+  }
+  if (keys.length === 0) {
+    throw new ConfigBulkError('invalid_input', 'keys cannot be empty');
+  }
+  if (keys.length > 100) {
+    throw new ConfigBulkError('invalid_input', 'keys cap is 100');
+  }
+  const seen = new Set<string>();
+  const requested: string[] = [];
+  for (const k of keys) {
+    if (typeof k !== 'string' || !k.trim()) {
+      throw new ConfigBulkError(
+        'invalid_input',
+        'keys must be non-empty strings',
+      );
+    }
+    const trimmed = k.trim();
+    if (seen.has(trimmed)) {
+      throw new ConfigBulkError(
+        'invalid_input',
+        `duplicate key in filter: ${trimmed}`,
+      );
+    }
+    seen.add(trimmed);
+    requested.push(trimmed);
+  }
+
+  const fullSnapshot = exportConfig(configStore, source_tenant_id, now);
+  const filteredOverrides: Record<string, ConfigValue> = {};
+  const not_in_source: string[] = [];
+  for (const k of requested) {
+    if (Object.prototype.hasOwnProperty.call(fullSnapshot.overrides, k)) {
+      filteredOverrides[k] = fullSnapshot.overrides[k]!;
+    } else {
+      not_in_source.push(k);
+    }
+  }
+
+  const summary = importConfig(
+    configStore,
+    target_tenant_id,
+    {
+      generated_at: fullSnapshot.generated_at,
+      source_tenant_id: fullSnapshot.source_tenant_id,
+      overrides: filteredOverrides,
+    },
+    applied_by,
+    dry_run,
+    now,
+  );
+
+  return {
+    ...summary,
+    not_in_source,
+    requested_keys: requested,
+  };
+}
+
 export interface ConfigSnapshot {
   /** ISO timestamp of when the snapshot was generated. */
   generated_at: string;
