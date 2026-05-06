@@ -345,3 +345,140 @@ export function getEffectivePreset(
   if (lib) return lib;
   return store.get(tenant_id, preset_id);
 }
+
+// ─── M16.11 — Version diff ───────────────────────────────────────────
+
+/** Fields compared when diffing two preset snapshots. `id` is excluded
+ *  on purpose — it's immutable across versions. */
+const DIFFABLE_PRESET_FIELDS = [
+  'name',
+  'description',
+  'category',
+  'regulator',
+  'severity',
+  'shocks',
+  'source_doc',
+] as const;
+
+export type DiffableField = (typeof DIFFABLE_PRESET_FIELDS)[number];
+export type DiffKind = 'changed' | 'added' | 'removed';
+
+export interface PresetDiffEntry {
+  field: DiffableField;
+  before: unknown;
+  after: unknown;
+  kind: DiffKind;
+}
+
+export interface PresetVersionDiffResult {
+  preset_id: string;
+  from_version: number;
+  to_version: number;
+  diff: PresetDiffEntry[];
+  change_count: number;
+  /** When `from_version === to_version` we still return an empty diff
+   *  rather than erroring — the SPA's version selector defaults can
+   *  hit this and shouldn't 400. */
+  identical_versions: boolean;
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a === 'object' && a !== null && b !== null) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
+
+/**
+ * Pure-function field-by-field diff between two ScenarioPreset
+ * snapshots. Mirrors RP-1's `diffRuleSnapshots` shape so the SPA
+ * can reuse its diff viewer.
+ *
+ * Returns `kind: 'changed'` when both sides have a value and they
+ * differ, `'added'` when `after` has a value `before` doesn't, and
+ * `'removed'` for the reverse. For the M16 preset shape every
+ * diffable field is required — `added`/`removed` only fire on
+ * undefined/null shape variants (e.g. `source_doc` defaulted-in).
+ */
+export function diffPresetVersions(
+  before: ScenarioPreset,
+  after: ScenarioPreset,
+): PresetDiffEntry[] {
+  const out: PresetDiffEntry[] = [];
+  for (const field of DIFFABLE_PRESET_FIELDS) {
+    const a = (before as unknown as Record<string, unknown>)[field];
+    const b = (after as unknown as Record<string, unknown>)[field];
+    if (valuesEqual(a, b)) continue;
+    const aMissing = a === undefined || a === null;
+    const bMissing = b === undefined || b === null;
+    let kind: DiffKind;
+    if (aMissing && !bMissing) kind = 'added';
+    else if (!aMissing && bMissing) kind = 'removed';
+    else kind = 'changed';
+    out.push({ field, before: a, after: b, kind });
+  }
+  return out;
+}
+
+/**
+ * Runs a diff between two version numbers stored against `preset_id`.
+ * Throws CustomPresetError(unknown_version) if either snapshot has
+ * been evicted by the FIFO cap (or never existed).
+ */
+export function diffPresetVersionsByNumber(
+  store: CustomPresetStore,
+  tenant_id: string,
+  preset_id: string,
+  from_version: number,
+  to_version: number,
+): PresetVersionDiffResult {
+  if (
+    typeof from_version !== 'number' ||
+    !Number.isInteger(from_version) ||
+    from_version < 1
+  ) {
+    throw new CustomPresetError(
+      'invalid_input',
+      'from_version must be a positive integer',
+    );
+  }
+  if (
+    typeof to_version !== 'number' ||
+    !Number.isInteger(to_version) ||
+    to_version < 1
+  ) {
+    throw new CustomPresetError(
+      'invalid_input',
+      'to_version must be a positive integer',
+    );
+  }
+  const versions = store.listVersions(tenant_id, preset_id);
+  const fromV = versions.find((v) => v.version === from_version);
+  if (!fromV) {
+    throw new CustomPresetError(
+      'unknown_version',
+      `version ${from_version} not found (may have been evicted; cap=${VERSION_CAP})`,
+    );
+  }
+  const toV = versions.find((v) => v.version === to_version);
+  if (!toV) {
+    throw new CustomPresetError(
+      'unknown_version',
+      `version ${to_version} not found (may have been evicted; cap=${VERSION_CAP})`,
+    );
+  }
+  const diff =
+    from_version === to_version
+      ? []
+      : diffPresetVersions(fromV.snapshot, toV.snapshot);
+  return {
+    preset_id,
+    from_version,
+    to_version,
+    diff,
+    change_count: diff.length,
+    identical_versions: from_version === to_version,
+  };
+}

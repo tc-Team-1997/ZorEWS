@@ -239,6 +239,7 @@ import {
 import {
   CustomPresetError,
   defaultCustomPresetStore,
+  diffPresetVersionsByNumber,
   getEffectivePreset,
   type CustomPresetStore,
 } from './scenario_custom';
@@ -3355,6 +3356,74 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(
         wrapResponse({ items, total: items.length, preset_id: id }, ctx),
       );
+    },
+  );
+
+  /** GET /v1/scenarios/library/custom/:preset_id/versions/diff?from=N&to=M
+   *  (T6 M16.11) — field-by-field diff between two snapshots. Mirrors
+   *  RP-1's rule version diff shape so the SPA can reuse the diff
+   *  viewer. Returns 404 when either version has been evicted by the
+   *  M16.10 FIFO cap (default 20). */
+  app.get(
+    '/v1/scenarios/library/custom/:preset_id/versions/diff',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const fromRaw = req.query.from;
+      const toRaw = req.query.to;
+      const from_version = Number(fromRaw);
+      const to_version = Number(toRaw);
+      if (
+        typeof fromRaw !== 'string' ||
+        typeof toRaw !== 'string' ||
+        !Number.isInteger(from_version) ||
+        !Number.isInteger(to_version) ||
+        from_version < 1 ||
+        to_version < 1
+      ) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'from and to must be positive integers', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const live = customPresetStore.get(req.tenant!.tenant_id, id);
+      if (!live) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `custom preset ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const out = diffPresetVersionsByNumber(
+          customPresetStore,
+          req.tenant!.tenant_id,
+          id,
+          from_version,
+          to_version,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof CustomPresetError) {
+          if (e.code === 'unknown_version') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_version', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
     },
   );
 

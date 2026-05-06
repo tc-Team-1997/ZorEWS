@@ -6,6 +6,8 @@ import request from 'supertest';
 import {
   CustomPresetError,
   InMemoryCustomPresetStore,
+  diffPresetVersions,
+  diffPresetVersionsByNumber,
   getEffectivePreset,
 } from '../src/scenario_custom';
 import { makeApp } from '../src/server';
@@ -953,5 +955,239 @@ describe('M16.10 — versioning routes', () => {
       .send({ ...VALID, name: 'still works' });
     expect(r.status).toBe(200);
     expect(r.body.body.name).toBe('still works');
+  });
+});
+
+// ─── M16.11 — Version diff ───────────────────────────────────────────
+
+describe('diffPresetVersions (M16.11 pure helper)', () => {
+  test('identical snapshots → empty diff', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    expect(diffPresetVersions(p, p)).toEqual([]);
+  });
+
+  test('renamed preset → one changed entry on `name`', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const updated = s.update('BIL', p.id, { ...VALID, name: 'Renamed' }, 'lead', NOW);
+    const d = diffPresetVersions(p, updated);
+    expect(d).toHaveLength(1);
+    expect(d[0]!.field).toBe('name');
+    expect(d[0]!.kind).toBe('changed');
+    expect(d[0]!.before).toBe(VALID.name);
+    expect(d[0]!.after).toBe('Renamed');
+  });
+
+  test('shocks change reported on the shocks field with object before/after', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const updated = s.update(
+      'BIL',
+      p.id,
+      { ...VALID, shocks: { gdp: -3, rate: 200, fx: 8 } },
+      'lead',
+      NOW,
+    );
+    const d = diffPresetVersions(p, updated);
+    expect(d).toHaveLength(1);
+    expect(d[0]!.field).toBe('shocks');
+    expect(d[0]!.kind).toBe('changed');
+    expect(d[0]!.before).toEqual({ gdp: -1.5, rate: 75, fx: 4 });
+    expect(d[0]!.after).toEqual({ gdp: -3, rate: 200, fx: 8 });
+  });
+
+  test('multiple field changes → one entry per field', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const updated = s.update(
+      'BIL',
+      p.id,
+      { ...VALID, name: 'X', severity: 'severe', shocks: { gdp: -5, rate: 0, fx: 0 } },
+      'lead',
+      NOW,
+    );
+    const d = diffPresetVersions(p, updated);
+    const fields = d.map((e) => e.field).sort();
+    expect(fields).toEqual(['name', 'severity', 'shocks']);
+    for (const e of d) expect(e.kind).toBe('changed');
+  });
+
+  test('id is NOT included in the diff (immutable across versions)', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p1 = s.create('BIL', VALID, 'admin', NOW);
+    // Forge a snapshot with a different id and confirm it's ignored.
+    const forged = { ...p1, id: 'custom_other' };
+    const d = diffPresetVersions(p1, forged);
+    expect(d).toEqual([]);
+  });
+
+  test('shock equality compares deep — same object yields no entry', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const same = { ...p, shocks: { ...p.shocks } };
+    expect(diffPresetVersions(p, same)).toEqual([]);
+  });
+});
+
+describe('diffPresetVersionsByNumber (M16.11 pure helper)', () => {
+  test('happy: from=1, to=2 returns the rename diff', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    s.update('BIL', p.id, { ...VALID, name: 'Renamed' }, 'lead', NOW);
+    const out = diffPresetVersionsByNumber(s, 'BIL', p.id, 1, 2);
+    expect(out.preset_id).toBe(p.id);
+    expect(out.from_version).toBe(1);
+    expect(out.to_version).toBe(2);
+    expect(out.change_count).toBe(1);
+    expect(out.identical_versions).toBe(false);
+    expect(out.diff[0]!.field).toBe('name');
+  });
+
+  test('from === to short-circuits to empty diff with identical_versions=true', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    const out = diffPresetVersionsByNumber(s, 'BIL', p.id, 1, 1);
+    expect(out.diff).toEqual([]);
+    expect(out.change_count).toBe(0);
+    expect(out.identical_versions).toBe(true);
+  });
+
+  test('reverse direction: from=2, to=1 reports the inverse diff', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    s.update('BIL', p.id, { ...VALID, name: 'Renamed' }, 'lead', NOW);
+    const out = diffPresetVersionsByNumber(s, 'BIL', p.id, 2, 1);
+    expect(out.diff[0]!.before).toBe('Renamed');
+    expect(out.diff[0]!.after).toBe(VALID.name);
+  });
+
+  test('unknown_version → CustomPresetError', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    try {
+      diffPresetVersionsByNumber(s, 'BIL', p.id, 1, 99);
+      fail('expected throw');
+    } catch (e) {
+      expect((e as CustomPresetError).code).toBe('unknown_version');
+    }
+  });
+
+  test('invalid_input on non-positive version', () => {
+    const s = new InMemoryCustomPresetStore();
+    const p = s.create('BIL', VALID, 'admin', NOW);
+    expect(() => diffPresetVersionsByNumber(s, 'BIL', p.id, 0, 1)).toThrow(
+      /positive integer/,
+    );
+    expect(() => diffPresetVersionsByNumber(s, 'BIL', p.id, 1, -1)).toThrow(
+      /positive integer/,
+    );
+  });
+});
+
+describe('GET /v1/scenarios/library/custom/:preset_id/versions/diff (M16.11 route)', () => {
+  test('200 with diff body when both versions exist', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'Renamed' });
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions/diff?from=1&to=2`)
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.preset_id).toBe(id);
+    expect(r.body.body.change_count).toBe(1);
+    expect(r.body.body.diff[0].field).toBe('name');
+    expect(r.body.body.identical_versions).toBe(false);
+  });
+
+  test('200 with empty diff when from === to', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions/diff?from=1&to=1`)
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.diff).toEqual([]);
+    expect(r.body.body.identical_versions).toBe(true);
+  });
+
+  test('404 when preset is unknown', async () => {
+    const { app } = makeCustomApp('admin');
+    const r = await request(app)
+      .get('/v1/scenarios/library/custom/custom_nope/versions/diff?from=1&to=2')
+      .set(TH_BIL);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_preset');
+  });
+
+  test('404 when version is unknown', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions/diff?from=1&to=99`)
+      .set(TH_BIL);
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_version');
+  });
+
+  test('400 when from is missing', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions/diff?to=2`)
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+  });
+
+  test('400 when from is not numeric', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions/diff?from=abc&to=2`)
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeCustomApp('case_owner');
+    const r = await request(app)
+      .get('/v1/scenarios/library/custom/custom_x/versions/diff?from=1&to=2')
+      .set(TH_BIL);
+    expect(r.status).toBe(403);
+  });
+
+  test('M16.10 GET /versions still works alongside the new /diff route', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    const r = await request(app)
+      .get(`/v1/scenarios/library/custom/${id}/versions`)
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.items.length).toBe(1);
+  });
+
+  test('M16.10 POST /restore/:version still works alongside /diff', async () => {
+    const { app } = makeCustomApp('admin');
+    const c = await request(app).post('/v1/scenarios/library/custom').set(TH_BIL).send(VALID);
+    const id = c.body.body.id;
+    await request(app)
+      .put(`/v1/scenarios/library/custom/${id}`)
+      .set(TH_BIL)
+      .send({ ...VALID, name: 'v2' });
+    const r = await request(app)
+      .post(`/v1/scenarios/library/custom/${id}/restore/1`)
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(200);
+    expect(r.body.body.preset.name).toBe(VALID.name);
   });
 });
