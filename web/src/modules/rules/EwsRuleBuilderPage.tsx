@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   AlertTriangle,
+  Copy,
+  GitCompare,
   PlayCircle,
   Plus,
+  Sparkles,
   Trash2,
   PowerOff,
   ShieldCheck,
@@ -12,6 +16,8 @@ import {
 import { http } from '@/lib/http';
 import { Badge, type BadgeTone, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { EwsRuleDiffViewer } from './EwsRuleDiffViewer';
+import { rulesPlusApi } from './rulesPlusApi';
 
 // ── Types (mirror BFF EwsRule shape) ─────────────────────────────────
 
@@ -127,6 +133,30 @@ export function EwsRuleBuilderPage() {
   const [testRule, setTestRule] = useState<EwsRule | null>(null);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof ewsApi.test>> | null>(null);
   const [testValues, setTestValues] = useState<Record<string, string>>({});
+  // RP-2: per-row diff modal + clone-flow state.
+  const [diffRuleId, setDiffRuleId] = useState<string | null>(null);
+  const [cloneSource, setCloneSource] = useState<EwsRule | null>(null);
+  const [cloneNewId, setCloneNewId] = useState('');
+  const [cloneNewName, setCloneNewName] = useState('');
+  const [cloneError, setCloneError] = useState<string | null>(null);
+
+  const cloneMut = useMutation({
+    mutationFn: ({ src, new_rule_id, new_name }: { src: string; new_rule_id: string; new_name?: string }) =>
+      rulesPlusApi.clone(src, new_rule_id, new_name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ews-rules'] });
+      setCloneSource(null);
+      setCloneNewId('');
+      setCloneNewName('');
+      setCloneError(null);
+    },
+    onError: (e: unknown) => {
+      const msg =
+        (e as { response?: { data?: { error?: { message?: string } } } })?.response
+          ?.data?.error?.message ?? 'Clone failed';
+      setCloneError(msg);
+    },
+  });
 
   const createMut = useMutation({
     mutationFn: ewsApi.create,
@@ -163,9 +193,17 @@ export function EwsRuleBuilderPage() {
         title="EWS Rule Builder"
         subtitle="Operator-authored rules that fire when an indicator crosses a threshold."
         actions={
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus size={16} /> New rule
-          </Button>
+          <>
+            <Link
+              to="/rules/ews/wizard"
+              className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100"
+            >
+              <Sparkles size={14} /> 4-step wizard
+            </Link>
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus size={16} /> New rule
+            </Button>
+          </>
         }
       />
 
@@ -213,6 +251,25 @@ export function EwsRuleBuilderPage() {
                     }}
                   >
                     <PlayCircle size={14} /> Test
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setDiffRuleId(r.rule_id)}
+                    title="View version diff (RP-1)"
+                  >
+                    <GitCompare size={14} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setCloneSource(r);
+                      setCloneNewId(`${r.rule_id}_COPY`);
+                      setCloneNewName(`${r.name} (copy)`);
+                      setCloneError(null);
+                    }}
+                    title="Clone rule"
+                  >
+                    <Copy size={14} />
                   </Button>
                   {r.state === 'draft' || r.state === 'pending_review' ? (
                     <Button onClick={() => activateMut.mutate(r.rule_id)}>
@@ -268,6 +325,71 @@ export function EwsRuleBuilderPage() {
           result={testResult}
           submitting={testMut.isPending}
         />
+      ) : null}
+
+      {diffRuleId ? (
+        <EwsRuleDiffViewer
+          ruleId={diffRuleId}
+          onClose={() => setDiffRuleId(null)}
+        />
+      ) : null}
+
+      {cloneSource ? (
+        <div
+          data-testid="clone-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-md rounded-md bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center gap-2">
+              <Copy size={16} />
+              <h3 className="text-base font-semibold">Clone {cloneSource.rule_id}</h3>
+            </div>
+            <div className="mb-3 text-xs text-slate-500">
+              Creates a draft copy preserving conditions + action. New rule starts at semver 0.1.0.
+            </div>
+            <label className="mb-2 block text-xs">
+              <span className="font-semibold uppercase text-slate-500">New rule_id</span>
+              <input
+                value={cloneNewId}
+                onChange={(e) => setCloneNewId(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm font-mono"
+                placeholder="RULE_FOO_002"
+              />
+            </label>
+            <label className="mb-3 block text-xs">
+              <span className="font-semibold uppercase text-slate-500">
+                New name (optional)
+              </span>
+              <input
+                value={cloneNewName}
+                onChange={(e) => setCloneNewName(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+              />
+            </label>
+            {cloneError ? (
+              <div className="mb-2 rounded bg-rose-50 p-2 text-xs text-rose-700">
+                {cloneError}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCloneSource(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() =>
+                  cloneMut.mutate({
+                    src: cloneSource.rule_id,
+                    new_rule_id: cloneNewId,
+                    new_name: cloneNewName || undefined,
+                  })
+                }
+                disabled={!cloneNewId || cloneMut.isPending}
+              >
+                <Copy size={12} /> Clone
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
