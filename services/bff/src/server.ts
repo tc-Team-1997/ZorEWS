@@ -29,6 +29,18 @@ import { StubRiskProfileSource, type RiskProfileSource } from './risk_profile';
 import type { Lookups, UiSeverity } from './types';
 import { requireRole as rbacRequireRole } from '../../../infra/rbac/lib/dist/src/index';
 import { respondAsync as copilotRespond, type ChatRequest } from './copilot/chat';
+import {
+  defaultCopilotAuditStore,
+  type CopilotAuditStore,
+} from './copilot/audit_store';
+import { maskPII } from './copilot/pii_masker';
+import {
+  COPILOT_DEFAULT_LIMIT,
+  checkAndConsume,
+  defaultRateState,
+  inspect as inspectRate,
+} from './copilot/rate_limiter';
+import { tryHandleEwsIntent } from './copilot/ews_intents';
 import { runScenario, validateShocks } from './scenario/engine';
 import { defaultPortfolio, type Account } from './scenario/portfolio';
 import {
@@ -659,6 +671,8 @@ export interface AppDeps {
   cmsCaseStore?: CmsCaseStore;
   /** Override for tests — per-tenant assignee pool (CMS-4). */
   cmsAssigneePoolStore?: AssigneePoolStore;
+  /** Override for tests — copilot audit + conversation store (Copilot-1). */
+  copilotAuditStore?: CopilotAuditStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -895,6 +909,7 @@ export function makeApp(deps: AppDeps = {}) {
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
   const cmsCaseStore = deps.cmsCaseStore ?? defaultCmsCaseStore;
   const cmsAssigneePoolStore = deps.cmsAssigneePoolStore ?? defaultAssigneePoolStore;
+  const copilotAuditStore = deps.copilotAuditStore ?? defaultCopilotAuditStore;
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -1804,6 +1819,315 @@ export function makeApp(deps: AppDeps = {}) {
     });
     res.json(wrapResponse(out, env));
   });
+
+  // ── Copilot v2 — hardened route + EWS intents (Copilot-2) ────────────
+  //
+  // Adds: role gate (copilot:use), per-user rate limit (30/hour),
+  // PII masking before persistence + LLM, audit log per query,
+  // optional conversation persistence (auto-create on first turn),
+  // 4 EWS-specific intents (why_flagged / summarize_alert /
+  // suggest_case_steps / explain_kri).
+  //
+  // Legacy /v1/copilot/chat above is untouched — additive only.
+
+  /** POST /v1/copilot/v2/chat
+   *  body { message, conversation_id?, context?: { page, entity, role } }
+   *  Returns { conversation_id, reply, suggestions, used_intent,
+   *            masked_pii_kinds, used_llm, quota }. */
+  app.post(
+    '/v1/copilot/v2/chat',
+    requireTenantMw,
+    requireRole('copilot:use'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const user_id =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+        getRole(req) ||
+        'anonymous';
+
+      // Rate limit
+      const rate = checkAndConsume(defaultRateState, tenant_id, user_id, now());
+      if (!rate.ok) {
+        res.set('Retry-After', String(
+          Math.max(1, Math.ceil((new Date(rate.reset_at).getTime() - now().getTime()) / 1000)),
+        ));
+        return res.status(429).json(
+          wrapError(
+            {
+              code: 'EWS_429_rate_limited',
+              message: `${COPILOT_DEFAULT_LIMIT} queries/hour exceeded. Try again at ${rate.reset_at}.`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as {
+        message?: unknown;
+        conversation_id?: unknown;
+        context?: { page?: unknown; entity?: unknown; role?: unknown };
+      };
+      if (typeof w.message !== 'string' || !w.message.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'message is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (w.message.length > 2000) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'message exceeds 2000 chars', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+
+      // PII mask BEFORE persistence + LLM
+      const { masked: maskedMessage, hits: piiKinds } = maskPII(w.message);
+
+      // Conversation: auto-create on first turn or honour client-supplied id
+      let conv = null as ReturnType<CopilotAuditStore['getConversation']>;
+      if (typeof w.conversation_id === 'string' && w.conversation_id.trim()) {
+        conv = copilotAuditStore.getConversation(tenant_id, w.conversation_id.trim());
+        if (!conv) {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_conversation',
+                message: `conversation ${w.conversation_id} not found`,
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        if (conv.user_id !== user_id) {
+          return res.status(403).json(
+            wrapError(
+              {
+                code: 'EWS_403_conversation_owner_mismatch',
+                message: 'conversation belongs to a different user',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+      }
+      const chatCtx = (w.context ?? {}) as ChatRequest['context'];
+      const role = getRole(req) ?? undefined;
+      if (!conv) {
+        const ent = chatCtx?.entity;
+        conv = copilotAuditStore.startConversation({
+          tenant_id,
+          user_id,
+          initial_page: typeof chatCtx?.page === 'string' ? chatCtx.page : undefined,
+          initial_entity_id:
+            ent && typeof ent === 'object' && 'id' in ent ? String(ent.id) : undefined,
+          now: now(),
+        });
+      }
+
+      // Persist user turn (masked)
+      copilotAuditStore.appendMessage({
+        tenant_id,
+        conversation_id: conv.conversation_id,
+        role: 'user',
+        text: maskedMessage,
+        now: now(),
+      });
+
+      // Try EWS intents first; fall through to legacy brain if none match.
+      const ewsHit = tryHandleEwsIntent(maskedMessage, {
+        ...(chatCtx ?? {}),
+        role: chatCtx?.role ?? role,
+      });
+      let reply: string;
+      let suggestions: string[];
+      let intent: string;
+      let used_llm = false;
+      if (ewsHit) {
+        reply = ewsHit.reply;
+        suggestions = ewsHit.suggestions;
+        intent = ewsHit.intent;
+      } else {
+        const brain = await copilotRespond({
+          message: maskedMessage,
+          context: { ...(chatCtx ?? {}), role: chatCtx?.role ?? role },
+        });
+        reply = brain.reply;
+        suggestions = brain.suggestions;
+        intent = brain.used_context.matched_intent;
+        used_llm = intent === 'llm';
+      }
+
+      // Persist assistant turn
+      copilotAuditStore.appendMessage({
+        tenant_id,
+        conversation_id: conv.conversation_id,
+        role: 'assistant',
+        text: reply,
+        matched_intent: intent,
+        now: now(),
+      });
+
+      // Audit
+      copilotAuditStore.recordAudit({
+        tenant_id,
+        user_id,
+        conversation_id: conv.conversation_id,
+        intent,
+        page: typeof chatCtx?.page === 'string' ? chatCtx.page : null,
+        entity_type:
+          chatCtx?.entity && typeof chatCtx.entity === 'object' && 'type' in chatCtx.entity
+            ? String(chatCtx.entity.type)
+            : null,
+        entity_id:
+          chatCtx?.entity && typeof chatCtx.entity === 'object' && 'id' in chatCtx.entity
+            ? String(chatCtx.entity.id)
+            : null,
+        message_length: w.message.length,
+        masked_pii_kinds: piiKinds,
+        used_llm,
+        now: now(),
+      });
+
+      return res.json(
+        wrapResponse(
+          {
+            conversation_id: conv.conversation_id,
+            reply,
+            suggestions,
+            used_intent: intent,
+            masked_pii_kinds: piiKinds,
+            used_llm,
+            quota: { remaining: rate.remaining, reset_at: rate.reset_at },
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/copilot/v2/conversations — list current user's conversations. */
+  app.get(
+    '/v1/copilot/v2/conversations',
+    requireTenantMw,
+    requireRole('copilot:use'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const user_id =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+        getRole(req) ||
+        'anonymous';
+      const items = copilotAuditStore.listConversations(req.tenant!.tenant_id, user_id);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/copilot/v2/conversations/:conversation_id
+   *  Returns conversation header + messages oldest-first. */
+  app.get(
+    '/v1/copilot/v2/conversations/:conversation_id',
+    requireTenantMw,
+    requireRole('copilot:use'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.conversation_id ?? '';
+      const conv = copilotAuditStore.getConversation(req.tenant!.tenant_id, id);
+      if (!conv) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_conversation',
+              message: `conversation ${id} not found`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const user_id =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+        getRole(req) ||
+        'anonymous';
+      if (conv.user_id !== user_id) {
+        return res.status(403).json(
+          wrapError(
+            {
+              code: 'EWS_403_conversation_owner_mismatch',
+              message: 'conversation belongs to a different user',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const messages = copilotAuditStore.listMessages(req.tenant!.tenant_id, id);
+      return res.json(wrapResponse({ ...conv, messages }, ctx));
+    },
+  );
+
+  /** GET /v1/copilot/v2/quota — current rate-limit window state. */
+  app.get(
+    '/v1/copilot/v2/quota',
+    requireTenantMw,
+    requireRole('copilot:use'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const user_id =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+        getRole(req) ||
+        'anonymous';
+      const q = inspectRate(defaultRateState, req.tenant!.tenant_id, user_id, now());
+      return res.json(
+        wrapResponse(
+          { limit: COPILOT_DEFAULT_LIMIT, used: q.used, remaining: q.remaining, reset_at: q.reset_at },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/copilot/v2/audit — admin-only compliance review. */
+  app.get(
+    '/v1/copilot/v2/audit',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const limit = q.limit ? Number(q.limit) : 100;
+      const filter: { user_id?: string; since?: string; until?: string } = {};
+      if (typeof q.user_id === 'string' && q.user_id) filter.user_id = q.user_id;
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      try {
+        const items = copilotAuditStore.listAudit(req.tenant!.tenant_id, filter, limit);
+        return res.json(wrapResponse({ items, total: items.length }, ctx));
+      } catch (e) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: e instanceof Error ? e.message : String(e),
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
 
   // ── BIL AI/ML model registry (T6 M7.1) ────────────────────────────────
   //

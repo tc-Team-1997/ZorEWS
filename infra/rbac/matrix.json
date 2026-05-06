@@ -56,6 +56,7 @@
     "users:deactivate":             ["admin"],
 
     "audit:read":                   ["admin", "supervisor"],
-    "webhooks:manage":              ["admin"]
+    "webhooks:manage":              ["admin"],
+    "copilot:use":                  ["admin", "risk_analyst", "supervisor"]
   }
 }
