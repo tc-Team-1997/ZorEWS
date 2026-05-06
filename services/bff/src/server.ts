@@ -146,6 +146,24 @@ import {
   resolveWidget,
 } from './dashboard_widget_resolver';
 import {
+  CMS_CASE_STATES,
+  CMS_PRIORITIES,
+  CMS_SLA_WARNING_PCT,
+  CmsCaseError,
+  isCmsCaseState,
+  isCmsPriority,
+  isSlaBreached,
+  slaProgressPct,
+  type CmsCase,
+  type CmsCaseState,
+  type CmsPriority,
+} from './cms_cases';
+import {
+  defaultCmsCaseStore,
+  type CmsCaseStore,
+  type CmsListFilter,
+} from './cms_store';
+import {
   InMemoryModelPerformanceStore,
   ModelPerformanceError,
   isPerformanceMetric,
@@ -630,6 +648,8 @@ export interface AppDeps {
   modelPerformanceStore?: ModelPerformanceStore;
   /** Override for tests — per-tenant EWS rules store (EWS-2). */
   ewsRuleStore?: EwsRuleStore;
+  /** Override for tests — per-tenant CMS case store (CMS-2). */
+  cmsCaseStore?: CmsCaseStore;
   /**
    * Override for tests — Core Insurance / Policy Master adapter
    * (T6 M14.1). Defaults to the module-level StubInsuranceAdapter
@@ -864,6 +884,7 @@ export function makeApp(deps: AppDeps = {}) {
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
+  const cmsCaseStore = deps.cmsCaseStore ?? defaultCmsCaseStore;
   const promotionEngine = deps.promotionEngine ?? defaultPromotionEngine;
   const ruleStore = deps.ruleStore ?? defaultRuleStore;
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
@@ -4043,6 +4064,732 @@ export function makeApp(deps: AppDeps = {}) {
    * and returns status + latency. Admin-only — health diagnostics surface
    * sensitive infrastructure detail.
    */
+  // ── EWS Case Management System (CMS-3) ───────────────────────────────
+  //
+  // 19 routes under /v1/cms/cases/*. Sits ALONGSIDE the existing M9.x
+  // /v1/cases/* surface — additive only.
+  //
+  // Route ordering: literal /stats, /sla-breaches, /bulk-assign declared
+  // BEFORE the :case_id param routes so the param doesn't shadow.
+  //
+  // Audit + case-event side effects: every mutation writes a
+  // case.{create/update/transition/assign/escalate/close} audit event
+  // AND a corresponding M9.4 case-event journal entry so cross-case
+  // consumers see one stream.
+
+  function cmsApexUser(req: Request): string {
+    return ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+  }
+
+  function cmsErrorResponse(
+    e: unknown,
+    ctx: ReturnType<typeof extractCtx>,
+  ): { status: number; body: ReturnType<typeof wrapError> } {
+    if (e instanceof CmsCaseError) {
+      const code = e.code;
+      const status =
+        code === 'unknown_case' ? 404 :
+        code === 'case_locked' ? 409 :
+        code === 'cap_reached' ? 409 :
+        code === 'illegal_transition' ? 409 :
+        code === 'invalid_mime_type' ? 415 :
+        400;
+      const httpCode =
+        status === 404 ? `EWS_404_${code}` :
+        status === 409 ? `EWS_409_${code}` :
+        status === 415 ? `EWS_415_${code}` :
+        `EWS_400_${code}`;
+      return {
+        status,
+        body: wrapError(
+          { code: httpCode, message: e.message, severity: 'MEDIUM' },
+          ctx,
+        ),
+      };
+    }
+    throw e;
+  }
+
+  function writeCmsAuditEvents(
+    tenant_id: string,
+    action_suffix: string,
+    actor: string,
+    case_obj: { case_id: string; case_number?: string },
+    metadata: Record<string, unknown>,
+  ): void {
+    try {
+      auditTrailStore.record(
+        tenant_id,
+        {
+          actor_username: actor,
+          actor_role: 'admin',
+          action: `case.${action_suffix}`,
+          resource_type: 'case',
+          resource_id: case_obj.case_id,
+          outcome: 'success',
+          severity: 'info',
+          metadata: { case_number: case_obj.case_number, ...metadata },
+        },
+        now(),
+      );
+    } catch {
+      // swallow — telemetry must not break mutation
+    }
+    try {
+      const journalAction =
+        action_suffix === 'create' ? 'opened' :
+        action_suffix === 'close' ? 'closed' :
+        action_suffix === 'escalate' ? 'escalated' :
+        action_suffix === 'transition' || action_suffix === 'reopen' ? 'state_change' :
+        action_suffix === 'note_added' ? 'note_added' :
+        action_suffix === 'attachment_added' || action_suffix === 'attachment_deleted' ? 'note_added' :
+        'state_change';
+      caseEventStore.record(
+        tenant_id,
+        {
+          case_id: case_obj.case_id,
+          action: journalAction,
+          actor: `cms:${actor}`,
+          payload: { case_number: case_obj.case_number, action_suffix, ...metadata },
+        },
+        now(),
+      );
+    } catch {
+      // swallow
+    }
+  }
+
+  /** GET /v1/cms/cases/stats — dashboard rollup. */
+  app.get(
+    '/v1/cms/cases/stats',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
+      const by_status = Object.fromEntries(
+        CMS_CASE_STATES.map((s) => [s, 0]),
+      ) as Record<CmsCaseState, number>;
+      const by_priority = Object.fromEntries(
+        CMS_PRIORITIES.map((p) => [p, 0]),
+      ) as Record<CmsPriority, number>;
+      let sla_breached_count = 0;
+      let sla_warning_count = 0;
+      const closedDurations: number[] = [];
+      const t = now();
+      for (const c of items) {
+        by_status[c.status] += 1;
+        by_priority[c.priority] += 1;
+        if (c.status !== 'CLOSED') {
+          const due = new Date(c.sla_due_at);
+          const created = new Date(c.created_at);
+          if (isSlaBreached(t, due)) sla_breached_count += 1;
+          else if (slaProgressPct(t, created, due) >= CMS_SLA_WARNING_PCT) {
+            sla_warning_count += 1;
+          }
+        } else if (c.resolved_at) {
+          closedDurations.push(
+            new Date(c.resolved_at).getTime() - new Date(c.created_at).getTime(),
+          );
+        }
+      }
+      const avg_resolution_hours =
+        closedDurations.length === 0
+          ? null
+          : Math.round(
+              (closedDurations.reduce((s, x) => s + x, 0) / closedDurations.length) /
+                36_000,
+            ) / 100;
+      return res.json(
+        wrapResponse(
+          {
+            total: items.length,
+            by_status,
+            by_priority,
+            sla_breached_count,
+            sla_warning_count,
+            avg_resolution_hours,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/cms/cases/sla-breaches — open cases past sla_due_at,
+   *  sorted by overshoot (most-overdue first). */
+  app.get(
+    '/v1/cms/cases/sla-breaches',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
+      const t = now();
+      const breaches = items
+        .filter((c) => c.status !== 'CLOSED' && isSlaBreached(t, new Date(c.sla_due_at)))
+        .map((c) => ({
+          case_id: c.case_id,
+          case_number: c.case_number,
+          title: c.title,
+          priority: c.priority,
+          assigned_to: c.assigned_to,
+          status: c.status,
+          sla_due_at: c.sla_due_at,
+          overshoot_hours:
+            (t.getTime() - new Date(c.sla_due_at).getTime()) / 3_600_000,
+          progress_pct: slaProgressPct(t, new Date(c.created_at), new Date(c.sla_due_at)),
+        }))
+        .sort((a, b) => b.overshoot_hours - a.overshoot_hours);
+      return res.json(
+        wrapResponse({ items: breaches, total: breaches.length }, ctx),
+      );
+    },
+  );
+
+  /** POST /v1/cms/cases/bulk-assign — assign many cases at once. */
+  app.post(
+    '/v1/cms/cases/bulk-assign',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as {
+        case_ids?: unknown;
+        assigned_to?: unknown;
+        reason?: unknown;
+      };
+      if (!Array.isArray(w.case_ids) || w.case_ids.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'case_ids[] required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (typeof w.assigned_to !== 'string' || !w.assigned_to.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'assigned_to required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const assigned_by = cmsApexUser(req);
+      const reason = typeof w.reason === 'string' ? w.reason : undefined;
+      try {
+        const out = cmsCaseStore.bulkAssign(
+          req.tenant!.tenant_id,
+          w.case_ids as string[],
+          w.assigned_to.trim(),
+          assigned_by,
+          reason,
+          now(),
+        );
+        const ok_count = out.filter((r) => r.status === 'ok').length;
+        return res.json(
+          wrapResponse(
+            { rows: out, ok_count, total: out.length },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/cases — list with filters. */
+  app.get(
+    '/v1/cms/cases',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filter: CmsListFilter = {};
+      if (typeof q.status === 'string' && q.status) {
+        if (!isCmsCaseState(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'invalid status', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.status = q.status;
+      }
+      if (typeof q.priority === 'string' && q.priority) {
+        if (!isCmsPriority(q.priority)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'invalid priority', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.priority = q.priority;
+      }
+      if (typeof q.assigned_to === 'string' && q.assigned_to) filter.assigned_to = q.assigned_to;
+      if (typeof q.alert_id === 'string' && q.alert_id) filter.alert_id = q.alert_id;
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      if (typeof q.q === 'string' && q.q) filter.q = q.q;
+      if (typeof q.case_number === 'string' && q.case_number) filter.case_number = q.case_number;
+      if (typeof q.tags === 'string' && q.tags) {
+        filter.tags_any = q.tags.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      const items = cmsCaseStore.list(req.tenant!.tenant_id, filter);
+      return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** POST /v1/cms/cases — create. */
+  app.post(
+    '/v1/cms/cases',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const created_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.create(req.tenant!.tenant_id, inner, created_by, now());
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'create', created_by, c, {
+          priority: c.priority,
+          alert_id: c.alert_id,
+        });
+        return res.status(201).json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/cases/:case_id — full detail. */
+  app.get(
+    '/v1/cms/cases/:case_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const c = cmsCaseStore.get(req.tenant!.tenant_id, id);
+      if (!c) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_case', message: `case ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const t = now();
+      const due = new Date(c.sla_due_at);
+      const created = new Date(c.created_at);
+      const sla = {
+        due_at: c.sla_due_at,
+        progress_pct: slaProgressPct(t, created, due),
+        breached: isSlaBreached(t, due) && c.status !== 'CLOSED',
+        warning: !isSlaBreached(t, due)
+          && slaProgressPct(t, created, due) >= CMS_SLA_WARNING_PCT
+          && c.status !== 'CLOSED',
+      };
+      return res.json(
+        wrapResponse(
+          {
+            ...c,
+            assignments: cmsCaseStore.listAssignments(req.tenant!.tenant_id, id),
+            notes_count: cmsCaseStore.listNotes(req.tenant!.tenant_id, id).length,
+            attachments_count: cmsCaseStore.listAttachments(req.tenant!.tenant_id, id).length,
+            sla,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** PATCH /v1/cms/cases/:case_id — update mutable fields. */
+  app.patch(
+    '/v1/cms/cases/:case_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const updated_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.update(req.tenant!.tenant_id, id, inner, updated_by, now());
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'update', updated_by, c, {});
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/transition body { target } */
+  app.post(
+    '/v1/cms/cases/:case_id/transition',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { target?: unknown };
+      if (!isCmsCaseState(w.target)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'target required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const performed_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.transition(req.tenant!.tenant_id, id, w.target, performed_by, now());
+        const suffix = w.target === 'OPEN' ? 'reopen' : 'transition';
+        writeCmsAuditEvents(req.tenant!.tenant_id, suffix, performed_by, c, {
+          target: w.target,
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/assign body { assigned_to, reason? } */
+  app.post(
+    '/v1/cms/cases/:case_id/assign',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const assigned_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.assign(req.tenant!.tenant_id, id, inner, assigned_by, now());
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'assign', assigned_by, c, {
+          assigned_to: c.assigned_to,
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/escalate body { reason? } */
+  app.post(
+    '/v1/cms/cases/:case_id/escalate',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      const reason = typeof w.reason === 'string' ? w.reason : undefined;
+      const performed_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.escalate(req.tenant!.tenant_id, id, performed_by, reason, now());
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'escalate', performed_by, c, {
+          reason: reason ?? null,
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/close body { resolution_category, resolution_notes } */
+  app.post(
+    '/v1/cms/cases/:case_id/close',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const closed_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.close(req.tenant!.tenant_id, id, inner, closed_by, now());
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'close', closed_by, c, {
+          resolution_category: c.resolution_category,
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/notes — add a note. */
+  app.post(
+    '/v1/cms/cases/:case_id/notes',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const user = cmsApexUser(req);
+      try {
+        const n = cmsCaseStore.addNote(req.tenant!.tenant_id, id, inner, user, now());
+        writeCmsAuditEvents(
+          req.tenant!.tenant_id,
+          'note_added',
+          user,
+          { case_id: n.case_id },
+          { note_id: n.note_id, is_internal: n.is_internal },
+        );
+        return res.status(201).json(wrapResponse(n, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/cases/:case_id/notes — list (newest-first). */
+  app.get(
+    '/v1/cms/cases/:case_id/notes',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const cur = cmsCaseStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_case', message: `case ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = cmsCaseStore.listNotes(req.tenant!.tenant_id, id);
+      return res.json(wrapResponse({ items, total: items.length, case_id: id }, ctx));
+    },
+  );
+
+  /** POST /v1/cms/cases/:case_id/attachments body
+   *  { file_name, file_size, mime_type } — registers metadata. */
+  app.post(
+    '/v1/cms/cases/:case_id/attachments',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const uploaded_by = cmsApexUser(req);
+      try {
+        const a = cmsCaseStore.addAttachment(
+          req.tenant!.tenant_id,
+          id,
+          inner,
+          uploaded_by,
+          now(),
+        );
+        writeCmsAuditEvents(
+          req.tenant!.tenant_id,
+          'attachment_added',
+          uploaded_by,
+          { case_id: a.case_id },
+          {
+            attachment_id: a.attachment_id,
+            file_name: a.file_name,
+            mime_type: a.mime_type,
+            virus_scan_status: a.virus_scan_status,
+          },
+        );
+        return res.status(201).json(wrapResponse(a, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/cases/:case_id/attachments — list. */
+  app.get(
+    '/v1/cms/cases/:case_id/attachments',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const cur = cmsCaseStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_case', message: `case ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = cmsCaseStore.listAttachments(req.tenant!.tenant_id, id);
+      return res.json(wrapResponse({ items, total: items.length, case_id: id }, ctx));
+    },
+  );
+
+  /** GET /v1/cms/cases/:case_id/attachments/:attachment_id — single
+   *  attachment metadata (the prototype's "download" surfaces metadata
+   *  + a `cms://` placeholder URL since blobs aren't persisted). */
+  app.get(
+    '/v1/cms/cases/:case_id/attachments/:attachment_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const fid = req.params.attachment_id ?? '';
+      const a = cmsCaseStore.getAttachment(req.tenant!.tenant_id, id, fid);
+      if (!a) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_attachment',
+              message: `attachment ${fid} not found on case ${id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(a, ctx));
+    },
+  );
+
+  /** DELETE /v1/cms/cases/:case_id/attachments/:attachment_id */
+  app.delete(
+    '/v1/cms/cases/:case_id/attachments/:attachment_id',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const fid = req.params.attachment_id ?? '';
+      const deleted_by = cmsApexUser(req);
+      try {
+        const ok = cmsCaseStore.deleteAttachment(
+          req.tenant!.tenant_id,
+          id,
+          fid,
+          deleted_by,
+          now(),
+        );
+        if (!ok) {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_attachment',
+                message: `attachment ${fid} not found on case ${id}`,
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        writeCmsAuditEvents(
+          req.tenant!.tenant_id,
+          'attachment_deleted',
+          deleted_by,
+          { case_id: id },
+          { attachment_id: fid },
+        );
+        return res.status(204).send();
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/cms/cases/:case_id/history — full per-case audit. */
+  app.get(
+    '/v1/cms/cases/:case_id/history',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw === undefined ? 200 : Number(limitRaw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'limit must be 1..200', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const cur = cmsCaseStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_case', message: `case ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = cmsCaseStore.listHistory(req.tenant!.tenant_id, id, limit);
+      return res.json(wrapResponse({ items, total: items.length, case_id: id }, ctx));
+    },
+  );
+
+  // ── End CMS-3 routes ─────────────────────────────────────────────────
+
   /**
    * GET /v1/cases/sla-summary
    * Returns SLA classification across the synthetic case fleet:
