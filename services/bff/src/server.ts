@@ -138,7 +138,13 @@ import {
   WIDGET_CATALOG,
   defaultCustomDashboardStore,
   type CustomDashboardStore,
+  type DashboardWidget,
 } from './custom_dashboards';
+import {
+  WidgetResolverError,
+  resolveDashboard,
+  resolveWidget,
+} from './dashboard_widget_resolver';
 import {
   InMemoryModelPerformanceStore,
   ModelPerformanceError,
@@ -5050,6 +5056,91 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.status(204).send();
+    },
+  );
+
+  // ── Custom dashboard data resolver (T6 M11.8) ────────────────────────
+  //
+  // M11.7 ships the layout builder; M11.8 fills the widgets in one
+  // call. Pure-function deterministic synth seeded by (tenant,
+  // widget_type, config-hash, day) — same FNV-1a + Mulberry32
+  // pattern as M14 adapters, so the SPA renders the same numbers
+  // within a day.
+
+  /** POST /v1/dashboards/widgets/resolve (T6 M11.8) — resolve a
+   *  single ad-hoc widget. Body { widget_type, position, span, config }. */
+  app.post(
+    '/v1/dashboards/widgets/resolve',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as Partial<DashboardWidget>;
+      if (
+        !w ||
+        typeof w !== 'object' ||
+        !w.widget_type ||
+        !w.position ||
+        !w.span
+      ) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'widget_type, position, and span required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const payload = resolveWidget(
+          req.tenant!.tenant_id,
+          {
+            widget_type: w.widget_type,
+            position: w.position,
+            span: w.span,
+            config: w.config ?? {},
+          },
+          now(),
+        );
+        return res.json(wrapResponse(payload, ctx));
+      } catch (e) {
+        if (e instanceof WidgetResolverError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/dashboards/custom/:dashboard_id/resolve (T6 M11.8) —
+   *  resolve every widget on a saved dashboard in one shot. */
+  app.post(
+    '/v1/dashboards/custom/:dashboard_id/resolve',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.dashboard_id ?? '';
+      const dashboard = customDashboardStore.get(req.tenant!.tenant_id, id);
+      if (!dashboard) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_dashboard', message: `dashboard ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const resolved = resolveDashboard(dashboard, now());
+      return res.json(wrapResponse(resolved, ctx));
     },
   );
 
