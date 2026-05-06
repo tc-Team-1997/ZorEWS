@@ -554,6 +554,7 @@ import { renderEvidenceSummary } from './audit_evidence_summary';
 import {
   defaultIngestionRegistry,
   IngestionError,
+  type ConnectorRun,
   type IngestionRegistry,
 } from './ingestion';
 import {
@@ -561,6 +562,12 @@ import {
   RUN_ANALYTICS_MAX_WINDOW,
   aggregateRunAnalytics,
 } from './connector_run_analytics';
+import {
+  AdapterSlaError,
+  DEFAULT_SLA_TARGETS,
+  buildAdapterSlaDashboard,
+  validateSlaTargets,
+} from './adapter_sla_dashboard';
 import {
   ConnectorSchemaError,
   getConnectorSchema,
@@ -10619,6 +10626,77 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/ingestion/adapters/sla-dashboard (T6 M14.11) — fleet-wide
+   *  SLA dashboard. Runs M3.5 analytics across every connector for the
+   *  tenant + applies per-adapter SLA gates.
+   *
+   *  Query params (all optional):
+   *    window=N                 (default 20, max RUN_ANALYTICS_MAX_WINDOW)
+   *    min_success_rate=0..1    (default 0.95)
+   *    max_p95_latency_ms=ms    (default 30000, max 86_400_000)
+   *
+   *  Connectors with no finished runs in the window report
+   *  sla_status='unknown' (not 'breached'). */
+  app.get(
+    '/v1/ingestion/adapters/sla-dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? RUN_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > RUN_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${RUN_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      let targets;
+      try {
+        targets = validateSlaTargets({
+          min_success_rate: req.query.min_success_rate,
+          max_p95_latency_ms: req.query.max_p95_latency_ms,
+        });
+      } catch (e) {
+        if (e instanceof AdapterSlaError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+      const tenantId = req.tenant!.tenant_id;
+      const connectors = ingestionRegistry.list(tenantId);
+      const runsByConnectorId = new Map<string, readonly ConnectorRun[]>();
+      for (const c of connectors) {
+        runsByConnectorId.set(c.id, ingestionRegistry.listRuns(tenantId, c.id, window));
+      }
+      const dashboard = buildAdapterSlaDashboard(connectors, runsByConnectorId, targets, {
+        window,
+        now: now(),
+      });
+      // Sanity check (silences unused-import in some builds): default
+      // targets are exposed on the response so the SPA can show
+      // "evaluated against ... (default …)".
+      void DEFAULT_SLA_TARGETS;
+      return res.json(wrapResponse(dashboard, ctx));
     },
   );
 
