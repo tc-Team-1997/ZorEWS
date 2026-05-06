@@ -20,6 +20,7 @@
 // This module ONLY exposes types + the pure validator. The store +
 // executor + routes land in EWS-2 / EWS-3.
 
+import { randomUUID } from 'node:crypto';
 import {
   EWS_INDICATOR_CATALOG,
   type EwsIndicator,
@@ -415,3 +416,315 @@ export function validateEwsRule(input: unknown): EwsRuleInput {
     tags,
   };
 }
+
+// ─── State machine ────────────────────────────────────────────────────
+
+const ALLOWED_TRANSITIONS: Record<EwsRuleState, EwsRuleState[]> = {
+  draft: ['pending_review', 'deprecated'],
+  pending_review: ['active', 'draft', 'deprecated'],
+  active: ['deprecated'],
+  deprecated: [], // terminal
+};
+
+export function isLegalTransition(from: EwsRuleState, to: EwsRuleState): boolean {
+  return ALLOWED_TRANSITIONS[from].includes(to);
+}
+
+// ─── Per-execution telemetry record ──────────────────────────────────
+
+export interface EwsRuleExecution {
+  execution_id: string;
+  /** Per-tenant monotonic counter for stable cursor semantics. */
+  sequence_no: number;
+  rule_id: string;
+  tenant_id: string;
+  entity_type: 'customer' | 'policy' | 'claim';
+  entity_id: string;
+  matched: boolean;
+  matched_indicators: string[];
+  score_impact: number;
+  alert_id: string | null;
+  evaluated_at: string;
+  duration_us: number;
+}
+
+// ─── Store ────────────────────────────────────────────────────────────
+
+const RULES_CAP_PER_TENANT = 200;
+const EXECUTIONS_CAP_PER_TENANT = 5000;
+
+export interface EwsRuleStore {
+  list(
+    tenant_id: string,
+    filters?: {
+      category?: EwsRuleCategory;
+      state?: EwsRuleState;
+      is_active?: boolean;
+    },
+  ): EwsRule[];
+  get(tenant_id: string, rule_id: string): EwsRule | null;
+  create(
+    tenant_id: string,
+    input: unknown,
+    created_by: string,
+    now: Date,
+  ): EwsRule;
+  /** Replace mutable fields. The rule must NOT be `deprecated`. Bumps version. */
+  replace(
+    tenant_id: string,
+    rule_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): EwsRule;
+  /** Promote draft → pending_review. */
+  submit(tenant_id: string, rule_id: string, now: Date): EwsRule;
+  /** Activate pending_review → active. Sets is_active=true. */
+  activate(tenant_id: string, rule_id: string, now: Date): EwsRule;
+  /** Soft-delete: any non-deprecated state → deprecated. Sets is_active=false. */
+  deprecate(tenant_id: string, rule_id: string, now: Date): EwsRule;
+
+  /** Record a per-rule execution telemetry row. */
+  recordExecution(
+    tenant_id: string,
+    input: Omit<EwsRuleExecution, 'execution_id' | 'sequence_no' | 'tenant_id'>,
+  ): EwsRuleExecution;
+  /** List executions for a single rule, newest-first. */
+  listExecutionsForRule(
+    tenant_id: string,
+    rule_id: string,
+    limit: number,
+  ): EwsRuleExecution[];
+}
+
+function cloneRule(r: EwsRule): EwsRule {
+  return {
+    ...r,
+    conditions: r.conditions.map((c) => ({
+      ...c,
+      ...(Array.isArray(c.value) ? { value: [...c.value] } : {}),
+      ...(c.range ? { range: [c.range[0], c.range[1]] as [number, number] } : {}),
+    })),
+    action: { ...r.action },
+    tags: [...r.tags],
+  };
+}
+
+export class InMemoryEwsRuleStore implements EwsRuleStore {
+  /** tenant_id → rule_id → rule. */
+  private readonly rulesByTenant = new Map<string, Map<string, EwsRule>>();
+  /** tenant_id → executions[] (newest at end). */
+  private readonly executionsByTenant = new Map<string, EwsRuleExecution[]>();
+  private readonly executionSeqByTenant = new Map<string, number>();
+
+  private rulesBucket(tenant_id: string): Map<string, EwsRule> {
+    let m = this.rulesByTenant.get(tenant_id);
+    if (!m) {
+      m = new Map();
+      this.rulesByTenant.set(tenant_id, m);
+    }
+    return m;
+  }
+
+  private execBucket(tenant_id: string): EwsRuleExecution[] {
+    let arr = this.executionsByTenant.get(tenant_id);
+    if (!arr) {
+      arr = [];
+      this.executionsByTenant.set(tenant_id, arr);
+    }
+    return arr;
+  }
+
+  list(
+    tenant_id: string,
+    filters: {
+      category?: EwsRuleCategory;
+      state?: EwsRuleState;
+      is_active?: boolean;
+    } = {},
+  ): EwsRule[] {
+    const bucket = this.rulesByTenant.get(tenant_id);
+    if (!bucket) return [];
+    return [...bucket.values()]
+      .filter((r) => !filters.category || r.category === filters.category)
+      .filter((r) => !filters.state || r.state === filters.state)
+      .filter((r) => filters.is_active === undefined || r.is_active === filters.is_active)
+      .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
+      .map(cloneRule);
+  }
+
+  get(tenant_id: string, rule_id: string): EwsRule | null {
+    const r = this.rulesByTenant.get(tenant_id)?.get(rule_id);
+    return r ? cloneRule(r) : null;
+  }
+
+  create(
+    tenant_id: string,
+    input: unknown,
+    created_by: string,
+    now: Date,
+  ): EwsRule {
+    if (!created_by || !created_by.trim()) {
+      throw new EwsRuleError('invalid_input', 'created_by required');
+    }
+    const valid = validateEwsRule(input);
+    const bucket = this.rulesBucket(tenant_id);
+    if (bucket.has(valid.rule_id)) {
+      throw new EwsRuleError(
+        'duplicate_rule_id',
+        `rule_id ${valid.rule_id} already exists in tenant ${tenant_id}`,
+      );
+    }
+    if (bucket.size >= RULES_CAP_PER_TENANT) {
+      throw new EwsRuleError(
+        'cap_reached',
+        `tenant ${tenant_id} already has ${RULES_CAP_PER_TENANT} rules`,
+      );
+    }
+    const rule: EwsRule = {
+      rule_id: valid.rule_id,
+      tenant_id,
+      name: valid.name,
+      category: valid.category,
+      description: valid.description,
+      conditions: valid.conditions,
+      logic: valid.logic,
+      action: valid.action,
+      is_active: false, // newly-created rules are NOT active until activated
+      state: 'draft',
+      version: 1,
+      tags: valid.tags ?? [],
+      created_by: created_by.trim(),
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      deprecated_at: null,
+    };
+    bucket.set(rule.rule_id, rule);
+    return cloneRule(rule);
+  }
+
+  replace(
+    tenant_id: string,
+    rule_id: string,
+    input: unknown,
+    updated_by: string,
+    now: Date,
+  ): EwsRule {
+    if (!updated_by || !updated_by.trim()) {
+      throw new EwsRuleError('invalid_input', 'updated_by required');
+    }
+    const bucket = this.rulesBucket(tenant_id);
+    const cur = bucket.get(rule_id);
+    if (!cur) {
+      throw new EwsRuleError('unknown_rule', `rule ${rule_id} not found`);
+    }
+    if (cur.state === 'deprecated') {
+      throw new EwsRuleError(
+        'illegal_state',
+        `rule ${rule_id} is deprecated and cannot be edited`,
+      );
+    }
+    const inputObj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const valid = validateEwsRule({ ...inputObj, rule_id: cur.rule_id });
+    const next: EwsRule = {
+      ...cur,
+      name: valid.name,
+      category: valid.category,
+      description: valid.description,
+      conditions: valid.conditions,
+      logic: valid.logic,
+      action: valid.action,
+      tags: valid.tags ?? cur.tags,
+      version: cur.version + 1,
+      updated_at: now.toISOString(),
+    };
+    bucket.set(rule_id, next);
+    return cloneRule(next);
+  }
+
+  private transition(
+    tenant_id: string,
+    rule_id: string,
+    target: EwsRuleState,
+    now: Date,
+  ): EwsRule {
+    const bucket = this.rulesBucket(tenant_id);
+    const cur = bucket.get(rule_id);
+    if (!cur) {
+      throw new EwsRuleError('unknown_rule', `rule ${rule_id} not found`);
+    }
+    if (!isLegalTransition(cur.state, target)) {
+      throw new EwsRuleError(
+        'illegal_transition',
+        `cannot transition rule from ${cur.state} → ${target}`,
+      );
+    }
+    const next: EwsRule = {
+      ...cur,
+      state: target,
+      is_active: target === 'active',
+      deprecated_at: target === 'deprecated' ? now.toISOString() : cur.deprecated_at,
+      updated_at: now.toISOString(),
+    };
+    bucket.set(rule_id, next);
+    return cloneRule(next);
+  }
+
+  submit(tenant_id: string, rule_id: string, now: Date): EwsRule {
+    return this.transition(tenant_id, rule_id, 'pending_review', now);
+  }
+
+  activate(tenant_id: string, rule_id: string, now: Date): EwsRule {
+    return this.transition(tenant_id, rule_id, 'active', now);
+  }
+
+  deprecate(tenant_id: string, rule_id: string, now: Date): EwsRule {
+    return this.transition(tenant_id, rule_id, 'deprecated', now);
+  }
+
+  // ── Executions ──────────────────────────────────────────────────────
+
+  recordExecution(
+    tenant_id: string,
+    input: Omit<EwsRuleExecution, 'execution_id' | 'sequence_no' | 'tenant_id'>,
+  ): EwsRuleExecution {
+    const arr = this.execBucket(tenant_id);
+    const nextSeq = (this.executionSeqByTenant.get(tenant_id) ?? 0) + 1;
+    this.executionSeqByTenant.set(tenant_id, nextSeq);
+    const exec: EwsRuleExecution = {
+      execution_id: `exe-${randomUUID()}`,
+      sequence_no: nextSeq,
+      tenant_id,
+      ...input,
+      matched_indicators: [...input.matched_indicators],
+    };
+    arr.push(exec);
+    if (arr.length > EXECUTIONS_CAP_PER_TENANT) {
+      arr.splice(0, arr.length - EXECUTIONS_CAP_PER_TENANT);
+    }
+    return { ...exec, matched_indicators: [...exec.matched_indicators] };
+  }
+
+  listExecutionsForRule(
+    tenant_id: string,
+    rule_id: string,
+    limit: number,
+  ): EwsRuleExecution[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new EwsRuleError('invalid_input', 'limit must be 1..1000');
+    }
+    const arr = this.executionsByTenant.get(tenant_id) ?? [];
+    return arr
+      .filter((e) => e.rule_id === rule_id)
+      .sort((a, b) => b.sequence_no - a.sequence_no)
+      .slice(0, limit)
+      .map((e) => ({ ...e, matched_indicators: [...e.matched_indicators] }));
+  }
+}
+
+export const defaultEwsRuleStore: EwsRuleStore = new InMemoryEwsRuleStore();
+
+export {
+  RULES_CAP_PER_TENANT as EWS_RULES_CAP_PER_TENANT,
+  EXECUTIONS_CAP_PER_TENANT as EWS_EXECUTIONS_CAP_PER_TENANT,
+};
