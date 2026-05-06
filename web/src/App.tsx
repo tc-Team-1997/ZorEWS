@@ -16,6 +16,7 @@ import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
 import { RuleConfigPage } from '@/modules/rules/RuleConfigPage';
+import { EwsRuleBuilderPage } from '@/modules/rules/EwsRuleBuilderPage';
 import { CaseListPage } from '@/modules/cases/CaseListPage';
 import { CaseDetailPage } from '@/modules/cases/CaseDetailPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
@@ -67,6 +68,7 @@ export function App() {
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
             <Route path="rules" element={<RuleConfigPage />} />
+            <Route path="rules/ews" element={<EwsRuleBuilderPage />} />
             <Route path="cases" element={<CaseListPage />} />
             <Route path="cases/:id" element={<CaseDetailPage />} />
             <Route path="scenario" element={<ScenarioPage />} />

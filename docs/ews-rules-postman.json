@@ -1,0 +1,177 @@
+{
+  "info": {
+    "name": "APEX EWS — Rules Engine",
+    "description": "Postman collection for the EWS rules engine (EWS-1 through EWS-5). Covers all 9 routes under /v1/ews/rules/* plus the seeded RULE_CREDIT_001 lifecycle as a quickstart flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001" },
+    { "key": "tenantId", "value": "BIL" },
+    { "key": "channel", "value": "API" },
+    { "key": "apexUser", "value": "compliance.lead" },
+    { "key": "apexRole", "value": "admin" },
+    { "key": "ruleId", "value": "RULE_CREDIT_001" }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "0. List indicator catalog",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/indicators"
+      }
+    },
+    {
+      "name": "1. List rules",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/ews/rules?category=credit&state=active",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "ews", "rules"],
+          "query": [
+            { "key": "category", "value": "credit" },
+            { "key": "state", "value": "active" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Create rule (RULE_CREDIT_001)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rule_id\": \"RULE_CREDIT_001\",\n  \"name\": \"High EMI Bounce Risk\",\n  \"category\": \"credit\",\n  \"description\": \"3+ EMI bounces in 90 days indicates servicing distress.\",\n  \"conditions\": [\n    { \"field\": \"emi_bounce_count_90d\", \"operator\": \">=\", \"value\": 3 }\n  ],\n  \"logic\": \"AND\",\n  \"action\": {\n    \"alert_severity\": \"RED\",\n    \"weight\": 25,\n    \"recommended_action\": \"Pause disbursement; assign to RM for 24-hour callback.\"\n  },\n  \"is_active\": true\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Get single rule",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}"
+      }
+    },
+    {
+      "name": "4. Update rule (PUT — bumps version)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rule_id\": \"RULE_CREDIT_001\",\n  \"name\": \"High EMI Bounce Risk (v2)\",\n  \"category\": \"credit\",\n  \"description\": \"3+ EMI bounces in 90 days — escalated severity per Q2 review.\",\n  \"conditions\": [\n    { \"field\": \"emi_bounce_count_90d\", \"operator\": \">=\", \"value\": 3 }\n  ],\n  \"logic\": \"AND\",\n  \"action\": { \"alert_severity\": \"RED\", \"weight\": 30 }\n}"
+        }
+      }
+    },
+    {
+      "name": "5. Test rule against sample values",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/test",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"values\": { \"emi_bounce_count_90d\": 5 }\n}"
+        }
+      }
+    },
+    {
+      "name": "6. Activate rule (draft → active)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/activate"
+      }
+    },
+    {
+      "name": "7. Bulk evaluate one entity against all active rules",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/evaluate",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"entity_type\": \"customer\",\n  \"entity_id\": \"cust-001\",\n  \"values\": {\n    \"emi_bounce_count_90d\": 5,\n    \"kyc_doc_expiry_days\": 60,\n    \"premium_overdue_days\": 0,\n    \"txn_amount_to_avg_ratio\": 0,\n    \"agent_portfolio_lapse_pct\": 0,\n    \"login_new_country_24h\": 0,\n    \"customer_exposure_pct_of_portfolio\": 0,\n    \"txn_freq_drop_30d_pct\": 0,\n    \"risk_score_delta_7d\": 0\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "8. Get rule hits (telemetry)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/ews/rules/{{ruleId}}/hits?limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["v1", "ews", "rules", "{{ruleId}}", "hits"],
+          "query": [{ "key": "limit", "value": "20" }]
+        }
+      }
+    },
+    {
+      "name": "9. Soft-delete rule (state → deprecated)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "X-Tenant-ID", "value": "{{tenantId}}" },
+          { "key": "X-Channel", "value": "{{channel}}" },
+          { "key": "X-APEX-USER", "value": "{{apexUser}}" },
+          { "key": "x-apex-role", "value": "{{apexRole}}" }
+        ],
+        "url": "{{baseUrl}}/v1/ews/rules/{{ruleId}}"
+      }
+    }
+  ]
+}
