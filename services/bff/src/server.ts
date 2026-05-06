@@ -397,6 +397,11 @@ import {
   type AutoAckRuleStore,
 } from './alert_auto_ack';
 import {
+  defaultQuietHoursMuteEventStore,
+  evaluateQuietHoursMute,
+  type QuietHoursMuteEventStore,
+} from './alert_quiet_hours_mute';
+import {
   WebhookChannelError,
   defaultNotificationWebhookStore,
   type NotificationWebhookStore,
@@ -647,6 +652,8 @@ export interface AppDeps {
   notificationWebhookStore?: NotificationWebhookStore;
   /** Override for tests — per-user notification preference store (T6 M10.5). */
   notificationPreferenceStore?: NotificationPreferenceStore;
+  /** Override for tests — quiet-hours mute event audit store (T6 M10.8). */
+  quietHoursMuteEventStore?: QuietHoursMuteEventStore;
   /**
    * Override for tests — per-tenant custom scenario preset store
    * (T6 M16.4).
@@ -885,6 +892,8 @@ export function makeApp(deps: AppDeps = {}) {
   const notificationWebhookStore = deps.notificationWebhookStore ?? defaultNotificationWebhookStore;
   const notificationPreferenceStore =
     deps.notificationPreferenceStore ?? defaultNotificationPreferenceStore;
+  const quietHoursMuteEventStore =
+    deps.quietHoursMuteEventStore ?? defaultQuietHoursMuteEventStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
@@ -1464,8 +1473,15 @@ export function makeApp(deps: AppDeps = {}) {
 
   /** POST /v1/alerts/ingest (T6 M8.5) — ingest a single alert and
    *  auto-ack it if a tenant rule matches. body
-   *  { alert_id, bil_class, source_system?, tags? } → returns the
-   *  resolved policy decision + live ack state. */
+   *  { alert_id, bil_class, source_system?, tags?, target_username? }
+   *  → returns the resolved policy decision + live ack state.
+   *
+   *  M10.8 extension: when `target_username` is provided and the named
+   *  user is currently inside their M10.7 quiet-hours window, and the
+   *  M8.4 rule didn't already auto-ack, the alert is auto-muted with
+   *  reason "quiet hours". RED severity bypasses (operator pages on
+   *  critical even at night). The decision is reported under the
+   *  `quiet_hours_mute` field on the response. */
   app.post(
     '/v1/alerts/ingest',
     requireTenantMw,
@@ -1479,14 +1495,39 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const rules = autoAckRuleStore.list(req.tenant!.tenant_id);
       try {
-        const result = ingestAlertWithAutoAck(
+        const baseResult = ingestAlertWithAutoAck(
           rules,
           alertAckStore,
           req.tenant!.tenant_id,
           inner,
           now(),
         );
-        return res.json(wrapResponse(result, ctx));
+        // M10.8 — quiet-hours auto-mute pass.
+        const innerObj =
+          inner && typeof inner === 'object' ? (inner as Record<string, unknown>) : {};
+        const target_username =
+          typeof innerObj.target_username === 'string' && innerObj.target_username.trim()
+            ? (innerObj.target_username as string).trim()
+            : undefined;
+        const quiet_hours_mute = evaluateQuietHoursMute({
+          prefStore: notificationPreferenceStore,
+          ackStore: alertAckStore,
+          muteStore: quietHoursMuteEventStore,
+          tenant_id: req.tenant!.tenant_id,
+          alert_id: baseResult.alert_id,
+          bil_class: baseResult.bil_class,
+          target_username,
+          already_auto_acked: baseResult.auto_acked,
+          now: now(),
+        });
+        // If quiet-hours mute applied, prefer its ack_state (newer
+        // transition); otherwise keep the M8.4 result.
+        const finalAckState = quiet_hours_mute.applied
+          ? quiet_hours_mute.ack_state
+          : baseResult.ack_state;
+        return res.json(
+          wrapResponse({ ...baseResult, ack_state: finalAckState, quiet_hours_mute }, ctx),
+        );
       } catch (e) {
         if (e instanceof AutoAckError) {
           return res.status(400).json(
@@ -1495,6 +1536,95 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/alerts/quiet-hours-muted/me?since=ISO&limit=N (T6 M10.8) —
+   *  list alerts auto-muted for the calling user during their quiet
+   *  hours, newest-first. Caller is identified by X-APEX-USER. */
+  app.get(
+    '/v1/alerts/quiet-hours-muted/me',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const username =
+        typeof req.headers['x-apex-user'] === 'string'
+          ? (req.headers['x-apex-user'] as string).trim()
+          : '';
+      if (!username) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_missing_user', message: 'X-APEX-USER header required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const sinceRaw = req.query.since;
+      let since: Date | undefined;
+      if (typeof sinceRaw === 'string' && sinceRaw.trim()) {
+        const d = new Date(sinceRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_since', message: 'since must be a valid ISO timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        since = d;
+      }
+      const limitRaw = req.query.limit;
+      let limit: number | undefined;
+      if (typeof limitRaw === 'string' && limitRaw.trim()) {
+        const n = Number(limitRaw);
+        if (!Number.isInteger(n) || n <= 0 || n > 200) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_limit', message: 'limit must be 1-200', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        limit = n;
+      }
+      const items = quietHoursMuteEventStore.listForUser(
+        req.tenant!.tenant_id,
+        username,
+        since,
+        limit,
+      );
+      const total = quietHoursMuteEventStore.countForUser(req.tenant!.tenant_id, username);
+      return res.json(wrapResponse({ items, total, returned: items.length }, ctx));
+    },
+  );
+
+  /** DELETE /v1/alerts/quiet-hours-muted/me (T6 M10.8) — clear the
+   *  caller's quiet-hours-mute audit history (e.g. after the user
+   *  reviewed it). Returns the number of cleared rows. */
+  app.delete(
+    '/v1/alerts/quiet-hours-muted/me',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const username =
+        typeof req.headers['x-apex-user'] === 'string'
+          ? (req.headers['x-apex-user'] as string).trim()
+          : '';
+      if (!username) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_missing_user', message: 'X-APEX-USER header required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const cleared = quietHoursMuteEventStore.clearForUser(
+        req.tenant!.tenant_id,
+        username,
+      );
+      return res.json(wrapResponse({ cleared }, ctx));
     },
   );
 

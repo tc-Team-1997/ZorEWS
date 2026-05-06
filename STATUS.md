@@ -43,7 +43,7 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 - **M7** — A/B segmented by customer attribute (M7.5)
 - **M8** — wire M8.4 evaluate into the alert-ingest path (M8.5)
 - **M9** — apply approved actions to downstream stores (M9.4)
-- **M10** — alert acknowledgment auto-mute via M10.7 quiet hours (M10.8)
+- **M10** — ~~alert acknowledgment auto-mute via M10.7 quiet hours (M10.8)~~ shipped 2026-05-06
 - **M11** — custom dashboard builder (M11.7)
 - **M12** — schedule timezones beyond UTC (M12.4)
 - **M13** — selective-key clone (only specified keys, not full snapshot) (M13.7)
