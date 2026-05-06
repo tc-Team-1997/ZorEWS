@@ -135,6 +135,108 @@ export function validateSlaTargets(input: unknown): AdapterSlaTargets {
   return { min_success_rate, max_p95_latency_ms };
 }
 
+// ─── M14.12 — Per-tenant SLA target overrides ────────────────────────
+//
+// M14.11 hardcoded the SLA gates as PLATFORM defaults. M14.12 lets a
+// tenant persist its own targets so the dashboard doesn't need a
+// query-param override on every call. The dashboard route resolves
+// in this order:
+//
+//   1. ?min_success_rate / ?max_p95_latency_ms query param  (per-call)
+//   2. tenant override stored here                          (per-tenant)
+//   3. DEFAULT_SLA_TARGETS                                  (platform)
+//
+// Storage is in-memory + tenant-keyed, mirroring the M10.6 tenant-
+// defaults pattern used by NotificationPreferenceStore.
+
+export interface TenantSlaTargetsRecord extends AdapterSlaTargets {
+  tenant_id: string;
+  /** ISO timestamp when the override was last written. null when the
+   *  tenant has never set one (caller is reading the platform default). */
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface AdapterSlaTargetsStore {
+  /** Always returns a record. When the tenant has no override, the
+   *  fields default to the platform defaults and `updated_at` is null. */
+  get(tenant_id: string): TenantSlaTargetsRecord;
+  set(
+    tenant_id: string,
+    targets: AdapterSlaTargets,
+    updated_by: string,
+    now: Date,
+  ): TenantSlaTargetsRecord;
+  /** Reset to platform defaults (drops the override). Returns true
+   *  if a row was deleted, false if there was nothing to drop. */
+  reset(tenant_id: string): boolean;
+}
+
+export class InMemoryAdapterSlaTargetsStore implements AdapterSlaTargetsStore {
+  private readonly map = new Map<string, TenantSlaTargetsRecord>();
+
+  get(tenant_id: string): TenantSlaTargetsRecord {
+    const stored = this.map.get(tenant_id);
+    if (stored) return stored;
+    return {
+      tenant_id,
+      ...DEFAULT_SLA_TARGETS,
+      updated_at: null,
+      updated_by: null,
+    };
+  }
+
+  set(
+    tenant_id: string,
+    targets: AdapterSlaTargets,
+    updated_by: string,
+    now: Date,
+  ): TenantSlaTargetsRecord {
+    if (!tenant_id || typeof tenant_id !== 'string') {
+      throw new AdapterSlaError('invalid_input', 'tenant_id is required');
+    }
+    if (!updated_by || !updated_by.trim()) {
+      throw new AdapterSlaError('invalid_input', 'updated_by is required');
+    }
+    const next: TenantSlaTargetsRecord = {
+      tenant_id,
+      min_success_rate: targets.min_success_rate,
+      max_p95_latency_ms: targets.max_p95_latency_ms,
+      updated_at: now.toISOString(),
+      updated_by: updated_by.trim(),
+    };
+    this.map.set(tenant_id, next);
+    return next;
+  }
+
+  reset(tenant_id: string): boolean {
+    return this.map.delete(tenant_id);
+  }
+}
+
+export const defaultAdapterSlaTargetsStore: AdapterSlaTargetsStore =
+  new InMemoryAdapterSlaTargetsStore();
+
+/**
+ * Resolve which targets the dashboard should evaluate against for a
+ * given call. Priority: per-call query override > stored tenant
+ * override > platform default. The caller passes whatever subset of
+ * targets they parsed from query params (or `null` for "no override").
+ */
+export function resolveSlaTargets(
+  store: AdapterSlaTargetsStore,
+  tenant_id: string,
+  perCallOverride: Partial<AdapterSlaTargets> | null,
+): AdapterSlaTargets {
+  const stored = store.get(tenant_id);
+  return {
+    min_success_rate:
+      perCallOverride?.min_success_rate ?? stored.min_success_rate,
+    max_p95_latency_ms:
+      perCallOverride?.max_p95_latency_ms ?? stored.max_p95_latency_ms,
+  };
+}
+
 // ─── Pure aggregator ──────────────────────────────────────────────────
 
 /**

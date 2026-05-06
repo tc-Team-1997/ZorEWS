@@ -567,7 +567,11 @@ import {
   AdapterSlaError,
   DEFAULT_SLA_TARGETS,
   buildAdapterSlaDashboard,
+  defaultAdapterSlaTargetsStore,
+  resolveSlaTargets,
   validateSlaTargets,
+  type AdapterSlaTargets,
+  type AdapterSlaTargetsStore,
 } from './adapter_sla_dashboard';
 import {
   ConnectorSchemaError,
@@ -665,6 +669,8 @@ export interface AppDeps {
   notificationPreferenceStore?: NotificationPreferenceStore;
   /** Override for tests — quiet-hours mute event audit store (T6 M10.8). */
   quietHoursMuteEventStore?: QuietHoursMuteEventStore;
+  /** Override for tests — per-tenant adapter SLA targets store (T6 M14.12). */
+  adapterSlaTargetsStore?: AdapterSlaTargetsStore;
   /**
    * Override for tests — per-tenant custom scenario preset store
    * (T6 M16.4).
@@ -905,6 +911,8 @@ export function makeApp(deps: AppDeps = {}) {
     deps.notificationPreferenceStore ?? defaultNotificationPreferenceStore;
   const quietHoursMuteEventStore =
     deps.quietHoursMuteEventStore ?? defaultQuietHoursMuteEventStore;
+  const adapterSlaTargetsStore =
+    deps.adapterSlaTargetsStore ?? defaultAdapterSlaTargetsStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
@@ -10734,24 +10742,48 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
-      let targets;
-      try {
-        targets = validateSlaTargets({
-          min_success_rate: req.query.min_success_rate,
-          max_p95_latency_ms: req.query.max_p95_latency_ms,
-        });
-      } catch (e) {
-        if (e instanceof AdapterSlaError) {
+      // Build per-call override ONLY from what the caller supplied so
+      // resolveSlaTargets can fall back to the tenant store / platform
+      // default for missing fields.
+      const perCall: Partial<AdapterSlaTargets> = {};
+      if (typeof req.query.min_success_rate === 'string') {
+        const n = Number(req.query.min_success_rate);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
           return res.status(400).json(
             wrapError(
-              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'min_success_rate must be in [0, 1]',
+                severity: 'MEDIUM',
+              },
               ctx,
             ),
           );
         }
-        throw e;
+        perCall.min_success_rate = n;
+      }
+      if (typeof req.query.max_p95_latency_ms === 'string') {
+        const n = Number(req.query.max_p95_latency_ms);
+        if (!Number.isFinite(n) || n < 0 || n > 86_400_000) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'max_p95_latency_ms must be in [0, 86400000]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        perCall.max_p95_latency_ms = n;
       }
       const tenantId = req.tenant!.tenant_id;
+      const targets = resolveSlaTargets(
+        adapterSlaTargetsStore,
+        tenantId,
+        Object.keys(perCall).length === 0 ? null : perCall,
+      );
       const connectors = ingestionRegistry.list(tenantId);
       const runsByConnectorId = new Map<string, readonly ConnectorRun[]>();
       for (const c of connectors) {
@@ -10766,6 +10798,87 @@ export function makeApp(deps: AppDeps = {}) {
       // "evaluated against ... (default …)".
       void DEFAULT_SLA_TARGETS;
       return res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/adapters/sla-targets (T6 M14.12) — read the
+   *  caller's tenant SLA targets. When the tenant has no override,
+   *  returns the platform defaults with `updated_at: null`. */
+  app.get(
+    '/v1/ingestion/adapters/sla-targets',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const record = adapterSlaTargetsStore.get(req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          {
+            ...record,
+            default_targets: DEFAULT_SLA_TARGETS,
+            is_override: record.updated_at !== null,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** PUT /v1/ingestion/adapters/sla-targets (T6 M14.12) — set the
+   *  tenant override. Body { min_success_rate, max_p95_latency_ms }.
+   *  Admin-only. */
+  app.put(
+    '/v1/ingestion/adapters/sla-targets',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const updated_by =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const targets = validateSlaTargets(inner);
+        const out = adapterSlaTargetsStore.set(
+          req.tenant!.tenant_id,
+          targets,
+          updated_by,
+          now(),
+        );
+        return res.json(
+          wrapResponse(
+            { ...out, default_targets: DEFAULT_SLA_TARGETS, is_override: true },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof AdapterSlaError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/ingestion/adapters/sla-targets (T6 M14.12) — drop the
+   *  tenant override; subsequent dashboard calls fall back to the
+   *  platform defaults. Returns { reset: bool }. */
+  app.delete(
+    '/v1/ingestion/adapters/sla-targets',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const reset = adapterSlaTargetsStore.reset(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ reset }, ctx));
     },
   );
 

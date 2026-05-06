@@ -6,7 +6,9 @@ import request from 'supertest';
 import {
   AdapterSlaError,
   DEFAULT_SLA_TARGETS,
+  InMemoryAdapterSlaTargetsStore,
   buildAdapterSlaDashboard,
+  resolveSlaTargets,
   validateSlaTargets,
 } from '../src/adapter_sla_dashboard';
 import {
@@ -24,18 +26,24 @@ import { UnavailableCaseActionSink } from '../src/case_action';
 const NOW = new Date('2026-05-06T12:00:00.000Z');
 const TH_BIL = { 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' };
 
-function makeDashApp(role = 'admin', registry?: InMemoryIngestionRegistry) {
+function makeDashApp(
+  role = 'admin',
+  registry?: InMemoryIngestionRegistry,
+  targetsStore?: InMemoryAdapterSlaTargetsStore,
+) {
   const reg = registry ?? new InMemoryIngestionRegistry();
+  const ts = targetsStore ?? new InMemoryAdapterSlaTargetsStore();
   const built = makeApp({
     source: new StaticSource([]),
     evaluator: new StubEvaluator(),
     riskProfile: new StubRiskProfileSource(),
     caseAction: new UnavailableCaseActionSink(),
     ingestionRegistry: reg,
+    adapterSlaTargetsStore: ts,
     now: () => NOW,
     getRole: () => role,
   });
-  return { ...built, registry: reg };
+  return { ...built, registry: reg, targetsStore: ts };
 }
 
 // Helpers for synthesising runs at the pure-helper layer.
@@ -467,5 +475,258 @@ describe('GET /v1/ingestion/adapters/sla-dashboard (M14.11)', () => {
       SEED_CONNECTORS.length,
     );
     expect(r.body.body.fleet_summary.sla_met_count).toBe(0);
+  });
+});
+
+// ─── M14.12 — Per-tenant SLA target overrides ────────────────────────
+
+describe('InMemoryAdapterSlaTargetsStore (M14.12)', () => {
+  test('get without prior set → platform defaults + updated_at null', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    const r = s.get('BIL');
+    expect(r.tenant_id).toBe('BIL');
+    expect(r.min_success_rate).toBe(DEFAULT_SLA_TARGETS.min_success_rate);
+    expect(r.max_p95_latency_ms).toBe(DEFAULT_SLA_TARGETS.max_p95_latency_ms);
+    expect(r.updated_at).toBeNull();
+    expect(r.updated_by).toBeNull();
+  });
+
+  test('set persists and overwrites prior value', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    s.set('BIL', { min_success_rate: 0.99, max_p95_latency_ms: 5000 }, 'admin', NOW);
+    const r1 = s.get('BIL');
+    expect(r1.min_success_rate).toBe(0.99);
+    expect(r1.updated_by).toBe('admin');
+    expect(r1.updated_at).toBe(NOW.toISOString());
+    s.set('BIL', { min_success_rate: 0.9, max_p95_latency_ms: 10000 }, 'admin2', NOW);
+    const r2 = s.get('BIL');
+    expect(r2.min_success_rate).toBe(0.9);
+    expect(r2.updated_by).toBe('admin2');
+  });
+
+  test('reset returns true when an override existed, false otherwise', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    expect(s.reset('BIL')).toBe(false);
+    s.set('BIL', { min_success_rate: 0.9, max_p95_latency_ms: 5000 }, 'admin', NOW);
+    expect(s.reset('BIL')).toBe(true);
+    // After reset, get falls back to platform defaults
+    expect(s.get('BIL').updated_at).toBeNull();
+  });
+
+  test('set rejects empty updated_by', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    expect(() =>
+      s.set(
+        'BIL',
+        { min_success_rate: 0.9, max_p95_latency_ms: 5000 },
+        '   ',
+        NOW,
+      ),
+    ).toThrow(AdapterSlaError);
+  });
+
+  test('isolates tenants', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    s.set('BIL', { min_success_rate: 0.99, max_p95_latency_ms: 5000 }, 'admin', NOW);
+    expect(s.get('BIL').min_success_rate).toBe(0.99);
+    expect(s.get('BANK_DEMO').min_success_rate).toBe(
+      DEFAULT_SLA_TARGETS.min_success_rate,
+    );
+  });
+});
+
+describe('resolveSlaTargets (M14.12)', () => {
+  test('no override + no per-call → platform defaults', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    expect(resolveSlaTargets(s, 'BIL', null)).toEqual(DEFAULT_SLA_TARGETS);
+  });
+
+  test('tenant override + no per-call → tenant override', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    s.set('BIL', { min_success_rate: 0.8, max_p95_latency_ms: 60000 }, 'admin', NOW);
+    expect(resolveSlaTargets(s, 'BIL', null)).toEqual({
+      min_success_rate: 0.8,
+      max_p95_latency_ms: 60000,
+    });
+  });
+
+  test('tenant override + per-call (full) → per-call wins', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    s.set('BIL', { min_success_rate: 0.8, max_p95_latency_ms: 60000 }, 'admin', NOW);
+    expect(
+      resolveSlaTargets(s, 'BIL', {
+        min_success_rate: 0.99,
+        max_p95_latency_ms: 1000,
+      }),
+    ).toEqual({ min_success_rate: 0.99, max_p95_latency_ms: 1000 });
+  });
+
+  test('tenant override + per-call (PARTIAL) → fields merge correctly', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    s.set('BIL', { min_success_rate: 0.8, max_p95_latency_ms: 60000 }, 'admin', NOW);
+    // Per-call only overrides min_success_rate; max_p95 falls back to tenant override
+    expect(
+      resolveSlaTargets(s, 'BIL', { min_success_rate: 0.99 }),
+    ).toEqual({ min_success_rate: 0.99, max_p95_latency_ms: 60000 });
+  });
+
+  test('no tenant override + per-call (partial) → fills missing from platform default', () => {
+    const s = new InMemoryAdapterSlaTargetsStore();
+    expect(
+      resolveSlaTargets(s, 'BIL', { max_p95_latency_ms: 5000 }),
+    ).toEqual({
+      min_success_rate: DEFAULT_SLA_TARGETS.min_success_rate,
+      max_p95_latency_ms: 5000,
+    });
+  });
+});
+
+describe('GET /v1/ingestion/adapters/sla-targets (M14.12)', () => {
+  test('200 with platform defaults when no override has been set', async () => {
+    const { app } = makeDashApp('admin');
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.is_override).toBe(false);
+    expect(r.body.body.updated_at).toBeNull();
+    expect(r.body.body.min_success_rate).toBe(DEFAULT_SLA_TARGETS.min_success_rate);
+    expect(r.body.body.max_p95_latency_ms).toBe(DEFAULT_SLA_TARGETS.max_p95_latency_ms);
+    expect(r.body.body.default_targets).toEqual(DEFAULT_SLA_TARGETS);
+  });
+
+  test('200 with override after PUT', async () => {
+    const ts = new InMemoryAdapterSlaTargetsStore();
+    ts.set('BIL', { min_success_rate: 0.99, max_p95_latency_ms: 8000 }, 'jane', NOW);
+    const { app } = makeDashApp('admin', undefined, ts);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r.body.body.is_override).toBe(true);
+    expect(r.body.body.min_success_rate).toBe(0.99);
+    expect(r.body.body.updated_by).toBe('jane');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeDashApp('case_owner');
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r.status).toBe(403);
+  });
+});
+
+describe('PUT /v1/ingestion/adapters/sla-targets (M14.12)', () => {
+  test('200 persists override + stamps updated_by from X-APEX-USER', async () => {
+    const { app, targetsStore } = makeDashApp('admin');
+    const r = await request(app)
+      .put('/v1/ingestion/adapters/sla-targets')
+      .set({ ...TH_BIL, 'X-APEX-USER': 'jane.sre' })
+      .send({ min_success_rate: 0.97, max_p95_latency_ms: 15000 });
+    expect(r.status).toBe(200);
+    expect(r.body.body.min_success_rate).toBe(0.97);
+    expect(r.body.body.updated_by).toBe('jane.sre');
+    expect(r.body.body.is_override).toBe(true);
+    // Persisted in store
+    expect(targetsStore.get('BIL').min_success_rate).toBe(0.97);
+  });
+
+  test('400 on invalid min_success_rate', async () => {
+    const { app } = makeDashApp('admin');
+    const r = await request(app)
+      .put('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL)
+      .send({ min_success_rate: 1.5, max_p95_latency_ms: 10000 });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  test('non-allowed role → 403', async () => {
+    const { app } = makeDashApp('case_owner');
+    const r = await request(app)
+      .put('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL)
+      .send({ min_success_rate: 0.9, max_p95_latency_ms: 10000 });
+    expect(r.status).toBe(403);
+  });
+});
+
+describe('DELETE /v1/ingestion/adapters/sla-targets (M14.12)', () => {
+  test('200 reset=true when an override existed', async () => {
+    const ts = new InMemoryAdapterSlaTargetsStore();
+    ts.set('BIL', { min_success_rate: 0.99, max_p95_latency_ms: 8000 }, 'jane', NOW);
+    const { app } = makeDashApp('admin', undefined, ts);
+    const r = await request(app)
+      .delete('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.reset).toBe(true);
+    // Subsequent GET returns platform defaults
+    const r2 = await request(app)
+      .get('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r2.body.body.is_override).toBe(false);
+  });
+
+  test('200 reset=false when there was nothing to reset', async () => {
+    const { app } = makeDashApp('admin');
+    const r = await request(app)
+      .delete('/v1/ingestion/adapters/sla-targets')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.reset).toBe(false);
+  });
+});
+
+describe('M14.11 dashboard route honours M14.12 tenant override', () => {
+  test('stored override is used when no query params are passed', async () => {
+    // Set tenant override that's MORE permissive than the default —
+    // a connector with all-success runs at 50ms latency would meet
+    // both the default (0.95 / 30000) and the override (0.5 / 60000).
+    // Verify the dashboard echoes the OVERRIDE in the targets field.
+    const ts = new InMemoryAdapterSlaTargetsStore();
+    ts.set('BIL', { min_success_rate: 0.5, max_p95_latency_ms: 60000 }, 'admin', NOW);
+    const reg = new InMemoryIngestionRegistry();
+    reg.runNow('BIL', SEED_CONNECTORS[0]!.id, 'scheduler', NOW);
+    const { app } = makeDashApp('admin', reg, ts);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-dashboard')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.targets).toEqual({
+      min_success_rate: 0.5,
+      max_p95_latency_ms: 60000,
+    });
+  });
+
+  test('query param overrides the stored tenant override', async () => {
+    const ts = new InMemoryAdapterSlaTargetsStore();
+    ts.set('BIL', { min_success_rate: 0.5, max_p95_latency_ms: 60000 }, 'admin', NOW);
+    const { app } = makeDashApp('admin', undefined, ts);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-dashboard?min_success_rate=0.99')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    // min_success_rate from query (0.99); max_p95_latency_ms still from store (60000)
+    expect(r.body.body.targets).toEqual({
+      min_success_rate: 0.99,
+      max_p95_latency_ms: 60000,
+    });
+  });
+
+  test('per-tenant store survives across calls (no shared singleton leak)', async () => {
+    const ts = new InMemoryAdapterSlaTargetsStore();
+    ts.set('BIL', { min_success_rate: 0.7, max_p95_latency_ms: 12345 }, 'admin', NOW);
+    const { app } = makeDashApp('admin', undefined, ts);
+    // BIL → 0.7 / 12345
+    const a = await request(app)
+      .get('/v1/ingestion/adapters/sla-dashboard')
+      .set(TH_BIL);
+    expect(a.body.body.targets.min_success_rate).toBe(0.7);
+    // BANK_DEMO → platform defaults (no override)
+    const b = await request(app)
+      .get('/v1/ingestion/adapters/sla-dashboard')
+      .set({ ...TH_BIL, 'X-Tenant-ID': 'BANK_DEMO' });
+    expect(b.body.body.targets).toEqual(DEFAULT_SLA_TARGETS);
   });
 });
