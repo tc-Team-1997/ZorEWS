@@ -201,6 +201,16 @@ import {
   type EwsRuleStore,
 } from './ews_rules';
 import {
+  SEMVER_INITIAL,
+  approveWithFourEyes,
+  buildCloneInput,
+  defaultEwsRuleVersionsStore,
+  diffRuleSnapshots,
+  isSemver,
+  rejectWithFourEyes,
+  type EwsRuleVersionsStore,
+} from './ews_rules_versions';
+import {
   EWS_INDICATOR_CATALOG,
   type EwsIndicator,
 } from './ews_indicators';
@@ -667,6 +677,8 @@ export interface AppDeps {
   modelPerformanceStore?: ModelPerformanceStore;
   /** Override for tests — per-tenant EWS rules store (EWS-2). */
   ewsRuleStore?: EwsRuleStore;
+  /** Override for tests — versions + approvals ledger (RP-1). */
+  ewsRuleVersionsStore?: EwsRuleVersionsStore;
   /** Override for tests — per-tenant CMS case store (CMS-2). */
   cmsCaseStore?: CmsCaseStore;
   /** Override for tests — per-tenant assignee pool (CMS-4). */
@@ -907,6 +919,7 @@ export function makeApp(deps: AppDeps = {}) {
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
+  const ewsRuleVersionsStore = deps.ewsRuleVersionsStore ?? defaultEwsRuleVersionsStore;
   const cmsCaseStore = deps.cmsCaseStore ?? defaultCmsCaseStore;
   const cmsAssigneePoolStore = deps.cmsAssigneePoolStore ?? defaultAssigneePoolStore;
   const copilotAuditStore = deps.copilotAuditStore ?? defaultCopilotAuditStore;
@@ -12387,6 +12400,390 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const items = ewsRuleStore.listExecutionsForRule(req.tenant!.tenant_id, id, limit);
       return res.json(wrapResponse({ items, total: items.length, rule_id: id }, ctx));
+    },
+  );
+
+  // ── EWS Rules-Plus — versions + clone + approve/reject (RP-1) ────────
+  //
+  // Layered ON TOP of the EWS-1..5 rules engine. Existing /create,
+  // /update, /transition, /activate, /:id/test, /:id/hits routes stay
+  // UNTOUCHED. Six new routes:
+  //   POST   /v1/ews/rules/:rule_id/clone
+  //   POST   /v1/ews/rules/:rule_id/approve
+  //   POST   /v1/ews/rules/:rule_id/reject
+  //   GET    /v1/ews/rules/:rule_id/versions
+  //   GET    /v1/ews/rules/:rule_id/versions/:semver
+  //   POST   /v1/ews/rules/:rule_id/versions/diff
+
+  function rulesPlusErr(
+    e: unknown,
+    ctx: ReturnType<typeof extractCtx>,
+  ): { status: number; body: ReturnType<typeof wrapError> } {
+    if (e instanceof EwsRuleError) {
+      const status =
+        e.code === 'unknown_rule' ? 404 :
+        e.code === 'self_approval_refused' ? 403 :
+        e.code === 'duplicate_rule_id' || e.code === 'duplicate_semver' ||
+          e.code === 'cap_reached' || e.code === 'no_pending_approval' ||
+          e.code === 'illegal_state' || e.code === 'illegal_transition' ? 409 :
+        400;
+      const httpCode =
+        status === 404 ? `EWS_404_${e.code}` :
+        status === 403 ? `EWS_403_${e.code}` :
+        status === 409 ? `EWS_409_${e.code}` :
+        `EWS_400_${e.code}`;
+      return {
+        status,
+        body: wrapError(
+          { code: httpCode, message: e.message, severity: status >= 500 ? 'HIGH' : 'MEDIUM' },
+          ctx,
+        ),
+      };
+    }
+    throw e;
+  }
+
+  /** POST /v1/ews/rules/:rule_id/clone (RP-1)
+   *  body { new_rule_id, new_name? } → 201 fresh DRAFT v0.1.0. */
+  app.post(
+    '/v1/ews/rules/:rule_id/clone',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const created_by = ewsApexUser(req);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { new_rule_id?: unknown; new_name?: unknown };
+      if (typeof w.new_rule_id !== 'string') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'new_rule_id required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const source = ewsRuleStore.get(tenant_id, id);
+      if (!source) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const input = buildCloneInput(source, {
+          new_rule_id: w.new_rule_id,
+          new_name: typeof w.new_name === 'string' ? w.new_name : undefined,
+        });
+        const created = ewsRuleStore.create(tenant_id, input, created_by, now());
+        // Snapshot v0.1.0
+        ewsRuleVersionsStore.recordVersion({
+          tenant_id,
+          rule: created,
+          semver: SEMVER_INITIAL,
+          created_by,
+          reason: `cloned from ${id} (${source.name})`,
+          now: now(),
+        });
+        try {
+          auditTrailStore.record(
+            tenant_id,
+            {
+              actor_username: created_by,
+              actor_role: 'admin',
+              action: 'rule.create',
+              resource_type: 'rule',
+              resource_id: created.rule_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { cloned_from: id, semver: SEMVER_INITIAL },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.status(201).json(
+          wrapResponse({ rule: created, semver: SEMVER_INITIAL, cloned_from: id }, ctx),
+        );
+      } catch (e) {
+        const r = rulesPlusErr(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/submit (RP-1, additive)
+   *  body { reason? } → 200 with rule (PENDING_REVIEW). Records the
+   *  maker so /approve can refuse self-approval. */
+  app.post(
+    '/v1/ews/rules/:rule_id/submit',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const maker = ewsApexUser(req);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      try {
+        // Resubmit-safe: only call the state transition if the rule
+        // is currently in DRAFT. If it's already in PENDING_REVIEW
+        // (e.g. previously rejected, maker resubmitting), skip the
+        // state machine call but still record a fresh approval row.
+        const cur = ewsRuleStore.get(tenant_id, id);
+        if (!cur) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        const rule =
+          cur.state === 'draft' ? ewsRuleStore.submit(tenant_id, id, now()) : cur;
+        const approval = ewsRuleVersionsStore.recordSubmission({
+          tenant_id,
+          rule_id: id,
+          maker_username: maker,
+          reason: typeof w.reason === 'string' ? w.reason : null,
+          now: now(),
+        });
+        return res.json(wrapResponse({ rule, approval }, ctx));
+      } catch (e) {
+        const r = rulesPlusErr(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/approve (RP-1)
+   *  4-eyes activate. Refuses if approver === maker. */
+  app.post(
+    '/v1/ews/rules/:rule_id/approve',
+    requireTenantMw,
+    requireRole('rules:retire'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const approver = ewsApexUser(req);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      try {
+        const out = approveWithFourEyes(ewsRuleStore, ewsRuleVersionsStore, {
+          tenant_id,
+          rule_id: id,
+          approver_username: approver,
+          reason: typeof w.reason === 'string' ? w.reason : null,
+          now: now(),
+        });
+        try {
+          auditTrailStore.record(
+            tenant_id,
+            {
+              actor_username: approver,
+              actor_role: 'admin',
+              action: 'rule.activate',
+              resource_type: 'rule',
+              resource_id: id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { via: 'four_eyes_approve', maker: out.approval.maker_username },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const r = rulesPlusErr(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/reject (RP-1)
+   *  4-eyes reject. body { reason } required. */
+  app.post(
+    '/v1/ews/rules/:rule_id/reject',
+    requireTenantMw,
+    requireRole('rules:retire'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const approver = ewsApexUser(req);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      if (typeof w.reason !== 'string' || !w.reason.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'reason required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const out = rejectWithFourEyes(ewsRuleStore, ewsRuleVersionsStore, {
+          tenant_id,
+          rule_id: id,
+          approver_username: approver,
+          reason: w.reason,
+          now: now(),
+        });
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const r = rulesPlusErr(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
+  /** GET /v1/ews/rules/:rule_id/versions — list snapshots (newest first). */
+  app.get(
+    '/v1/ews/rules/:rule_id/versions',
+    requireTenantMw,
+    requireRole('rules:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const cur = ewsRuleStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = ewsRuleVersionsStore.listVersions(req.tenant!.tenant_id, id);
+      const latest = ewsRuleVersionsStore.latestSemver(req.tenant!.tenant_id, id);
+      return res.json(
+        wrapResponse({ items, total: items.length, rule_id: id, latest_semver: latest }, ctx),
+      );
+    },
+  );
+
+  /** GET /v1/ews/rules/:rule_id/versions/:semver — single snapshot. */
+  app.get(
+    '/v1/ews/rules/:rule_id/versions/:semver',
+    requireTenantMw,
+    requireRole('rules:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const semver = req.params.semver ?? '';
+      if (!isSemver(semver)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `bad semver: ${semver}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const v = ewsRuleVersionsStore.getVersion(req.tenant!.tenant_id, id, semver);
+      if (!v) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_version', message: `version ${semver} not found for rule ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(v, ctx));
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/versions/diff
+   *  body { from, to } → field-by-field diff. */
+  app.post(
+    '/v1/ews/rules/:rule_id/versions/diff',
+    requireTenantMw,
+    requireRole('rules:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { from?: unknown; to?: unknown };
+      if (!isSemver(w.from) || !isSemver(w.to)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'from + to must be SemVer (X.Y.Z)', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const tenant_id = req.tenant!.tenant_id;
+      const A = ewsRuleVersionsStore.getVersion(tenant_id, id, w.from);
+      const B = ewsRuleVersionsStore.getVersion(tenant_id, id, w.to);
+      if (!A || !B) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_version',
+              message: `version ${A ? w.to : w.from} not found for rule ${id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const diff = diffRuleSnapshots(A.snapshot, B.snapshot);
+      return res.json(
+        wrapResponse(
+          { rule_id: id, from: w.from, to: w.to, diff, change_count: diff.length },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ews/rules/:rule_id/approvals — full approval ledger. */
+  app.get(
+    '/v1/ews/rules/:rule_id/approvals',
+    requireTenantMw,
+    requireRole('rules:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const cur = ewsRuleStore.get(req.tenant!.tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = ewsRuleVersionsStore.listApprovals(req.tenant!.tenant_id, id);
+      const pending = ewsRuleVersionsStore.pendingApproval(req.tenant!.tenant_id, id);
+      return res.json(wrapResponse({ items, total: items.length, pending }, ctx));
     },
   );
 
