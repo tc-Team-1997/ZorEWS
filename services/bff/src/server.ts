@@ -10,6 +10,7 @@
 // partners (mobile, CBS adapters, regulators) call; /api is what the SPA's
 // MSW currently fakes.
 
+import { randomUUID } from 'node:crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import { dedupeByAlertId, mapAlertList } from './mapping';
 import { makeAlertSource, type AlertSource } from './source';
@@ -567,9 +568,12 @@ import {
   AdapterSlaError,
   DEFAULT_SLA_TARGETS,
   buildAdapterSlaDashboard,
+  defaultAdapterSlaBreachEventStore,
   defaultAdapterSlaTargetsStore,
+  recordBreachEvents,
   resolveSlaTargets,
   validateSlaTargets,
+  type AdapterSlaBreachEventStore,
   type AdapterSlaTargets,
   type AdapterSlaTargetsStore,
 } from './adapter_sla_dashboard';
@@ -671,6 +675,8 @@ export interface AppDeps {
   quietHoursMuteEventStore?: QuietHoursMuteEventStore;
   /** Override for tests — per-tenant adapter SLA targets store (T6 M14.12). */
   adapterSlaTargetsStore?: AdapterSlaTargetsStore;
+  /** Override for tests — per-tenant adapter SLA breach audit store (T6 M14.13). */
+  adapterSlaBreachEventStore?: AdapterSlaBreachEventStore;
   /**
    * Override for tests — per-tenant custom scenario preset store
    * (T6 M16.4).
@@ -913,6 +919,8 @@ export function makeApp(deps: AppDeps = {}) {
     deps.quietHoursMuteEventStore ?? defaultQuietHoursMuteEventStore;
   const adapterSlaTargetsStore =
     deps.adapterSlaTargetsStore ?? defaultAdapterSlaTargetsStore;
+  const adapterSlaBreachEventStore =
+    deps.adapterSlaBreachEventStore ?? defaultAdapterSlaBreachEventStore;
   const customPresetStore = deps.customPresetStore ?? defaultCustomPresetStore;
   const customWeightPresetStore = deps.customWeightPresetStore ?? defaultCustomWeightPresetStore;
   const schemaOverrideStore = deps.schemaOverrideStore ?? defaultSchemaOverrideStore;
@@ -10879,6 +10887,156 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const reset = adapterSlaTargetsStore.reset(req.tenant!.tenant_id);
       return res.json(wrapResponse({ reset }, ctx));
+    },
+  );
+
+  /** POST /v1/ingestion/adapters/sla-snapshot (T6 M14.13) — observe
+   *  the current dashboard + record one event per breached row to the
+   *  audit store. Returns the dashboard plus the freshly-recorded
+   *  event list so the operator can see exactly what was logged.
+   *
+   *  Use case: cron-trigger every 5 minutes to build a breach
+   *  history operators can replay later. Manual button in the SPA
+   *  also fires this on demand.
+   *
+   *  Same query params as `/sla-dashboard` (window + per-call target
+   *  overrides apply identically). */
+  app.post(
+    '/v1/ingestion/adapters/sla-snapshot',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? RUN_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > RUN_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${RUN_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const perCall: Partial<AdapterSlaTargets> = {};
+      if (typeof req.query.min_success_rate === 'string') {
+        const n = Number(req.query.min_success_rate);
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'min_success_rate must be in [0, 1]', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        perCall.min_success_rate = n;
+      }
+      if (typeof req.query.max_p95_latency_ms === 'string') {
+        const n = Number(req.query.max_p95_latency_ms);
+        if (!Number.isFinite(n) || n < 0 || n > 86_400_000) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'max_p95_latency_ms must be in [0, 86400000]', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        perCall.max_p95_latency_ms = n;
+      }
+      const tenantId = req.tenant!.tenant_id;
+      const targets = resolveSlaTargets(
+        adapterSlaTargetsStore,
+        tenantId,
+        Object.keys(perCall).length === 0 ? null : perCall,
+      );
+      const connectors = ingestionRegistry.list(tenantId);
+      const runsByConnectorId = new Map<string, readonly ConnectorRun[]>();
+      for (const c of connectors) {
+        runsByConnectorId.set(c.id, ingestionRegistry.listRuns(tenantId, c.id, window));
+      }
+      const dashboard = buildAdapterSlaDashboard(connectors, runsByConnectorId, targets, {
+        window,
+        now: now(),
+      });
+      const recorded = recordBreachEvents(
+        adapterSlaBreachEventStore,
+        dashboard,
+        tenantId,
+        now(),
+        randomUUID,
+      );
+      return res.json(
+        wrapResponse(
+          { dashboard, recorded_events: recorded, recorded_count: recorded.length },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ingestion/adapters/sla-breaches?since=ISO&limit=N (T6 M14.13)
+   *  — list recorded breach events newest-first. */
+  app.get(
+    '/v1/ingestion/adapters/sla-breaches',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sinceRaw = req.query.since;
+      let since: Date | undefined;
+      if (typeof sinceRaw === 'string' && sinceRaw.trim()) {
+        const d = new Date(sinceRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_since', message: 'since must be a valid ISO timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        since = d;
+      }
+      const limitRaw = req.query.limit;
+      let limit: number | undefined;
+      if (typeof limitRaw === 'string' && limitRaw.trim()) {
+        const n = Number(limitRaw);
+        if (!Number.isInteger(n) || n <= 0 || n > 200) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_limit', message: 'limit must be 1-200', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        limit = n;
+      }
+      const tenantId = req.tenant!.tenant_id;
+      const items = adapterSlaBreachEventStore.list(tenantId, since, limit);
+      const total = adapterSlaBreachEventStore.count(tenantId);
+      return res.json(
+        wrapResponse({ items, total, returned: items.length }, ctx),
+      );
+    },
+  );
+
+  /** DELETE /v1/ingestion/adapters/sla-breaches (T6 M14.13) — wipe the
+   *  tenant's audit history. Returns { cleared: N }. */
+  app.delete(
+    '/v1/ingestion/adapters/sla-breaches',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cleared = adapterSlaBreachEventStore.clear(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ cleared }, ctx));
     },
   );
 

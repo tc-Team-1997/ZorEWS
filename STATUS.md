@@ -47,7 +47,7 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 - **M11** — custom dashboard builder (M11.7)
 - **M12** — schedule timezones beyond UTC (M12.4)
 - **M13** — ~~selective-key clone (only specified keys, not full snapshot) (M13.7)~~ shipped 2026-05-06
-- **M14** — wider field-officer mobile surface (M14.10); ~~per-adapter SLA dashboards (M14.11)~~ shipped 2026-05-06; ~~per-tenant SLA target overrides (M14.12)~~ shipped 2026-05-06
+- **M14** — wider field-officer mobile surface (M14.10); ~~per-adapter SLA dashboards (M14.11)~~ shipped 2026-05-06; ~~per-tenant SLA target overrides (M14.12)~~ shipped 2026-05-06; ~~SLA breach event log (M14.13)~~ shipped 2026-05-06
 - **M15** — PDF/Excel evidence export (M15.4)
 - **M16** — preset versioning + restore (M16.10); ~~version diff (M16.11)~~ shipped 2026-05-06
 

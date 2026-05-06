@@ -217,6 +217,128 @@ export class InMemoryAdapterSlaTargetsStore implements AdapterSlaTargetsStore {
 export const defaultAdapterSlaTargetsStore: AdapterSlaTargetsStore =
   new InMemoryAdapterSlaTargetsStore();
 
+// ─── M14.13 — SLA breach event log ───────────────────────────────────
+//
+// Audit history of SLA breaches over time. The dashboard route (M14.11)
+// gives a point-in-time view; M14.13 lets an operator answer "when did
+// we breach yesterday?" by snapshotting the dashboard at intervals
+// (cron / manual button-press) and persisting one event per breached
+// row.
+//
+// Storage is in-memory + FIFO-capped at 200 events per tenant
+// (mirrors the M10.8 quiet-hours-mute audit store). Each event is a
+// single point-in-time observation; correlating across events into
+// "breach windows" is left to the SPA / a future analytics module.
+
+export interface AdapterSlaBreachEvent {
+  /** Globally-unique id (uuid). */
+  event_id: string;
+  tenant_id: string;
+  connector_id: string;
+  connector_name: string;
+  source_system: string;
+  /** ISO when the snapshot fired. */
+  observed_at: string;
+  sla_breaches: SlaBreachReason[];
+  /** Echo of the row's metrics at observation time. */
+  success_rate: number | null;
+  p95_latency_ms: number | null;
+  /** Echo of the targets used to evaluate the breach. */
+  sla_targets: AdapterSlaTargets;
+}
+
+export interface AdapterSlaBreachEventStore {
+  record(e: AdapterSlaBreachEvent): void;
+  /** Newest-first; optional `since` filter on `observed_at`. */
+  list(
+    tenant_id: string,
+    since?: Date,
+    limit?: number,
+  ): readonly AdapterSlaBreachEvent[];
+  count(tenant_id: string): number;
+  /** Wipe a tenant's history. Returns the number of rows cleared. */
+  clear(tenant_id: string): number;
+}
+
+export const ADAPTER_SLA_BREACH_EVENT_CAP = 200;
+
+export class InMemoryAdapterSlaBreachEventStore
+  implements AdapterSlaBreachEventStore
+{
+  private readonly map = new Map<string, AdapterSlaBreachEvent[]>();
+
+  record(e: AdapterSlaBreachEvent): void {
+    const arr = this.map.get(e.tenant_id) ?? [];
+    arr.push(e);
+    while (arr.length > ADAPTER_SLA_BREACH_EVENT_CAP) arr.shift();
+    this.map.set(e.tenant_id, arr);
+  }
+
+  list(
+    tenant_id: string,
+    since?: Date,
+    limit?: number,
+  ): readonly AdapterSlaBreachEvent[] {
+    const arr = this.map.get(tenant_id) ?? [];
+    const filtered = since
+      ? arr.filter((e) => new Date(e.observed_at).getTime() >= since.getTime())
+      : arr;
+    const newestFirst = [...filtered].reverse();
+    return typeof limit === 'number' && limit > 0
+      ? newestFirst.slice(0, limit)
+      : newestFirst;
+  }
+
+  count(tenant_id: string): number {
+    return this.map.get(tenant_id)?.length ?? 0;
+  }
+
+  clear(tenant_id: string): number {
+    const n = this.map.get(tenant_id)?.length ?? 0;
+    this.map.delete(tenant_id);
+    return n;
+  }
+}
+
+export const defaultAdapterSlaBreachEventStore: AdapterSlaBreachEventStore =
+  new InMemoryAdapterSlaBreachEventStore();
+
+/**
+ * Walk a dashboard result and push one event per breached row to the
+ * store. Returns the events that were recorded so the caller can
+ * surface them in the response. Pure-side-effect; idempotent only in
+ * the sense that you'll get one new row per call (de-dup is the
+ * caller's job — typically not needed since snapshots fire on a
+ * cadence, not on every dashboard read).
+ */
+export function recordBreachEvents(
+  store: AdapterSlaBreachEventStore,
+  dashboard: AdapterSlaDashboard,
+  tenant_id: string,
+  now: Date,
+  uuid: () => string,
+): AdapterSlaBreachEvent[] {
+  const out: AdapterSlaBreachEvent[] = [];
+  for (const row of dashboard.per_adapter) {
+    if (row.sla_status !== 'breached') continue;
+    const event: AdapterSlaBreachEvent = {
+      event_id: uuid(),
+      tenant_id,
+      connector_id: row.connector_id,
+      connector_name: row.name,
+      source_system: row.source_system,
+      observed_at: now.toISOString(),
+      sla_breaches: [...row.sla_breaches],
+      success_rate: row.success_rate,
+      p95_latency_ms: row.p95_latency_ms,
+      sla_targets: row.sla_targets,
+    };
+    store.record(event);
+    out.push(event);
+  }
+  return out;
+}
+
 /**
  * Resolve which targets the dashboard should evaluate against for a
  * given call. Priority: per-call query override > stored tenant
