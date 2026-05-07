@@ -1,0 +1,542 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — User Access Override Admin API
+  version: "1.0.0"
+  description: |
+    Per-user EWS access override layered on top of role-based access.
+    Maps to BAC A Bank EWS User Manual v1.0 §3.1.6 (Admin) + §3.1.7 (Security Admin).
+
+    All routes:
+    - require the EWS request envelope headers (X-Tenant-ID, X-Channel, X-Source-System)
+    - return the standard EWS response envelope `{ header, body }`
+    - audit-log every write via `app_admin.admin_audit_log` with hash-chain fan-out
+
+servers:
+  - url: /v1/admin
+    description: Mounted on the BFF service (default port 8084)
+
+# ───────────────────────── shared components ─────────────────────────
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      in: header
+      name: X-Tenant-ID
+      required: true
+      schema: { type: string, example: BANK_DEMO }
+    Channel:
+      in: header
+      name: X-Channel
+      required: true
+      schema:
+        type: string
+        enum: [LOS, MOBILE, BRANCH, API, AGENT_PORTAL]
+    SourceSystem:
+      in: header
+      name: X-Source-System
+      required: true
+      schema: { type: string, example: apex-ews-spa }
+
+  schemas:
+    ResponseHeader:
+      type: object
+      required: [status, code, message, requestId, timestamp]
+      properties:
+        status: { type: string, enum: [SUCCESS, FAILURE] }
+        code: { type: string, example: EWS_200 }
+        message: { type: string, example: "Processed Successfully" }
+        requestId: { type: string, format: uuid }
+        timestamp: { type: string, format: date-time }
+    ErrorEnvelope:
+      type: object
+      required: [header, error]
+      properties:
+        header: { $ref: "#/components/schemas/ResponseHeader" }
+        error:
+          type: object
+          required: [code, message, severity]
+          properties:
+            code: { type: string, example: EWS_400_invalid_input }
+            message: { type: string }
+            severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    SuccessEnvelope:
+      type: object
+      required: [header, body]
+      properties:
+        header: { $ref: "#/components/schemas/ResponseHeader" }
+        body: { type: object }
+
+    OverrideStatus:
+      type: string
+      enum: [PENDING_APPROVAL, ACTIVE, REJECTED, REVOKED, EXPIRED]
+    OverrideType:
+      type: string
+      enum: [GRANT, REVOKE]
+    PermissionType:
+      type: string
+      enum: [VIEW, EDIT, APPROVE, FULL]
+    ModulePath:
+      type: string
+      description: Server-allowlisted SPA module identifier
+      enum:
+        - dashboard
+        - alerts
+        - alerts.detail
+        - customers
+        - customers.detail
+        - rules
+        - rules.detail
+        - rules.builder
+        - rules.ews
+        - cases
+        - cases.detail
+        - cases.cms
+        - cases.cms.detail
+        - scenarios
+        - scenarios.detail
+        - reports
+        - reports.snapshot
+        - reports.alerts
+        - reports.cases
+        - reports.rbi
+        - integrations.health
+        - admin.users
+        - admin.audit-log
+        - admin.integrations
+        - admin.webhooks
+        - admin.tenants
+        - admin.user-access-override
+        - profile.sessions
+        - profile.activity
+
+    UserAccessOverride:
+      type: object
+      required:
+        - override_id
+        - tenant_id
+        - user_id
+        - module_path
+        - override_type
+        - permission_type
+        - effective_from
+        - reason
+        - requires_approval
+        - status
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        override_id: { type: string, format: uuid }
+        tenant_id: { type: string }
+        user_id: { type: string, example: u-002 }
+        module_path: { $ref: "#/components/schemas/ModulePath" }
+        override_type: { $ref: "#/components/schemas/OverrideType" }
+        permission_type: { $ref: "#/components/schemas/PermissionType" }
+        effective_from: { type: string, format: date-time }
+        effective_till: { type: string, format: date-time, nullable: true }
+        reason: { type: string, minLength: 10 }
+        requires_approval: { type: boolean }
+        status: { $ref: "#/components/schemas/OverrideStatus" }
+        created_by: { type: string }
+        approved_by: { type: string, nullable: true }
+        rejected_by: { type: string, nullable: true }
+        revoked_by: { type: string, nullable: true }
+        rejection_reason: { type: string, nullable: true }
+        revocation_reason: { type: string, nullable: true }
+        approval_note: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        approved_at: { type: string, format: date-time, nullable: true }
+        rejected_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+
+    CreateOverrideInput:
+      type: object
+      required:
+        - user_id
+        - module_paths
+        - override_type
+        - permission_type
+        - effective_from
+        - reason
+      properties:
+        user_id: { type: string }
+        module_paths:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ModulePath" }
+        override_type: { $ref: "#/components/schemas/OverrideType" }
+        permission_type: { $ref: "#/components/schemas/PermissionType" }
+        effective_from: { type: string, format: date-time }
+        effective_till: { type: string, format: date-time, nullable: true }
+        reason: { type: string, minLength: 10 }
+        requires_approval: { type: boolean, default: true }
+
+    UpdateOverrideInput:
+      type: object
+      properties:
+        module_paths:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ModulePath" }
+        override_type: { $ref: "#/components/schemas/OverrideType" }
+        permission_type: { $ref: "#/components/schemas/PermissionType" }
+        effective_from: { type: string, format: date-time }
+        effective_till: { type: string, format: date-time, nullable: true }
+        reason: { type: string, minLength: 10 }
+
+    ListOverridesResponseBody:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/UserAccessOverride" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+
+    EffectiveAccess:
+      type: object
+      required: [user_id, computed_at, role_access, overrides_applied, effective]
+      properties:
+        user_id: { type: string }
+        computed_at: { type: string, format: date-time }
+        role_access:
+          type: object
+          properties:
+            roles: { type: array, items: { type: string } }
+            modules:
+              type: array
+              items:
+                type: object
+                properties:
+                  module_path: { $ref: "#/components/schemas/ModulePath" }
+                  permissions:
+                    type: array
+                    items: { $ref: "#/components/schemas/PermissionType" }
+                  source: { type: string, example: role }
+        overrides_applied:
+          type: array
+          items: { $ref: "#/components/schemas/UserAccessOverride" }
+        effective:
+          type: array
+          items:
+            type: object
+            properties:
+              module_path: { $ref: "#/components/schemas/ModulePath" }
+              permissions:
+                type: array
+                items: { $ref: "#/components/schemas/PermissionType" }
+              source:
+                type: string
+                description: |
+                  'role' | 'override:<id>' | 'role,override:<id1>,override:<id2>'
+                  — comma-separated audit chain of where each module's
+                  permission set came from.
+
+    AdminAuditLogRow:
+      type: object
+      required: [audit_id, tenant_id, entity_type, entity_id, action, actor_id, actor_role, created_at]
+      properties:
+        audit_id: { type: string, format: uuid }
+        tenant_id: { type: string }
+        entity_type: { type: string, enum: [user_access_override] }
+        entity_id: { type: string }
+        action: { type: string, enum: [create, update, approve, reject, revoke, expire] }
+        actor_id: { type: string }
+        actor_role: { type: string }
+        before_state: { type: object, nullable: true }
+        after_state: { type: object, nullable: true }
+        reason: { type: string, nullable: true }
+        request_id: { type: string, nullable: true }
+        ip_address: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+  responses:
+    BadRequest:
+      description: Invalid input
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+    Forbidden:
+      description: Self-approval blocked or RBAC denied
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+    NotFound:
+      description: Override or user not found
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+    Conflict:
+      description: Invalid state transition or duplicate active override
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+
+security:
+  - bearer: []
+
+# ───────────────────────────── paths ─────────────────────────────────
+
+paths:
+  /user-access-overrides:
+    get:
+      summary: List overrides
+      operationId: listUserAccessOverrides
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+        - { in: query, name: user_id,      schema: { type: string } }
+        - { in: query, name: status,       schema: { type: string }, description: "Comma-separated subset of OverrideStatus" }
+        - { in: query, name: module_path,  schema: { $ref: "#/components/schemas/ModulePath" } }
+        - { in: query, name: created_from, schema: { type: string, format: date-time } }
+        - { in: query, name: created_to,   schema: { type: string, format: date-time } }
+        - { in: query, name: page,         schema: { type: integer, default: 1 } }
+        - { in: query, name: page_size,    schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/ListOverridesResponseBody" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      summary: Create override(s) — fans out one row per module_path
+      operationId: createUserAccessOverride
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateOverrideInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body:
+                        type: object
+                        properties:
+                          overrides:
+                            type: array
+                            items: { $ref: "#/components/schemas/UserAccessOverride" }
+                          created: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /user-access-overrides/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/Channel"
+      - $ref: "#/components/parameters/SourceSystem"
+    get:
+      summary: Get a single override
+      operationId: getUserAccessOverride
+      responses:
+        "200":
+          description: Override
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/UserAccessOverride" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Edit a PENDING_APPROVAL override
+      operationId: updateUserAccessOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateOverrideInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/UserAccessOverride" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Not editable in current status
+          content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+
+  /user-access-overrides/{id}/approve:
+    post:
+      summary: Approve a PENDING_APPROVAL override (different admin from creator)
+      operationId: approveUserAccessOverride
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approval_note: { type: string }
+      responses:
+        "200":
+          description: Now ACTIVE
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/UserAccessOverride" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /user-access-overrides/{id}/reject:
+    post:
+      summary: Reject a PENDING_APPROVAL override
+      operationId: rejectUserAccessOverride
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rejection_reason]
+              properties:
+                rejection_reason: { type: string, minLength: 10 }
+      responses:
+        "200":
+          description: REJECTED
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/UserAccessOverride" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /user-access-overrides/{id}/revoke:
+    post:
+      summary: Revoke an ACTIVE override
+      operationId: revokeUserAccessOverride
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revocation_reason]
+              properties:
+                revocation_reason: { type: string, minLength: 10 }
+      responses:
+        "200":
+          description: REVOKED
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/UserAccessOverride" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/{user_id}/effective-access:
+    get:
+      summary: Effective access for one user (role ∪ grants − revokes)
+      operationId: getEffectiveAccess
+      parameters:
+        - { in: path, name: user_id, required: true, schema: { type: string } }
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+      responses:
+        "200":
+          description: Effective access
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body: { $ref: "#/components/schemas/EffectiveAccess" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /admin-audit-log:
+    get:
+      summary: List admin audit-log entries
+      operationId: listAdminAuditLog
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+        - { in: query, name: entity_id, schema: { type: string } }
+        - { in: query, name: actor_id,  schema: { type: string } }
+        - { in: query, name: from,      schema: { type: string, format: date-time } }
+        - { in: query, name: to,        schema: { type: string, format: date-time } }
+        - { in: query, name: page,      schema: { type: integer, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: Audit log
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      body:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/AdminAuditLogRow" }
+                          total: { type: integer }
+                          page: { type: integer }
+                          page_size: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }

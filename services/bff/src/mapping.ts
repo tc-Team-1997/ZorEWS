@@ -172,9 +172,17 @@ export function mapAlertList(
 
   const sort = filters.sort ?? 'criticality';
   rows.sort((a, b) => {
-    if (sort === 'criticality') return b.criticality_score - a.criticality_score;
-    if (sort === 'severity') return SEVERITY_WEIGHT[b.severity] - SEVERITY_WEIGHT[a.severity];
-    return b.age_min - a.age_min; // age — oldest first
+    let primary = 0;
+    if (sort === 'criticality') primary = b.criticality_score - a.criticality_score;
+    else if (sort === 'severity') primary = SEVERITY_WEIGHT[b.severity] - SEVERITY_WEIGHT[a.severity];
+    else primary = b.age_min - a.age_min; // age — oldest first
+    if (primary !== 0) return primary;
+    // Deterministic tiebreakers so equal-score alerts return in a
+    // stable order across reloads:
+    //   1. newest first by created_at
+    //   2. ascending id (string compare)
+    if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+    return a.id.localeCompare(b.id);
   });
   return rows;
 }

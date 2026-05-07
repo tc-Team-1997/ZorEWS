@@ -57,6 +57,12 @@
 
     "audit:read":                   ["admin", "supervisor"],
     "webhooks:manage":              ["admin"],
-    "copilot:use":                  ["admin", "risk_analyst", "supervisor"]
+    "copilot:use":                  ["admin", "risk_analyst", "supervisor"],
+
+    "admin:user_access_override:list":    ["admin", "supervisor"],
+    "admin:user_access_override:create":  ["admin"],
+    "admin:user_access_override:approve": ["admin"],
+    "admin:user_access_override:revoke":  ["admin"],
+    "admin:user_access_override:audit":   ["admin", "supervisor"]
   }
 }

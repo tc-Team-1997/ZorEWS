@@ -618,6 +618,43 @@ function defaultGetRole(req: unknown): string | null {
   return typeof v === 'string' && v ? v : null;
 }
 
+/**
+ * Default rolesForUser — used by the User Access Override
+ * effective-access resolver. Reads from app_iam.users when a Postgres
+ * pool is reachable; falls back to ['admin'] in dev so the endpoint
+ * still returns a useful answer in MSW / no-PG mode.
+ *
+ * Production swaps this for a JWT-claim extractor + cache.
+ */
+async function defaultRolesForUser(_tenant_id: string, user_id: string): Promise<string[]> {
+  const url = process.env.BFF_PG_URL ?? process.env.AUTH_PG_URL;
+  if (!url) {
+    // Heuristic: hand back the role implied by the seed-username convention
+    // (alice.admin → admin, sue.super → supervisor, etc.).
+    if (user_id.includes('admin')) return ['admin'];
+    if (user_id.includes('super')) return ['supervisor'];
+    if (user_id.includes('risk'))  return ['risk_analyst'];
+    if (user_id.includes('collect')) return ['collection_officer'];
+    if (user_id.includes('field')) return ['field_officer'];
+    return ['admin'];
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Pool } = require('pg') as typeof import('pg');
+  const pool = new Pool({ connectionString: url, max: 1 });
+  try {
+    const r = await pool.query<{ role: string }>(
+      `SELECT role FROM app_iam.users WHERE id = $1 OR username = $1 LIMIT 1`,
+      [user_id],
+    );
+    if (r.rows[0]?.role) return [r.rows[0].role];
+    return ['admin'];
+  } catch {
+    return ['admin'];
+  } finally {
+    await pool.end();
+  }
+}
+
 const VALID_SEVERITIES: UiSeverity[] = ['low', 'medium', 'high', 'critical'];
 const VALID_ACTION_KINDS = ['call', 'visit', 'sms', 'email', 'note'] as const;
 
@@ -898,6 +935,21 @@ export interface AppDeps {
   jwtVerifier?: JwtVerifier;
   now?: () => Date;
   getRole?: (req: Request) => string | null;
+
+  /**
+   * Per-user access override store (BAC §3.1.6/§3.1.7). When provided,
+   * mounts the /v1/admin/user-access-overrides + /v1/admin/users/:id/
+   * effective-access + /v1/admin/admin-audit-log routes. Wired by the
+   * bootstrap path below to a PG-backed store when BFF_PG_URL is set.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  userAccessOverrideStore?: any;
+  /**
+   * Tenant-scoped lookup for a user's roles. Used by the
+   * effective-access resolver. Defaults to a stub that reads from
+   * app_iam.users when a PG pool is reachable, else returns ['admin'].
+   */
+  rolesForUser?: (tenant_id: string, user_id: string) => Promise<string[]>;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -990,6 +1042,24 @@ export function makeApp(deps: AppDeps = {}) {
   app.use(express.json({ limit: '512kb' }));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+  // ---------- /v1/admin/* — User Access Override (BAC §3.1.6/§3.1.7) ----------
+  // Mounted as a child router so the routes file owns its own routing
+  // table; server.ts just plumbs in the store + middleware shims.
+  if (deps.userAccessOverrideStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeUserAccessOverrideRouter } = require('./admin/user_access_override_routes') as
+      typeof import('./admin/user_access_override_routes');
+    app.use(
+      makeUserAccessOverrideRouter({
+        store: deps.userAccessOverrideStore,
+        requireTenantMw,
+        requireRole,
+        rolesForUser: deps.rolesForUser ?? defaultRolesForUser,
+        now,
+      }),
+    );
+  }
 
   // ---------- /api (internal BFF — T3.10) ----------
   app.get('/api/alerts', requireRole('alerts:list'), (req, res) =>
@@ -14003,10 +14073,19 @@ if (require.main === module) {
   void (async () => {
     const webhookStore = await makeWebhookStore();
     const { store: scenarioStore } = await makeScenarioStore();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeUserAccessOverrideStore } = require('./admin/user_access_override_store') as
+      typeof import('./admin/user_access_override_store');
+    const { store: userAccessOverrideStore } = await makeUserAccessOverrideStore();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
-    const { app } = makeApp({ webhookStore, scenarioStore });
+    const { app } = makeApp({
+      webhookStore,
+      scenarioStore,
+      userAccessOverrideStore,
+      rolesForUser: defaultRolesForUser,
+    });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {
       try { seedDefaultEwsRules(defaultEwsRuleStore, t, 'system', new Date()); } catch { /* best-effort */ }
