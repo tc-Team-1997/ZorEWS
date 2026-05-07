@@ -101,24 +101,24 @@ const CATEGORIES: EwsRuleCategory[] = [
 
 const ewsApi = {
   list: () =>
-    http.get<{ body: { items: EwsRule[]; total: number } }>('/v1/ews/rules')
-      .then((r) => r.data.body.items),
+    http.get<{ items: EwsRule[]; total: number }>('/v1/ews/rules')
+      .then((r) => r.data.items),
   indicators: () =>
-    http.get<{ body: { items: EwsIndicator[] } }>('/v1/ews/rules/indicators')
-      .then((r) => r.data.body.items),
+    http.get<{ items: EwsIndicator[] }>('/v1/ews/rules/indicators')
+      .then((r) => r.data.items),
   create: (rule: unknown) =>
-    http.post<{ body: EwsRule }>('/v1/ews/rules', rule).then((r) => r.data.body),
+    http.post<EwsRule>('/v1/ews/rules', rule).then((r) => r.data),
   remove: (id: string) =>
-    http.delete<{ body: EwsRule }>(`/v1/ews/rules/${id}`).then((r) => r.data.body),
+    http.delete<EwsRule>(`/v1/ews/rules/${id}`).then((r) => r.data),
   activate: (id: string) =>
-    http.post<{ body: EwsRule }>(`/v1/ews/rules/${id}/activate`, {}).then((r) => r.data.body),
+    http.post<EwsRule>(`/v1/ews/rules/${id}/activate`, {}).then((r) => r.data),
   test: (id: string, values: Record<string, number | string>) =>
     http
-      .post<{ body: { matched: boolean; matched_indicators: string[]; score_impact: number; alert_severity: AlertSeverity } }>(
+      .post<{ matched: boolean; matched_indicators: string[]; score_impact: number; alert_severity: AlertSeverity }>(
         `/v1/ews/rules/${id}/test`,
         { values },
       )
-      .then((r) => r.data.body),
+      .then((r) => r.data),
 };
 
 // ── Component ────────────────────────────────────────────────────────

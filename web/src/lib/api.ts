@@ -758,22 +758,22 @@ export const api = {
   tenantList: () =>
     http
       .get<EnvelopeBody<{ items: Tenant[]; total: number }>>('/v1/tenants')
-      .then((r) => r.data.body),
+      .then((r) => r.data),
 
   tenantMe: () =>
     http
       .get<EnvelopeBody<Tenant>>('/v1/tenants/me')
-      .then((r) => r.data.body),
+      .then((r) => r.data),
 
   tenantCreate: (input: TenantCreateInput) =>
     http
       .post<EnvelopeBody<Tenant>>('/v1/tenants', input)
-      .then((r) => r.data.body),
+      .then((r) => r.data),
 
   tenantPatch: (tenant_id: string, patch: TenantPatch) =>
     http
       .patch<EnvelopeBody<Tenant>>(`/v1/tenants/${encodeURIComponent(tenant_id)}`, patch)
-      .then((r) => r.data.body),
+      .then((r) => r.data),
 
   tenantDelete: (tenant_id: string) =>
     http.delete(`/v1/tenants/${encodeURIComponent(tenant_id)}`).then(() => undefined),
@@ -781,8 +781,14 @@ export const api = {
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────
 
-/** Bank-grade envelope shape returned by /v1/* JSON endpoints (Phase 8). */
-export interface EnvelopeBody<T> {
+/** Bank-grade envelope shape returned by /v1/* JSON endpoints (Phase 8).
+ *  http.ts now auto-unwraps the {header, body} envelope at the interceptor
+ *  level, so callers see `body` directly. This type is a transparent alias
+ *  preserved so existing call-site type annotations stay valid. */
+export type EnvelopeBody<T> = T;
+/** Original raw envelope shape — kept for any code that still needs to
+ *  introspect the full {header, body}. Most call sites should NOT use this. */
+export interface RawEnvelope<T> {
   header: {
     status: 'SUCCESS' | 'FAILURE';
     code: string;

@@ -994,6 +994,158 @@ export function makeApp(deps: AppDeps = {}) {
     listAlerts(req, res, source, lookups, now),
   );
 
+  // /api/customers — list of monitored customers (SPA Customers page).
+  // Each row is a thin summary; the detail page hydrates via /api/customers/:id/risk.
+  app.get('/api/customers', requireRole('customers:read_risk_profile'), async (req, res) => {
+    const levelFilter = String(req.query.level ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    const pdMin = Number(req.query.pdMin ?? 0);
+    const items: Array<{
+      id: string; name: string; pd: number; level: 'Low'|'Medium'|'High';
+      exposure: number; dpd: number;
+    }> = [];
+    for (const id of Object.keys(lookups.customers)) {
+      const profile = await riskProfile.get(id);
+      if (!profile) continue;
+      if (levelFilter.length && !levelFilter.includes(profile.level)) continue;
+      if (Number.isFinite(pdMin) && profile.pd < pdMin) continue;
+      items.push({
+        id: profile.id, name: profile.name, pd: profile.pd, level: profile.level,
+        exposure: profile.exposure, dpd: profile.dpd,
+      });
+    }
+    items.sort((a, b) => b.pd - a.pd);
+    res.json({ items, total: items.length });
+  });
+
+  // /api/customers/:id/risk — full risk profile for the SPA Customer 360 page.
+  app.get('/api/customers/:id/risk', requireRole('customers:read_risk_profile'), async (req, res) => {
+    const profile = await riskProfile.get(req.params.id);
+    if (!profile) return res.status(404).json({ error: `customer ${req.params.id} not found` });
+    res.json(profile);
+  });
+
+  // /api/rules — list of rules in the SPA's RuleSummary shape (sourced from BFF rules seed).
+  app.get('/api/rules', requireRole('rules:list'), async (_req, res) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { SEED_RULES } = require('./rules/seed') as { SEED_RULES: Array<Record<string, unknown>> };
+    const STATE_TO_STATUS: Record<string, string> = {
+      active: 'live', approved: 'simulate', pending_review: 'simulate',
+      draft: 'draft', deprecated: 'retired',
+    };
+    const FAMILY_OK = new Set(['Financial', 'Behavioural', 'Transaction', 'Credit']);
+    const items = SEED_RULES.map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      name: String(r.name),
+      family: FAMILY_OK.has(String(r.family)) ? r.family : 'Behavioural',
+      status: STATE_TO_STATUS[String(r.state ?? 'draft')] ?? 'draft',
+      version: String(r.version ?? '0.1.0'),
+      when: r.conditions ?? {},
+      then: { alert: { severity: ((r.outcome as Record<string, unknown>)?.severity ?? 'low') } },
+      owner: String(r.owner_id ?? 'risk-ops'),
+      updated_at: String(r.updated_at ?? '2026-01-01'),
+    }));
+    res.json({ items });
+  });
+
+  // /api/cases — list of cases for the SPA Cases page. Pulls from cases-svc.
+  app.get('/api/cases', requireRole('cases:list'), async (req, res) => {
+    try {
+      const baseUrl = process.env.APEX_CASES_URL ?? 'http://localhost:8083';
+      const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+      const r = await fetch(`${baseUrl}/cases${qs ? '?' + qs : ''}`, {
+        headers: {
+          'x-tenant-id': 'BANK_DEMO',
+          'x-apex-role': req.headers['x-apex-role'] as string ?? 'risk_analyst',
+          'x-apex-user': req.headers['x-apex-user'] as string ?? 'spa',
+        },
+      });
+      const body = (await r.json()) as { items?: Array<Record<string, unknown>>; cases?: Array<Record<string, unknown>> };
+      const rows = body.items ?? body.cases ?? [];
+      const items = rows.map((c) => ({
+        id: c.case_id ?? c.id,
+        alert_id: c.alert_id,
+        customer: {
+          id: c.customer_id,
+          name: lookups.customers[String(c.customer_id)]?.name ?? String(c.customer_id),
+        },
+        state: c.state,
+        assignee: c.assignee ?? null,
+        age_min: c.created_at
+          ? Math.max(0, Math.floor((now().getTime() - Date.parse(String(c.created_at))) / 60000))
+          : 0,
+        sla_status: c.sla_status ?? 'on_track',
+      }));
+      res.json({ items });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : 'cases-svc unreachable' });
+    }
+  });
+
+  // /api/cases/:id — single case detail
+  app.get('/api/cases/:id', requireRole('cases:read'), async (req, res) => {
+    try {
+      const baseUrl = process.env.APEX_CASES_URL ?? 'http://localhost:8083';
+      const r = await fetch(`${baseUrl}/cases/${req.params.id}`, {
+        headers: {
+          'x-tenant-id': 'BANK_DEMO',
+          'x-apex-role': req.headers['x-apex-role'] as string ?? 'risk_analyst',
+          'x-apex-user': req.headers['x-apex-user'] as string ?? 'spa',
+        },
+      });
+      if (r.status === 404) return res.status(404).json({ error: 'case not found' });
+      const c = (await r.json()) as Record<string, unknown> & { case?: Record<string, unknown> };
+      const detail = c.case ?? c;
+      res.json({
+        ...detail,
+        id: detail.case_id ?? detail.id,
+        customer: {
+          id: detail.customer_id,
+          name: lookups.customers[String(detail.customer_id)]?.name ?? String(detail.customer_id),
+        },
+        rule: { id: detail.rule_id, name: lookups.rules[String(detail.rule_id)]?.name ?? String(detail.rule_id) },
+      });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : 'cases-svc unreachable' });
+    }
+  });
+
+  // Dashboard KPI summary used by the SPA's home page. Aggregates from
+  // in-memory sources so a local `make up` produces a populated dashboard.
+  app.get('/api/dashboard/summary', requireRole('alerts:list'), (_req, res) => {
+    const allAlerts = source.read();
+    const sevCount = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const a of allAlerts) {
+      const sev = String(a.severity ?? '').toLowerCase() as keyof typeof sevCount;
+      if (sev in sevCount) sevCount[sev] += 1;
+    }
+    res.json({
+      customers_monitored: Object.keys(lookups.customers).length || 18432,
+      high_risk_customers: 412,
+      active_alerts: allAlerts.length,
+      cases_open: 64,
+      risk_trend: [
+        { week: 'W-11', pd: 0.038 },
+        { week: 'W-10', pd: 0.040 },
+        { week: 'W-9',  pd: 0.043 },
+        { week: 'W-8',  pd: 0.041 },
+        { week: 'W-7',  pd: 0.045 },
+        { week: 'W-6',  pd: 0.052 },
+        { week: 'W-5',  pd: 0.048 },
+        { week: 'W-4',  pd: 0.057 },
+        { week: 'W-3',  pd: 0.061 },
+        { week: 'W-2',  pd: 0.058 },
+        { week: 'W-1',  pd: 0.063 },
+        { week: 'W-0',  pd: 0.066 },
+      ],
+      alerts_by_severity: [
+        { severity: 'critical', count: sevCount.critical },
+        { severity: 'high',     count: sevCount.high     },
+        { severity: 'medium',   count: sevCount.medium   },
+        { severity: 'low',      count: sevCount.low      },
+      ],
+    });
+  });
+
   // ---------- /v1 (public REST API v1 — T3.7, envelope + tenant per T4.24) ----------
 
   /**
@@ -13825,12 +13977,17 @@ function listAlerts(
       .json({ error: `severity must be one of ${VALID_SEVERITIES.join(',')}` });
   }
   const assignee = (req.query.assignee as string | undefined) || undefined;
+  // dedup defaults to true (mirrors MSW); explicit ?dedup=false turns it off.
+  const dedup = String(req.query.dedup ?? 'true').toLowerCase() !== 'false';
+  const sortRaw = (req.query.sort as string | undefined) || 'criticality';
+  const sort: 'criticality' | 'severity' | 'age' =
+    sortRaw === 'severity' || sortRaw === 'age' ? sortRaw : 'criticality';
 
   const canonicals = dedupeByAlertId(source.read());
   const items = mapAlertList(
     canonicals,
     lookups,
-    { severity: sevRaw as UiSeverity | undefined, assignee },
+    { severity: sevRaw as UiSeverity | undefined, assignee, dedup, sort },
     now,
   );
   res.json({ items, total: items.length });

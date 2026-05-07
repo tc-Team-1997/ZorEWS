@@ -96,9 +96,60 @@ export class StubRiskProfileSource implements RiskProfileSource {
       model_name: 'pd_xgboost',
       model_version: '0.1.0',
     },
+    'c-103': makeStubProfile('c-103', 'Catherine Wanjiru', 0.18, 'Low',    320_000,  4),
+    'c-104': makeStubProfile('c-104', 'Daniel Mwangi',     0.09, 'Low',    150_000,  0),
+    'c-105': makeStubProfile('c-105', 'Esther Njeri',      0.61, 'High',   880_000, 22),
+    'c-106': makeStubProfile('c-106', 'Faisal Hussein',    0.74, 'High', 1_650_000, 41),
+    'c-107': makeStubProfile('c-107', 'Grace Atieno',      0.34, 'Medium', 470_000,  8),
+    'c-108': makeStubProfile('c-108', 'Hassan Otieno',     0.12, 'Low',    220_000,  0),
+    'c-109': makeStubProfile('c-109', 'Irene Mutua',       0.51, 'High',   780_000, 17),
+    'c-110': makeStubProfile('c-110', 'James Kiprotich',   0.27, 'Medium', 380_000,  3),
+    'c-111': makeStubProfile('c-111', 'Kavita Singh',      0.06, 'Low',    180_000,  0),
+    'c-112': makeStubProfile('c-112', 'Linus Owino',       0.55, 'High',   910_000, 28),
+    'c-113': makeStubProfile('c-113', 'Mary Wambui',       0.31, 'Medium', 420_000,  6),
+    'c-114': makeStubProfile('c-114', 'Nathan Korir',      0.08, 'Low',    260_000,  0),
+    'c-115': makeStubProfile('c-115', 'Olivia Cherop',     0.83, 'High', 1_980_000, 67),
+    'c-116': makeStubProfile('c-116', 'Peter Maina',       0.58, 'High',   720_000, 24),
+    'c-117': makeStubProfile('c-117', 'Quentin Wamalwa',   0.36, 'Medium', 510_000, 11),
+    'c-118': makeStubProfile('c-118', 'Ruth Akinyi',       0.69, 'High',   840_000, 19),
+    'c-119': makeStubProfile('c-119', 'Samuel Tanui',      0.11, 'Low',    195_000,  0),
+    'c-120': makeStubProfile('c-120', 'Tabitha Njoroge',   0.64, 'High', 1_110_000, 35),
   };
 
   async get(customer_id: string): Promise<RiskProfile | null> {
     return this.profiles[customer_id] ?? null;
   }
+}
+
+function makeStubProfile(
+  id: string,
+  name: string,
+  pd: number,
+  level: 'Low' | 'Medium' | 'High',
+  exposure: number,
+  dpd: number,
+): RiskProfile {
+  return {
+    id,
+    name,
+    pd,
+    level,
+    exposure,
+    dpd,
+    balance_trend: [
+      { month: 'Nov', balance: Math.round(exposure * 0.32) },
+      { month: 'Dec', balance: Math.round(exposure * 0.28) },
+      { month: 'Jan', balance: Math.round(exposure * 0.24) },
+      { month: 'Feb', balance: Math.round(exposure * 0.21) },
+      { month: 'Mar', balance: Math.round(exposure * 0.17) },
+      { month: 'Apr', balance: Math.round(exposure * 0.14) },
+    ],
+    top_reasons: [
+      { feature: 'utilization',  value: Math.min(0.99, 0.4 + pd * 0.6), shap_value: pd * 0.4,  direction: 'positive' },
+      { feature: 'bureau_score', value: Math.round(720 - pd * 200),     shap_value: pd * 0.25, direction: 'positive' },
+      { feature: 'tenure_months',value: 36,                              shap_value: -0.08,     direction: 'negative' },
+    ],
+    model_name: 'pd_xgboost',
+    model_version: '0.1.0',
+  };
 }

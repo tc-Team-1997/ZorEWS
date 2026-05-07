@@ -57,6 +57,22 @@ export function mapAlertEvent(
   const ageMs = now().getTime() - raisedMs;
   const ageMin = Number.isFinite(ageMs) ? Math.max(0, Math.floor(ageMs / 60000)) : 0;
 
+  // Confidence + exposure aren't on the canonical wire shape yet, so the
+  // server uses deterministic stand-ins keyed off severity + customer_id
+  // until the rule engine + customer-exposure feed land. Keeps the list
+  // stable across reloads so the SPA's tests + UX feel consistent.
+  const confidence = CONFIDENCE_BY_SEVERITY[severity];
+  const exposure =
+    lookups.customers[canonical.customer_id]?.exposure_kes ??
+    EXPOSURE_BY_SEVERITY[severity];
+
+  const criticality_score = computeScore({
+    severity,
+    confidence,
+    customer_exposure_kes: exposure,
+    age_min: ageMin,
+  });
+
   return {
     id: canonical.alert_id,
     severity,
@@ -66,12 +82,58 @@ export function mapAlertEvent(
     age_min: ageMin,
     assignee,
     created_at: canonical.raised_at,
+    confidence,
+    customer_exposure_kes: exposure,
+    criticality_score,
+    linked_alert_ids: [],
   };
+}
+
+const CONFIDENCE_BY_SEVERITY: Record<UiSeverity, number> = {
+  critical: 0.92,
+  high:     0.82,
+  medium:   0.65,
+  low:      0.55,
+};
+
+const EXPOSURE_BY_SEVERITY: Record<UiSeverity, number> = {
+  critical: 1_500_000,
+  high:       800_000,
+  medium:     400_000,
+  low:        200_000,
+};
+
+const SEVERITY_WEIGHT: Record<UiSeverity, number> = {
+  critical: 4, high: 3, medium: 2, low: 1,
+};
+
+function ageBoost(ageMin: number): number {
+  if (ageMin < 24 * 60) return 1.0;
+  if (ageMin < 72 * 60) return 1.2;
+  return 1.5;
+}
+
+function computeScore(input: {
+  severity: UiSeverity;
+  confidence: number;
+  customer_exposure_kes: number;
+  age_min: number;
+}): number {
+  const sw = SEVERITY_WEIGHT[input.severity];
+  const conf = Math.min(1, Math.max(0, input.confidence));
+  const expBase = Math.max(input.customer_exposure_kes, 100_000);
+  const expMult = Math.log10(expBase / 100_000);
+  const safe = expMult <= 0 ? 1 : 1 + expMult;
+  return Math.round(sw * conf * safe * ageBoost(input.age_min) * 100) / 100;
 }
 
 export interface ListFilters {
   severity?: UiSeverity;
   assignee?: string;
+  /** Group by customer; highest-criticality alert per customer is primary. */
+  dedup?: boolean;
+  /** Sort key. `criticality` (default) ranks by computeScore desc. */
+  sort?: 'criticality' | 'severity' | 'age';
 }
 
 export function mapAlertList(
@@ -80,18 +142,39 @@ export function mapAlertList(
   filters: ListFilters = {},
   now: () => Date = () => new Date(),
 ): AlertRow[] {
-  // Newest-first by raised_at, with stable secondary sort on alert_id so
-  // re-runs across the same outbox shard return the same order.
-  const rows = canonicals
+  let rows = canonicals
     .map((c) => mapAlertEvent(c, lookups, now))
     .filter((r) => {
       if (filters.severity && r.severity !== filters.severity) return false;
       if (filters.assignee && r.assignee !== filters.assignee) return false;
       return true;
     });
+
+  if (filters.dedup) {
+    const byCustomer = new Map<string, AlertRow[]>();
+    for (const r of rows) {
+      const arr = byCustomer.get(r.customer.id) ?? [];
+      arr.push(r);
+      byCustomer.set(r.customer.id, arr);
+    }
+    const merged: AlertRow[] = [];
+    for (const arr of byCustomer.values()) {
+      if (arr.length === 1) { merged.push(arr[0]); continue; }
+      let primary = arr[0];
+      for (const r of arr) {
+        if (r.criticality_score > primary.criticality_score) primary = r;
+      }
+      const linked = arr.filter((r) => r.id !== primary.id).map((r) => r.id);
+      merged.push({ ...primary, linked_alert_ids: linked });
+    }
+    rows = merged;
+  }
+
+  const sort = filters.sort ?? 'criticality';
   rows.sort((a, b) => {
-    if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
-    return a.id.localeCompare(b.id);
+    if (sort === 'criticality') return b.criticality_score - a.criticality_score;
+    if (sort === 'severity') return SEVERITY_WEIGHT[b.severity] - SEVERITY_WEIGHT[a.severity];
+    return b.age_min - a.age_min; // age — oldest first
   });
   return rows;
 }

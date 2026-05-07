@@ -63,7 +63,7 @@ export function DashboardPage() {
     setSearchParams(sp, { replace: true });
   };
 
-  const { data, isLoading } = useQuery({
+  const { data } = useQuery({
     queryKey: ['dashboard.summary'],
     queryFn: api.dashboardSummary,
   });
@@ -86,7 +86,7 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         <MetricCard
           label="Customers monitored"
-          value={isLoading ? '—' : data!.customers_monitored.toLocaleString()}
+          value={data ? data.customers_monitored.toLocaleString() : '—'}
           tone="blue"
           sub="all portfolios"
           to={KPI_LINKS.customersAll}
@@ -95,7 +95,7 @@ export function DashboardPage() {
         />
         <MetricCard
           label="High-risk customers"
-          value={isLoading ? '—' : data!.high_risk_customers.toLocaleString()}
+          value={data ? data.high_risk_customers.toLocaleString() : '—'}
           tone="danger"
           sub="PD ≥ 0.5"
           to={KPI_LINKS.customersHighRisk}
@@ -104,7 +104,7 @@ export function DashboardPage() {
         />
         <MetricCard
           label="Active alerts"
-          value={isLoading ? '—' : data!.active_alerts.toLocaleString()}
+          value={data ? data.active_alerts.toLocaleString() : '—'}
           tone="warning"
           sub="unresolved"
           to={KPI_LINKS.alertsActive}
@@ -113,7 +113,7 @@ export function DashboardPage() {
         />
         <MetricCard
           label="Cases open"
-          value={isLoading ? '—' : data!.cases_open.toLocaleString()}
+          value={data ? data.cases_open.toLocaleString() : '—'}
           tone="purple"
           sub="across queues"
           to={KPI_LINKS.casesOpen}
@@ -122,7 +122,7 @@ export function DashboardPage() {
         />
         <MetricCard
           label="SLA breaches"
-          value={sla.isLoading ? '—' : sla.data!.totals.breached.toLocaleString()}
+          value={sla.data ? sla.data.totals.breached.toLocaleString() : '—'}
           tone={sla.data && sla.data.totals.breached > 0 ? 'danger' : 'success'}
           sub={
             sla.data

@@ -38,6 +38,12 @@ export interface AlertRow {
   age_min: number;
   assignee?: string | null;
   created_at: string;
+  /** Fields the SPA's prioritization formula uses (web/src/lib/criticality.ts).
+   *  Populated by mapAlertList so the queue can rank + dedup. */
+  confidence: number;
+  customer_exposure_kes: number;
+  criticality_score: number;
+  linked_alert_ids: string[];
 }
 
 export interface AlertListResponse {
@@ -46,7 +52,7 @@ export interface AlertListResponse {
 }
 
 export interface CustomerLookup {
-  [customer_id: string]: { name: string };
+  [customer_id: string]: { name: string; exposure_kes?: number };
 }
 
 export interface RuleLookup {

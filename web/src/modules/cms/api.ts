@@ -129,8 +129,10 @@ export interface CmsListFilters {
 
 const cmsBase = '/v1/cms/cases';
 
-function unwrap<T>(p: Promise<{ data: { body: T } }>) {
-  return p.then((r) => r.data.body);
+// http.ts now auto-unwraps the {header, body} envelope at the response
+// interceptor, so `r.data` IS the body.
+function unwrap<T>(p: Promise<{ data: T }>) {
+  return p.then((r) => r.data);
 }
 
 export const cmsApi = {

@@ -109,8 +109,8 @@ export function EwsRuleWizardPage() {
     queryKey: ['ews-indicators'],
     queryFn: () =>
       http
-        .get<{ body: { items: EwsIndicator[] } }>('/v1/ews/rules/indicators')
-        .then((r) => r.data.body.items),
+        .get<{ items: EwsIndicator[] }>('/v1/ews/rules/indicators')
+        .then((r) => r.data.items),
   });
 
   // Auto-save every 30s — only when the user has started filling in data.
@@ -154,8 +154,8 @@ export function EwsRuleWizardPage() {
         },
       };
       const created = await http
-        .post<{ body: { rule_id: string } }>('/v1/ews/rules', body)
-        .then((r) => r.data.body);
+        .post<{ rule_id: string }>('/v1/ews/rules', body)
+        .then((r) => r.data);
       if (draft.activate_after_create) {
         // Use 4-eyes path. Will 403 if same user is also approver — operator
         // intent would then be to ask a colleague to approve.

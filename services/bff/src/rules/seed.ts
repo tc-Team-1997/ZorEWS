@@ -276,6 +276,115 @@ export const SEED_RULES: RuleV2[] = [
     ],
   },
 
+  // ── ACTIVE additions (T-extended seed) ────────────────────────────
+  {
+    id: 'r-30',
+    name: 'Cross-product default cascade',
+    family: 'Credit',
+    applicable_products: ['personal_loan', 'credit_card', 'msme'],
+    state: 'active',
+    version: '1.2.0',
+    owner_id: 'risk.maker.alpha',
+    submitted_by: 'risk.maker.alpha',
+    approved_by: 'risk.checker.delta',
+    conditions: {
+      kind: 'group',
+      op: 'AND',
+      children: [
+        { kind: 'leaf', condition: { variable_id: 'current_dpd', op: '>=', value: 60 } },
+        { kind: 'leaf', condition: { variable_id: 'utilization', op: '>', value: 0.9 } },
+        {
+          kind: 'leaf',
+          condition: { variable_id: 'salary_credit_consistency', op: '<', value: 0.3, window_days: 30 },
+        },
+      ],
+    },
+    outcome: {
+      severity: 'critical',
+      alert_priority: 'P1',
+      notify_roles: ['risk_analyst', 'supervisor', 'collection_officer'],
+      reason_template: 'Default cascading across products — escalate immediately',
+    },
+    regulatory_ref: 'Internal SOP §5.1 (cross-product contagion)',
+    created_at: '2026-04-10T08:00:00Z',
+    updated_at: '2026-04-24T14:00:00Z',
+    audit: [
+      {
+        ts: '2026-04-10T08:00:00Z',
+        actor_id: 'risk.maker.alpha',
+        actor_role: 'risk_analyst',
+        kind: 'created',
+        to_state: 'draft',
+      },
+      {
+        ts: '2026-04-12T10:00:00Z',
+        actor_id: 'risk.checker.delta',
+        actor_role: 'supervisor',
+        kind: 'approved',
+        to_state: 'approved',
+      },
+      {
+        ts: '2026-04-12T16:00:00Z',
+        actor_id: 'cro.kumar',
+        actor_role: 'admin',
+        kind: 'activated',
+        to_state: 'active',
+      },
+    ],
+  },
+  {
+    id: 'r-31',
+    name: 'Direct-debit bounce ≥ 3 in 30d',
+    family: 'Transaction',
+    applicable_products: ['personal_loan', 'msme'],
+    state: 'active',
+    version: '1.0.0',
+    owner_id: 'fraud.maker.gamma',
+    submitted_by: 'fraud.maker.gamma',
+    approved_by: 'risk.checker.delta',
+    conditions: {
+      kind: 'group',
+      op: 'AND',
+      children: [
+        {
+          kind: 'leaf',
+          condition: { variable_id: 'direct_debit_bounce_count_30d', op: '>=', value: 3, window_days: 30 },
+        },
+      ],
+    },
+    outcome: {
+      severity: 'high',
+      alert_priority: 'P2',
+      notify_roles: ['collection_officer'],
+      reason_template: '3+ direct-debit bounces in 30 days — payment-instruction failure pattern',
+    },
+    created_at: '2026-04-15T08:00:00Z',
+    updated_at: '2026-04-19T11:00:00Z',
+    audit: [
+      {
+        ts: '2026-04-15T08:00:00Z',
+        actor_id: 'fraud.maker.gamma',
+        actor_role: 'risk_analyst',
+        kind: 'created',
+        to_state: 'draft',
+      },
+      {
+        ts: '2026-04-18T09:00:00Z',
+        actor_id: 'risk.checker.delta',
+        actor_role: 'supervisor',
+        kind: 'approved',
+        to_state: 'approved',
+      },
+      {
+        ts: '2026-04-19T11:00:00Z',
+        actor_id: 'cro.kumar',
+        actor_role: 'admin',
+        kind: 'activated',
+        to_state: 'active',
+      },
+    ],
+  },
+
   // ── DEPRECATED (retired) ──────────────────────────────────────────
   {
     id: 'r-25',

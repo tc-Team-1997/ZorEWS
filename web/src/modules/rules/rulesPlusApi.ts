@@ -36,8 +36,8 @@ export interface RuleDiffEntry {
   kind: 'changed' | 'added' | 'removed';
 }
 
-function unwrap<T>(p: Promise<{ data: { body: T } }>): Promise<T> {
-  return p.then((r) => r.data.body);
+function unwrap<T>(p: Promise<{ data: T }>): Promise<T> {
+  return p.then((r) => r.data);
 }
 
 export const rulesPlusApi = {
