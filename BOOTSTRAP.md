@@ -27,10 +27,56 @@ python3 _generate_seeds.py     # ~220 customers, ~520 loans, ~6000 txns, ~6% NPA
 
 ```bash
 cd /Users/taniya/apex-ews/data/schema
-make up                         # docker compose: postgres:16 on :5432
-make migrate                    # 001+002+003 SQL
+make up                         # docker run apex-ews-pg (postgres:16) on :55432
+make migrate                    # 001..011 SQL — full app schema
 make verify                     # row counts + audit-trigger smoke
 ```
+
+**Connection details for any client (DBeaver / TablePlus / pgAdmin / VS Code):**
+
+| Field | Value |
+|-------|-------|
+| Host | `localhost` |
+| Port | `55432` |
+| Database | `apex_ews` |
+| User | `apex` |
+| Password | `apex` |
+| URL | `postgres://apex:apex@localhost:55432/apex_ews` |
+
+**Apply migrations 012-015 + load 26k synthetic operator rows + 8 CMS demo cases:**
+
+```bash
+# 012-015 weren't part of `make migrate` — apply them manually:
+for f in 012_ews_rules.sql 013_cms_cases.sql 014_copilot_audit.sql 015_ews_rules_versions.sql; do
+  PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -v ON_ERROR_STOP=1 -f "$f"
+done
+
+# Or, if psql isn't on PATH, run via the container:
+for f in 012_ews_rules.sql 013_cms_cases.sql 014_copilot_audit.sql 015_ews_rules_versions.sql; do
+  docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -q < "$f"
+done
+
+# 26k synthetic operator rows (users + sessions + audit + cases + alerts + …):
+source ../../.venv/bin/activate
+python3 _generate_app_seeds.py
+docker cp app_seeds.sql apex-ews-pg:/tmp/app_seeds.sql
+docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -f /tmp/app_seeds.sql
+
+# 10 brief-mandated EWS rules into the BIL tenant:
+docker cp seed_ews_rules.sql apex-ews-pg:/tmp/seed_ews_rules.sql
+docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -f /tmp/seed_ews_rules.sql
+```
+
+After this you'll have ~26k application rows across 9 schemas. The BFF additionally seeds 8 demo CMS cases + 10 EWS rules into its in-memory stores at cold start, so even with the database unwired the SPA pages render.
+
+**Wire services to Postgres** (turns on the PG-backed code paths):
+
+```bash
+PG=postgres://apex:apex@localhost:55432/apex_ews
+CASES_PG_URL=$PG ALERTS_PG_URL=$PG BFF_PG_URL=$PG make up
+```
+
+`cases-svc` reads/writes `app_cases.cases`; `alerts-svc` reads/writes `app_alerts.alerts`; the BFF's scenario + webhook stores swap to `app_scenario.saved_scenarios` + `app_bff.webhook_*`. Without these env vars all four are in-memory.
 
 ## 3. Run dbt (agent-data)
 
@@ -110,13 +156,25 @@ pytest -q
 ```bash
 cd /Users/taniya/apex-ews/web
 npm install
-npx msw init public/ --save     # generates public/mockServiceWorker.js (required — main.tsx calls worker.start() in DEV)
+npx msw init public/ --save     # generates public/mockServiceWorker.js (required — main.tsx calls worker.start() in DEV when MSW is on)
 npm run build          # vite build (also runs tsc --noEmit — there is no separate `typecheck` script)
 npm test               # vitest
 npm run dev            # http://localhost:5173 — log in with alice.admin / Admin!Pass1 (TOTP from auth-svc seed)
 ```
 
 The `mockServiceWorker.js` step is easy to miss — vitest+jsdom never exercises MSW's service-worker registration, so the test suite stays green even when the file is absent, but the SPA bundle never mounts in the browser because `worker.start()` throws.
+
+**To switch the SPA from MSW to the live BFF / auth-svc:**
+
+```bash
+cat > web/.env.development.local <<'EOF'
+VITE_USE_MSW=false
+VITE_API_BASE_URL=/
+EOF
+make web-dev
+```
+
+`vite.config.ts` proxies `/api/*` and `/v1/*` to BFF (`:8084`) and `/auth/*` to auth-svc (`:8080`), so the SPA hits same-origin and CORS isn't a problem. To go back to the offline MSW demo, delete `web/.env.development.local`. **Also keep `make up` running in another shell** — the SPA expects all 7 services up; check with `make smoke`.
 
 ## 9. Terraform (agent-integration) — fmt + validate only, no apply
 

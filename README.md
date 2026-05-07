@@ -52,17 +52,38 @@ Open http://localhost:5173. Login:
 
 The SPA's MSW path mocks every backend, so click-through works without any service running.
 
-### Full backend stack
+### Full backend stack (real BFF + auth-svc + Postgres)
 
 ```sh
 make install   # one-time: deps for every workspace
 make up        # starts cases, alerts, rules, indicators, bff, collection-adapter, auth-svc
 make smoke     # curl /healthz on each
 make ps        # what's running
+```
 
-cd web && echo 'VITE_API_BASE_URL=http://localhost:8084' > .env.local
-make web-dev   # SPA now hits the real BFF (with x-apex-role enforcement)
+**Switch the SPA from MSW to real backends:**
 
+```sh
+cat > web/.env.development.local <<'EOF'
+VITE_USE_MSW=false
+VITE_API_BASE_URL=/
+EOF
+make web-dev
+```
+
+`vite.config.ts` proxies `/api/*` and `/v1/*` → BFF (`:8084`) and `/auth/*` → auth-svc (`:8080`), so the SPA hits same-origin and the browser is happy with CORS. To go back to the offline MSW demo, delete `web/.env.development.local`.
+
+**Postgres-backed stores (cases + alerts + scenarios + webhooks):**
+
+```sh
+# Postgres (apex-ews-pg) must be running — see "Database" below.
+PG=postgres://apex:apex@localhost:55432/apex_ews
+CASES_PG_URL=$PG ALERTS_PG_URL=$PG BFF_PG_URL=$PG make up
+```
+
+When set, `cases-svc` reads/writes `app_cases.cases`, `alerts-svc` reads/writes `app_alerts.alerts`, and the BFF uses `app_scenario.saved_scenarios` + `app_bff.webhook_*`. Without these env vars, all four stores are in-memory (auto-seeded on cold start with 8 demo CMS cases + 10 EWS rules + the canonical 6 V2 rules).
+
+```sh
 # When done:
 make down
 ```
@@ -176,6 +197,8 @@ apex-ews/
 ## Status
 
 **414 tests pass clean** across the codebase (204 SPA vitest + 210 BFF jest, plus 79 dbt + 16 schema-compat pytest + 11 RBAC pytest + 13 RBAC TS jest). All four blockers (B1/B2/B3/B4) closed. Wave 3 done; auth/security sweep done; Wave 4 UX features (dashboard interactivity, full scenario simulation, alert prioritization, rule config UX overhaul, customer 360-view, outbound webhooks) all shipped in 2026-04-28 → 2026-05-02. **Database scaled out 2026-05-03 to 10k customers + 5 new app_* schemas (~731k rows total).** The system runs end-to-end locally — see the Quick Start above.
+
+**Real-backend dev mode (2026-05-07):** SPA now talks to the live backend stack via a Vite proxy in dev — toggle with `web/.env.development.local`. All 18 SPA-bound endpoints serve data: `/api/dashboard/summary`, `/api/alerts` (14 ranked alerts), `/api/customers` (20), `/api/customers/:id/risk` (full SHAP), `/api/rules` (8 V2), `/api/cases` (528 from Postgres), `/v1/scenarios` (120 saved), `/v1/tenants` (2), `/v1/cms/cases` (8 demo), `/v1/ews/rules` (10 brief-mandated rules per tenant), `/v1/ews/rules/indicators` (15), `/v1/webhooks` (25 + 915 deliveries from Postgres), `/v1/integrations/health`, `/v1/cases/sla-summary`, `/v1/dashboards/bil/{executive,claims,operational}`, `/v1/reports/{snapshot,alerts,cases,rbi}?period={week,month,quarter}`. Adds 5 BFF facades (`/api/dashboard/summary`, `/api/customers`, `/api/customers/:id/risk`, `/api/rules`, `/api/cases`), envelope auto-unwrap + tenant-header auto-inject in `web/src/lib/http.ts`, criticality-score computation in BFF mapping, and seed-on-cold-start helpers for CMS cases + EWS rules.
 
 **Three scheduled follow-ups** (in-session, recipes saved to memory for cross-session recovery):
 - 2026-05-16 — convert existing `/v1/reports` PDF/Excel to client-side (mirrors the scenario approach so MSW dev mode produces real binaries instead of falling back to JSON).

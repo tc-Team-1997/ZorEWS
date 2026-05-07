@@ -1,7 +1,7 @@
 # APEX EWS — Live Status
 
 **Current phase:** **T6 BIL 16-module platform expansion in flight.** All 16 modules have at least one live sub-phase shipped — see "T6 Coverage Matrix" below. **100 T6 sub-phases shipped + EWS rules engine (5 commits) · ~250 routes wired · BFF jest 3155 pass / 9 skipped / 3164 total.** Earlier waves (Wave 3 + UX/auth hardening sweep + Wave 4 + database fill-out) remain shipped: Phase 1/3 verified; B1/B2/B3/B4 closed; case-management vertical slice; BFF + REST API v1 + Collection adapter + schema-registry CI + RBAC + emit-side AJV. SPA carries auth/security hardening (rate-limit, lockout, audit log, sessions, password history, first-login wizard, OWASP headers, idle timeout, EN+HI i18n), dashboard interactivity, full-fat scenario simulation (IFRS 9 stage migration + 5 templates + side-by-side compare + segment×risk heatmap + CSV/PDF/Excel export), outbound webhooks, criticality-based alert prioritization, rule config UX overhaul, Customer Risk Profile §5.3 360-view. **Database scaled to 10,000 customers (~731k rows / 9 schemas / 21 tables).** Only T3.1–T3.3, T2.11, T2.12, T4.3, T4.13–T4.17, T5.x remain — out of prototype scope or scheduled.
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-07
 
 ## T6 Coverage Matrix — BIL 16-module platform expansion
 
@@ -90,6 +90,40 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 | B4 | ~~No CI yet — there is nothing enforcing schema BACKWARD compatibility, IaC fmt, or test gates.~~ Cleared 2026-04-27. `.github/workflows/schema-compat.yml` runs `infra/schema-registry/scripts/check_compat.py` + 16 pytest tests on every PR touching the registry. Glue Schema Registry resource provisioned in `infra/terraform/30-data` (`aws_glue_registry.apex_ews` + per-topic `aws_glue_schema.topics`). | — | done |
 
 ## Activity Log
+
+### 2026-05-07 — Real-backend dev mode wired end-to-end (3 commits)
+
+Spent the session moving the SPA off MSW and onto the live BFF + auth-svc + Postgres so a `make up`-style developer flow renders real data on every page, not just the offline mocks.
+
+- **SPA dev wiring** — `vite.config.ts` proxy forwards `/api/*` → BFF (`:8084`), `/v1/*` → BFF, `/auth/*` → auth-svc (`:8080`); `web/.env.development.local` toggle (`VITE_USE_MSW=false`) flips MSW off. Default still on so the offline demo path (`make web-dev` no env file) keeps working.
+- **`web/src/lib/http.ts`** — request interceptor auto-injects `X-Tenant-ID` (from auth store, default `BANK_DEMO`) + `X-Channel: API` + `X-Source-System: apex-ews-spa` so every `/v1` call passes the bank-grade envelope gate. Response interceptor auto-unwraps `{header, body}` so callers see the body directly.
+- **Type cleanup** — `EnvelopeBody<T>` aliased to `T` (transparent); 14 stale `r.data.body` accessors stripped across `lib/api.ts`, `cms/api.ts`, `rules/EwsRuleBuilderPage.tsx`, `rules/EwsRuleWizardPage.tsx`, `rules/rulesPlusApi.ts`. `tsc --noEmit` clean across the SPA.
+- **Page hardening** — `DashboardPage.tsx` non-null assertions (`data!.x.toLocaleString()`) replaced with `data ? data.x.toLocaleString() : '—'` so a slow / 401 / cold cache renders placeholders instead of crashing.
+- **5 new BFF `/api/*` facades** — `/api/dashboard/summary`, `/api/customers`, `/api/customers/:id/risk`, `/api/rules`, `/api/cases` (+ `/api/cases/:id`). Each is a SPA-internal flavor that doesn't require the full envelope/tenant context — they aggregate from the BFF in-memory stores or proxy to cases-svc.
+- **Criticality computed server-side** — `services/bff/src/mapping.ts` now populates `criticality_score`, `confidence`, `customer_exposure_kes`, `linked_alert_ids` on every `AlertRow` (formula mirrors `web/src/lib/criticality.ts`). Honours `?dedup=true&sort=criticality` query params. `CustomerLookup.exposure_kes` added so per-customer exposure feeds the score.
+- **Extended seeds** — 14 new customers (c-107..c-120, with realistic exposures), 5 new rules (r-30..r-34) including 2 V2 maker-checker entries (`Cross-product default cascade`, `Direct-debit bounce ≥ 3 in 30d`), 13 alerts seeded into `services/regulatory-svc/alerts/.outbox/` so the SPA queue ranks Olivia Cherop (8.45) → Faisal Hussein (8.16) → Achieng Otieno (7.7).
+- **Cold-start seeders for in-memory stores** — `seedDemoCmsCases()` adds 8 demo CMS investigations into `defaultCmsCaseStore` on bootstrap; existing `seedDefaultEwsRules()` invoked for both `BANK_DEMO` and `BIL` so `/v1/ews/rules` ships 10 brief-mandated rules per tenant.
+- **Postgres bring-up** — `apex-ews-pg` (postgres:16, port 55432, db apex_ews, role apex/apex). Migrations 001-015 applied (skipping 010_mart_tenant.sql which depends on `mart.customer_360` from `dbt run`). `_generate_app_seeds.py` produces 26,169 rows across 12 tables (505 users, 528 cases, 2527 alerts, 120 saved scenarios, 25 webhook subs + 915 deliveries, 12k audit events). With `CASES_PG_URL` / `ALERTS_PG_URL` / `BFF_PG_URL` set, the cases-svc, alerts-svc, and BFF (scenarios + webhooks) read/write Postgres instead of in-memory.
+
+**Verification:** all 18 SPA-bound endpoints return 200 against the local stack:
+
+```
+/api/dashboard/summary, /api/alerts, /api/customers, /api/customers/c-115/risk,
+/api/rules, /api/cases, /v1/scenarios, /v1/tenants, /v1/cms/cases, /v1/ews/rules,
+/v1/ews/rules/indicators, /v1/webhooks, /v1/integrations/health,
+/v1/cases/sla-summary, /v1/dashboards/bil/{executive,claims,operational},
+/v1/reports/snapshot?period=month
+```
+
+**Commits:**
+- `445d757` — SPA → real BFF wiring + extended customer/rule/alert seeds (17 files, +6989/-51)
+- `ebf3e7d` — Seed CMS Cases page with 8 demo investigations (2 files, +33)
+- `19afba2` — Seed EWS rules + CMS cases on BFF cold start (BANK_DEMO + BIL) (1 file, +7)
+
+**Open follow-ups:**
+- alerts-svc smart-queue insert occasionally trips a transient FK race (`queue_assignments_alert_id_fkey`) when the alert insert hasn't yet committed — the alert still lands and the BFF still serves it; worth filing for proper transaction ordering.
+- `services/event-bus` is a workspace dependency of alerts-svc but the top-level `Makefile`'s `TS_SERVICES` list doesn't include it — fresh checkouts must `cd services/event-bus && npm install && npm run build` before `make up` succeeds.
+- `dbt seed && dbt run` not yet executed against the new 10k-customer seed — `mart.customer_360` is still empty, so any future BFF route that joins the mart will need a fallback or a one-off dbt run.
 
 ### 2026-04-26 — Programme kick-off
 
