@@ -896,3 +896,34 @@ export const defaultCmsCaseStore: CmsCaseStore = new InMemoryCmsCaseStore();
 
 // Re-exports for callers
 export { CMS_RESOLUTION_CATEGORIES };
+
+/**
+ * Seed the default in-memory store with a handful of demo cases so the
+ * SPA's CMS Cases page has something to render on a fresh `make up`.
+ * Idempotent — only seeds when the tenant has zero cases.
+ */
+export function seedDemoCmsCases(
+  store: CmsCaseStore = defaultCmsCaseStore,
+  tenant_id = 'BANK_DEMO',
+): void {
+  if (store.list(tenant_id, {}).length > 0) return;
+  const now = new Date('2026-05-07T08:00:00Z');
+  const seeds: Array<{ title: string; description: string; alert_id: string; priority: 'P1'|'P2'|'P3'|'P4'; assigned_to?: string; tags?: string[] }> = [
+    { title: 'Multi-bureau delinquency on Olivia Cherop', description: 'Cross-product cascade detected; collections must verify employment + visit on-site.', alert_id: 'a-1009', priority: 'P1', assigned_to: 'carl.collect', tags: ['critical','collections','site-visit'] },
+    { title: 'Direct-debit bounce x3 — Ruth Akinyi',     description: 'Standing instruction failures across 30d window.',                                  alert_id: 'a-1010', priority: 'P2', tags: ['payments','fraud-watch'] },
+    { title: 'DPD≥30 + 95% utilisation — Achieng Otieno', description: 'Card maxed out and 30 days behind. Requires checker approval before restructure.', alert_id: 'a-1001', priority: 'P1', assigned_to: 'sue.super', tags: ['restructure','maker-checker'] },
+    { title: 'Cheque return 2x in 30d — Catherine Wanjiru', description: 'Cheque return pattern flagged; verify with branch.',                            alert_id: 'a-1003', priority: 'P3', tags: ['msme'] },
+    { title: 'Bureau enquiry surge — Daniel Mwangi',     description: '4 bureau enquiries in 14 days. Likely shopping for distress credit.',              alert_id: 'a-1004', priority: 'P4', assigned_to: 'ravi.risk', tags: ['credit-shopping'] },
+    { title: 'Cross-product default — Linus Owino',       description: 'High DPD + utilisation on multiple products.',                                     alert_id: 'a-1015', priority: 'P1', assigned_to: 'carl.collect', tags: ['critical','cross-product'] },
+    { title: 'Card spend anomaly — Mary Wambui',          description: 'Z-score 3.1 on 90-day card spend.',                                                alert_id: 'a-1013', priority: 'P4', tags: ['aml','low-priority'] },
+    { title: 'Salary inflow stopped — Faisal Hussein',    description: '60-day salary inflow gap; possible employment loss.',                              alert_id: 'a-1006', priority: 'P2', assigned_to: 'fiona.field', tags: ['employment-shock'] },
+  ];
+  for (const s of seeds) {
+    try {
+      store.create(tenant_id, s, 'alice.admin', now);
+    } catch {
+      // Best-effort seed; if validation rejects a row in some future
+      // schema tweak we don't want to brick startup.
+    }
+  }
+}

@@ -173,6 +173,7 @@ import {
 } from './cms_cases';
 import {
   defaultCmsCaseStore,
+  seedDemoCmsCases,
   type CmsCaseStore,
   type CmsListFilter,
 } from './cms_store';
@@ -14001,6 +14002,7 @@ if (require.main === module) {
   void (async () => {
     const webhookStore = await makeWebhookStore();
     const { store: scenarioStore } = await makeScenarioStore();
+    seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     const { app } = makeApp({ webhookStore, scenarioStore });
     // eslint-disable-next-line no-console
     app.listen(port, () =>
