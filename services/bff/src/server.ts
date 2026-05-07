@@ -177,6 +177,7 @@ import {
   type CmsCaseStore,
   type CmsListFilter,
 } from './cms_store';
+import { seedDefaultEwsRules } from './ews_rules_seed';
 import {
   autoCreateCaseFromAlert,
   defaultAssigneePoolStore,
@@ -14003,7 +14004,13 @@ if (require.main === module) {
     const webhookStore = await makeWebhookStore();
     const { store: scenarioStore } = await makeScenarioStore();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
+    // Seed the 10 brief-mandated EWS rules into both tenants so the
+    // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({ webhookStore, scenarioStore });
+    const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
+    for (const t of ['BANK_DEMO', 'BIL']) {
+      try { seedDefaultEwsRules(defaultEwsRuleStore, t, 'system', new Date()); } catch { /* best-effort */ }
+    }
     // eslint-disable-next-line no-console
     app.listen(port, () =>
       console.log(
