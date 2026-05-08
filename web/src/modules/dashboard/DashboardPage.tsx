@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { color } from '@/styles/tokens';
 import { useChatContext } from '@/components/copilot/useChatContext';
 import { SLABreachMatrix } from '@/components/dashboard/SLABreachMatrix';
+import { LiveActivityFeed } from '@/components/dashboard/LiveActivityFeed';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -193,8 +194,13 @@ export function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="mt-4">
-        <SLABreachMatrix />
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <SLABreachMatrix />
+        </div>
+        <div className="lg:col-span-1">
+          <LiveActivityFeed />
+        </div>
       </div>
 
       {sla.data && <SlaPanel summary={sla.data} />}
