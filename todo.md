@@ -47,7 +47,7 @@
 | 5.2 | Alert List — Customer ID / Risk Score / Indicator / Severity / Status | ✅ | T1.16, T3.10, T4.9 | BFF maps `apex.regulatory.events.v2` to list-row; criticality scoring + dedup added 2026-05-02 |
 | 5.3 | Customer Risk Profile (with SHAP top-5) | ✅ | T1.16, T2.8, T4.11 | 360-view enhancement 2026-05-02: Linked Alerts + Linked Cases panels with click-through |
 | 5.4 | Rule Configuration Screen | ✅ | T1.16, T4.10 | UX overhaul 2026-05-02: search + sticky list + severity strip + 5-tab unified detail card |
-| 5.5 | Analytics Dashboard | ⏳ | T4.1 | Dashboard time-range + clickable KPIs landed (T4.8); the 4 sub-dashboards (risk trend / PD distribution / stage migration / alert resolution) still pending under T4.1 |
+| 5.5 | Analytics Dashboard | ✅ | T4.1 | Closed 2026-05-08 — all 4 sub-dashboards live at `/analytics` (alert-resolution / risk-trend / pd-distribution / stage-migration). Pure resolvers in `services/bff/src/analytics/*.ts` over `app_alerts.alerts`; new RBAC op `dashboard:analytics:read`. Real PD + IFRS-9 stage columns will swap source queries without changing the public shape |
 
 ## §6 Other Features
 
@@ -71,10 +71,10 @@
 
 | § | Feature | Status | TASKS.md | Notes |
 |---|---------|--------|----------|-------|
-| 8 | Risk trend dashboard | ⏳ | T4.1 | |
-| 8 | PD distribution dashboard | ⏳ | T4.1 | |
-| 8 | Stage migration dashboard | ⏳ | T4.1 | |
-| 8 | Alert resolution dashboard | ⏳ | T4.1 (amended) | Was missing from T4.1's bullet list; appended in this audit |
+| 8 | Risk trend dashboard | ✅ | T4.1 | Shipped 2026-05-08 (4b) |
+| 8 | PD distribution dashboard | ✅ | T4.1 | Shipped 2026-05-08 (4c) |
+| 8 | Stage migration dashboard | ✅ | T4.1 | Shipped 2026-05-08 (4d) |
+| 8 | Alert resolution dashboard | ✅ | T4.1 (amended) | Shipped 2026-05-08 (4a) — 1st of the four |
 
 ## §9 API Framework
 

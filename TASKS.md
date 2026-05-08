@@ -62,7 +62,7 @@
 
 ## Phase 4 — Scale, UX & Mobile (M14–18)
 
-- [ ] T4.1 Analytics dashboard suite (risk trend, PD distribution, stage migration, **alert resolution** — _EWS.docx §8 lists alert-resolution alongside the other three; make sure the suite covers it_) — **agent-ui** _(partially done 2026-05-02: dashboard time-range selector + clickable KPIs + customer list landed; the other three sub-dashboards still pending)_
+- [x] T4.1 Analytics dashboard suite (risk trend, PD distribution, stage migration, alert resolution) — **agent-ui** _(closed 2026-05-08; partially done 2026-05-02 with the time-range selector + clickable KPIs + customer list, then the four sub-dashboards landed in commits f92272f / 33299af / 2f7bc75 / 4760325 — see `services/bff/src/analytics/*.ts` + `web/src/modules/dashboard/AnalyticsPage.tsx`. Sibling top-level entry `/analytics` was chosen over a /reports sub-tab. New RBAC op `dashboard:analytics:read`. Stages + PD-proxy derive from app_alerts.alerts.severity / criticality_score until real columns land)_
 - [x] T4.2 Scenario engine (GDP/rate/FX shock) — portfolio PD re-run — **agent-ai** + **agent-ui** _(2026-05-02: BFF engine returned shape-correct ScenarioResult; SPA layered with 5 templates, IFRS 9 stage migration matrix, segment×risk heatmap, Portfolio PD + NPA% cards, top-affected drill-down, saved scenarios with side-by-side compare, CSV/PDF/Excel export. Caveat: stage_1→stage_3 PD cutoffs are absolute-PD bands; production should use relative deterioration vs origination PD)_
 - [ ] T4.3 Mobile RN shell — Alert list, Case view, call/visit log, GPS — **agent-ui**
 - [ ] T4.4 Performance tuning — HPA, Karpenter, Aurora reader autoscale — **agent-integration**
