@@ -2134,6 +2134,57 @@ export const handlers = [
     return HttpResponse.json(envelope(row));
   }),
 
+  // Note: bulk-revoke comes BEFORE the /:id handlers so MSW doesn't
+  // route the literal "bulk-revoke" path segment as an :id.
+  http.post('/v1/admin/user-access-overrides/bulk-revoke', async ({ request }) => {
+    const body = (await request.json()) as { user_id?: string; revocation_reason?: string };
+    if (!body.user_id) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'user_id required', 'MEDIUM'), { status: 400 });
+    }
+    const reason = (body.revocation_reason ?? '').trim();
+    if (reason.length < 10) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'reason ≥ 10 chars required for bulk-revoke', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const revoked: MswOverride[] = [];
+    for (let i = 0; i < mswOverrides.length; i++) {
+      const before = mswOverrides[i];
+      if (before.user_id !== body.user_id) continue;
+      if (before.status !== 'ACTIVE') continue;
+      const after: MswOverride = {
+        ...before,
+        status: 'REVOKED',
+        revoked_by: actor,
+        revoked_at: now,
+        revocation_reason: reason,
+        updated_at: now,
+      };
+      mswOverrides[i] = after;
+      mswOverrideAudit.push({
+        audit_id: `aud-${Date.now()}-${i}`,
+        tenant_id: 'BANK_DEMO',
+        entity_type: 'user_access_override',
+        entity_id: before.override_id,
+        action: 'revoke',
+        actor_id: actor,
+        actor_role: 'admin',
+        before_state: before,
+        after_state: after,
+        reason,
+        request_id: null,
+        ip_address: null,
+        user_agent: null,
+        created_at: now,
+      });
+      revoked.push(after);
+    }
+    return HttpResponse.json(envelope({ revoked, count: revoked.length }));
+  }),
+
   http.post('/v1/admin/user-access-overrides', async ({ request }) => {
     const body = (await request.json()) as MswCreateInput;
     const actor = readPersistedRole() ? 'alice.admin' : 'alice.admin';

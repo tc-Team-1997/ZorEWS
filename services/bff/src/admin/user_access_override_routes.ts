@@ -45,6 +45,18 @@ export interface OverrideRouterDeps {
    * resolver just emits an empty role section.
    */
   rolesForUser: (tenant_id: string, user_id: string) => Promise<string[]>;
+  /**
+   * Optional webhook dispatcher — when present, approve/reject/revoke
+   * fire `user_access_override.{approved,rejected,revoked}` events
+   * fire-and-forget. Pattern matches scenario.run / alert.created.
+   *
+   * Typed loose (event_type as string) so the router stays decoupled
+   * from the WebhookEventType union — server.ts passes a real
+   * WebhookDispatcher whose dispatch is type-checked against
+   * WebhookEventType separately.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webhookDispatcher?: { dispatch: (...args: any[]) => unknown };
   now?: () => Date;
 }
 
@@ -59,7 +71,27 @@ const ALL_STATUSES: OverrideStatus[] = [
 export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterType {
   const router = Router();
   const now = deps.now ?? (() => new Date());
-  const { store, requireTenantMw, requireRole, rolesForUser } = deps;
+  const { store, requireTenantMw, requireRole, rolesForUser, webhookDispatcher } = deps;
+
+  const fireEvent = (
+    event_type:
+      | 'user_access_override.approved'
+      | 'user_access_override.rejected'
+      | 'user_access_override.revoked',
+    tenant_id: string,
+    payload: Record<string, unknown>,
+  ) => {
+    if (!webhookDispatcher) return;
+    try {
+      // Fire-and-forget — matches WebhookDispatcher.dispatch signature
+      // (event_type, payload, tenant_id). Tenant scoping prevents cross-
+      // tenant fan-out at the dispatcher level.
+      void webhookDispatcher.dispatch(event_type, payload, tenant_id);
+    } catch {
+      // Webhook failures must never break the primary action; the
+      // dispatcher's own retry/log pipeline is the source of truth.
+    }
+  };
 
   // ── helpers ────────────────────────────────────────────────────────
 
@@ -235,6 +267,15 @@ export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterTy
       const ctx = extractCtx(req, now);
       const note = (req.body as { approval_note?: string } | undefined)?.approval_note ?? null;
       const out = await store.approve(req.tenant!.tenant_id, req.params.id, note, actorOf(req), now());
+      fireEvent('user_access_override.approved', req.tenant!.tenant_id, {
+        override_id: out.override_id,
+        user_id: out.user_id,
+        module_path: out.module_path,
+        permission_type: out.permission_type,
+        override_type: out.override_type,
+        approved_by: out.approved_by,
+        approved_at: out.approved_at,
+      });
       res.json(wrapResponse(out, ctx));
     }),
   );
@@ -249,6 +290,13 @@ export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterTy
       const ctx = extractCtx(req, now);
       const reason = (req.body as { rejection_reason?: string } | undefined)?.rejection_reason ?? '';
       const out = await store.reject(req.tenant!.tenant_id, req.params.id, reason, actorOf(req), now());
+      fireEvent('user_access_override.rejected', req.tenant!.tenant_id, {
+        override_id: out.override_id,
+        user_id: out.user_id,
+        rejected_by: out.rejected_by,
+        rejected_at: out.rejected_at,
+        rejection_reason: reason,
+      });
       res.json(wrapResponse(out, ctx));
     }),
   );
@@ -263,7 +311,53 @@ export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterTy
       const ctx = extractCtx(req, now);
       const reason = (req.body as { revocation_reason?: string } | undefined)?.revocation_reason ?? '';
       const out = await store.revoke(req.tenant!.tenant_id, req.params.id, reason, actorOf(req), now());
+      fireEvent('user_access_override.revoked', req.tenant!.tenant_id, {
+        override_id: out.override_id,
+        user_id: out.user_id,
+        revoked_by: out.revoked_by,
+        revoked_at: out.revoked_at,
+        revocation_reason: reason,
+        bulk: false,
+      });
       res.json(wrapResponse(out, ctx));
+    }),
+  );
+
+  // ── POST /v1/admin/user-access-overrides/bulk-revoke ───────────────
+  // Bulk revoke every ACTIVE override for one user — used by the
+  // offboarding flow ("user left the team — kill all overrides").
+  router.post(
+    '/v1/admin/user-access-overrides/bulk-revoke',
+    requireTenantMw,
+    requireRole('admin:user_access_override:bulk_revoke'),
+    wrap(async (req, res) => {
+      const ctx = extractCtx(req, now);
+      const body = (req.body ?? {}) as { user_id?: string; revocation_reason?: string };
+      if (!body.user_id) {
+        throw new OverrideError(400, 'EWS_400_invalid_input', 'user_id is required');
+      }
+      const reason = body.revocation_reason ?? '';
+      const out = await store.bulkRevoke(
+        req.tenant!.tenant_id,
+        body.user_id,
+        reason,
+        actorOf(req),
+        now(),
+      );
+      // Fire one event per revoked override so individual webhook
+      // subscribers see the same shape as a single revoke. Adds
+      // bulk=true so consumers can group them if desired.
+      for (const o of out) {
+        fireEvent('user_access_override.revoked', req.tenant!.tenant_id, {
+          override_id: o.override_id,
+          user_id: o.user_id,
+          revoked_by: o.revoked_by,
+          revoked_at: o.revoked_at,
+          revocation_reason: reason,
+          bulk: true,
+        });
+      }
+      res.json(wrapResponse({ revoked: out, count: out.length }, ctx));
     }),
   );
 

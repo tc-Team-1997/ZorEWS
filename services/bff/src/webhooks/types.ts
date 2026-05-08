@@ -18,7 +18,10 @@ export type WebhookEventType =
   | 'case.assigned'
   | 'case.closed'
   | 'scenario.run'
-  | 'webhook.test';
+  | 'webhook.test'
+  | 'user_access_override.approved'
+  | 'user_access_override.rejected'
+  | 'user_access_override.revoked';
 
 /**
  * Registered subscription. One per URL+events combination — admins can

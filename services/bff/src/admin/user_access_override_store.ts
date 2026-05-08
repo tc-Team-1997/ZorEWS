@@ -74,6 +74,19 @@ export interface UserAccessOverrideStore {
     actor: ActorContext,
     now: Date,
   ): Promise<UserAccessOverride>;
+  /**
+   * Bulk-revoke every ACTIVE override for `user_id`. Used by the
+   * offboarding flow ("user left the team — kill all overrides").
+   * Returns the list of rows that transitioned ACTIVE → REVOKED.
+   * No-ops on users with no active overrides.
+   */
+  bulkRevoke(
+    tenant_id: string,
+    user_id: string,
+    reason: string,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<UserAccessOverride[]>;
   listAuditLog(
     tenant_id: string,
     filter: { entity_id?: string; actor_id?: string; from?: string; to?: string; page?: number; page_size?: number },
@@ -341,6 +354,38 @@ export class InMemoryUserAccessOverrideStore implements UserAccessOverrideStore 
     this.rows[idx] = after;
     this.audits.push(mkAudit(tenant_id, override_id, 'revoke', before, after, reason, actor, now));
     return after;
+  }
+
+  async bulkRevoke(
+    tenant_id: string,
+    user_id: string,
+    reason: string,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<UserAccessOverride[]> {
+    if (!reason || reason.trim().length < 10) {
+      throw new OverrideError(400, 'EWS_400_invalid_input', 'reason ≥ 10 chars required for bulk-revoke');
+    }
+    const out: UserAccessOverride[] = [];
+    const ts = now.toISOString();
+    for (let i = 0; i < this.rows.length; i++) {
+      const before = this.rows[i];
+      if (before.tenant_id !== tenant_id) continue;
+      if (before.user_id !== user_id) continue;
+      if (before.status !== 'ACTIVE') continue;
+      const after: UserAccessOverride = {
+        ...before,
+        status: 'REVOKED',
+        revoked_by: actor.actor_id,
+        revoked_at: ts,
+        revocation_reason: reason,
+        updated_at: ts,
+      };
+      this.rows[i] = after;
+      this.audits.push(mkAudit(tenant_id, before.override_id, 'revoke', before, after, reason, actor, now));
+      out.push(after);
+    }
+    return out;
   }
 
   async listAuditLog(
@@ -648,6 +693,61 @@ export class PgUserAccessOverrideStore implements UserAccessOverrideStore {
       await this.writeAudit(client, mkAudit(tenant_id, override_id, 'revoke', before, after, reason, actor, now));
       await client.query('COMMIT');
       return after;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async bulkRevoke(
+    tenant_id: string,
+    user_id: string,
+    reason: string,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<UserAccessOverride[]> {
+    if (!reason || reason.trim().length < 10) {
+      throw new OverrideError(400, 'EWS_400_invalid_input', 'reason ≥ 10 chars required for bulk-revoke');
+    }
+    // Pre-flight: collect ACTIVE rows so we can fan-out audit entries.
+    const beforeRes = await this.pool.query(
+      `SELECT * FROM app_admin.user_access_override
+        WHERE tenant_id=$1 AND user_id=$2 AND status='ACTIVE'`,
+      [tenant_id, user_id],
+    );
+    if (beforeRes.rows.length === 0) return [];
+    const ts = now.toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out: UserAccessOverride[] = [];
+      for (const r of beforeRes.rows) {
+        const before = rowToOverride(r);
+        const after: UserAccessOverride = {
+          ...before,
+          status: 'REVOKED',
+          revoked_by: actor.actor_id,
+          revoked_at: ts,
+          revocation_reason: reason,
+          updated_at: ts,
+        };
+        await client.query(
+          `UPDATE app_admin.user_access_override
+              SET status='REVOKED', revoked_by=$1, revoked_at=$2,
+                  revocation_reason=$3, updated_at=$2
+            WHERE tenant_id=$4 AND override_id=$5`,
+          [actor.actor_id, ts, reason, tenant_id, before.override_id],
+        );
+        await this.writeAudit(
+          client,
+          mkAudit(tenant_id, before.override_id, 'revoke', before, after, reason, actor, now),
+        );
+        out.push(after);
+      }
+      await client.query('COMMIT');
+      return out;
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;

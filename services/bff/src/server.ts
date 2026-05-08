@@ -1056,6 +1056,7 @@ export function makeApp(deps: AppDeps = {}) {
         requireTenantMw,
         requireRole,
         rolesForUser: deps.rolesForUser ?? defaultRolesForUser,
+        webhookDispatcher,
         now,
       }),
     );

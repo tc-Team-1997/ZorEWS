@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, ShieldCheck, Trash2 } from 'lucide-react';
 import { api, type EffectiveAccessRow } from '@/lib/api';
-import { Badge, Panel } from '@/components/ui';
+import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
 const PERMISSION_TONE: Record<string, 'success' | 'blue' | 'warning' | 'danger'> = {
@@ -14,10 +15,26 @@ const PERMISSION_TONE: Record<string, 'success' | 'blue' | 'warning' | 'danger'>
 
 export function EffectiveAccessPage() {
   const { user_id } = useParams<{ user_id: string }>();
+  const queryClient = useQueryClient();
+  const [showBulkRevoke, setShowBulkRevoke] = useState(false);
+  const [bulkReason, setBulkReason] = useState('');
+  const [bulkErr, setBulkErr] = useState<string | null>(null);
+
   const q = useQuery({
     queryKey: ['uao', 'effective', user_id],
     queryFn: () => api.uaoEffectiveAccess(user_id ?? ''),
     enabled: !!user_id,
+  });
+
+  const bulk = useMutation({
+    mutationFn: () => api.uaoBulkRevoke(user_id ?? '', bulkReason),
+    onSuccess: () => {
+      setShowBulkRevoke(false);
+      setBulkReason('');
+      setBulkErr(null);
+      void queryClient.invalidateQueries({ queryKey: ['uao'] });
+    },
+    onError: (e) => setBulkErr(e instanceof Error ? e.message : 'Bulk revoke failed'),
   });
 
   return (
@@ -57,23 +74,35 @@ export function EffectiveAccessPage() {
               {q.data.overrides_applied.length === 0 ? (
                 <div className="text-xs text-muted">None in force at this time.</div>
               ) : (
-                <ul className="space-y-2">
-                  {q.data.overrides_applied.map((o) => (
-                    <li key={o.override_id} className="border rounded p-2">
-                      <div className="text-xs flex items-center gap-2">
-                        <ShieldCheck className="w-3 h-3" />
-                        <Badge tone={o.override_type === 'GRANT' ? 'success' : 'danger'}>
-                          {o.override_type}
-                        </Badge>
-                        <span className="font-mono">{o.module_path}</span>
-                        <span className="text-muted">/ {o.permission_type}</span>
-                      </div>
-                      <div className="text-2xs text-muted mt-1">
-                        until {o.effective_till ? new Date(o.effective_till).toLocaleDateString() : 'permanent'}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="space-y-2">
+                    {q.data.overrides_applied.map((o) => (
+                      <li key={o.override_id} className="border rounded p-2">
+                        <div className="text-xs flex items-center gap-2">
+                          <ShieldCheck className="w-3 h-3" />
+                          <Badge tone={o.override_type === 'GRANT' ? 'success' : 'danger'}>
+                            {o.override_type}
+                          </Badge>
+                          <span className="font-mono">{o.module_path}</span>
+                          <span className="text-muted">/ {o.permission_type}</span>
+                        </div>
+                        <div className="text-2xs text-muted mt-1">
+                          until {o.effective_till ? new Date(o.effective_till).toLocaleDateString() : 'permanent'}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 pt-3 border-t">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setShowBulkRevoke(true)}
+                      data-testid="uao-bulk-revoke-open"
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Revoke all overrides for this user
+                    </Button>
+                  </div>
+                </>
               )}
             </Panel>
 
@@ -123,6 +152,64 @@ export function EffectiveAccessPage() {
             </Panel>
           </div>
         </>
+      )}
+
+      {showBulkRevoke && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Bulk revoke confirmation"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+        >
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-5">
+            <h2 className="text-base font-semibold mb-2">Revoke all active overrides</h2>
+            <p className="text-xs text-muted mb-3">
+              This will revoke{' '}
+              <strong>{q.data?.overrides_applied.length ?? 0}</strong> active
+              override{q.data && q.data.overrides_applied.length === 1 ? '' : 's'} for{' '}
+              <span className="font-mono">{user_id}</span>. The action is audit-logged
+              and cannot be batch-undone — overrides must be re-created individually.
+            </p>
+            <textarea
+              value={bulkReason}
+              onChange={(e) => setBulkReason(e.target.value)}
+              rows={3}
+              placeholder="Reason (≥ 10 chars; audit-logged)"
+              className="w-full border rounded-md px-3 py-2 text-sm"
+              data-testid="uao-bulk-revoke-reason"
+            />
+            {bulkErr && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-md px-3 py-2 text-xs mt-2">
+                {bulkErr}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowBulkRevoke(false);
+                  setBulkErr(null);
+                }}
+                disabled={bulk.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (bulkReason.trim().length < 10) {
+                    setBulkErr('Reason ≥ 10 characters required');
+                    return;
+                  }
+                  bulk.mutate();
+                }}
+                disabled={bulk.isPending}
+                data-testid="uao-bulk-revoke-confirm"
+              >
+                {bulk.isPending ? 'Revoking…' : 'Revoke all'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

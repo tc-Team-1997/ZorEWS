@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Plus, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import {
   api,
+  USER_BRANCH_MAP,
   type OverrideStatus,
   type UserAccessOverride,
 } from '@/lib/api';
@@ -32,8 +33,11 @@ export function UserAccessOverrideListPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OverrideStatus | 'ALL'>('ALL');
+  const [branchFilter, setBranchFilter] = useState('ALL');
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<UserAccessOverride | null>(null);
+  const [editing, setEditing] = useState<UserAccessOverride | null>(null);
 
   const list = useQuery({
     queryKey: ['uao', 'list', statusFilter],
@@ -56,17 +60,46 @@ export function UserAccessOverrideListPage() {
     },
   });
 
+  const edit = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Parameters<typeof api.uaoUpdate>[1] }) =>
+      api.uaoUpdate(id, patch),
+    onSuccess: () => {
+      setEditing(null);
+      refresh();
+    },
+  });
+
+  // Bulk-revoke moved to the EffectiveAccessPage where it has the user
+  // context inline (see "/admin/user-access-override/users/:id/effective-access").
+
   const filtered = useMemo(() => {
-    const items = list.data?.items ?? [];
-    if (!search.trim()) return items;
-    const q = search.trim().toLowerCase();
-    return items.filter(
-      (o) =>
-        o.user_id.toLowerCase().includes(q) ||
-        o.module_path.toLowerCase().includes(q) ||
-        o.reason.toLowerCase().includes(q),
-    );
-  }, [list.data?.items, search]);
+    let items = list.data?.items ?? [];
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter(
+        (o) =>
+          o.user_id.toLowerCase().includes(q) ||
+          o.module_path.toLowerCase().includes(q) ||
+          o.reason.toLowerCase().includes(q),
+      );
+    }
+    if (branchFilter !== 'ALL') {
+      items = items.filter((o) => USER_BRANCH_MAP[o.user_id]?.branch === branchFilter);
+    }
+    if (departmentFilter !== 'ALL') {
+      items = items.filter((o) => USER_BRANCH_MAP[o.user_id]?.department === departmentFilter);
+    }
+    return items;
+  }, [list.data?.items, search, branchFilter, departmentFilter]);
+
+  const allBranches = useMemo(
+    () => Array.from(new Set(Object.values(USER_BRANCH_MAP).map((u) => u.branch))).sort(),
+    [],
+  );
+  const allDepartments = useMemo(
+    () => Array.from(new Set(Object.values(USER_BRANCH_MAP).map((u) => u.department))).sort(),
+    [],
+  );
 
   const counts = useMemo(() => {
     const items = list.data?.items ?? [];
@@ -81,18 +114,26 @@ export function UserAccessOverrideListPage() {
     {
       key: 'user',
       header: 'User',
-      render: (o) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{o.user_id}</span>
-          <Link
-            to={`/admin/user-access-override/users/${encodeURIComponent(o.user_id)}/effective-access`}
-            className="text-2xs text-blue-600 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            View effective access →
-          </Link>
-        </div>
-      ),
+      render: (o) => {
+        const meta = USER_BRANCH_MAP[o.user_id];
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium">{o.user_id}</span>
+            {meta && (
+              <span className="text-2xs text-muted">
+                {meta.branch} · {meta.department}
+              </span>
+            )}
+            <Link
+              to={`/admin/user-access-override/users/${encodeURIComponent(o.user_id)}/effective-access`}
+              className="text-2xs text-blue-600 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              View effective access →
+            </Link>
+          </div>
+        );
+      },
     },
     {
       key: 'module',
@@ -155,6 +196,32 @@ export function UserAccessOverrideListPage() {
       ),
       width: 160,
     },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (o) => (
+        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+          {o.status === 'PENDING_APPROVAL' && (
+            <button
+              type="button"
+              onClick={() => setEditing(o)}
+              className="text-2xs text-blue-600 hover:underline"
+              data-testid={`uao-edit-${o.override_id}`}
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setSelected(o)}
+            className="text-2xs text-blue-600 hover:underline"
+          >
+            View
+          </button>
+        </div>
+      ),
+      width: 110,
+    },
   ];
 
   return (
@@ -197,7 +264,7 @@ export function UserAccessOverrideListPage() {
         </button>
       </div>
 
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <Input
           placeholder="Search by user, module path, or reason"
           value={search}
@@ -206,6 +273,34 @@ export function UserAccessOverrideListPage() {
           aria-label="search"
           data-testid="uao-search"
         />
+        <select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          className="border rounded-md px-2 py-1.5 text-xs"
+          aria-label="branch"
+          data-testid="uao-branch-filter"
+        >
+          <option value="ALL">All branches</option>
+          {allBranches.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+        <select
+          value={departmentFilter}
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+          className="border rounded-md px-2 py-1.5 text-xs"
+          aria-label="department"
+          data-testid="uao-dept-filter"
+        >
+          <option value="ALL">All departments</option>
+          {allDepartments.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
         <div className="flex-1" />
         <Button onClick={() => setShowCreate(true)} data-testid="uao-add">
           <Plus className="w-4 h-4 mr-1" />
@@ -229,6 +324,29 @@ export function UserAccessOverrideListPage() {
           onSubmit={(input) => create.mutate(input)}
           isPending={create.isPending}
           error={create.error}
+        />
+      )}
+
+      {editing && (
+        <OverrideFormModal
+          mode="edit"
+          override={editing}
+          onClose={() => setEditing(null)}
+          onSubmit={(input) =>
+            edit.mutate({
+              id: editing.override_id,
+              patch: {
+                module_paths: input.module_paths,
+                override_type: input.override_type,
+                permission_type: input.permission_type,
+                effective_from: input.effective_from,
+                effective_till: input.effective_till,
+                reason: input.reason,
+              },
+            })
+          }
+          isPending={edit.isPending}
+          error={edit.error}
         />
       )}
 

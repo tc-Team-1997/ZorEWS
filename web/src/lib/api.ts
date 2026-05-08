@@ -836,6 +836,14 @@ export const api = {
       )
       .then((r) => r.data),
 
+  uaoBulkRevoke: (user_id: string, revocation_reason: string) =>
+    http
+      .post<{ revoked: UserAccessOverride[]; count: number }>(
+        '/v1/admin/user-access-overrides/bulk-revoke',
+        { user_id, revocation_reason },
+      )
+      .then((r) => r.data),
+
   uaoEffectiveAccess: (user_id: string) =>
     http
       .get<EffectiveAccess>(
@@ -999,6 +1007,20 @@ export interface EffectiveAccess {
   overrides_applied: UserAccessOverride[];
   effective: EffectiveAccessRow[];
 }
+
+/**
+ * Branch + department lookup keyed by user_id. Mirrors the seeds in
+ * 017_user_branch_department.sql for the 5 demo accounts. The SPA list
+ * page joins this client-side for filter dropdowns until a real
+ * users-with-branch endpoint lands.
+ */
+export const USER_BRANCH_MAP: Record<string, { branch: string; department: string }> = {
+  'u-001': { branch: 'BR-NRB-01', department: 'Risk Operations' },
+  'u-002': { branch: 'BR-NRB-02', department: 'Risk Analytics' },
+  'u-003': { branch: 'BR-NRB-01', department: 'Risk Operations' },
+  'u-004': { branch: 'BR-MSA-01', department: 'Collections' },
+  'u-005': { branch: 'BR-MSA-02', department: 'Field Ops' },
+};
 
 export interface AdminAuditLogRow {
   audit_id: string;
