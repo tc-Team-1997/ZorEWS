@@ -994,6 +994,9 @@ export interface AppDeps {
   /** Source for the PD Distribution sub-dashboard (T4.1 4c). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdDistributionSource?: any;
+  /** Source for the Stage Migration sub-dashboard (T4.1 4d). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  stageMigrationSource?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1440,6 +1443,66 @@ export function makeApp(deps: AppDeps = {}) {
           res.status(500).json(
             wrapError(
               { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  // /v1/analytics/stage-migration — T4.1 4d.
+  // 3×3 (from-stage × to-stage) transition matrix between two snapshots,
+  // with per-stage totals + upgrade/downgrade/stationary counts.
+  if (deps.stageMigrationSource) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computeStageMigration } = require('./analytics/stage_migration') as
+      typeof import('./analytics/stage_migration');
+    app.get(
+      '/v1/analytics/stage-migration',
+      requireTenantMw,
+      requireRole('dashboard:analytics:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const tenant_id = req.tenant!.tenant_id;
+          const filter = {
+            as_of: typeof req.query.as_of === 'string' ? req.query.as_of : undefined,
+            prior_as_of: typeof req.query.prior_as_of === 'string' ? req.query.prior_as_of : undefined,
+            segment: typeof req.query.segment === 'string' ? req.query.segment : undefined,
+          };
+          for (const k of ['as_of', 'prior_as_of'] as const) {
+            const v = filter[k];
+            if (v && Number.isNaN(Date.parse(v))) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: `${k} must be ISO 8601`, severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+          }
+          const asOfDate = filter.as_of ? new Date(filter.as_of) : now();
+          // Default 30-day prior window when not provided
+          const priorDate = filter.prior_as_of
+            ? new Date(filter.prior_as_of)
+            : new Date(asOfDate.getTime() - 30 * 86_400_000);
+          const [current, prior] = await Promise.all([
+            deps.stageMigrationSource.loadSnapshot(tenant_id, asOfDate),
+            deps.stageMigrationSource.loadSnapshot(tenant_id, priorDate),
+          ]);
+          const out = computeStageMigration({
+            tenant_id,
+            current,
+            prior,
+            filter,
+            asOf: now(),
+          });
+          res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'analytics failed', severity: 'HIGH' },
               ctx,
             ),
           );
@@ -14589,6 +14652,10 @@ if (require.main === module) {
     const { makePdDistributionSource } = require('./analytics/pd_distribution') as
       typeof import('./analytics/pd_distribution');
     const { source: pdDistributionSource } = await makePdDistributionSource();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeStageMigrationSource } = require('./analytics/stage_migration') as
+      typeof import('./analytics/stage_migration');
+    const { source: stageMigrationSource } = await makeStageMigrationSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14605,6 +14672,7 @@ if (require.main === module) {
       alertResolutionSource,
       riskTrendSource,
       pdDistributionSource,
+      stageMigrationSource,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {

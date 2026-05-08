@@ -32,6 +32,8 @@ import {
   type AlertResolutionReport,
   type RiskTrendReport,
   type PdDistributionReport,
+  type StageMigrationReport,
+  type StageCode,
 } from '@/lib/api';
 
 type TabKey = 'alert-resolution' | 'risk-trend' | 'pd-distribution' | 'stage-migration';
@@ -40,7 +42,7 @@ const TABS: { key: TabKey; label: string; icon: typeof BarChart3; status: 'live'
   { key: 'alert-resolution', label: 'Alert resolution', icon: BarChart3,  status: 'live' },
   { key: 'risk-trend',       label: 'Risk trend',       icon: LineIcon,   status: 'live' },
   { key: 'pd-distribution',  label: 'PD distribution',  icon: BarChart3,  status: 'live' },
-  { key: 'stage-migration',  label: 'Stage migration',  icon: GitBranch,  status: 'pending' },
+  { key: 'stage-migration',  label: 'Stage migration',  icon: GitBranch,  status: 'live' },
 ];
 
 const SEVERITY_OPTIONS: AnalyticsSeverityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
@@ -107,7 +109,7 @@ export function AnalyticsPage() {
           {tab === 'alert-resolution' && <AlertResolutionTab />}
           {tab === 'risk-trend' && <RiskTrendTab />}
           {tab === 'pd-distribution' && <PdDistributionTab />}
-          {tab === 'stage-migration' && <ComingSoon title="Stage migration" />}
+          {tab === 'stage-migration' && <StageMigrationTab />}
         </div>
       </Panel>
     </div>
@@ -650,18 +652,229 @@ function PdDistributionView({
   );
 }
 
-// ── Coming-soon placeholder ───────────────────────────────────────────
+// ── Stage Migration tab (4d) ──────────────────────────────────────────
 
-function ComingSoon({ title }: { title: string }) {
+const STAGE_LABEL: Record<StageCode, string> = {
+  stage_1: 'Stage 1 · perform',
+  stage_2: 'Stage 2 · SICR',
+  stage_3: 'Stage 3 · NPA',
+};
+
+function StageMigrationTab() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const compareDays = Number(searchParams.get('compare') ?? '30');
+
+  const setCompare = (days: number) => {
+    const sp = new URLSearchParams(searchParams);
+    if (days === 30) sp.delete('compare');
+    else sp.set('compare', String(days));
+    setSearchParams(sp, { replace: true });
+  };
+
+  const filter = useMemo(() => {
+    const prior_as_of = new Date(Date.now() - compareDays * 86_400_000).toISOString();
+    return { prior_as_of };
+  }, [compareDays]);
+
+  const q = useQuery({
+    queryKey: ['analytics.stage-migration', compareDays],
+    queryFn: () => api.stageMigration(filter),
+  });
+
   return (
-    <div
-      className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 p-12 text-slate-500"
-      data-testid={`coming-soon-${title.toLowerCase().replace(/\s+/g, '-')}`}
-    >
-      <span className="text-sm font-medium">{title} — coming soon</span>
-      <span className="text-xs">
-        Sub-dashboard scaffold landed; resolver + chart land in a follow-on commit.
-      </span>
+    <div className="space-y-4" data-testid="stage-migration-panel">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label htmlFor="sm-compare" className="block text-xs font-medium text-slate-500 mb-1">
+            Compare to
+          </label>
+          <select
+            id="sm-compare"
+            value={compareDays}
+            onChange={(e) => setCompare(Number(e.target.value))}
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+          >
+            <option value={1}>1 day ago</option>
+            <option value={7}>7 days ago</option>
+            <option value={30}>30 days ago</option>
+            <option value={90}>90 days ago</option>
+          </select>
+        </div>
+        <span className="ml-auto text-xs text-slate-500">
+          {q.data?.generated_at
+            ? `Generated ${new Date(q.data.generated_at).toLocaleString()}`
+            : ''}
+        </span>
+      </div>
+
+      {q.isLoading && <p className="py-6 text-center text-sm text-slate-500">Loading…</p>}
+      {q.isError && (
+        <p role="alert" className="py-6 text-center text-sm text-rose-600">
+          <AlertTriangle size={14} className="mr-1 inline" />
+          {(q.error as Error)?.message ?? 'Failed to load.'}
+        </p>
+      )}
+      {q.data && <StageMigrationView report={q.data} compareDays={compareDays} />}
     </div>
   );
 }
+
+function StageMigrationView({
+  report,
+  compareDays,
+}: {
+  report: StageMigrationReport;
+  compareDays: number;
+}) {
+  // Build a 3×3 lookup from the flat matrix.
+  const cellMap = new Map<string, number>();
+  for (const c of report.matrix) cellMap.set(`${c.from}|${c.to}`, c.count);
+
+  const stages: StageCode[] = ['stage_1', 'stage_2', 'stage_3'];
+  const cellAt = (from: StageCode, to: StageCode) => cellMap.get(`${from}|${to}`) ?? 0;
+
+  // Heat-mapping: max non-zero off-diagonal cell anchors the colour scale.
+  const offDiagMax = Math.max(
+    1,
+    ...report.matrix.filter((c) => c.from !== c.to).map((c) => c.count),
+  );
+  const cellBg = (from: StageCode, to: StageCode, count: number) => {
+    if (from === to) return 'bg-slate-50';
+    const fromIdx = stages.indexOf(from);
+    const toIdx = stages.indexOf(to);
+    const intensity = Math.min(1, count / offDiagMax);
+    if (toIdx > fromIdx) {
+      // Upgrades (more risk) → red shades
+      const a = 0.05 + intensity * 0.6;
+      return `rgba(220, 38, 38, ${a})`;
+    }
+    // Downgrades (less risk) → green shades
+    const a = 0.05 + intensity * 0.6;
+    return `rgba(29, 158, 117, ${a})`;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4" data-testid="sm-kpis">
+        <div data-testid="sm-kpi-upgrades">
+          <MetricCard
+            label="Upgrades"
+            value={report.upgrades_count.toLocaleString()}
+            tone="danger"
+            sub="moved to higher (riskier) stage"
+          />
+        </div>
+        <MetricCard
+          label="Downgrades"
+          value={report.downgrades_count.toLocaleString()}
+          tone="success"
+          sub="moved to lower (safer) stage"
+        />
+        <MetricCard
+          label="Stationary"
+          value={report.stationary_count.toLocaleString()}
+          tone="neutral"
+          sub="no stage change in window"
+        />
+        <MetricCard
+          label="New customers"
+          value={report.new_customers_count.toLocaleString()}
+          tone="blue"
+          sub={`since ${compareDays}d ago`}
+        />
+        <MetricCard
+          label="Exited"
+          value={report.exited_customers_count.toLocaleString()}
+          tone="warning"
+          sub="not in current snapshot"
+        />
+      </div>
+
+      <Panel title={`Transition matrix · current vs ${compareDays}d ago`}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm" data-testid="stage-migration-matrix">
+            <thead>
+              <tr>
+                <th className="w-32 p-2 text-left text-xs uppercase text-slate-500">
+                  Prior ↓ / Current →
+                </th>
+                {stages.map((to) => (
+                  <th key={to} className="p-2 text-left text-xs uppercase text-slate-500">
+                    {STAGE_LABEL[to]}
+                  </th>
+                ))}
+                <th className="p-2 text-left text-xs uppercase text-slate-500">Prior total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stages.map((from) => {
+                const priorTotal = report.totals.find((t) => t.stage === from)!.prior;
+                return (
+                  <tr key={from} className="border-t border-slate-200">
+                    <td className="p-2 text-xs font-medium text-slate-600">
+                      {STAGE_LABEL[from]}
+                    </td>
+                    {stages.map((to) => {
+                      const count = cellAt(from, to);
+                      return (
+                        <td
+                          key={to}
+                          className="p-2 text-center"
+                          style={{ backgroundColor: cellBg(from, to, count) }}
+                          data-testid={`sm-cell-${from}-${to}`}
+                        >
+                          <div className="font-semibold tabular text-slate-900">
+                            {count.toLocaleString()}
+                          </div>
+                          {from !== to && priorTotal > 0 && (
+                            <div className="text-[10px] text-slate-500">
+                              {((count / priorTotal) * 100).toFixed(1)}%
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="p-2 text-center text-slate-500 tabular">
+                      {priorTotal.toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t border-slate-300">
+                <td className="p-2 text-xs uppercase text-slate-500">Current total</td>
+                {stages.map((to) => {
+                  const cur = report.totals.find((t) => t.stage === to)!.current;
+                  const delta = report.totals.find((t) => t.stage === to)!.delta;
+                  return (
+                    <td key={to} className="p-2 text-center">
+                      <div className="font-semibold tabular text-slate-900">
+                        {cur.toLocaleString()}
+                      </div>
+                      <div
+                        className={`text-[10px] tabular ${
+                          delta > 0 ? 'text-rose-600' : delta < 0 ? 'text-emerald-700' : 'text-slate-400'
+                        }`}
+                      >
+                        {delta > 0 ? '+' : ''}
+                        {delta.toLocaleString()}
+                      </div>
+                    </td>
+                  );
+                })}
+                <td className="p-2"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Diagonal cells = customers who stayed at the same stage. Red shading on
+          off-diagonal upper-right = upgrades (more risk). Green shading on
+          lower-left = downgrades (less risk). Stage 1 = perform · Stage 2 = SICR ·
+          Stage 3 = NPA — derived from latest alert severity until real IFRS-9
+          stage data lands.
+        </p>
+      </Panel>
+    </div>
+  );
+}
+

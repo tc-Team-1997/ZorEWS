@@ -450,6 +450,37 @@ export interface AlertResolutionReport {
   filters_applied: AlertResolutionFilter;
 }
 
+// Stage migration (4d)
+export type StageCode = 'stage_1' | 'stage_2' | 'stage_3';
+export interface StageMatrixCell {
+  from: StageCode;
+  to: StageCode;
+  count: number;
+}
+export interface StageTotal {
+  stage: StageCode;
+  current: number;
+  prior: number;
+  delta: number;
+}
+export interface StageMigrationFilter {
+  as_of?: string;
+  prior_as_of?: string;
+  segment?: string;
+}
+export interface StageMigrationReport {
+  matrix: StageMatrixCell[];
+  totals: StageTotal[];
+  upgrades_count: number;
+  downgrades_count: number;
+  stationary_count: number;
+  new_customers_count: number;
+  exited_customers_count: number;
+  generated_at: string;
+  tenant_id: string;
+  filters_applied: StageMigrationFilter;
+}
+
 // PD distribution (4c)
 export type PdRiskBand = 'low' | 'medium' | 'high';
 export interface PdHistogramBin {
@@ -1170,6 +1201,13 @@ export const api = {
   pdDistribution: (filter: PdDistributionFilter = {}) =>
     http
       .get<PdDistributionReport>('/v1/analytics/pd-distribution', {
+        params: filter,
+      })
+      .then((r) => r.data),
+
+  stageMigration: (filter: StageMigrationFilter = {}) =>
+    http
+      .get<StageMigrationReport>('/v1/analytics/stage-migration', {
         params: filter,
       })
       .then((r) => r.data),

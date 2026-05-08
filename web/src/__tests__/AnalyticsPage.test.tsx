@@ -34,13 +34,48 @@ describe('AnalyticsPage — chrome', () => {
     expect(screen.getByTestId('analytics-tab-stage-migration')).toBeInTheDocument();
   });
 
-  it('switching to the stage-migration placeholder shows the coming-soon panel', async () => {
+  it('all 4 tabs are live (no coming-soon placeholders left)', async () => {
+    authenticate();
+    renderWithProviders(<AnalyticsPage />);
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('AnalyticsPage — stage-migration tab', () => {
+  it('hydrates 3×3 transition matrix + KPI cards', async () => {
     authenticate();
     const user = userEvent.setup();
     renderWithProviders(<AnalyticsPage />);
+
     await user.click(screen.getByTestId('analytics-tab-stage-migration'));
-    expect(screen.getByTestId('coming-soon-stage-migration')).toBeInTheDocument();
-    expect(screen.queryByTestId('alert-resolution-panel')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('sm-kpis')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('stage-migration-matrix')).toBeInTheDocument();
+    // All 9 (from, to) cells present
+    expect(screen.getByTestId('sm-cell-stage_1-stage_1')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-cell-stage_3-stage_3')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-cell-stage_1-stage_3')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-cell-stage_3-stage_1')).toBeInTheDocument();
+  });
+
+  it('changing compare-to dropdown triggers a refetch', async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyticsPage />);
+
+    await user.click(screen.getByTestId('analytics-tab-stage-migration'));
+    await waitFor(() =>
+      expect(screen.getByTestId('sm-kpi-upgrades')).toBeInTheDocument(),
+    );
+    const before = screen.getByTestId('sm-kpi-upgrades').textContent ?? '';
+    await user.selectOptions(screen.getByLabelText(/Compare to/i), '7');
+
+    // The MSW seed differs across compare windows → KPI text differs
+    await waitFor(() => {
+      const after = screen.getByTestId('sm-kpi-upgrades').textContent ?? '';
+      expect(after).not.toBe(before);
+    });
   });
 });
 

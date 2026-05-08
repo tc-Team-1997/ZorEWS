@@ -3008,6 +3008,70 @@ export const handlers = [
     return HttpResponse.json(envelope({ deleted: true }));
   }),
 
+  // ── Analytics — Stage Migration (T4.1 4d) ────────────────────────────
+
+  http.get('/v1/analytics/stage-migration', ({ request }) => {
+    const url = new URL(request.url);
+    for (const k of ['as_of', 'prior_as_of'] as const) {
+      const v = url.searchParams.get(k);
+      if (v && Number.isNaN(Date.parse(v))) {
+        return HttpResponse.json(
+          envelopeError('EWS_400_invalid_input', `${k} must be ISO 8601`, 'MEDIUM'),
+          { status: 400 },
+        );
+      }
+    }
+    // Vary the prior snapshot by the prior_as_of distance — different
+    // compare-to dropdowns produce different transition counts.
+    const priorAsOf = url.searchParams.get('prior_as_of');
+    const days = priorAsOf
+      ? Math.max(0, Math.round((Date.now() - Date.parse(priorAsOf)) / 86_400_000))
+      : 30;
+
+    const { current, prior } = mswStageMigrationSeed(days);
+    const STAGES: ('stage_1' | 'stage_2' | 'stage_3')[] = ['stage_1', 'stage_2', 'stage_3'];
+    const curMap = new Map(current.map((r) => [r.customer_id, r.stage]));
+    const priorMap = new Map(prior.map((r) => [r.customer_id, r.stage]));
+
+    const matrix: { from: string; to: string; count: number }[] = [];
+    for (const from of STAGES) for (const to of STAGES) matrix.push({ from, to, count: 0 });
+    let upgrades = 0, downgrades = 0, stationary = 0, newCust = 0, exited = 0;
+    const allIds = new Set<string>([...curMap.keys(), ...priorMap.keys()]);
+    for (const id of allIds) {
+      const from = priorMap.get(id);
+      const to = curMap.get(id);
+      if (!from && to) { newCust += 1; continue; }
+      if (from && !to) { exited += 1; continue; }
+      if (!from || !to) continue;
+      const cell = matrix.find((c) => c.from === from && c.to === to)!;
+      cell.count += 1;
+      const fi = STAGES.indexOf(from);
+      const ti = STAGES.indexOf(to);
+      if (ti > fi) upgrades += 1;
+      else if (ti < fi) downgrades += 1;
+      else stationary += 1;
+    }
+    const totals = STAGES.map((stage) => {
+      const cur = current.filter((r) => r.stage === stage).length;
+      const pri = prior.filter((r) => r.stage === stage).length;
+      return { stage, current: cur, prior: pri, delta: cur - pri };
+    });
+    return HttpResponse.json(
+      envelope({
+        matrix,
+        totals,
+        upgrades_count: upgrades,
+        downgrades_count: downgrades,
+        stationary_count: stationary,
+        new_customers_count: newCust,
+        exited_customers_count: exited,
+        generated_at: new Date().toISOString(),
+        tenant_id: 'BANK_DEMO',
+        filters_applied: priorAsOf ? { prior_as_of: priorAsOf } : {},
+      }),
+    );
+  }),
+
   // ── Analytics — PD Distribution (T4.1 4c) ────────────────────────────
 
   http.get('/v1/analytics/pd-distribution', ({ request }) => {
@@ -3382,6 +3446,29 @@ function mswWeeklyTrend(
     if (r.closed_at) bump(isoWeek(new Date(r.closed_at)), 'closed');
   }
   return [...map.values()].sort((a, b) => a.week.localeCompare(b.week));
+}
+
+// Stage-migration seed — 300 customers, with deterministic stage rotation
+// based on the comparison window so different `compare` values produce
+// visibly different upgrade/downgrade counts in the SPA.
+function mswStageMigrationSeed(compareDays: number): {
+  current: { customer_id: string; stage: 'stage_1' | 'stage_2' | 'stage_3' }[];
+  prior: { customer_id: string; stage: 'stage_1' | 'stage_2' | 'stage_3' }[];
+} {
+  const stages: ('stage_1' | 'stage_2' | 'stage_3')[] = ['stage_1', 'stage_2', 'stage_3'];
+  const cur: { customer_id: string; stage: 'stage_1' | 'stage_2' | 'stage_3' }[] = [];
+  const prior: { customer_id: string; stage: 'stage_1' | 'stage_2' | 'stage_3' }[] = [];
+  for (let i = 0; i < 300; i++) {
+    const id = `cust-${i + 1}`;
+    const curIdx = (i * 7) % 3;
+    // Wider compare window → more rotation between prior + current
+    const shift = compareDays >= 30 ? 1 : compareDays >= 7 ? 0 : 0;
+    const priorIdx = (curIdx - shift - ((i * 5) % 3 === 0 ? 1 : 0) + 3) % 3;
+    cur.push({ customer_id: id, stage: stages[curIdx] });
+    if (i % 11 !== 0) prior.push({ customer_id: id, stage: stages[priorIdx] });
+    // Skip a few to create "new" customer count > 0
+  }
+  return { current: cur, prior };
 }
 
 // PD-distribution seed — 300 customers with criticality_score values

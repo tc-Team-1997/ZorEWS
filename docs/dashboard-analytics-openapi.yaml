@@ -95,6 +95,60 @@ components:
         to: { type: string, format: date-time }
         severity: { $ref: "#/components/schemas/SeverityFilter" }
 
+    StageCode:
+      type: string
+      enum: [stage_1, stage_2, stage_3]
+    StageMatrixCell:
+      type: object
+      required: [from, to, count]
+      properties:
+        from: { $ref: "#/components/schemas/StageCode" }
+        to:   { $ref: "#/components/schemas/StageCode" }
+        count: { type: integer, minimum: 0 }
+    StageTotal:
+      type: object
+      required: [stage, current, prior, delta]
+      properties:
+        stage:   { $ref: "#/components/schemas/StageCode" }
+        current: { type: integer, minimum: 0 }
+        prior:   { type: integer, minimum: 0 }
+        delta:   { type: integer }
+    StageMigrationFilter:
+      type: object
+      properties:
+        as_of:       { type: string, format: date-time }
+        prior_as_of: { type: string, format: date-time }
+        segment:     { type: string }
+    StageMigrationReport:
+      type: object
+      required:
+        - matrix
+        - totals
+        - upgrades_count
+        - downgrades_count
+        - stationary_count
+        - new_customers_count
+        - exited_customers_count
+        - generated_at
+        - tenant_id
+        - filters_applied
+      properties:
+        matrix:
+          type: array
+          items: { $ref: "#/components/schemas/StageMatrixCell" }
+          description: 9 cells in stable row-major order (stage_1→{1,2,3}, stage_2→{1,2,3}, stage_3→{1,2,3}).
+        totals:
+          type: array
+          items: { $ref: "#/components/schemas/StageTotal" }
+        upgrades_count:        { type: integer, minimum: 0 }
+        downgrades_count:      { type: integer, minimum: 0 }
+        stationary_count:      { type: integer, minimum: 0 }
+        new_customers_count:   { type: integer, minimum: 0 }
+        exited_customers_count: { type: integer, minimum: 0 }
+        generated_at: { type: string, format: date-time }
+        tenant_id:    { type: string }
+        filters_applied: { $ref: "#/components/schemas/StageMigrationFilter" }
+
     PdRiskBand:
       type: string
       enum: [low, medium, high]
@@ -259,6 +313,47 @@ components:
             severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
 
 paths:
+  /analytics/stage-migration:
+    get:
+      summary: 3×3 IFRS-9 stage transition matrix between two snapshots (T4.1 4d)
+      operationId: getAnalyticsStageMigration
+      tags: [analytics]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexRole"
+        - in: query
+          name: as_of
+          schema: { type: string, format: date-time }
+        - in: query
+          name: prior_as_of
+          schema: { type: string, format: date-time }
+        - in: query
+          name: segment
+          schema: { type: string }
+      responses:
+        "200":
+          description: Transition matrix + per-stage totals + movement counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body: { $ref: "#/components/schemas/StageMigrationReport" }
+        "400":
+          description: Invalid input (bad as_of / prior_as_of)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+        "403":
+          description: Caller's role lacks `dashboard:analytics:read`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+
   /analytics/pd-distribution:
     get:
       summary: 10-bin histogram of latest PD-proxy per customer (T4.1 4c)
