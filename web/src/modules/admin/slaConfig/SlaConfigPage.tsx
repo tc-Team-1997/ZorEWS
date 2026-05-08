@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   api,
   type SlaConfigRow,
@@ -9,6 +9,7 @@ import {
 import { Badge, Button, DataTable, Input, Panel, type BadgeTone, type Column } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SlaConfigEditModal } from './SlaConfigEditModal';
+import { CreateSlaConfigModal } from './CreateSlaConfigModal';
 
 const STATUS_TONE: Record<SlaConfigStatus, BadgeTone> = {
   ACTIVE: 'success',
@@ -22,6 +23,7 @@ export function SlaConfigPage() {
   const [statusFilter, setStatusFilter] = useState<SlaConfigStatus | 'ALL'>('ACTIVE');
   const [editing, setEditing] = useState<SlaConfigRow | null>(null);
   const [archiving, setArchiving] = useState<SlaConfigRow | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const list = useQuery({
     queryKey: ['sla-config', statusFilter],
@@ -46,6 +48,13 @@ export function SlaConfigPage() {
     mutationFn: (id: string) => api.slaConfigArchive(id),
     onSuccess: () => {
       setArchiving(null);
+      refresh();
+    },
+  });
+  const create = useMutation({
+    mutationFn: api.slaConfigCreate,
+    onSuccess: () => {
+      setCreating(false);
       refresh();
     },
   });
@@ -199,6 +208,11 @@ export function SlaConfigPage() {
           className="max-w-md"
           data-testid="sla-search"
         />
+        <div className="flex-1" />
+        <Button onClick={() => setCreating(true)} data-testid="sla-add">
+          <Plus className="w-4 h-4 mr-1" />
+          Add SLA target
+        </Button>
       </div>
 
       <Panel>
@@ -228,6 +242,16 @@ export function SlaConfigPage() {
           onConfirm={() => archive.mutate(archiving.sla_config_id)}
           isPending={archive.isPending}
           error={archive.error}
+        />
+      )}
+
+      {creating && (
+        <CreateSlaConfigModal
+          existing={list.data?.items ?? []}
+          onClose={() => setCreating(false)}
+          onSubmit={(input) => create.mutate(input)}
+          isPending={create.isPending}
+          error={create.error}
         />
       )}
     </div>

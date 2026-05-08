@@ -79,6 +79,57 @@ describe('SlaConfigPage', () => {
     });
   });
 
+  it('Add SLA target opens the create modal and warns on duplicate', async () => {
+    renderWithProviders(<SlaConfigPage />);
+    await screen.findAllByText('credit_risk');
+    await userEvent.click(screen.getByTestId('sla-add'));
+    expect(screen.getByRole('dialog', { name: /Add SLA target/i })).toBeInTheDocument();
+    // Picking an existing seeded combination triggers the duplicate
+    // warning + disables the submit button.
+    await userEvent.type(screen.getByTestId('sla-create-category'), 'credit_risk');
+    await userEvent.click(screen.getByTestId('sla-create-priority-P1'));
+    await userEvent.type(screen.getByTestId('sla-create-days'), '1');
+    expect(screen.getByTestId('sla-create-dup-warn')).toBeInTheDocument();
+    expect((screen.getByTestId('sla-create-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('happy-path create: brand-new (category, priority) row appears in the list', async () => {
+    renderWithProviders(<SlaConfigPage />);
+    await screen.findAllByText('credit_risk');
+    await userEvent.click(screen.getByTestId('sla-add'));
+    await userEvent.type(screen.getByTestId('sla-create-category'), 'aml_kyc');
+    await userEvent.click(screen.getByTestId('sla-create-priority-P2'));
+    await userEvent.type(screen.getByTestId('sla-create-days'), '4');
+    await userEvent.type(
+      screen.getByTestId('sla-create-notes'),
+      'New AML/KYC fast track for sanctions hits',
+    );
+    await userEvent.click(screen.getByTestId('sla-create-submit'));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Add SLA target/i })).not.toBeInTheDocument();
+    });
+    // The new row should be visible in the ACTIVE list
+    await waitFor(() => {
+      expect(screen.getByText('aml_kyc')).toBeInTheDocument();
+    });
+  });
+
+  it('Add SLA target — out-of-range target is rejected', async () => {
+    renderWithProviders(<SlaConfigPage />);
+    await screen.findAllByText('credit_risk');
+    await userEvent.click(screen.getByTestId('sla-add'));
+    // Use a fresh category that no prior test could have created so
+    // the client-side duplicate guard doesn't disable submit.
+    await userEvent.type(
+      screen.getByTestId('sla-create-category'),
+      'regulatory_returns_test',
+    );
+    await userEvent.click(screen.getByTestId('sla-create-priority-P2'));
+    await userEvent.type(screen.getByTestId('sla-create-days'), '500');
+    await userEvent.click(screen.getByTestId('sla-create-submit'));
+    expect(await screen.findByTestId('sla-create-error')).toHaveTextContent(/365/);
+  });
+
   it('archive confirm dialog renders + archives the row', async () => {
     renderWithProviders(<SlaConfigPage />);
     await screen.findAllByText('credit_risk');
