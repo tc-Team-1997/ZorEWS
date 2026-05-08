@@ -858,7 +858,58 @@ export const api = {
         { params },
       )
       .then((r) => r.data),
+
+  // ── Dashboard SLA Breach Matrix (BAC §3.1.6 / §3.1.9.1.4) ─────────
+
+  slaBreachMatrix: (
+    params: { branch?: string; business_unit?: string; as_of?: string } = {},
+  ) =>
+    http
+      .get<SlaBreachMatrix>('/v1/dashboard/sla-breach-matrix', { params })
+      .then((r) => r.data),
 };
+
+// ── SLA Breach Matrix types ─────────────────────────────────────────
+
+export type SlaBucketLabel = '0-7 days' | '8-30 days' | '31-90 days' | '90+ days';
+/** Compact slug for URL params + tile keys. Mapped 1:1 to SlaBucketLabel. */
+export type SlaBucketSlug = '0-7d' | '8-30d' | '31-90d' | '90+d';
+
+export const SLA_BUCKET_SLUG: Record<SlaBucketLabel, SlaBucketSlug> = {
+  '0-7 days':   '0-7d',
+  '8-30 days':  '8-30d',
+  '31-90 days': '31-90d',
+  '90+ days':   '90+d',
+};
+export const SLA_BUCKET_LABEL: Record<SlaBucketSlug, SlaBucketLabel> = {
+  '0-7d':   '0-7 days',
+  '8-30d':  '8-30 days',
+  '31-90d': '31-90 days',
+  '90+d':   '90+ days',
+};
+
+export interface SlaBucket {
+  label: SlaBucketLabel;
+  min_days: number;
+  max_days: number | null;
+  total_open: number;
+  breached: number;
+  breach_pct: number;
+  severity_split: { high: number; medium: number; low: number };
+}
+
+export interface SlaBreachMatrix {
+  buckets: SlaBucket[];
+  generatedAt: string;
+  filters: {
+    tenant_id: string;
+    branch?: string;
+    business_unit?: string;
+    as_of?: string;
+  };
+  uncategorised_count: number;
+  unresolved_count: number;
+}
 
 // ── User Access Override types ──────────────────────────────────────
 

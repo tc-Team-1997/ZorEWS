@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { SLA_BUCKET_LABEL, type SlaBucketSlug } from '@/lib/api';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -57,7 +58,57 @@ export function CmsCaseListPage() {
     },
   });
 
-  const items = listQ.data?.items ?? [];
+  // Deep-link filter from the dashboard SLA Breach Matrix tile
+  // (BAC §3.1.9.1.4): /cms/cases?ageBucket=8-30d&breached=true.
+  // Applied client-side on top of the server-side `filters` state.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const ageBucket = (searchParams.get('ageBucket') as SlaBucketSlug | null) ?? null;
+  const breachedOnly = searchParams.get('breached') === 'true';
+  const ageBucketLabel = ageBucket ? SLA_BUCKET_LABEL[ageBucket] : null;
+
+  const ageBucketRange = useMemo<{ min: number; max: number | null } | null>(() => {
+    if (!ageBucket) return null;
+    if (ageBucket === '0-7d')   return { min: 0,  max: 7   };
+    if (ageBucket === '8-30d')  return { min: 8,  max: 30  };
+    if (ageBucket === '31-90d') return { min: 31, max: 90  };
+    return                            { min: 91, max: null };
+  }, [ageBucket]);
+
+  // Reset selection when the deep-link filter changes (the visible
+  // rows are different, so a stale Set is misleading).
+  useEffect(() => { setSelected(new Set()); }, [ageBucket, breachedOnly]);
+
+  const allItems = listQ.data?.items ?? [];
+  const items = useMemo(() => {
+    if (!ageBucketRange && !breachedOnly) return allItems;
+    const now = Date.now();
+    return allItems.filter((c) => {
+      const ageDays = Math.floor((now - new Date(c.created_at).getTime()) / 86_400_000);
+      if (ageBucketRange) {
+        if (ageDays < ageBucketRange.min) return false;
+        if (ageBucketRange.max !== null && ageDays > ageBucketRange.max) return false;
+      }
+      if (breachedOnly) {
+        // Heuristic without a server-computed flag: treat as breached
+        // if status is not closed AND age > priority-derived target
+        // (P1 1d / P2 3d / P3 7d / P4 14d). The dashboard endpoint
+        // computes the *real* breach status against sla_config; this
+        // is the in-list approximation while the row-level flag
+        // ships.
+        const target = c.priority === 'P1' ? 1 : c.priority === 'P2' ? 3 : c.priority === 'P3' ? 7 : 14;
+        if (c.status === 'CLOSED') return false;
+        if (ageDays <= target) return false;
+      }
+      return true;
+    });
+  }, [allItems, ageBucketRange, breachedOnly]);
+
+  const clearDeepLink = () => {
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('ageBucket');
+    sp.delete('breached');
+    setSearchParams(sp, { replace: true });
+  };
 
   const toggleSelected = (id: string) => {
     setSelected((prev) => {
@@ -125,6 +176,38 @@ export function CmsCaseListPage() {
 
       {/* Quick filters + search */}
       <Panel title="Cases">
+        {(ageBucketLabel || breachedOnly) && (
+          <div
+            className="mb-3 flex items-center gap-2 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm"
+            data-testid="cms-deeplink-filter"
+          >
+            <span className="text-xs font-medium text-blue-800">
+              Filtered from dashboard:
+            </span>
+            {ageBucketLabel && (
+              <Badge tone="blue" className="text-2xs">
+                Age {ageBucketLabel}
+              </Badge>
+            )}
+            {breachedOnly && (
+              <Badge tone="danger" className="text-2xs">
+                Breached only
+              </Badge>
+            )}
+            <span className="text-2xs text-blue-700">
+              showing {items.length} of {allItems.length}
+            </span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={clearDeepLink}
+              className="text-xs text-blue-700 hover:underline"
+              data-testid="cms-deeplink-clear"
+            >
+              Clear
+            </button>
+          </div>
+        )}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-sm">
             <Search size={14} />

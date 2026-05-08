@@ -26,6 +26,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader';
 import { color } from '@/styles/tokens';
 import { useChatContext } from '@/components/copilot/useChatContext';
+import { SLABreachMatrix } from '@/components/dashboard/SLABreachMatrix';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -192,6 +193,10 @@ export function DashboardPage() {
         </Panel>
       </div>
 
+      <div className="mt-4">
+        <SLABreachMatrix />
+      </div>
+
       {sla.data && <SlaPanel summary={sla.data} />}
     </div>
   );
@@ -200,7 +205,7 @@ export function DashboardPage() {
 function SlaPanel({ summary }: { summary: SlaSummary }) {
   return (
     <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <Panel title="SLA breach matrix" className="lg:col-span-2">
+      <Panel title="SLA status by severity" className="lg:col-span-2">
         <table className="w-full text-[12px]" data-testid="sla-matrix">
           <thead className="text-muted">
             <tr className="border-b border-divider">

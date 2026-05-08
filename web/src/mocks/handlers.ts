@@ -2430,6 +2430,49 @@ export const handlers = [
     rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
     return HttpResponse.json(envelope({ items: rows, total: rows.length, page: 1, page_size: 50 }));
   }),
+
+  // ── Dashboard SLA Breach Matrix (BAC §3.1.6 / §3.1.9.1.4) ───────────
+  // Static-ish offline shape that surfaces enough signal to demo all
+  // four buckets + breach %, severity split, fallback counts.
+  http.get('/v1/dashboard/sla-breach-matrix', ({ request }) => {
+    const url = new URL(request.url);
+    const businessUnit = url.searchParams.get('business_unit');
+    const asOf = url.searchParams.get('as_of') ?? new Date().toISOString();
+    // Deterministic fixture; small enough to be auditable but covers
+    // every visual state (zero, partial breach, fully breached).
+    const buckets = [
+      { label: '0-7 days',   min_days: 0,  max_days: 7,    total_open: 18, breached: 2,  breach_pct: 11.1, severity_split: { high: 1, medium: 1, low: 0 } },
+      { label: '8-30 days',  min_days: 8,  max_days: 30,   total_open: 12, breached: 6,  breach_pct: 50,   severity_split: { high: 3, medium: 2, low: 1 } },
+      { label: '31-90 days', min_days: 31, max_days: 90,   total_open: 7,  breached: 6,  breach_pct: 85.7, severity_split: { high: 4, medium: 1, low: 1 } },
+      { label: '90+ days',   min_days: 91, max_days: null, total_open: 3,  breached: 3,  breach_pct: 100,  severity_split: { high: 2, medium: 1, low: 0 } },
+    ];
+    // Optional BU filter — show fewer cases when CORPORATE selected.
+    if (businessUnit === 'CORPORATE') {
+      for (const b of buckets) {
+        b.total_open = Math.floor(b.total_open / 2);
+        b.breached = Math.floor(b.breached / 2);
+        b.breach_pct = b.total_open === 0 ? 0 : Math.round((b.breached / b.total_open) * 1000) / 10;
+        b.severity_split = {
+          high: Math.floor(b.severity_split.high / 2),
+          medium: Math.floor(b.severity_split.medium / 2),
+          low: Math.floor(b.severity_split.low / 2),
+        };
+      }
+    }
+    return HttpResponse.json(
+      envelope({
+        buckets,
+        generatedAt: asOf,
+        filters: {
+          tenant_id: 'BANK_DEMO',
+          ...(businessUnit ? { business_unit: businessUnit } : {}),
+          ...(url.searchParams.get('branch') ? { branch: url.searchParams.get('branch')! } : {}),
+        },
+        uncategorised_count: 4,
+        unresolved_count: 0,
+      }),
+    );
+  }),
 ];
 
 // MSW state for the saved-scenario endpoints. Lives at module scope so
