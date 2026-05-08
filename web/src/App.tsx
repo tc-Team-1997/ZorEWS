@@ -26,6 +26,7 @@ import { CaseDetailPage } from '@/modules/cases/CaseDetailPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
 import { ReportsPage } from '@/modules/reports/ReportsPage';
 import { CasesDetailReportPage } from '@/modules/reports/CasesDetailReportPage';
+import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
@@ -86,6 +87,7 @@ export function App() {
             <Route path="scenario" element={<ScenarioPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="reports/cases-detail" element={<CasesDetailReportPage />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="profile/sessions" element={<SessionsPage />} />
             <Route path="profile/activity" element={<LoginActivityPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />

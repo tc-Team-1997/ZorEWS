@@ -3007,6 +3007,63 @@ export const handlers = [
     mswSavedFilters.delete(id);
     return HttpResponse.json(envelope({ deleted: true }));
   }),
+
+  // ── Analytics — Alert Resolution (T4.1, EWS.docx §5.5 / §8) ─────────
+
+  http.get('/v1/analytics/alert-resolution', ({ request }) => {
+    const url = new URL(request.url);
+    const sevRaw = url.searchParams.get('severity');
+    const VALID_SEV = ['critical', 'high', 'medium', 'low', 'all'];
+    if (sevRaw && !VALID_SEV.includes(sevRaw)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', `severity must be one of ${VALID_SEV.join(',')}`, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const severity = sevRaw && sevRaw !== 'all' ? sevRaw : null;
+
+    // Demo seed: 200 alerts spread over the past 4 weeks. Reasonable
+    // ack/close rates so the funnel + percentile chart show variation.
+    const seed = mswAnalyticsSeed();
+    const rows = severity ? seed.filter((r) => r.severity === severity) : seed;
+
+    const created = rows.length;
+    const acked = rows.filter((r) => r.acked_at).length;
+    const investigated = rows.filter((r) => {
+      if (!r.acked_at) return false;
+      if (!r.closed_at) return true;
+      return Date.parse(r.closed_at) - Date.parse(r.acked_at) >= 5 * 60_000;
+    }).length;
+    const closed = rows.filter((r) => r.closed_at).length;
+    const ratio = (n: number) =>
+      created === 0 ? 0 : Math.round((n / created) * 10000) / 10000;
+
+    const ackDur = rows
+      .filter((r) => r.acked_at)
+      .map((r) => (Date.parse(r.acked_at!) - Date.parse(r.created_at)) / 1000);
+    const closeDur = rows
+      .filter((r) => r.closed_at)
+      .map((r) => (Date.parse(r.closed_at!) - Date.parse(r.created_at)) / 1000);
+
+    const trend = mswWeeklyTrend(rows);
+
+    return HttpResponse.json(
+      envelope({
+        funnel: [
+          { stage: 'created',      count: created,      ratio: ratio(created) },
+          { stage: 'acked',        count: acked,        ratio: ratio(acked) },
+          { stage: 'investigated', count: investigated, ratio: ratio(investigated) },
+          { stage: 'closed',       count: closed,       ratio: ratio(closed) },
+        ],
+        ack_duration: mswPercentile(ackDur),
+        close_duration: mswPercentile(closeDur),
+        trend,
+        generated_at: new Date().toISOString(),
+        tenant_id: 'BANK_DEMO',
+        filters_applied: severity ? { severity } : {},
+      }),
+    );
+  }),
 ];
 
 // MSW state for the saved-scenario endpoints. Lives at module scope so
@@ -3106,6 +3163,89 @@ function mswSortKey(r: MswCaseRow, col: string): string | number {
   if (col === 'case_number') return r.case_number;
   if (col === 'severity') return r.severity;
   return r.created_at;
+}
+
+// ── Analytics — Alert Resolution helpers ───────────────────────────────
+
+interface MswAnalyticsRow {
+  alert_id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  created_at: string;
+  acked_at: string | null;
+  closed_at: string | null;
+}
+
+function mswPercentile(samples: number[]): {
+  n: number;
+  p50_sec: number | null;
+  p95_sec: number | null;
+  mean_sec: number | null;
+} {
+  if (samples.length === 0) return { n: 0, p50_sec: null, p95_sec: null, mean_sec: null };
+  const sorted = [...samples].sort((a, b) => a - b);
+  const pick = (q: number) =>
+    sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  return {
+    n: sorted.length,
+    p50_sec: Math.round(pick(0.5)),
+    p95_sec: Math.round(pick(0.95)),
+    mean_sec: Math.round(sum / sorted.length),
+  };
+}
+
+function mswWeeklyTrend(
+  rows: MswAnalyticsRow[],
+): { week: string; created: number; acked: number; closed: number }[] {
+  const map = new Map<string, { week: string; created: number; acked: number; closed: number }>();
+  const isoWeek = (d: Date) => {
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dayNum = t.getUTCDay() || 7;
+    t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(((t.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+    return `${t.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  };
+  const bump = (week: string, key: 'created' | 'acked' | 'closed') => {
+    const b = map.get(week) ?? { week, created: 0, acked: 0, closed: 0 };
+    b[key] += 1;
+    map.set(week, b);
+  };
+  for (const r of rows) {
+    bump(isoWeek(new Date(r.created_at)), 'created');
+    if (r.acked_at) bump(isoWeek(new Date(r.acked_at)), 'acked');
+    if (r.closed_at) bump(isoWeek(new Date(r.closed_at)), 'closed');
+  }
+  return [...map.values()].sort((a, b) => a.week.localeCompare(b.week));
+}
+
+// Deterministic 200-row seed spanning ~4 weeks. Each alert has a
+// realistic ack-rate (~70%) + close-rate (~40%) so the funnel + p50/p95
+// chart show variation; severity is round-robin so the filter exercises.
+function mswAnalyticsSeed(): MswAnalyticsRow[] {
+  const sevs: MswAnalyticsRow['severity'][] = ['critical', 'high', 'medium', 'low'];
+  const now = Date.now();
+  const out: MswAnalyticsRow[] = [];
+  for (let i = 0; i < 200; i++) {
+    const ageMin = (i * 217) % (28 * 24 * 60); // up to 28 days back, deterministic
+    const created = now - ageMin * 60_000;
+    // Pseudo-random ack/close decisions
+    const r1 = (i * 7 + 3) % 10;          // 0-9 — ack if < 7
+    const r2 = (i * 13 + 5) % 10;         // 0-9 — close if < 4
+    const ackDelayMin = ((i * 23 + 1) % 360) + 5;          // 5-365 min
+    const closeDelayMin = ((i * 31 + 17) % 1440) + 60;     // 1-25h
+    const ackedAt = r1 < 7 ? created + ackDelayMin * 60_000 : null;
+    const closedAt =
+      ackedAt != null && r2 < 4 ? ackedAt + closeDelayMin * 60_000 : null;
+    out.push({
+      alert_id: `a-${i + 1}`,
+      severity: sevs[i % sevs.length],
+      created_at: new Date(created).toISOString(),
+      acked_at: ackedAt ? new Date(ackedAt).toISOString() : null,
+      closed_at: closedAt ? new Date(closedAt).toISOString() : null,
+    });
+  }
+  return out;
 }
 
 // 12-row demo set spanning all 4 buckets, breach + non-breach, multiple

@@ -413,6 +413,43 @@ export interface CasesSavedFilter {
   updated_at: string;
 }
 
+// ── Analytics Dashboard (T4.1, EWS.docx §5.5 / §8) ────────────────────
+
+export type AnalyticsSeverityFilter =
+  | 'critical' | 'high' | 'medium' | 'low' | 'all';
+
+export interface AnalyticsFunnelStage {
+  stage: 'created' | 'acked' | 'investigated' | 'closed';
+  count: number;
+  ratio: number;
+}
+export interface AnalyticsDurationStat {
+  n: number;
+  p50_sec: number | null;
+  p95_sec: number | null;
+  mean_sec: number | null;
+}
+export interface AnalyticsTrendBucket {
+  week: string;
+  created: number;
+  acked: number;
+  closed: number;
+}
+export interface AlertResolutionFilter {
+  from?: string;
+  to?: string;
+  severity?: AnalyticsSeverityFilter;
+}
+export interface AlertResolutionReport {
+  funnel: AnalyticsFunnelStage[];
+  ack_duration: AnalyticsDurationStat;
+  close_duration: AnalyticsDurationStat;
+  trend: AnalyticsTrendBucket[];
+  generated_at: string;
+  tenant_id: string;
+  filters_applied: AlertResolutionFilter;
+}
+
 // ── Rules v2 (banking-grade enhancements) ──────────────────────────────
 
 export type RuleProduct =
@@ -1041,6 +1078,19 @@ export const api = {
   deleteCasesSavedFilter: (id: string) =>
     http
       .delete<{ deleted: boolean }>(`/v1/reports/cases/filters/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  // ── Analytics Dashboard (T4.1, EWS.docx §5.5 / §8) ────────────────────
+
+  alertResolution: (filter: AlertResolutionFilter = {}) =>
+    http
+      .get<AlertResolutionReport>('/v1/analytics/alert-resolution', {
+        params: {
+          from: filter.from,
+          to: filter.to,
+          severity: filter.severity && filter.severity !== 'all' ? filter.severity : undefined,
+        },
+      })
       .then((r) => r.data),
 };
 

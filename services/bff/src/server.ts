@@ -980,6 +980,14 @@ export interface AppDeps {
   /** Optional Pg pool used to record export audit rows. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   reportAuditPool?: any;
+  /**
+   * Source for the Analytics Dashboard sub-dashboards (T4.1, EWS.docx
+   * §5.5 / §8). When provided, mounts /v1/analytics/* endpoints.
+   * Bootstrap path wires this to a Pg-backed source via
+   * makeAlertResolutionSource() when BFF_PG_URL is set.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  alertResolutionSource?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1426,6 +1434,67 @@ export function makeApp(deps: AppDeps = {}) {
           res.status(500).json(
             wrapError(
               { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  // /v1/analytics/alert-resolution — T4.1, EWS.docx §5.5 / §8 sub-dashboard.
+  // Funnel + p50/p95 ack/close durations + weekly trend off the
+  // app_alerts.alerts row set. Pure resolver; Pg IO via deps.
+  if (deps.alertResolutionSource) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computeAlertResolution } = require('./analytics/alert_resolution') as
+      typeof import('./analytics/alert_resolution');
+    app.get(
+      '/v1/analytics/alert-resolution',
+      requireTenantMw,
+      requireRole('dashboard:analytics:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const tenant_id = req.tenant!.tenant_id;
+          const sevRaw = typeof req.query.severity === 'string' ? req.query.severity : undefined;
+          const VALID_SEV = ['critical', 'high', 'medium', 'low', 'all'] as const;
+          if (sevRaw && !VALID_SEV.includes(sevRaw as (typeof VALID_SEV)[number])) {
+            return res.status(400).json(
+              wrapError(
+                {
+                  code: 'EWS_400_invalid_input',
+                  message: `severity must be one of ${VALID_SEV.join(',')}`,
+                  severity: 'MEDIUM',
+                },
+                ctx,
+              ),
+            );
+          }
+          const filter = {
+            from: typeof req.query.from === 'string' ? req.query.from : undefined,
+            to: typeof req.query.to === 'string' ? req.query.to : undefined,
+            severity: sevRaw as
+              | 'critical' | 'high' | 'medium' | 'low' | 'all' | undefined,
+          };
+          for (const k of ['from', 'to'] as const) {
+            const v = filter[k];
+            if (v && Number.isNaN(Date.parse(v))) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: `${k} must be ISO 8601`, severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+          }
+          const rows = await deps.alertResolutionSource.loadAlertLifecycle(tenant_id, filter);
+          const out = computeAlertResolution({ tenant_id, rows, filter, asOf: now() });
+          res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'analytics failed', severity: 'HIGH' },
               ctx,
             ),
           );
@@ -14399,6 +14468,10 @@ if (require.main === module) {
     const { store: savedFilterStore, pool: savedFilterPool } = await makeSavedFilterStore();
     // Reuse whichever pool is live for audit rows (both target the same DB).
     const reportAuditPool = casesDetailPool ?? savedFilterPool ?? null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeAlertResolutionSource } = require('./analytics/alert_resolution') as
+      typeof import('./analytics/alert_resolution');
+    const { source: alertResolutionSource } = await makeAlertResolutionSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14412,6 +14485,7 @@ if (require.main === module) {
       casesDetailSource,
       savedFilterStore,
       reportAuditPool,
+      alertResolutionSource,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {

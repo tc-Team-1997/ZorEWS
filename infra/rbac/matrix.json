@@ -76,6 +76,8 @@
 
     "reports:cases:view":                      ["admin", "supervisor", "risk_analyst"],
     "reports:cases:export":                    ["admin", "supervisor"],
-    "reports:saved_filters:manage":            ["admin", "supervisor", "risk_analyst"]
+    "reports:saved_filters:manage":            ["admin", "supervisor", "risk_analyst"],
+
+    "dashboard:analytics:read":                ["admin", "supervisor", "risk_analyst"]
   }
 }

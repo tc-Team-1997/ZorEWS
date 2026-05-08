@@ -1,0 +1,183 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — Analytics Dashboard
+  version: "1.0.0"
+  description: |
+    Sub-dashboards for the §5.5 Analytics Dashboard suite (T4.1 / EWS.docx §8).
+    The full T4.1 scope is four sub-dashboards: risk-trend, pd-distribution,
+    stage-migration, and alert-resolution. This document covers the
+    alert-resolution endpoint that ships in the first slice; the other
+    three will be appended as they land.
+
+    Joins:
+      `app_alerts.alerts` (lifecycle: created_at / acked_at / closed_at)
+
+    Pure resolver — no per-request mutation. Same SLA buckets the
+    SLA Breach Matrix uses (`dashboard:sla_breach_matrix:read`); analytics
+    has its own RBAC op `dashboard:analytics:read`.
+
+servers:
+  - url: /v1
+    description: Mounted on the BFF service (default port 8084)
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      in: header
+      name: X-Tenant-ID
+      required: true
+      schema: { type: string, example: BANK_DEMO }
+    Channel:
+      in: header
+      name: X-Channel
+      required: true
+      schema:
+        type: string
+        enum: [LOS, MOBILE, BRANCH, API, AGENT_PORTAL]
+    ApexRole:
+      in: header
+      name: x-apex-role
+      required: false
+      schema:
+        type: string
+        enum: [admin, supervisor, risk_analyst, collection_officer, field_officer]
+
+  schemas:
+    AlertSeverity:
+      type: string
+      enum: [critical, high, medium, low]
+    SeverityFilter:
+      type: string
+      enum: [critical, high, medium, low, all]
+
+    FunnelStage:
+      type: object
+      required: [stage, count, ratio]
+      properties:
+        stage:
+          type: string
+          enum: [created, acked, investigated, closed]
+        count: { type: integer, minimum: 0 }
+        ratio:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Conversion ratio against the `created` stage. Always 1.0 for `created` itself when there are rows.
+
+    DurationStat:
+      type: object
+      required: [n, p50_sec, p95_sec, mean_sec]
+      properties:
+        n: { type: integer, minimum: 0, description: Sample size used for this percentile. }
+        p50_sec: { type: integer, nullable: true }
+        p95_sec: { type: integer, nullable: true }
+        mean_sec: { type: integer, nullable: true }
+
+    TrendBucket:
+      type: object
+      required: [week, created, acked, closed]
+      properties:
+        week: { type: string, example: "2026-W18" }
+        created: { type: integer, minimum: 0 }
+        acked: { type: integer, minimum: 0 }
+        closed: { type: integer, minimum: 0 }
+
+    AlertResolutionFilter:
+      type: object
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        severity: { $ref: "#/components/schemas/SeverityFilter" }
+
+    AlertResolutionReport:
+      type: object
+      required:
+        - funnel
+        - ack_duration
+        - close_duration
+        - trend
+        - generated_at
+        - tenant_id
+        - filters_applied
+      properties:
+        funnel:
+          type: array
+          items: { $ref: "#/components/schemas/FunnelStage" }
+        ack_duration: { $ref: "#/components/schemas/DurationStat" }
+        close_duration: { $ref: "#/components/schemas/DurationStat" }
+        trend:
+          type: array
+          items: { $ref: "#/components/schemas/TrendBucket" }
+        generated_at: { type: string, format: date-time }
+        tenant_id: { type: string }
+        filters_applied: { $ref: "#/components/schemas/AlertResolutionFilter" }
+
+    EwsHeader:
+      type: object
+      required: [status, requestId, timestamp]
+      properties:
+        status:    { type: string, enum: [SUCCESS, FAILURE] }
+        requestId: { type: string, format: uuid }
+        timestamp: { type: string, format: date-time }
+    EwsError:
+      type: object
+      required: [header, error]
+      properties:
+        header: { $ref: "#/components/schemas/EwsHeader" }
+        error:
+          type: object
+          required: [code, message, severity]
+          properties:
+            code:
+              type: string
+              enum: [EWS_400_invalid_input, EWS_403_forbidden, EWS_500]
+            message: { type: string }
+            severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
+
+paths:
+  /analytics/alert-resolution:
+    get:
+      summary: Alert lifecycle funnel + p50/p95 ack/close durations + weekly trend
+      operationId: getAnalyticsAlertResolution
+      tags: [analytics]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexRole"
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: severity
+          schema: { $ref: "#/components/schemas/SeverityFilter" }
+      responses:
+        "200":
+          description: Resolution funnel + percentile durations + trend.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body: { $ref: "#/components/schemas/AlertResolutionReport" }
+        "400":
+          description: Invalid input (bad severity, bad from/to date)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+        "403":
+          description: Caller's role lacks `dashboard:analytics:read`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
