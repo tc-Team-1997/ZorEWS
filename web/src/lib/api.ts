@@ -867,6 +867,38 @@ export const api = {
     http
       .get<SlaBreachMatrix>('/v1/dashboard/sla-breach-matrix', { params })
       .then((r) => r.data),
+
+  // ── SLA config admin (BAC §3.1.6) ─────────────────────────────────
+
+  slaConfigList: (
+    params: {
+      case_category?: string;
+      priority?: SlaConfigPriority;
+      business_unit?: string;
+      status?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
+    http
+      .get<{ items: SlaConfigRow[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/sla-config',
+        { params },
+      )
+      .then((r) => r.data),
+
+  slaConfigCreate: (input: SlaConfigCreateInput) =>
+    http.post<SlaConfigRow>('/v1/admin/sla-config', input).then((r) => r.data),
+
+  slaConfigUpdate: (id: string, patch: SlaConfigUpdateInput) =>
+    http
+      .put<SlaConfigRow>(`/v1/admin/sla-config/${encodeURIComponent(id)}`, patch)
+      .then((r) => r.data),
+
+  slaConfigArchive: (id: string) =>
+    http
+      .delete<SlaConfigRow>(`/v1/admin/sla-config/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
 };
 
 // ── SLA Breach Matrix types ─────────────────────────────────────────
@@ -909,6 +941,42 @@ export interface SlaBreachMatrix {
   };
   uncategorised_count: number;
   unresolved_count: number;
+}
+
+// ── SLA Config admin types ─────────────────────────────────────────
+
+export type SlaConfigPriority = 'P1' | 'P2' | 'P3' | 'P4';
+export type SlaConfigStatus = 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED';
+
+export interface SlaConfigRow {
+  sla_config_id: string;
+  tenant_id: string;
+  case_category: string;
+  priority: SlaConfigPriority;
+  business_unit: string | null;
+  sla_target_days: number;
+  status: SlaConfigStatus;
+  effective_from: string;
+  effective_till: string | null;
+  notes: string | null;
+  created_by: string;
+  updated_by: string | null;
+  superseded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SlaConfigCreateInput {
+  case_category: string;
+  priority: SlaConfigPriority;
+  business_unit?: string | null;
+  sla_target_days: number;
+  notes?: string | null;
+}
+
+export interface SlaConfigUpdateInput {
+  sla_target_days?: number;
+  notes?: string | null;
 }
 
 // ── User Access Override types ──────────────────────────────────────

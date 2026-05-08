@@ -61,6 +61,11 @@
 
     "dashboard:sla_breach_matrix:read":        ["admin", "supervisor", "risk_analyst"],
 
+    "admin:sla_config:list":                   ["admin", "supervisor"],
+    "admin:sla_config:create":                 ["admin"],
+    "admin:sla_config:update":                 ["admin"],
+    "admin:sla_config:archive":                ["admin"],
+
     "admin:user_access_override:list":         ["admin", "supervisor"],
     "admin:user_access_override:create":       ["admin"],
     "admin:user_access_override:approve":      ["admin"],

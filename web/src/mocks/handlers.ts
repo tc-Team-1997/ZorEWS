@@ -287,6 +287,88 @@ const mswOverrideAudit: MswOverrideAudit[] = [
   },
 ];
 
+// SLA Config admin (BAC §3.1.6) — MSW state -----------------------
+
+interface MswSlaConfig {
+  sla_config_id: string;
+  tenant_id: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  business_unit: string | null;
+  sla_target_days: number;
+  status: 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED';
+  effective_from: string;
+  effective_till: string | null;
+  notes: string | null;
+  created_by: string;
+  updated_by: string | null;
+  superseded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+interface MswSlaCreateInput {
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  business_unit?: string | null;
+  sla_target_days: number;
+  notes?: string | null;
+}
+
+// Mirrors data/schema/018_sla_config.sql seed for the offline demo path.
+function _mkSla(
+  cat: string,
+  prio: 'P1' | 'P2' | 'P3' | 'P4',
+  bu: string | null,
+  days: number,
+  notes: string,
+): MswSlaConfig {
+  const now = '2026-05-01T08:00:00Z';
+  return {
+    sla_config_id: `sla-seed-${cat}-${prio}-${bu ?? 'all'}`,
+    tenant_id: 'BANK_DEMO',
+    case_category: cat,
+    priority: prio,
+    business_unit: bu,
+    sla_target_days: days,
+    status: 'ACTIVE',
+    effective_from: now,
+    effective_till: null,
+    notes,
+    created_by: 'system:seed',
+    updated_by: null,
+    superseded_by: null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+const mswSlaConfigs: MswSlaConfig[] = [
+  _mkSla('credit_risk', 'P1', null, 1.0,  'Critical credit incident'),
+  _mkSla('credit_risk', 'P2', null, 3.0,  'High credit risk — RM follow-up'),
+  _mkSla('credit_risk', 'P3', null, 7.0,  'Routine credit triage'),
+  _mkSla('credit_risk', 'P4', null, 14.0, 'Low-priority credit hygiene'),
+  _mkSla('credit_risk', 'P1', 'CORPORATE', 0.5, 'Corporate banking: tighter than retail'),
+  _mkSla('fraud',       'P1', null, 0.5,  'Active fraud — 12h cutoff'),
+  _mkSla('fraud',       'P2', null, 1.0,  'Suspicious pattern — 24h'),
+  _mkSla('fraud',       'P3', null, 3.0,  'Anomaly review'),
+  _mkSla('fraud',       'P4', null, 7.0,  'Low-confidence flag'),
+  _mkSla('kyc',         'P1', null, 2.0,  'Expired-doc + active loan — 48h'),
+  _mkSla('kyc',         'P2', null, 5.0,  'KYC refresh due'),
+  _mkSla('kyc',         'P3', null, 10.0, 'Address mismatch (low-risk)'),
+  _mkSla('kyc',         'P4', null, 15.0, 'Doc-quality review'),
+  _mkSla('lapse',       'P1', null, 1.0,  'Imminent lapse — same-day agent contact'),
+  _mkSla('lapse',       'P2', null, 2.0,  'Premium overdue 15+ days'),
+  _mkSla('lapse',       'P3', null, 5.0,  'Grace-period reminder'),
+  _mkSla('lapse',       'P4', null, 10.0, 'Routine lapse follow-up'),
+  _mkSla('compliance',  'P1', null, 1.0,  'Regulator-driven escalation'),
+  _mkSla('compliance',  'P2', null, 3.0,  'Internal compliance breach'),
+  _mkSla('compliance',  'P3', null, 7.0,  'Routine compliance review'),
+  _mkSla('compliance',  'P4', null, 14.0, 'Process audit follow-up'),
+  _mkSla('default_fallback', 'P1', null, 2.0,  'Fallback when no category-specific row matches'),
+  _mkSla('default_fallback', 'P2', null, 5.0,  'Fallback'),
+  _mkSla('default_fallback', 'P3', null, 10.0, 'Fallback'),
+  _mkSla('default_fallback', 'P4', null, 20.0, 'Fallback'),
+];
+
 /** Mirror the BFF role_access.ts ACL — used by the offline effective-access mock. */
 function mswMockRoleAcl(userId: string): { roles: string[]; modules: { module_path: string; permissions: string[]; source: string }[] } {
   const roles = userId.includes('admin')   ? ['admin']
@@ -2429,6 +2511,195 @@ export const handlers = [
     if (actorId) rows = rows.filter((a) => a.actor_id === actorId);
     rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
     return HttpResponse.json(envelope({ items: rows, total: rows.length, page: 1, page_size: 50 }));
+  }),
+
+  // ── SLA Config admin (BAC §3.1.6) ──────────────────────────────────
+
+  http.get('/v1/admin/sla-config', ({ request }) => {
+    const url = new URL(request.url);
+    const cat = url.searchParams.get('case_category');
+    const prio = url.searchParams.get('priority');
+    const bu = url.searchParams.get('business_unit');
+    const status = url.searchParams.get('status');
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
+    let rows = mswSlaConfigs.slice();
+    if (cat) rows = rows.filter((r) => r.case_category === cat);
+    if (prio) rows = rows.filter((r) => r.priority === prio);
+    if (bu !== null) {
+      const isAll = bu === '*' || bu === '';
+      rows = rows.filter((r) => (isAll ? r.business_unit === null : r.business_unit === bu));
+    }
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((r) => set.has(r.status));
+    }
+    rows.sort((a, b) => {
+      if (a.case_category !== b.case_category) return a.case_category.localeCompare(b.case_category);
+      if (a.priority !== b.priority) return a.priority.localeCompare(b.priority);
+      return b.created_at.localeCompare(a.created_at);
+    });
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({
+        items: rows.slice(start, start + pageSize),
+        total: rows.length,
+        page,
+        page_size: pageSize,
+      }),
+    );
+  }),
+
+  http.get('/v1/admin/sla-config/:id', ({ params }) => {
+    const r = mswSlaConfigs.find((x) => x.sla_config_id === params.id);
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `sla_config ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/admin/sla-config', async ({ request }) => {
+    const body = (await request.json()) as MswSlaCreateInput;
+    if (!body.case_category || !body.priority) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'case_category + priority required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (!Number.isFinite(body.sla_target_days) || body.sla_target_days <= 0 || body.sla_target_days > 365) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'sla_target_days must be in (0, 365]', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const dup = mswSlaConfigs.find(
+      (r) =>
+        r.tenant_id === 'BANK_DEMO' &&
+        r.case_category === body.case_category &&
+        r.priority === body.priority &&
+        (r.business_unit ?? null) === (body.business_unit ?? null) &&
+        r.status === 'ACTIVE',
+    );
+    if (dup) {
+      return HttpResponse.json(
+        envelopeError(
+          'EWS_409_duplicate_active_sla_config',
+          `${body.case_category}/${body.priority}/${body.business_unit ?? '*'} already ACTIVE`,
+          'MEDIUM',
+        ),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const row: MswSlaConfig = {
+      sla_config_id: `sla-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id: 'BANK_DEMO',
+      case_category: body.case_category,
+      priority: body.priority,
+      business_unit: body.business_unit ?? null,
+      sla_target_days: Math.round(body.sla_target_days * 100) / 100,
+      status: 'ACTIVE',
+      effective_from: now,
+      effective_till: null,
+      notes: body.notes ?? null,
+      created_by: actor,
+      updated_by: null,
+      superseded_by: null,
+      created_at: now,
+      updated_at: now,
+    };
+    mswSlaConfigs.push(row);
+    return HttpResponse.json(envelope(row, 'EWS_201_created', 'Created'), { status: 201 });
+  }),
+
+  http.put('/v1/admin/sla-config/:id', async ({ params, request }) => {
+    const idx = mswSlaConfigs.findIndex((x) => x.sla_config_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `sla_config ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const old = mswSlaConfigs[idx];
+    if (old.status !== 'ACTIVE') {
+      return HttpResponse.json(
+        envelopeError('EWS_409_invalid_state', `only ACTIVE rows can be edited`, 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const patch = (await request.json()) as { sla_target_days?: number; notes?: string | null };
+    if (
+      patch.sla_target_days !== undefined &&
+      (!Number.isFinite(patch.sla_target_days) || patch.sla_target_days <= 0 || patch.sla_target_days > 365)
+    ) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'sla_target_days out of range', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const newId = `sla-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const next: MswSlaConfig = {
+      ...old,
+      sla_config_id: newId,
+      sla_target_days:
+        patch.sla_target_days !== undefined
+          ? Math.round(patch.sla_target_days * 100) / 100
+          : old.sla_target_days,
+      notes: patch.notes !== undefined ? patch.notes : old.notes,
+      effective_from: now,
+      effective_till: null,
+      created_by: actor,
+      updated_by: null,
+      superseded_by: null,
+      created_at: now,
+      updated_at: now,
+      status: 'ACTIVE',
+    };
+    mswSlaConfigs[idx] = {
+      ...old,
+      status: 'SUPERSEDED',
+      effective_till: now,
+      superseded_by: newId,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswSlaConfigs.push(next);
+    return HttpResponse.json(envelope(next));
+  }),
+
+  http.delete('/v1/admin/sla-config/:id', ({ params }) => {
+    const idx = mswSlaConfigs.findIndex((x) => x.sla_config_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `sla_config ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const old = mswSlaConfigs[idx];
+    if (old.status === 'ARCHIVED') return HttpResponse.json(envelope(old));
+    if (old.status !== 'ACTIVE') {
+      return HttpResponse.json(
+        envelopeError('EWS_409_invalid_state', `cannot archive a ${old.status} row`, 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const next: MswSlaConfig = {
+      ...old,
+      status: 'ARCHIVED',
+      effective_till: now,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswSlaConfigs[idx] = next;
+    return HttpResponse.json(envelope(next));
   }),
 
   // ── Dashboard SLA Breach Matrix (BAC §3.1.6 / §3.1.9.1.4) ───────────

@@ -958,6 +958,14 @@ export interface AppDeps {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slaMatrixSource?: any;
+  /**
+   * Admin CRUD store for app_admin.sla_config (BAC §3.1.6 admin
+   * widget). When provided, mounts /v1/admin/sla-config routes.
+   * Bootstrap path wires this to a PG-backed store via
+   * makeSlaConfigStore() when ADMIN_PG_URL || BFF_PG_URL is set.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  slaConfigStore?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1065,6 +1073,21 @@ export function makeApp(deps: AppDeps = {}) {
         requireRole,
         rolesForUser: deps.rolesForUser ?? defaultRolesForUser,
         webhookDispatcher,
+        now,
+      }),
+    );
+  }
+
+  // ---------- /v1/admin/sla-config — admin CRUD on app_admin.sla_config
+  if (deps.slaConfigStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeSlaConfigRouter } = require('./admin/sla_config_routes') as
+      typeof import('./admin/sla_config_routes');
+    app.use(
+      makeSlaConfigRouter({
+        store: deps.slaConfigStore,
+        requireTenantMw,
+        requireRole,
         now,
       }),
     );
@@ -14144,6 +14167,10 @@ if (require.main === module) {
     const { makeSlaMatrixSource } = require('./dashboard/sla_breach_matrix') as
       typeof import('./dashboard/sla_breach_matrix');
     const { source: slaMatrixSource } = await makeSlaMatrixSource();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeSlaConfigStore } = require('./admin/sla_config_store') as
+      typeof import('./admin/sla_config_store');
+    const { store: slaConfigStore } = await makeSlaConfigStore();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14153,6 +14180,7 @@ if (require.main === module) {
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
+      slaConfigStore,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {

@@ -34,6 +34,7 @@ import { AdminTenantsPage } from '@/modules/admin/AdminTenantsPage';
 import { AdminServiceClientsPage } from '@/modules/admin/AdminServiceClientsPage';
 import { UserAccessOverrideListPage } from '@/modules/admin/userAccessOverride/UserAccessOverrideListPage';
 import { EffectiveAccessPage } from '@/modules/admin/userAccessOverride/EffectiveAccessPage';
+import { SlaConfigPage } from '@/modules/admin/slaConfig/SlaConfigPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -97,6 +98,7 @@ export function App() {
               path="admin/user-access-override/users/:user_id/effective-access"
               element={<EffectiveAccessPage />}
             />
+            <Route path="admin/sla-config" element={<SlaConfigPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
