@@ -5192,7 +5192,7 @@ export function makeApp(deps: AppDeps = {}) {
     '/v1/cms/cases',
     requireTenantMw,
     requireRole('cases:list'),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const q = req.query;
       const filter: CmsListFilter = {};
@@ -5227,7 +5227,40 @@ export function makeApp(deps: AppDeps = {}) {
       if (typeof q.tags === 'string' && q.tags) {
         filter.tags_any = q.tags.split(',').map((s) => s.trim()).filter(Boolean);
       }
-      const items = cmsCaseStore.list(req.tenant!.tenant_id, filter);
+      let items = cmsCaseStore.list(req.tenant!.tenant_id, filter);
+
+      // ?breached=true — server-side breach filter using app_admin.sla_config
+      // resolver. Same math as the dashboard SLA Breach Matrix, so the
+      // dashboard tile click-through lands the user on a list whose
+      // count agrees with the tile (BAC §3.1.9.1.4).
+      const breachedParam = q.breached;
+      if (breachedParam === 'true' && deps.slaMatrixSource) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { buildSlaConfigIndex } = require('./dashboard/sla_breach_matrix') as
+          typeof import('./dashboard/sla_breach_matrix');
+        const configs = await deps.slaMatrixSource.loadConfigs(req.tenant!.tenant_id);
+        const resolveTarget = buildSlaConfigIndex(configs);
+        const asOfMs = now().getTime();
+        items = items.filter((c) => {
+          if (c.status === 'CLOSED') return false;
+          const target = resolveTarget(
+            req.tenant!.tenant_id,
+            // CmsCase doesn't carry case_category in the in-memory shape;
+            // PG path stores it on the column added by migration 019.
+            // When unavailable, the resolver falls through to
+            // default_fallback automatically.
+            (c as { case_category?: string | null }).case_category ?? null,
+            c.priority,
+            null, // no first-class business_unit on cms_cases yet
+          );
+          if (target === undefined) return false;
+          const created = Date.parse(c.created_at);
+          if (!Number.isFinite(created)) return false;
+          const ageDays = Math.max(0, Math.floor((asOfMs - created) / 86_400_000));
+          return ageDays > target;
+        });
+      }
+
       return res.json(wrapResponse({ items, total: items.length }, ctx));
     },
   );

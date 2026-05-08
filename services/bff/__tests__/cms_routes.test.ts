@@ -265,6 +265,84 @@ describe('CMS-3 — GET /v1/cms/cases (list)', () => {
     expect(r.body.body.total).toBe(1);
   });
 
+  test('?breached=true filters using sla_config (BAC §3.1.9.1.4)', async () => {
+    // Hand-built sla matrix source: P2 default_fallback target = 5d.
+    // We then create cases with controlled created_at via a custom now()
+    // shift. Two cases: one within target (3d old = on-track), one past
+    // (8d old = breached).
+    const cmsCaseStore = new InMemoryCmsCaseStore();
+    const caseEventStore = new InMemoryCaseEventStore();
+    let nowVal = NOW;
+    const slaMatrixSource = {
+      loadConfigs: async () => [
+        {
+          sla_config_id: 'cfg-fb-p2',
+          tenant_id: 'BIL',
+          case_category: 'default_fallback',
+          priority: 'P2' as const,
+          business_unit: null,
+          sla_target_days: 5,
+          status: 'ACTIVE' as const,
+        },
+      ],
+      // unused for this test — the route only calls loadConfigs
+      loadOpenCases: async () => [],
+    };
+    const built = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      cmsCaseStore,
+      caseEventStore,
+      slaMatrixSource,
+      now: () => nowVal,
+      getRole: () => 'admin',
+    });
+
+    // 8 days ago → past target (breached)
+    nowVal = new Date(NOW.getTime() - 8 * 86_400_000);
+    await createCase(built.app, { ...VALID, title: 'old breached' });
+    // 3 days ago → on track
+    nowVal = new Date(NOW.getTime() - 3 * 86_400_000);
+    await createCase(built.app, { ...VALID, title: 'still on track' });
+    // Move the clock back to NOW so the route sees ages 8d / 3d
+    nowVal = NOW;
+
+    const r = await request(built.app).get('/v1/cms/cases?breached=true').set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.total).toBe(1);
+    expect(r.body.body.items[0].title).toBe('old breached');
+
+    // Without the flag both rows surface
+    const all = await request(built.app).get('/v1/cms/cases').set(TH_BIL);
+    expect(all.body.body.total).toBe(2);
+  });
+
+  test('?breached=true with no sla_config row returns empty (not all rows)', async () => {
+    const cmsCaseStore = new InMemoryCmsCaseStore();
+    const caseEventStore = new InMemoryCaseEventStore();
+    const built = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      cmsCaseStore,
+      caseEventStore,
+      slaMatrixSource: {
+        loadConfigs: async () => [],
+        loadOpenCases: async () => [],
+      },
+      now: () => NOW,
+      getRole: () => 'admin',
+    });
+    await createCase(built.app);
+    const r = await request(built.app).get('/v1/cms/cases?breached=true').set(TH_BIL);
+    expect(r.status).toBe(200);
+    // No config → unresolved → excluded from the breached set
+    expect(r.body.body.total).toBe(0);
+  });
+
   test('cross-tenant isolation', async () => {
     const { app } = makeCmsApp('admin');
     await createCase(app);

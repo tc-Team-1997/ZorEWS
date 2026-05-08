@@ -41,9 +41,23 @@ export function CmsCaseListPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAssignee, setBulkAssignee] = useState('');
 
+  // Read deep-link filters now so the server-side `breached` flag flows
+  // into the query before client-side narrowing happens.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const ageBucket = (searchParams.get('ageBucket') as SlaBucketSlug | null) ?? null;
+  const breachedOnly = searchParams.get('breached') === 'true';
+  const ageBucketLabel = ageBucket ? SLA_BUCKET_LABEL[ageBucket] : null;
+
   const listQ = useQuery({
-    queryKey: ['cms-cases', filters, q],
-    queryFn: () => cmsApi.list({ ...filters, q: q || undefined }),
+    queryKey: ['cms-cases', filters, q, breachedOnly],
+    queryFn: () =>
+      cmsApi.list({
+        ...filters,
+        q: q || undefined,
+        // Server uses sla_config so the count agrees with the dashboard
+        // SLA Breach Matrix tile that linked here.
+        breached: breachedOnly || undefined,
+      }),
   });
   const statsQ = useQuery({ queryKey: ['cms-stats'], queryFn: () => cmsApi.stats() });
   const slaQ = useQuery({ queryKey: ['cms-sla'], queryFn: () => cmsApi.slaBreaches() });
@@ -58,13 +72,14 @@ export function CmsCaseListPage() {
     },
   });
 
-  // Deep-link filter from the dashboard SLA Breach Matrix tile
+  // Deep-link from the dashboard SLA Breach Matrix tile
   // (BAC §3.1.9.1.4): /cms/cases?ageBucket=8-30d&breached=true.
-  // Applied client-side on top of the server-side `filters` state.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const ageBucket = (searchParams.get('ageBucket') as SlaBucketSlug | null) ?? null;
-  const breachedOnly = searchParams.get('breached') === 'true';
-  const ageBucketLabel = ageBucket ? SLA_BUCKET_LABEL[ageBucket] : null;
+  //
+  // - `breached` is server-side now (sent into cmsApi.list above) so the
+  //   list count agrees with the dashboard tile, even when admins edit
+  //   sla_config away from the priority defaults.
+  // - `ageBucket` stays client-side because it's pure date math against
+  //   created_at — no need for a server round-trip just to slice.
 
   const ageBucketRange = useMemo<{ min: number; max: number | null } | null>(() => {
     if (!ageBucket) return null;
@@ -80,28 +95,15 @@ export function CmsCaseListPage() {
 
   const allItems = listQ.data?.items ?? [];
   const items = useMemo(() => {
-    if (!ageBucketRange && !breachedOnly) return allItems;
+    if (!ageBucketRange) return allItems;
     const now = Date.now();
     return allItems.filter((c) => {
       const ageDays = Math.floor((now - new Date(c.created_at).getTime()) / 86_400_000);
-      if (ageBucketRange) {
-        if (ageDays < ageBucketRange.min) return false;
-        if (ageBucketRange.max !== null && ageDays > ageBucketRange.max) return false;
-      }
-      if (breachedOnly) {
-        // Heuristic without a server-computed flag: treat as breached
-        // if status is not closed AND age > priority-derived target
-        // (P1 1d / P2 3d / P3 7d / P4 14d). The dashboard endpoint
-        // computes the *real* breach status against sla_config; this
-        // is the in-list approximation while the row-level flag
-        // ships.
-        const target = c.priority === 'P1' ? 1 : c.priority === 'P2' ? 3 : c.priority === 'P3' ? 7 : 14;
-        if (c.status === 'CLOSED') return false;
-        if (ageDays <= target) return false;
-      }
+      if (ageDays < ageBucketRange.min) return false;
+      if (ageBucketRange.max !== null && ageDays > ageBucketRange.max) return false;
       return true;
     });
-  }, [allItems, ageBucketRange, breachedOnly]);
+  }, [allItems, ageBucketRange]);
 
   const clearDeepLink = () => {
     const sp = new URLSearchParams(searchParams);

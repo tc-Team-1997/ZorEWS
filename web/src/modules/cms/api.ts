@@ -123,6 +123,8 @@ export interface CmsListFilters {
   tags?: string;
   since?: string;
   until?: string;
+  /** Server-side: keep only cases past their SLA target per app_admin.sla_config. */
+  breached?: boolean;
 }
 
 // ─── API ─────────────────────────────────────────────────────────────
