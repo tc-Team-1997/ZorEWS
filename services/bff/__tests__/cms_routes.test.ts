@@ -692,3 +692,96 @@ describe('CMS-3 — cross-tenant + RBAC + no shadow', () => {
     expect(r.status).toBe(200);
   });
 });
+
+describe('CMS-3 — PATCH /v1/cms/cases/:id/category', () => {
+  test('happy path: sets case_category from null → "fraud"', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'fraud', reason: 'Confirmed via manual review' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.case_category).toBe('fraud');
+  });
+
+  test('null clears the category back to default_fallback territory', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'fraud' });
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: null, reason: 'misclassified earlier' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.case_category).toBeNull();
+  });
+
+  test('empty string is treated as null', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: '   ' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.case_category).toBeNull();
+  });
+
+  test('non-string + non-null body → 400', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 42 });
+    expect(r.status).toBe(400);
+  });
+
+  test('non-admin / non-supervisor role denied (403)', async () => {
+    const { app } = makeCmsApp('risk_analyst');
+    const c = await createCase(app);
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'fraud' });
+    expect(r.status).toBe(403);
+  });
+
+  test('unknown case → 404', async () => {
+    const { app } = makeCmsApp('admin');
+    const r = await request(app)
+      .patch('/v1/cms/cases/no-such-id/category')
+      .set(TH_BIL)
+      .send({ case_category: 'fraud' });
+    expect(r.status).toBe(404);
+  });
+
+  test('idempotent re-categorise (same value, no-op) still returns 200', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'fraud' });
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'fraud' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.case_category).toBe('fraud');
+  });
+
+  test('rejects category > 64 chars', async () => {
+    const { app } = makeCmsApp('admin');
+    const c = await createCase(app);
+    const r = await request(app)
+      .patch(`/v1/cms/cases/${c.case_id}/category`)
+      .set(TH_BIL)
+      .send({ case_category: 'x'.repeat(65) });
+    expect(r.status).toBe(400);
+  });
+});

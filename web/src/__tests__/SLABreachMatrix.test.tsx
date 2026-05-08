@@ -18,7 +18,7 @@ function setRole(role: 'admin' | 'risk_analyst') {
   const user = {
     id: 'u-001',
     username: role === 'admin' ? 'alice.admin' : 'ravi.risk',
-    roles: [role] as const,
+    roles: [role],
   };
   localStorage.setItem('apex.ews.user', JSON.stringify(user));
   localStorage.setItem('apex.ews.token', 'test-token');

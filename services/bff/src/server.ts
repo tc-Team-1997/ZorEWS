@@ -5459,6 +5459,61 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** PATCH /v1/cms/cases/:case_id/category — set the case_category column.
+   *  Closes the loop on migration 019's heuristic backfill: rows that
+   *  fell through to NULL can be re-categorised by an admin so the
+   *  dashboard SLA Breach Matrix resolver picks up the right config. */
+  app.patch(
+    '/v1/cms/cases/:case_id/category',
+    requireTenantMw,
+    requireRole('cases:set_category'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const body = (inner ?? {}) as { case_category?: unknown; reason?: unknown };
+      // case_category accepts string | null. Anything else is rejected.
+      if (
+        body.case_category !== null &&
+        body.case_category !== undefined &&
+        typeof body.case_category !== 'string'
+      ) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'case_category must be string or null', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const reason =
+        typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : null;
+      const updated_by = cmsApexUser(req);
+      try {
+        const c = cmsCaseStore.setCategory(
+          req.tenant!.tenant_id,
+          id,
+          (body.case_category as string | null | undefined) ?? null,
+          reason,
+          updated_by,
+          now(),
+        );
+        writeCmsAuditEvents(req.tenant!.tenant_id, 'update', updated_by, c, {
+          field: 'case_category',
+          new_value: c.case_category,
+          reason,
+        });
+        return res.json(wrapResponse(c, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+    },
+  );
+
   /** POST /v1/cms/cases/:case_id/transition body { target } */
   app.post(
     '/v1/cms/cases/:case_id/transition',

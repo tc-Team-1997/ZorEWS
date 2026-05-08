@@ -30,6 +30,7 @@
     "cases:log_action":             ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
     "cases:monitor":                ["admin", "risk_analyst", "supervisor", "collection_officer"],
     "cases:close":                  ["admin", "supervisor", "collection_officer"],
+    "cases:set_category":           ["admin", "supervisor"],
 
     "cases:cas_submit":              ["admin", "risk_analyst", "supervisor"],
     "cases:cas_review":              ["admin", "supervisor"],

@@ -38,6 +38,9 @@ export interface CmsCase {
   resolution_notes: string;
   tags: string[];
   is_locked: boolean;
+  /** Re-categorisable via PATCH /v1/cms/cases/:id/category. NULL falls
+   *  through to default_fallback in the dashboard SLA Breach Matrix. */
+  case_category?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -157,6 +160,11 @@ export const cmsApi = {
 
   update: (case_id: string, body: Record<string, unknown>) =>
     unwrap<CmsCase>(http.patch(`${cmsBase}/${case_id}`, body)),
+
+  setCategory: (case_id: string, case_category: string | null, reason?: string) =>
+    unwrap<CmsCase>(
+      http.patch(`${cmsBase}/${case_id}/category`, { case_category, reason }),
+    ),
 
   transition: (case_id: string, target: CmsCaseState) =>
     unwrap<CmsCase>(http.post(`${cmsBase}/${case_id}/transition`, { target })),

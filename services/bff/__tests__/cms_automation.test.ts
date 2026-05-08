@@ -231,6 +231,7 @@ function mkCase(over: Partial<CmsCase> = {}): CmsCase {
     resolution_notes: '',
     tags: [],
     is_locked: false,
+    case_category: null,
     created_at: NOW.toISOString(),
     updated_at: NOW.toISOString(),
     ...over,

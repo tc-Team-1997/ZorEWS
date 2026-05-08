@@ -178,6 +178,11 @@ export interface CmsCase {
   resolution_notes: string;
   tags: string[];
   is_locked: boolean;
+  /** Mirrors app_cases.cms_cases.case_category column from migration 019.
+   *  NULL falls through to the resolver's default_fallback when the
+   *  dashboard SLA Breach Matrix runs its math. Mutated via the
+   *  `setCategory` store method + PATCH /v1/cms/cases/:id/category. */
+  case_category: string | null;
   created_at: string;
   updated_at: string;
 }

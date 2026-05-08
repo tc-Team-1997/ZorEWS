@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { Pencil } from 'lucide-react';
+import { useAuth } from '@/store/auth';
+import { SetCategoryModal } from './SetCategoryModal';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -31,6 +34,10 @@ export function CmsCaseDetailPage() {
   const [assigneeInput, setAssigneeInput] = useState('');
   const [escalateReason, setEscalateReason] = useState('');
   const [showCloseForm, setShowCloseForm] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(false);
+  const me = useAuth((s) => s.user);
+  const canSetCategory =
+    !!me && (me.roles.includes('admin') || me.roles.includes('supervisor'));
 
   const detailQ = useQuery({
     queryKey: ['cms-case', id],
@@ -61,6 +68,14 @@ export function CmsCaseDetailPage() {
   const transitionMut = useMutation({
     mutationFn: (target: CmsCaseState) => cmsApi.transition(id, target),
     onSuccess: invalidate,
+  });
+  const setCategoryMut = useMutation({
+    mutationFn: ({ category, reason }: { category: string | null; reason: string | null }) =>
+      cmsApi.setCategory(id, category, reason ?? undefined),
+    onSuccess: () => {
+      setEditingCategory(false);
+      invalidate();
+    },
   });
   const assignMut = useMutation({
     mutationFn: (assigned_to: string) => cmsApi.assign(id, assigned_to),
@@ -156,6 +171,22 @@ export function CmsCaseDetailPage() {
                 <Field label="Assigned to">{c.assigned_to ?? '—'}</Field>
                 <Field label="Priority">{c.priority}</Field>
                 <Field label="SLA due">{new Date(c.sla_due_at).toLocaleString()}</Field>
+                <Field label="Category">
+                  <span className="font-mono text-xs">
+                    {c.case_category ?? <em className="text-muted">none (default_fallback)</em>}
+                  </span>
+                  {canSetCategory && !isLocked && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingCategory(true)}
+                      className="ml-2 text-2xs text-blue-600 hover:underline inline-flex items-center gap-1"
+                      data-testid="cms-set-category-btn"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Edit
+                    </button>
+                  )}
+                </Field>
                 <Field label="Tags">
                   {c.tags.length === 0 ? '—' : c.tags.join(', ')}
                 </Field>
@@ -293,6 +324,20 @@ export function CmsCaseDetailPage() {
           )}
         </Panel>
       </div>
+
+      {editingCategory && (
+        <SetCategoryModal
+          caseId={id}
+          caseNumber={c.case_number}
+          currentCategory={c.case_category ?? null}
+          onClose={() => setEditingCategory(false)}
+          onSubmit={(category, reason) =>
+            setCategoryMut.mutate({ category, reason })
+          }
+          isPending={setCategoryMut.isPending}
+          error={setCategoryMut.error}
+        />
+      )}
     </div>
   );
 }

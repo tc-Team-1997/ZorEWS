@@ -98,6 +98,16 @@ export interface CmsCaseStore {
     updated_by: string,
     now: Date,
   ): CmsCase;
+  /** Re-categorise a single case. `case_category=null` clears it back
+   *  to default_fallback for the dashboard resolver. Audit-logged. */
+  setCategory(
+    tenant_id: string,
+    case_id: string,
+    case_category: string | null,
+    reason: string | null,
+    updated_by: string,
+    now: Date,
+  ): CmsCase;
   transition(
     tenant_id: string,
     case_id: string,
@@ -379,6 +389,7 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
       resolution_notes: '',
       tags: valid.tags ?? [],
       is_locked: false,
+      case_category: null,
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
     };
@@ -452,6 +463,41 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
     cur.updated_at = now.toISOString();
 
     this.writeHistory(tenant_id, case_id, 'update', before, clone(cur), updated_by.trim(), now);
+    return clone(cur);
+  }
+
+  setCategory(
+    tenant_id: string,
+    case_id: string,
+    case_category: string | null,
+    reason: string | null,
+    updated_by: string,
+    now: Date,
+  ): CmsCase {
+    if (!updated_by || !updated_by.trim()) {
+      throw new CmsCaseError('invalid_input', 'updated_by required');
+    }
+    const cur = this.requireCase(tenant_id, case_id);
+    this.rejectIfLocked(cur);
+    // Treat empty string as null — admins can clear by submitting blank.
+    const next = case_category && case_category.trim() ? case_category.trim() : null;
+    if (next !== null && next.length > 64) {
+      throw new CmsCaseError('invalid_input', 'case_category must be ≤ 64 characters');
+    }
+    if (next === cur.case_category) {
+      // No-op: no-write, no-history. Idempotent re-categorise.
+      return clone(cur);
+    }
+    const before = clone(cur);
+    cur.case_category = next;
+    cur.updated_at = now.toISOString();
+    // Use 'update' kind so the existing history list renders without
+    // a schema bump; the diff (before.case_category → after.case_category)
+    // tells the audit reader what changed. The optional reason rides
+    // along in the audit payload as a synthetic field.
+    const beforeAudit = { ...before, _reason: reason ?? null };
+    const afterAudit = { ...clone(cur), _reason: reason ?? null };
+    this.writeHistory(tenant_id, case_id, 'update', beforeAudit, afterAudit, updated_by.trim(), now);
     return clone(cur);
   }
 
