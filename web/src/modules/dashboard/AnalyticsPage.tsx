@@ -13,6 +13,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -28,13 +30,14 @@ import {
   api,
   type AnalyticsSeverityFilter,
   type AlertResolutionReport,
+  type RiskTrendReport,
 } from '@/lib/api';
 
 type TabKey = 'alert-resolution' | 'risk-trend' | 'pd-distribution' | 'stage-migration';
 
 const TABS: { key: TabKey; label: string; icon: typeof BarChart3; status: 'live' | 'pending' }[] = [
   { key: 'alert-resolution', label: 'Alert resolution', icon: BarChart3,  status: 'live' },
-  { key: 'risk-trend',       label: 'Risk trend',       icon: LineIcon,   status: 'pending' },
+  { key: 'risk-trend',       label: 'Risk trend',       icon: LineIcon,   status: 'live' },
   { key: 'pd-distribution',  label: 'PD distribution',  icon: BarChart3,  status: 'pending' },
   { key: 'stage-migration',  label: 'Stage migration',  icon: GitBranch,  status: 'pending' },
 ];
@@ -101,7 +104,7 @@ export function AnalyticsPage() {
           className="pt-4"
         >
           {tab === 'alert-resolution' && <AlertResolutionTab />}
-          {tab === 'risk-trend' && <ComingSoon title="Risk trend" />}
+          {tab === 'risk-trend' && <RiskTrendTab />}
           {tab === 'pd-distribution' && <ComingSoon title="PD distribution" />}
           {tab === 'stage-migration' && <ComingSoon title="Stage migration" />}
         </div>
@@ -282,6 +285,184 @@ function AlertResolutionView({ report }: { report: AlertResolutionReport }) {
           )}
         </Panel>
       </div>
+    </div>
+  );
+}
+
+// ── Risk Trend tab (4b) ───────────────────────────────────────────────
+
+const RANGE_PRESETS: { key: '7d' | '30d' | '90d' | 'all'; label: string; days: number | null }[] = [
+  { key: '7d',  label: 'Last 7 days',   days: 7 },
+  { key: '30d', label: 'Last 30 days',  days: 30 },
+  { key: '90d', label: 'Last 90 days',  days: 90 },
+  { key: 'all', label: 'All time',      days: null },
+];
+
+function RiskTrendTab() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rangeParam = searchParams.get('range') ?? '30d';
+  const range = RANGE_PRESETS.find((r) => r.key === rangeParam) ?? RANGE_PRESETS[1];
+
+  const setRange = (key: typeof RANGE_PRESETS[number]['key']) => {
+    const sp = new URLSearchParams(searchParams);
+    if (key === '30d') sp.delete('range');
+    else sp.set('range', key);
+    setSearchParams(sp, { replace: true });
+  };
+
+  const filter = useMemo(() => {
+    if (range.days == null) return {};
+    const from = new Date(Date.now() - range.days * 86_400_000).toISOString();
+    return { from };
+  }, [range]);
+
+  const q = useQuery({
+    queryKey: ['analytics.risk-trend', range.key],
+    queryFn: () => api.riskTrend(filter),
+  });
+
+  return (
+    <div className="space-y-4" data-testid="risk-trend-panel">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label htmlFor="rt-range" className="block text-xs font-medium text-slate-500 mb-1">
+            Time range
+          </label>
+          <select
+            id="rt-range"
+            value={range.key}
+            onChange={(e) => setRange(e.target.value as typeof RANGE_PRESETS[number]['key'])}
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+          >
+            {RANGE_PRESETS.map((r) => (
+              <option key={r.key} value={r.key}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <span className="ml-auto text-xs text-slate-500">
+          {q.data?.generated_at
+            ? `Generated ${new Date(q.data.generated_at).toLocaleString()}`
+            : ''}
+        </span>
+      </div>
+
+      {q.isLoading && <p className="py-6 text-center text-sm text-slate-500">Loading…</p>}
+      {q.isError && (
+        <p role="alert" className="py-6 text-center text-sm text-rose-600">
+          <AlertTriangle size={14} className="mr-1 inline" />
+          {(q.error as Error)?.message ?? 'Failed to load.'}
+        </p>
+      )}
+      {q.data && <RiskTrendView report={q.data} />}
+    </div>
+  );
+}
+
+function RiskTrendView({ report }: { report: RiskTrendReport }) {
+  const { totals } = report;
+  // Severity stack colors — danger/warning/sky/success match the existing
+  // dashboard severity palette so users don't relearn the legend.
+  const sevFill: Record<string, string> = {
+    critical: color.danger,
+    high:     color.warning,
+    medium:   color.sky,
+    low:      color.success,
+  };
+
+  // Recharts wants a flat shape per row — flatten by_severity.
+  const data = useMemo(
+    () =>
+      report.buckets.map((b) => ({
+        week: b.week,
+        critical: b.by_severity.critical,
+        high: b.by_severity.high,
+        medium: b.by_severity.medium,
+        low: b.by_severity.low,
+        avg_criticality: b.avg_criticality ?? 0,
+        high_critical_share_pct:
+          Math.round(b.high_critical_share * 1000) / 10,
+      })),
+    [report.buckets],
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4" data-testid="rt-kpis">
+        <div data-testid="rt-kpi-alerts">
+          <MetricCard
+            label="Alerts in window"
+            value={totals.alert_count.toLocaleString()}
+            tone="blue"
+            sub="across all severities"
+          />
+        </div>
+        <MetricCard
+          label="Avg criticality"
+          value={totals.avg_criticality == null ? '—' : totals.avg_criticality.toFixed(2)}
+          tone={
+            totals.avg_criticality == null
+              ? 'neutral'
+              : totals.avg_criticality >= 5
+                ? 'danger'
+                : totals.avg_criticality >= 3
+                  ? 'warning'
+                  : 'success'
+          }
+          sub="weighted across all alerts"
+        />
+        <MetricCard
+          label="High + critical share"
+          value={`${(totals.high_critical_share * 100).toFixed(1)}%`}
+          tone={
+            totals.high_critical_share >= 0.5
+              ? 'danger'
+              : totals.high_critical_share >= 0.25
+                ? 'warning'
+                : 'success'
+          }
+          sub="of total alerts in window"
+        />
+      </div>
+
+      <Panel title="Weekly alert volume × severity (bars) + avg criticality (line)">
+        {data.length === 0 ? (
+          <p className="py-12 text-center text-sm text-slate-500" data-testid="rt-empty">
+            No alerts in the selected window.
+          </p>
+        ) : (
+          <div className="h-[340px]" data-testid="risk-trend-chart">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={data} margin={{ left: 8, right: 8, top: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="week" />
+                <YAxis yAxisId="left" />
+                <YAxis yAxisId="right" orientation="right" />
+                <Tooltip />
+                <Legend />
+                {/* Stacked bars for severity counts */}
+                <Bar yAxisId="left" dataKey="critical" stackId="sev" fill={sevFill.critical} />
+                <Bar yAxisId="left" dataKey="high"     stackId="sev" fill={sevFill.high} />
+                <Bar yAxisId="left" dataKey="medium"   stackId="sev" fill={sevFill.medium} />
+                <Bar yAxisId="left" dataKey="low"      stackId="sev" fill={sevFill.low} />
+                {/* Avg criticality on the right axis */}
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="avg_criticality"
+                  stroke={color.navy}
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-slate-500">
+          Bar stack on the left axis = alert count by severity per ISO week. Line on
+          the right axis = average <code>criticality_score</code> across all alerts in
+          that week. Higher line + bigger red stack = higher concentrated risk.
+        </p>
+      </Panel>
     </div>
   );
 }

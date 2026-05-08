@@ -3008,6 +3008,89 @@ export const handlers = [
     return HttpResponse.json(envelope({ deleted: true }));
   }),
 
+  // ── Analytics — Risk Trend (T4.1 4b) ─────────────────────────────────
+
+  http.get('/v1/analytics/risk-trend', ({ request }) => {
+    const url = new URL(request.url);
+    const fromRaw = url.searchParams.get('from');
+    if (fromRaw && Number.isNaN(Date.parse(fromRaw))) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'from must be ISO 8601', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const fromMs = fromRaw ? Date.parse(fromRaw) : Number.NEGATIVE_INFINITY;
+    const seed = mswRiskTrendSeed();
+    const filtered = seed.filter((r) => Date.parse(r.created_at) >= fromMs);
+
+    type Bucket = {
+      week: string;
+      week_start: string;
+      total: number;
+      by_severity: Record<'critical' | 'high' | 'medium' | 'low', number>;
+      _sumCrit: number;
+    };
+    const isoWeek = (d: Date) => {
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      const dayNum = t.getUTCDay() || 7;
+      t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+      const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+      const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86_400_000 + 1) / 7);
+      const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      const adj = monday.getUTCDay() || 7;
+      monday.setUTCDate(monday.getUTCDate() - (adj - 1));
+      monday.setUTCHours(0, 0, 0, 0);
+      return { label: `${t.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`, monday };
+    };
+    const map = new Map<string, Bucket>();
+    let sumCritAll = 0, hiCritAll = 0;
+    for (const r of filtered) {
+      const { label, monday } = isoWeek(new Date(r.created_at));
+      const b = map.get(label) ?? {
+        week: label,
+        week_start: monday.toISOString(),
+        total: 0,
+        by_severity: { critical: 0, high: 0, medium: 0, low: 0 },
+        _sumCrit: 0,
+      };
+      b.total += 1;
+      b.by_severity[r.severity] += 1;
+      b._sumCrit += r.criticality_score;
+      map.set(label, b);
+      sumCritAll += r.criticality_score;
+      if (r.severity === 'critical' || r.severity === 'high') hiCritAll += 1;
+    }
+    const buckets = [...map.values()]
+      .sort((a, b) => a.week.localeCompare(b.week))
+      .map((b) => ({
+        week: b.week,
+        week_start: b.week_start,
+        total: b.total,
+        by_severity: b.by_severity,
+        avg_criticality: b.total === 0 ? null : Math.round((b._sumCrit / b.total) * 100) / 100,
+        high_critical_share:
+          b.total === 0
+            ? 0
+            : Math.round(((b.by_severity.critical + b.by_severity.high) / b.total) * 10000) / 10000,
+      }));
+
+    return HttpResponse.json(
+      envelope({
+        buckets,
+        totals: {
+          alert_count: filtered.length,
+          avg_criticality:
+            filtered.length === 0 ? null : Math.round((sumCritAll / filtered.length) * 100) / 100,
+          high_critical_share:
+            filtered.length === 0 ? 0 : Math.round((hiCritAll / filtered.length) * 10000) / 10000,
+        },
+        generated_at: new Date().toISOString(),
+        tenant_id: 'BANK_DEMO',
+        filters_applied: fromRaw ? { from: fromRaw } : {},
+      }),
+    );
+  }),
+
   // ── Analytics — Alert Resolution (T4.1, EWS.docx §5.5 / §8) ─────────
 
   http.get('/v1/analytics/alert-resolution', ({ request }) => {
@@ -3217,6 +3300,35 @@ function mswWeeklyTrend(
     if (r.closed_at) bump(isoWeek(new Date(r.closed_at)), 'closed');
   }
   return [...map.values()].sort((a, b) => a.week.localeCompare(b.week));
+}
+
+// Risk-trend seed — same shape as the alert-resolution seed but adds
+// a criticality_score field. 200 rows spanning ~4 weeks.
+function mswRiskTrendSeed(): {
+  alert_id: string;
+  customer_id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  criticality_score: number;
+  created_at: string;
+}[] {
+  const sevs: ('critical' | 'high' | 'medium' | 'low')[] = ['critical', 'high', 'medium', 'low'];
+  const sevWeight = { critical: 8, high: 5, medium: 3, low: 1 };
+  const now = Date.now();
+  const out = [];
+  for (let i = 0; i < 200; i++) {
+    const ageMin = (i * 217) % (28 * 24 * 60);
+    const sev = sevs[i % sevs.length];
+    out.push({
+      alert_id: `a-${i + 1}`,
+      customer_id: `cust-${(i % 50) + 1}`,
+      severity: sev,
+      // criticality_score in [1, 10] — weighted by severity + slight noise
+      criticality_score:
+        sevWeight[sev] + ((i % 7) - 3) * 0.2,
+      created_at: new Date(now - ageMin * 60_000).toISOString(),
+    });
+  }
+  return out;
 }
 
 // Deterministic 200-row seed spanning ~4 weeks. Each alert has a

@@ -450,6 +450,33 @@ export interface AlertResolutionReport {
   filters_applied: AlertResolutionFilter;
 }
 
+// Risk-trend (4b)
+export type AnalyticsAlertSeverity = 'critical' | 'high' | 'medium' | 'low';
+export interface RiskTrendBucket {
+  week: string;
+  week_start: string;
+  total: number;
+  by_severity: Record<AnalyticsAlertSeverity, number>;
+  avg_criticality: number | null;
+  high_critical_share: number;
+}
+export interface RiskTrendFilter {
+  from?: string;
+  to?: string;
+  segment?: string;
+}
+export interface RiskTrendReport {
+  buckets: RiskTrendBucket[];
+  totals: {
+    alert_count: number;
+    avg_criticality: number | null;
+    high_critical_share: number;
+  };
+  generated_at: string;
+  tenant_id: string;
+  filters_applied: RiskTrendFilter;
+}
+
 // ── Rules v2 (banking-grade enhancements) ──────────────────────────────
 
 export type RuleProduct =
@@ -1089,6 +1116,17 @@ export const api = {
           from: filter.from,
           to: filter.to,
           severity: filter.severity && filter.severity !== 'all' ? filter.severity : undefined,
+        },
+      })
+      .then((r) => r.data),
+
+  riskTrend: (filter: RiskTrendFilter = {}) =>
+    http
+      .get<RiskTrendReport>('/v1/analytics/risk-trend', {
+        params: {
+          from: filter.from,
+          to: filter.to,
+          segment: filter.segment,
         },
       })
       .then((r) => r.data),

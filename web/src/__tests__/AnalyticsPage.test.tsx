@@ -22,7 +22,7 @@ function authenticate(role = 'admin') {
 }
 
 describe('AnalyticsPage — chrome', () => {
-  it('renders all 4 tabs with placeholders for the unbuilt sub-dashboards', async () => {
+  it('renders all 4 tabs (alert-resolution + risk-trend live; pd/stage placeholders)', async () => {
     authenticate();
     renderWithProviders(<AnalyticsPage />);
     expect(
@@ -34,12 +34,12 @@ describe('AnalyticsPage — chrome', () => {
     expect(screen.getByTestId('analytics-tab-stage-migration')).toBeInTheDocument();
   });
 
-  it('switching to a placeholder tab shows the coming-soon panel', async () => {
+  it('switching to a placeholder tab (pd-distribution) shows the coming-soon panel', async () => {
     authenticate();
     const user = userEvent.setup();
     renderWithProviders(<AnalyticsPage />);
-    await user.click(screen.getByTestId('analytics-tab-risk-trend'));
-    expect(screen.getByTestId('coming-soon-risk-trend')).toBeInTheDocument();
+    await user.click(screen.getByTestId('analytics-tab-pd-distribution'));
+    expect(screen.getByTestId('coming-soon-pd-distribution')).toBeInTheDocument();
     expect(screen.queryByTestId('alert-resolution-panel')).not.toBeInTheDocument();
   });
 });
@@ -88,6 +88,41 @@ describe('AnalyticsPage — alert-resolution tab', () => {
         .parentElement!.textContent ?? '';
       // Critical is ~25% of the 200-seed (round-robin), so the count drops
       expect(next).not.toBe(allCardValue);
+    });
+  });
+});
+
+describe('AnalyticsPage — risk-trend tab', () => {
+  it('hydrates KPI cards + the composed chart from the MSW seed', async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyticsPage />);
+
+    await user.click(screen.getByTestId('analytics-tab-risk-trend'));
+    await waitFor(() =>
+      expect(screen.getByTestId('rt-kpis')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('rt-kpi-alerts')).toBeInTheDocument();
+    expect(screen.getByTestId('risk-trend-chart')).toBeInTheDocument();
+  });
+
+  it('changing range to 7d narrows the alert count', async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyticsPage />);
+
+    await user.click(screen.getByTestId('analytics-tab-risk-trend'));
+    await waitFor(() =>
+      expect(screen.getByTestId('rt-kpi-alerts')).toBeInTheDocument(),
+    );
+    const before = screen.getByTestId('rt-kpi-alerts').textContent ?? '';
+
+    await user.selectOptions(screen.getByLabelText(/Time range/i), '7d');
+
+    await waitFor(() => {
+      const after = screen.getByTestId('rt-kpi-alerts').textContent ?? '';
+      // 7d window contains fewer rows than the default 30d → text differs
+      expect(after).not.toBe(before);
     });
   });
 });

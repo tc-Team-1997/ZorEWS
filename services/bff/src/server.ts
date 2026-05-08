@@ -988,6 +988,9 @@ export interface AppDeps {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   alertResolutionSource?: any;
+  /** Source for the Risk Trend sub-dashboard (T4.1 4b). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  riskTrendSource?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1434,6 +1437,52 @@ export function makeApp(deps: AppDeps = {}) {
           res.status(500).json(
             wrapError(
               { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  // /v1/analytics/risk-trend — T4.1 4b, EWS.docx §5.5 / §8 sub-dashboard.
+  // Weekly bucketed alert counts by severity + average criticality. Same
+  // RBAC + envelope shape as the alert-resolution sibling.
+  if (deps.riskTrendSource) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computeRiskTrend } = require('./analytics/risk_trend') as
+      typeof import('./analytics/risk_trend');
+    app.get(
+      '/v1/analytics/risk-trend',
+      requireTenantMw,
+      requireRole('dashboard:analytics:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const tenant_id = req.tenant!.tenant_id;
+          const filter = {
+            from: typeof req.query.from === 'string' ? req.query.from : undefined,
+            to: typeof req.query.to === 'string' ? req.query.to : undefined,
+            segment: typeof req.query.segment === 'string' ? req.query.segment : undefined,
+          };
+          for (const k of ['from', 'to'] as const) {
+            const v = filter[k];
+            if (v && Number.isNaN(Date.parse(v))) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: `${k} must be ISO 8601`, severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+          }
+          const rows = await deps.riskTrendSource.loadAlerts(tenant_id, filter);
+          const out = computeRiskTrend({ tenant_id, rows, filter, asOf: now() });
+          res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'analytics failed', severity: 'HIGH' },
               ctx,
             ),
           );
@@ -14472,6 +14521,10 @@ if (require.main === module) {
     const { makeAlertResolutionSource } = require('./analytics/alert_resolution') as
       typeof import('./analytics/alert_resolution');
     const { source: alertResolutionSource } = await makeAlertResolutionSource();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeRiskTrendSource } = require('./analytics/risk_trend') as
+      typeof import('./analytics/risk_trend');
+    const { source: riskTrendSource } = await makeRiskTrendSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14486,6 +14539,7 @@ if (require.main === module) {
       savedFilterStore,
       reportAuditPool,
       alertResolutionSource,
+      riskTrendSource,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {
