@@ -422,3 +422,153 @@ describe('hook into /v1/ews/evaluate', () => {
     expect(fake.calls).toHaveLength(0);
   });
 });
+
+// ─── Reserved-event fan-out (T2.12 follow-on) ────────────────────────
+//
+// case.assigned, case.closed, alert.updated previously had no emitter —
+// they were declared in WebhookEventType but never fired. The lifecycle
+// hooks added 2026-05-09 fan out via webhookDispatcher (for external
+// systems) + the in-process bus (for the SPA SSE bell + live banner).
+
+describe('case.assigned fan-out', () => {
+  test('POST /v1/cms/cases/:id/assign dispatches case.assigned to subscribers', async () => {
+    const store = new WebhookSubscriptionStore();
+    const fake = makeFakeFetch([200]);
+    const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+    await request(app)
+      .post('/v1/webhooks')
+      .set(TH)
+      .send({
+        name: 'case-router',
+        url: 'https://router.test/case',
+        events: ['case.assigned'] as WebhookEventType[],
+      });
+
+    // Create + assign a CMS case
+    const create = await request(app).post('/v1/cms/cases').set(TH).send({
+      title: 'Spike review',
+      description: 'investigate withdrawal spike',
+      priority: 'P2',
+      alert_id: 'alrt-001',
+    });
+    expect(create.status).toBe(201);
+    const caseId = create.body.body.case_id as string;
+
+    await request(app)
+      .post(`/v1/cms/cases/${caseId}/assign`)
+      .set(TH)
+      .send({ assigned_to: 'jane' });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(fake.calls.length).toBeGreaterThan(0);
+    const lastCall = fake.calls[fake.calls.length - 1];
+    expect(lastCall.headers['x-apex-event']).toBe('case.assigned');
+    const payload = JSON.parse(lastCall.body) as { assigned_to: string; case_id: string };
+    expect(payload.assigned_to).toBe('jane');
+    expect(payload.case_id).toBe(caseId);
+  });
+
+  test('subscriber not listening for case.assigned does NOT receive it', async () => {
+    const store = new WebhookSubscriptionStore();
+    const fake = makeFakeFetch([200]);
+    const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+    // Subscribed only to alert.created — case events should be ignored
+    await request(app)
+      .post('/v1/webhooks')
+      .set(TH)
+      .send({
+        name: 'aml-only',
+        url: 'https://aml.test/x',
+        events: ['alert.created'] as WebhookEventType[],
+      });
+
+    const create = await request(app).post('/v1/cms/cases').set(TH).send({
+      title: 'x', description: 'y', priority: 'P2', alert_id: 'a',
+    });
+    await request(app)
+      .post(`/v1/cms/cases/${create.body.body.case_id}/assign`)
+      .set(TH)
+      .send({ assigned_to: 'jane' });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(fake.calls).toHaveLength(0);
+  });
+});
+
+describe('case.closed fan-out', () => {
+  test('POST /v1/cms/cases/:id/close dispatches case.closed', async () => {
+    const store = new WebhookSubscriptionStore();
+    const fake = makeFakeFetch([200]);
+    const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+    await request(app)
+      .post('/v1/webhooks')
+      .set(TH)
+      .send({
+        name: 'closer',
+        url: 'https://closer.test/case',
+        events: ['case.closed'] as WebhookEventType[],
+      });
+
+    const create = await request(app).post('/v1/cms/cases').set(TH).send({
+      title: 'review', description: 'r', priority: 'P3', alert_id: 'a',
+    });
+    expect(create.status).toBe(201);
+    const id = create.body.body.case_id as string;
+    const closeRes = await request(app).post(`/v1/cms/cases/${id}/close`).set(TH).send({
+      resolution_category: 'mitigated',
+      resolution_notes: 'customer regularised',
+    });
+    expect(closeRes.status).toBe(200);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const closeCalls = fake.calls.filter(
+      (c) => c.headers['x-apex-event'] === 'case.closed',
+    );
+    expect(closeCalls.length).toBeGreaterThanOrEqual(1);
+    const payload = JSON.parse(closeCalls[0].body) as { case_id: string; resolution_category: string };
+    expect(payload.case_id).toBe(id);
+    expect(payload.resolution_category).toBe('mitigated');
+  });
+});
+
+describe('alert.updated fan-out', () => {
+  test('POST /v1/alerts/:id/ack dispatches alert.updated with change=acknowledged', async () => {
+    const store = new WebhookSubscriptionStore();
+    const fake = makeFakeFetch([200]);
+    const { app } = makeWebhookApp({ store, fetchImpl: fake.fn as never });
+    const TH = { 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' };
+
+    await request(app)
+      .post('/v1/webhooks')
+      .set(TH)
+      .send({
+        name: 'ack-watcher',
+        url: 'https://ack.test/x',
+        events: ['alert.updated'] as WebhookEventType[],
+      });
+
+    const r = await request(app)
+      .post('/v1/alerts/some-alert-id/ack')
+      .set(TH)
+      .set('x-apex-user', 'jane')
+      .send({ notes: 'looking into it' });
+    expect([200, 400, 404]).toContain(r.status);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (r.status === 200) {
+      const updates = fake.calls.filter(
+        (c) => c.headers['x-apex-event'] === 'alert.updated',
+      );
+      expect(updates.length).toBe(1);
+      const p = JSON.parse(updates[0].body) as { change: string; alert_id: string; actor: string };
+      expect(p.change).toBe('acknowledged');
+      expect(p.actor).toBe('jane');
+    }
+  });
+});

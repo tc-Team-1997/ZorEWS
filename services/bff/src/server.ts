@@ -1954,6 +1954,25 @@ export function makeApp(deps: AppDeps = {}) {
           wrapper.notes as string | null | undefined,
           now(),
         );
+        webhookDispatcher.dispatch(
+          'alert.updated',
+          {
+            tenant_id: req.tenant!.tenant_id,
+            alert_id,
+            change: 'acknowledged',
+            actor: actor_username,
+            at: now().toISOString(),
+            ack_state: out,
+          },
+          req.tenant!.tenant_id,
+        );
+        bus.publish({
+          type: 'system',
+          level: 'info',
+          title: `Alert ${alert_id} acknowledged by ${actor_username}`,
+          href: `/alerts`,
+          meta: { alert_id, change: 'acknowledged', actor: actor_username },
+        });
         return res.json(wrapResponse(out, ctx));
       } catch (e) {
         if (e instanceof AlertAckError) {
@@ -1999,6 +2018,25 @@ export function makeApp(deps: AppDeps = {}) {
           (wrapper.reason ?? '') as string,
           now(),
         );
+        webhookDispatcher.dispatch(
+          'alert.updated',
+          {
+            tenant_id: req.tenant!.tenant_id,
+            alert_id,
+            change: 'unacknowledged',
+            actor: actor_username,
+            at: now().toISOString(),
+            ack_state: out,
+          },
+          req.tenant!.tenant_id,
+        );
+        bus.publish({
+          type: 'system',
+          level: 'warning',
+          title: `Alert ${alert_id} re-opened by ${actor_username}`,
+          href: `/alerts`,
+          meta: { alert_id, change: 'unacknowledged', actor: actor_username },
+        });
         return res.json(wrapResponse(out, ctx));
       } catch (e) {
         if (e instanceof AlertAckError) {
@@ -6069,6 +6107,36 @@ export function makeApp(deps: AppDeps = {}) {
         writeCmsAuditEvents(req.tenant!.tenant_id, 'assign', assigned_by, c, {
           assigned_to: c.assigned_to,
         });
+        // Fan out the lifecycle event — webhooks for external systems +
+        // in-process bus for the SPA bell + live alert/case streams.
+        webhookDispatcher.dispatch(
+          'case.assigned',
+          {
+            tenant_id: req.tenant!.tenant_id,
+            case_id: c.case_id,
+            case_number: c.case_number,
+            assigned_to: c.assigned_to,
+            assigned_by,
+            priority: c.priority,
+            status: c.status,
+            assigned_at: now().toISOString(),
+          },
+          req.tenant!.tenant_id,
+        );
+        bus.publish({
+          type: 'case.assigned',
+          level: 'info',
+          title: `Case ${c.case_number} assigned to ${c.assigned_to ?? '(unassigned)'}`,
+          body: c.title ?? undefined,
+          href: `/cms/cases/${c.case_id}`,
+          meta: {
+            case_id: c.case_id,
+            case_number: c.case_number,
+            assigned_to: c.assigned_to,
+            assigned_by,
+            priority: c.priority,
+          },
+        });
         return res.json(wrapResponse(c, ctx));
       } catch (e) {
         const r = cmsErrorResponse(e, ctx);
@@ -6124,6 +6192,34 @@ export function makeApp(deps: AppDeps = {}) {
         const c = cmsCaseStore.close(req.tenant!.tenant_id, id, inner, closed_by, now());
         writeCmsAuditEvents(req.tenant!.tenant_id, 'close', closed_by, c, {
           resolution_category: c.resolution_category,
+        });
+        webhookDispatcher.dispatch(
+          'case.closed',
+          {
+            tenant_id: req.tenant!.tenant_id,
+            case_id: c.case_id,
+            case_number: c.case_number,
+            closed_by,
+            resolution_category: c.resolution_category,
+            priority: c.priority,
+            status: c.status,
+            closed_at: now().toISOString(),
+          },
+          req.tenant!.tenant_id,
+        );
+        bus.publish({
+          type: 'case.closed',
+          level: 'success',
+          title: `Case ${c.case_number} closed`,
+          body: c.resolution_category ? `Resolution: ${c.resolution_category}` : undefined,
+          href: `/cms/cases/${c.case_id}`,
+          meta: {
+            case_id: c.case_id,
+            case_number: c.case_number,
+            closed_by,
+            resolution_category: c.resolution_category,
+            priority: c.priority,
+          },
         });
         return res.json(wrapResponse(c, ctx));
       } catch (e) {
