@@ -3,6 +3,13 @@ import { http } from '@/lib/http';
 
 export type NotificationLevel = 'info' | 'success' | 'warning' | 'danger';
 
+export type NotificationType =
+  | 'alert.created'
+  | 'case.assigned'
+  | 'case.closed'
+  | 'scenario.run'
+  | 'system';
+
 export interface Notification {
   id: string;
   ts: string;
@@ -10,6 +17,10 @@ export interface Notification {
   title: string;
   body?: string;
   href?: string;
+  /** Kind discriminator — `alert.created` etc. (T2.12). */
+  type?: NotificationType;
+  /** Kind-specific payload. */
+  meta?: Record<string, unknown>;
 }
 
 interface State {

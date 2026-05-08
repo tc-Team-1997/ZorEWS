@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Link2, MoreHorizontal } from 'lucide-react';
+import { Bell, Link2, MoreHorizontal } from 'lucide-react';
 import { api, type Alert, type Severity } from '@/lib/api';
-import { Badge, type BadgeTone, DataTable, type Column, FilterChip, Panel } from '@/components/ui';
+import { Badge, type BadgeTone, Button, DataTable, type Column, FilterChip, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
+import { useAlertStream } from '@/components/notifications/useAlertStream';
 import { bandFor, type SortKey } from '@/lib/criticality';
 
 const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
@@ -89,8 +90,9 @@ export function AlertListPage() {
     setSearchParams(sp, { replace: true });
   };
 
+  const queryKey = ['alerts', severity, assignee, sort, dedup] as const;
   const { data, isLoading } = useQuery({
-    queryKey: ['alerts', severity, assignee, sort, dedup],
+    queryKey,
     queryFn: () =>
       api.alerts({
         severity: severity ?? undefined,
@@ -100,6 +102,12 @@ export function AlertListPage() {
       }),
   });
   useChatContext({ page: 'alerts' });
+
+  // T2.12 — live alert stream. Each `alert.created` event auto-invalidates
+  // the query above so the table refreshes silently. The banner below
+  // surfaces "+N new" so the operator can scroll to the top deliberately.
+  const qc = useQueryClient();
+  const stream = useAlertStream({ invalidateQueryKey: queryKey });
 
   const columns: Column<Alert>[] = [
     {
@@ -269,12 +277,46 @@ export function AlertListPage() {
         </div>
       </Panel>
 
+      {stream.pending.length > 0 && (
+        <div
+          role="status"
+          data-testid="alerts-live-banner"
+          className="mb-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <Bell size={14} className="text-amber-700" />
+          <span>
+            <span className="font-semibold tabular">+{stream.pending.length}</span>{' '}
+            new alert{stream.pending.length === 1 ? '' : 's'} since you opened this view
+          </span>
+          <Button
+            variant="ghost"
+            data-testid="alerts-live-refresh"
+            onClick={() => {
+              void qc.invalidateQueries({ queryKey });
+              stream.clear();
+            }}
+          >
+            Show now
+          </Button>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         data={data?.items ?? []}
         empty={isLoading ? 'Loading alerts…' : 'No alerts match the filters'}
         onRowClick={(row) => navigate(`/customers/${row.customer.id}`)}
       />
+      <p
+        className="mt-2 text-[11px] text-ink-sub"
+        data-testid="alerts-live-status"
+      >
+        Live stream:{' '}
+        <span className={stream.connected ? 'text-emerald-700' : 'text-slate-500'}>
+          {stream.connected ? 'connected' : 'disconnected'}
+        </span>
+        {stream.totalSeen > 0 && <span> · {stream.totalSeen} seen this session</span>}
+      </p>
     </div>
   );
 }

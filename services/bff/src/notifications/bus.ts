@@ -31,6 +31,8 @@ export class NotificationBus {
       title: input.title,
       body: input.body,
       href: input.href,
+      type: input.type,
+      meta: input.meta,
     };
     this.recent.push(n);
     if (this.recent.length > this.cap) this.recent.shift();

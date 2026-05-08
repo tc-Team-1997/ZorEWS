@@ -160,6 +160,40 @@ describe('POST /v1/notifications/publish', () => {
     expect(r.status).toBe(400);
     expect(r.body.error.message).toMatch(/level/);
   });
+
+  // T2.12 — kind-typed notifications carry through publish + bus.
+  test('admin publishes an alert.created with meta payload', async () => {
+    const bus = new NotificationBus();
+    const { app } = makeNotifApp('admin', bus);
+    const r = await request(app)
+      .post('/v1/notifications/publish')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .send({
+        level: 'warning',
+        title: 'New high-risk alert · CUST-1',
+        type: 'alert.created',
+        meta: { customer_id: 'CUST-1', pd: 0.81, level: 'High' },
+      });
+    expect(r.status).toBe(201);
+    expect(r.body.body.notification.type).toBe('alert.created');
+    expect(r.body.body.notification.meta).toEqual({
+      customer_id: 'CUST-1',
+      pd: 0.81,
+      level: 'High',
+    });
+    expect(bus.recent).toHaveLength(1);
+    expect(bus.recent[0].type).toBe('alert.created');
+  });
+
+  test('400 on unknown type discriminator', async () => {
+    const { app } = makeNotifApp('admin');
+    const r = await request(app)
+      .post('/v1/notifications/publish')
+      .set({ 'X-Tenant-ID': 'BANK_DEMO', 'X-Channel': 'API' })
+      .send({ level: 'info', title: 'x', type: 'random.bogus' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/type/);
+  });
 });
 
 describe('openSse() — direct unit test', () => {

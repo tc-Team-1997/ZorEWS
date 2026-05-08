@@ -46,6 +46,7 @@
 - [x] T2.10 Model risk management framework doc — **agent-ai**
 - [x] T2.11 Fraud-suspicion alert type — added `Fraud` indicator family to `services/regulatory-svc/indicators/catalog.json` (FRD-001 sudden_withdrawal_spike, FRD-002 salary_credit_disappeared, FRD-003 channel_anomaly_score, FRD-004 geo_anomaly_distance_km), with compute fns under `src/compute/fraud.ts`. Three seed rules (RULE-031, 032, 033) carry the `fraud_suspicion` tag. DSL schema regex extended to allow `FRD-NNN`. — **agent-rule** + **agent-indicator** _(closed 2026-05-08; BAC §3.5)_
 - [ ] T2.12 Real-time alert path — Kafka-streaming branch from indicator-update events to rule-engine evaluation, p95 indicator-to-alert latency <60s; current path is DAG-batch on the mart — **agent-alert** + **agent-indicator** _(EWS.docx §3.5 specifies real-time alerts; the batch path satisfies the rule semantics but not the latency intent)_
+  - **Partial 2026-05-08** — BFF→SPA live delivery path: `Notification.type='alert.created'` events now fan out via the existing in-process `NotificationBus` whenever a high-PD evaluation fires (`/v1/ews/evaluate`). SSE on `/v1/notifications/stream` carries the typed event; SPA `useAlertStream` hook drives a live banner on the alerts list with auto-`invalidateQueries`. Sub-second propagation end-to-end. Still missing: upstream Kafka producer for indicator-update → rule-eval streaming on the agent-indicator / agent-rule side.
 
 ## Phase 3 — Integration & Case Management (M10–14)
 

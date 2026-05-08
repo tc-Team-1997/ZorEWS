@@ -2444,6 +2444,23 @@ export function makeApp(deps: AppDeps = {}) {
             },
             req.tenant!.tenant_id,
           );
+          // T2.12 — also fan out to the in-process notifications bus so SSE
+          // subscribers (the SPA bell + the live AlertListPage banner) get
+          // the same event without each subscriber needing its own webhook.
+          bus.publish({
+            type: 'alert.created',
+            level: 'warning',
+            title: `New high-risk alert · ${score.customer_id}`,
+            body: `PD ${(score.pd * 100).toFixed(1)}% — ${score.top_reasons?.[0]?.feature ?? 'evaluator'}`,
+            href: `/alerts?customer=${encodeURIComponent(score.customer_id ?? '')}`,
+            meta: {
+              customer_id: score.customer_id,
+              pd: score.pd,
+              level: score.level,
+              tenant_id: req.tenant?.tenant_id,
+              evaluated_at: now().toISOString(),
+            },
+          });
         }
         res.json(wrapResponse(score, ctx));
       } catch (e) {
@@ -4590,6 +4607,8 @@ export function makeApp(deps: AppDeps = {}) {
       title?: string;
       body?: string;
       href?: string;
+      type?: import('./notifications/types').NotificationType;
+      meta?: Record<string, unknown>;
     };
     const errs: string[] = [];
     if (!body || typeof body.title !== 'string' || !body.title.trim()) {
@@ -4598,6 +4617,10 @@ export function makeApp(deps: AppDeps = {}) {
     const validLevels: NotificationLevel[] = ['info', 'success', 'warning', 'danger'];
     if (!body.level || !validLevels.includes(body.level)) {
       errs.push(`level must be one of ${validLevels.join(',')}`);
+    }
+    const validTypes = ['alert.created', 'case.assigned', 'case.closed', 'scenario.run', 'system'];
+    if (body.type && !validTypes.includes(body.type)) {
+      errs.push(`type must be one of ${validTypes.join(',')} or omitted`);
     }
     if (errs.length) {
       return res.status(400).json(
@@ -4609,6 +4632,8 @@ export function makeApp(deps: AppDeps = {}) {
       title: body.title!,
       body: body.body,
       href: body.href,
+      type: body.type,
+      meta: body.meta,
     });
     res.status(201).json(
       wrapResponse(

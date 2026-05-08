@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { renderWithProviders } from './utils';
+
+interface MockESInstance {
+  emit(eventName: string, data: unknown): void;
+  close(): void;
+  closed: boolean;
+  dispatchEvent(ev: Event): boolean;
+}
+
+function getES(): MockESInstance {
+  const cls = (globalThis as { MockEventSource?: { lastInstance: MockESInstance | null } })
+    .MockEventSource;
+  if (!cls?.lastInstance) throw new Error('MockEventSource not initialised');
+  return cls.lastInstance;
+}
 
 describe('AlertListPage — basic render', () => {
   it('renders alert rows from the mock API', async () => {
@@ -73,6 +88,82 @@ describe('AlertListPage — dedup + sort', () => {
       // Just verify the page loads with the sort param applied — the
       // select reflects it.
       expect((screen.getByTestId('alerts-sort') as HTMLSelectElement).value).toBe('severity');
+    });
+  });
+});
+
+// T2.12 — live alert stream surfaces a banner + Show-now button.
+describe('AlertListPage — live alert stream (T2.12)', () => {
+  it('shows the connected stream-status pill once the EventSource opens', async () => {
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-live-status')).toHaveTextContent(/connected/);
+    });
+  });
+
+  it('hides the live banner until an alert.created event arrives', async () => {
+    renderWithProviders(<AlertListPage />);
+    // No banner pre-event
+    expect(screen.queryByTestId('alerts-live-banner')).not.toBeInTheDocument();
+    // Wait for SSE to be connected before emitting (otherwise the listener
+    // isn't attached yet)
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-live-status')).toHaveTextContent(/connected/);
+    });
+    act(() => {
+      getES().emit('notification', {
+        id: 'evt-1',
+        ts: '2026-05-08T12:00:00Z',
+        level: 'warning',
+        title: 'New high-risk alert · CUST-1',
+        type: 'alert.created',
+        meta: { customer_id: 'CUST-1' },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-live-banner')).toHaveTextContent(/\+1 new alert/);
+    });
+  });
+
+  it('non-alert events do NOT trigger the banner', async () => {
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-live-status')).toHaveTextContent(/connected/);
+    });
+    act(() => {
+      getES().emit('notification', {
+        id: 'evt-99',
+        ts: '2026-05-08T12:00:00Z',
+        level: 'info',
+        title: 'Scenario complete',
+        type: 'scenario.run',
+      });
+    });
+    // Allow the React state updater to settle before asserting absence.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('alerts-live-banner')).not.toBeInTheDocument();
+  });
+
+  it('"Show now" clears the banner', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-live-status')).toHaveTextContent(/connected/);
+    });
+    act(() => {
+      getES().emit('notification', {
+        id: 'evt-2',
+        ts: '2026-05-08T12:00:00Z',
+        level: 'warning',
+        title: 'New high-risk alert',
+        type: 'alert.created',
+      });
+    });
+    const banner = await screen.findByTestId('alerts-live-banner');
+    expect(banner).toBeInTheDocument();
+    await user.click(screen.getByTestId('alerts-live-refresh'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('alerts-live-banner')).not.toBeInTheDocument();
     });
   });
 });

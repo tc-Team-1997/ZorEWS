@@ -23,7 +23,7 @@
 | 3.2 | Indicator Engine — Credit family | ✅ | T1.5, T1.6 | |
 | 3.3 | Rule Engine — DSL + lifecycle | ✅ | T1.7, T1.8, T1.9 | 30 seed rules, simulator FP 0.148 |
 | 3.4 | AI Risk Scoring — PD + Risk Level | ✅ | T2.2, T2.3, T2.4 | Synthetic-trained champion AUC 0.8822 |
-| 3.5 | Alert Engine — real-time alerts | 🆕 | T2.12 (new) | Current path is DAG-batch on the mart; streaming/<60s path not built |
+| 3.5 | Alert Engine — real-time alerts | ⏳ | T2.12 | **Partial 2026-05-08**: BFF→SPA live delivery path shipped — `alert.created` now fans out via the in-process notifications bus on every High-PD evaluation, SSE on `/v1/notifications/stream` carries the typed event, SPA AlertListPage shows a "+N new alerts" live banner that auto-invalidates the query (sub-second propagation). **Still pending**: upstream Kafka streaming branch from indicator-update events to rule-engine evaluation (p95 indicator→alert <60s on the rule-eval side) — that still flows through the DAG-batch path. |
 | 3.5 | Alert type — high-risk customer | ✅ | T1.10, T2.7 | |
 | 3.5 | Alert type — potential default | ✅ | T1.10, T2.7 | |
 | 3.5 | Alert type — fraud suspicion | ✅ | T2.11 | Closed 2026-05-08 — Fraud indicator family added (`FRD-001` sudden-withdrawal-spike, `FRD-002` salary-credit-disappeared, `FRD-003` channel-anomaly, `FRD-004` geo-anomaly) under `services/regulatory-svc/indicators/src/compute/fraud.ts`; seed rules `RULE-031..033` carry `fraud_suspicion` tag. DSL schema regex extended to permit `FRD-` prefix. |
