@@ -950,6 +950,14 @@ export interface AppDeps {
    * app_iam.users when a PG pool is reachable, else returns ['admin'].
    */
   rolesForUser?: (tenant_id: string, user_id: string) => Promise<string[]>;
+  /**
+   * Source for the SLA breach matrix dashboard widget (BAC §3.1.9.1.4).
+   * When provided, mounts /v1/dashboard/sla-breach-matrix. The bootstrap
+   * path wires this to a PG-backed source that joins app_admin.sla_config
+   * × app_cases.cms_cases.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  slaMatrixSource?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1220,6 +1228,60 @@ export function makeApp(deps: AppDeps = {}) {
   });
 
   // ---------- /v1 (public REST API v1 — T3.7, envelope + tenant per T4.24) ----------
+
+  // /v1/dashboard/sla-breach-matrix — BAC §3.1.6 / §3.1.9.1.4 widget.
+  // Computes the four-bucket (0-7 / 8-30 / 31-90 / 90+) age breakdown
+  // with breach % derived live from app_admin.sla_config × open
+  // app_cases.cms_cases. The resolver itself is pure; PG IO happens
+  // in deps.slaMatrixSource (env-driven factory at bootstrap).
+  if (deps.slaMatrixSource) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computeSlaBreachMatrix } = require('./dashboard/sla_breach_matrix') as
+      typeof import('./dashboard/sla_breach_matrix');
+    app.get(
+      '/v1/dashboard/sla-breach-matrix',
+      requireTenantMw,
+      requireRole('dashboard:sla_breach_matrix:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const tenant_id = req.tenant!.tenant_id;
+          const branch = typeof req.query.branch === 'string' ? req.query.branch : undefined;
+          const business_unit =
+            typeof req.query.business_unit === 'string' ? req.query.business_unit : undefined;
+          const asOf =
+            typeof req.query.as_of === 'string' ? new Date(req.query.as_of) : now();
+          if (Number.isNaN(asOf.getTime())) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: 'as_of must be ISO 8601', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          const [configs, cases] = await Promise.all([
+            deps.slaMatrixSource.loadConfigs(tenant_id),
+            deps.slaMatrixSource.loadOpenCases(tenant_id, { branch, business_unit }),
+          ]);
+          const matrix = computeSlaBreachMatrix({
+            tenant_id,
+            cases,
+            configs,
+            asOf,
+            filters: { branch, business_unit },
+          });
+          res.json(wrapResponse(matrix, ctx));
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'matrix failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
+  }
 
   /**
    * /v1/alerts — same data + filters as /api/alerts; T4.24 wraps the
@@ -14078,6 +14140,10 @@ if (require.main === module) {
     const { makeUserAccessOverrideStore } = require('./admin/user_access_override_store') as
       typeof import('./admin/user_access_override_store');
     const { store: userAccessOverrideStore } = await makeUserAccessOverrideStore();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeSlaMatrixSource } = require('./dashboard/sla_breach_matrix') as
+      typeof import('./dashboard/sla_breach_matrix');
+    const { source: slaMatrixSource } = await makeSlaMatrixSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14086,6 +14152,7 @@ if (require.main === module) {
       scenarioStore,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
+      slaMatrixSource,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {

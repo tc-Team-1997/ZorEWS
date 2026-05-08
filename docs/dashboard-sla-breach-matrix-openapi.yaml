@@ -1,0 +1,169 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — Dashboard SLA Breach Matrix
+  version: "1.0.0"
+  description: |
+    Tenant-scoped, age-bucketed view of open cases with breach
+    percentage, severity split, and live recompute against
+    `app_admin.sla_config`. Maps to BAC §3.1.6 / §3.1.9.1.4.
+
+    Joins:
+      `app_cases.cms_cases` (open cases) ×
+      `app_admin.sla_config` (target days per category × priority × BU)
+
+    Editing `sla_config` immediately moves the breach line for every
+    open case in that bucket — no per-case `sla_due_at` snapshot is
+    used in this endpoint.
+
+servers:
+  - url: /v1/dashboard
+    description: Mounted on the BFF service (default port 8084)
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      in: header
+      name: X-Tenant-ID
+      required: true
+      schema: { type: string, example: BANK_DEMO }
+    Channel:
+      in: header
+      name: X-Channel
+      required: true
+      schema:
+        type: string
+        enum: [LOS, MOBILE, BRANCH, API, AGENT_PORTAL]
+    SourceSystem:
+      in: header
+      name: X-Source-System
+      required: true
+      schema: { type: string, example: apex-ews-spa }
+
+  schemas:
+    Severity:
+      type: string
+      enum: [high, medium, low]
+    SeveritySplit:
+      type: object
+      required: [high, medium, low]
+      properties:
+        high:   { type: integer, minimum: 0 }
+        medium: { type: integer, minimum: 0 }
+        low:    { type: integer, minimum: 0 }
+    Bucket:
+      type: object
+      required: [label, min_days, max_days, total_open, breached, breach_pct, severity_split]
+      properties:
+        label:
+          type: string
+          enum: ["0-7 days", "8-30 days", "31-90 days", "90+ days"]
+        min_days: { type: integer, minimum: 0 }
+        max_days:
+          type: integer
+          nullable: true
+          description: Inclusive upper bound in days, or null for the open-ended 90+ bucket
+        total_open: { type: integer, minimum: 0 }
+        breached:   { type: integer, minimum: 0 }
+        breach_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Percentage of total_open that is breached, rounded to 1 decimal
+        severity_split: { $ref: "#/components/schemas/SeveritySplit" }
+    SlaBreachMatrix:
+      type: object
+      required: [buckets, generatedAt, filters, uncategorised_count, unresolved_count]
+      properties:
+        buckets:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: "#/components/schemas/Bucket" }
+        generatedAt: { type: string, format: date-time }
+        filters:
+          type: object
+          required: [tenant_id]
+          properties:
+            tenant_id:     { type: string }
+            branch:        { type: string }
+            business_unit: { type: string }
+            as_of:         { type: string, format: date-time }
+        uncategorised_count:
+          type: integer
+          minimum: 0
+          description: Open cases with case_category=NULL that fell through to default_fallback
+        unresolved_count:
+          type: integer
+          minimum: 0
+          description: Open cases with no matching sla_config (excluded from buckets)
+    ResponseHeader:
+      type: object
+      required: [status, code, message, requestId, timestamp]
+      properties:
+        status:    { type: string, enum: [SUCCESS, FAILURE] }
+        code:      { type: string, example: EWS_200 }
+        message:   { type: string }
+        requestId: { type: string, format: uuid }
+        timestamp: { type: string, format: date-time }
+    ErrorEnvelope:
+      type: object
+      required: [header, error]
+      properties:
+        header: { $ref: "#/components/schemas/ResponseHeader" }
+        error:
+          type: object
+          required: [code, message, severity]
+          properties:
+            code:     { type: string, example: EWS_400_invalid_input }
+            message:  { type: string }
+            severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    SuccessEnvelope:
+      type: object
+      required: [header, body]
+      properties:
+        header: { $ref: "#/components/schemas/ResponseHeader" }
+        body:   { $ref: "#/components/schemas/SlaBreachMatrix" }
+
+  responses:
+    BadRequest:
+      description: Invalid query parameter (e.g. unparseable as_of)
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+    Forbidden:
+      description: RBAC denied or unknown tenant
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+
+security:
+  - bearer: []
+
+paths:
+  /sla-breach-matrix:
+    get:
+      summary: Compute the SLA breach matrix for a tenant
+      operationId: getSlaBreachMatrix
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/SourceSystem"
+        - in: query
+          name: branch
+          schema: { type: string }
+        - in: query
+          name: business_unit
+          schema: { type: string }
+        - in: query
+          name: as_of
+          schema: { type: string, format: date-time }
+          description: Time-travel point. Defaults to the server clock.
+      responses:
+        "200":
+          description: Computed matrix
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }

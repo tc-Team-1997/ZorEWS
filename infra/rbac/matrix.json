@@ -59,6 +59,8 @@
     "webhooks:manage":              ["admin"],
     "copilot:use":                  ["admin", "risk_analyst", "supervisor"],
 
+    "dashboard:sla_breach_matrix:read":        ["admin", "supervisor", "risk_analyst"],
+
     "admin:user_access_override:list":         ["admin", "supervisor"],
     "admin:user_access_override:create":       ["admin"],
     "admin:user_access_override:approve":      ["admin"],
