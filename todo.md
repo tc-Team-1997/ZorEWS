@@ -26,7 +26,7 @@
 | 3.5 | Alert Engine — real-time alerts | 🆕 | T2.12 (new) | Current path is DAG-batch on the mart; streaming/<60s path not built |
 | 3.5 | Alert type — high-risk customer | ✅ | T1.10, T2.7 | |
 | 3.5 | Alert type — potential default | ✅ | T1.10, T2.7 | |
-| 3.5 | Alert type — fraud suspicion | 🆕 | T2.11 (new) | No `Fraud` family in indicator catalog; no fraud-tagged seed rules |
+| 3.5 | Alert type — fraud suspicion | ✅ | T2.11 | Closed 2026-05-08 — Fraud indicator family added (`FRD-001` sudden-withdrawal-spike, `FRD-002` salary-credit-disappeared, `FRD-003` channel-anomaly, `FRD-004` geo-anomaly) under `services/regulatory-svc/indicators/src/compute/fraud.ts`; seed rules `RULE-031..033` carry `fraud_suspicion` tag. DSL schema regex extended to permit `FRD-` prefix. |
 | 3.6 | Case Management — Alert → Case → Assign → Action → Monitor | ✅ | T3.5, T3.6, T3.4 | Full lifecycle wired (FR-CASE-1/3/4) |
 
 ## §4 AI Capabilities

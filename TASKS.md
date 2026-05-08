@@ -44,7 +44,7 @@
 - [x] T2.8 Risk score + level + SHAP on Customer Risk Profile UI — **agent-ui**
 - [ ] T2.9 NL→SQL Copilot stub via Claude API — **agent-ai**
 - [x] T2.10 Model risk management framework doc — **agent-ai**
-- [ ] T2.11 Fraud-suspicion alert type — add `Fraud` indicator family to `services/regulatory-svc/indicators/catalog.json` (sudden-withdrawal-spike, salary-not-credited, channel-anomaly, geo-anomaly), seed ≥3 fraud-family rules, ensure alert producer tags severity/type=`fraud_suspicion` — **agent-rule** + **agent-indicator** _(EWS.docx §3.5 explicitly lists Fraud suspicion as a third alert type; current indicator families are only Financial/Behavioural/Transaction/Credit)_
+- [x] T2.11 Fraud-suspicion alert type — added `Fraud` indicator family to `services/regulatory-svc/indicators/catalog.json` (FRD-001 sudden_withdrawal_spike, FRD-002 salary_credit_disappeared, FRD-003 channel_anomaly_score, FRD-004 geo_anomaly_distance_km), with compute fns under `src/compute/fraud.ts`. Three seed rules (RULE-031, 032, 033) carry the `fraud_suspicion` tag. DSL schema regex extended to allow `FRD-NNN`. — **agent-rule** + **agent-indicator** _(closed 2026-05-08; BAC §3.5)_
 - [ ] T2.12 Real-time alert path — Kafka-streaming branch from indicator-update events to rule-engine evaluation, p95 indicator-to-alert latency <60s; current path is DAG-batch on the mart — **agent-alert** + **agent-indicator** _(EWS.docx §3.5 specifies real-time alerts; the batch path satisfies the rule semantics but not the latency intent)_
 
 ## Phase 3 — Integration & Case Management (M10–14)

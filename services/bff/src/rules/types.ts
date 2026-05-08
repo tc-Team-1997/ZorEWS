@@ -83,7 +83,7 @@ export interface AuditEvent {
 export interface RuleV2 {
   id: string;
   name: string;
-  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit';
+  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
   /** Empty array = applies to every product. */
   applicable_products: RuleProduct[];
   state: RuleState;

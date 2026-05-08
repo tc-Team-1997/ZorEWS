@@ -106,7 +106,7 @@ export interface CustomerListResponse {
 export interface RuleSummary {
   id: string;
   name: string;
-  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit';
+  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
   status: RuleStatus;
   version: string;
   when: Record<string, unknown>;
@@ -605,7 +605,7 @@ export interface RuleAuditEvent {
 export interface RuleV2 {
   id: string;
   name: string;
-  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit';
+  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
   applicable_products: RuleProduct[];
   state: RuleV2State;
   version: string;

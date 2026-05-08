@@ -1,0 +1,20 @@
+{
+  "id": "RULE-032",
+  "version": 1,
+  "status": "draft",
+  "severity": "critical",
+  "description": "Salary credit disappeared AND withdrawal spike — classic salary-mule pattern: legitimate inflow stops while drainage begins (BAC §3.5).",
+  "owner": "agent-rule",
+  "tags": ["fraud", "fraud_suspicion", "composite"],
+  "when": {
+    "and": [
+      { "indicator": "FRD-002", "op": "eq", "value": 1 },
+      { "indicator": "FRD-001", "op": "gte", "value": 5 }
+    ]
+  },
+  "then": {
+    "title": "Salary diversion + withdrawal spike",
+    "recommended_action": "Critical fraud — block outbound, notify HR-payroll partner, escalate to Fraud Ops within 30min.",
+    "tags": ["fraud", "fraud_suspicion", "composite"]
+  }
+}

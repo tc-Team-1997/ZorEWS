@@ -3929,7 +3929,7 @@ function rulesV2Variables() {
 interface MockRule {
   id: string;
   name: string;
-  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit';
+  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
   applicable_products: string[];
   state: 'draft' | 'pending_review' | 'approved' | 'active' | 'rejected' | 'deprecated';
   version: string;

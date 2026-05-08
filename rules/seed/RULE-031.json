@@ -1,0 +1,19 @@
+{
+  "id": "RULE-031",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Sudden withdrawal spike — withdrawals last week >10× the rolling 90-day weekly mean. Single-indicator high-confidence fraud signal (BAC §3.5).",
+  "owner": "agent-rule",
+  "tags": ["fraud", "fraud_suspicion"],
+  "when": {
+    "indicator": "FRD-001",
+    "op": "gte",
+    "value": 10
+  },
+  "then": {
+    "title": "Sudden withdrawal spike",
+    "recommended_action": "Freeze outbound channels pending Fraud Ops review; contact customer through verified channel within 1h.",
+    "tags": ["fraud", "fraud_suspicion"]
+  }
+}

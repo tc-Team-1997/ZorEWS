@@ -69,11 +69,12 @@ describe('DSL schema validation', () => {
     expect(v.ok).toBe(false);
   });
 
-  test('catalog has at least 30 indicators across 4 families', () => {
+  test('catalog has at least 30 indicators across the 5 BAC families (FIN/BEH/TXN/CRD/FRD)', () => {
     const ids = loadCatalogIds();
     expect(ids.size).toBeGreaterThanOrEqual(30);
     const fams = new Set(Array.from(ids).map((id) => id.split('-')[0]));
-    expect(fams).toEqual(new Set(['FIN', 'BEH', 'TXN', 'CRD']));
+    // FRD added per BAC §3.5 — see T2.11 (fraud-suspicion alert type).
+    expect(fams).toEqual(new Set(['FIN', 'BEH', 'TXN', 'CRD', 'FRD']));
   });
 });
 

@@ -16,19 +16,21 @@ describe('Compute registry vs catalog', () => {
     expect(r.ok).toBe(true);
   });
 
-  test('catalog spans the four expected families with non-trivial coverage', () => {
+  test('catalog spans the five expected families with non-trivial coverage', () => {
     const cat = loadCatalog();
     const fams = new Map<string, number>();
     for (const ind of cat.indicators) {
       const f = ind.id.split('-')[0];
       fams.set(f, (fams.get(f) ?? 0) + 1);
     }
-    expect(new Set(fams.keys())).toEqual(new Set(['FIN', 'BEH', 'TXN', 'CRD']));
-    // Each family should be non-trivial; the v1 catalog had ≥6 per family.
-    for (const [, c] of fams) expect(c).toBeGreaterThanOrEqual(6);
-    // Catalog size is documented in README; this anchors the snapshot but
-    // is derived from the file rather than hardcoded so single-indicator
-    // additions don't break the test.
+    // Fraud (FRD) added per BAC §3.5 — see T2.11.
+    expect(new Set(fams.keys())).toEqual(new Set(['FIN', 'BEH', 'TXN', 'CRD', 'FRD']));
+    // Original 4 had ≥6 each in v1; Fraud seeds at 4 and grows from there.
+    expect(fams.get('FIN') ?? 0).toBeGreaterThanOrEqual(6);
+    expect(fams.get('BEH') ?? 0).toBeGreaterThanOrEqual(6);
+    expect(fams.get('TXN') ?? 0).toBeGreaterThanOrEqual(6);
+    expect(fams.get('CRD') ?? 0).toBeGreaterThanOrEqual(6);
+    expect(fams.get('FRD') ?? 0).toBeGreaterThanOrEqual(4);
     expect(cat.indicators.length).toBeGreaterThanOrEqual(30);
   });
 

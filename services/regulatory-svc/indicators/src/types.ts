@@ -198,6 +198,23 @@ export interface MartTxnFeatures {
   /** TXN-008: weekend share, last 30d and prior 30-60d. */
   weekend_txn_share_30d?: number;
   weekend_txn_share_30_60d?: number;
+
+  // ---- Fraud-family extensions (FRD-001 … FRD-004). Agent-data
+  //      follow-up: surface these from txn_features when the source
+  //      raw.txn_events feed lands.
+  /** FRD-001: total withdrawal amount last 7 days. */
+  withdrawals_7d?: number;
+  /** FRD-001: rolling weekly mean of withdrawals over the prior 90 days. */
+  weekly_withdrawal_mean_90d?: number;
+  /** FRD-002: salary credit consistency in [0,1] over last 30 days. */
+  salary_credit_consistency_30d?: number;
+  /** FRD-002: salary credit consistency in [0,1] for the prior 30-60d window. */
+  salary_credit_consistency_30_60d?: number;
+  /** FRD-003: share [0,1] of last-7d transactions on a previously-unused channel. */
+  unfamiliar_channel_share_7d?: number;
+  /** FRD-004: greatest single-day haversine distance (km) between consecutive
+   *  transactions in the last 7d. 0 = no movement. */
+  geo_anomaly_distance_km_7d?: number;
 }
 
 // ---------- compute fn API ----------

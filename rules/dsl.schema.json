@@ -93,7 +93,7 @@
         "indicator": {
           "type": "string",
           "description": "Indicator id from the catalog (e.g. FIN-001).",
-          "pattern": "^(FIN|BEH|TXN|CRD)-[0-9]{3}$"
+          "pattern": "^(FIN|BEH|TXN|CRD|FRD)-[0-9]{3}$"
         },
         "op": {
           "type": "string",

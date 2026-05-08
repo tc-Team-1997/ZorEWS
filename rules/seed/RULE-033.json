@@ -1,0 +1,20 @@
+{
+  "id": "RULE-033",
+  "version": 1,
+  "status": "draft",
+  "severity": "high",
+  "description": "Geographic + channel anomaly — transactions from physically implausible distance AND on a previously-unused channel. Account-takeover signal (BAC §3.5).",
+  "owner": "agent-rule",
+  "tags": ["fraud", "fraud_suspicion", "composite"],
+  "when": {
+    "and": [
+      { "indicator": "FRD-004", "op": "gte", "value": 500 },
+      { "indicator": "FRD-003", "op": "gte", "value": 0.4 }
+    ]
+  },
+  "then": {
+    "title": "Geo + channel anomaly",
+    "recommended_action": "Suspected account takeover. Block transactions, force re-auth, contact customer via verified phone within 1h.",
+    "tags": ["fraud", "fraud_suspicion", "composite"]
+  }
+}

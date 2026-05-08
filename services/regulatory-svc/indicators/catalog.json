@@ -324,6 +324,46 @@
       "window_days": 180,
       "severity_weight": 0.7,
       "inputs": ["mart.customer_360.guarantor_links"]
+    },
+    {
+      "id": "FRD-001",
+      "family": "Fraud",
+      "name": "sudden_withdrawal_spike",
+      "description": "Total withdrawals in the last 7 days are >10× the rolling 90-day weekly mean — classic mule-account or compromised-credentials signal (BAC §3.5).",
+      "formula_pseudocode": "sum(withdrawals, last_7d) / max(0.01, avg(weekly_withdrawals, last_90d))",
+      "window_days": 90,
+      "severity_weight": 0.8,
+      "inputs": ["mart.txn_features.daily_withdrawals"]
+    },
+    {
+      "id": "FRD-002",
+      "family": "Fraud",
+      "name": "salary_credit_disappeared",
+      "description": "Salary-credit consistency dropped to 0 in the last 30 days for a customer who previously had ≥0.6 — possible salary-mule diversion or HR-side account-takeover.",
+      "formula_pseudocode": "salary_credit_consistency_30d == 0 AND prior_salary_credit_consistency_60_30d >= 0.6",
+      "window_days": 90,
+      "severity_weight": 0.7,
+      "inputs": ["mart.txn_features.salary_credits"]
+    },
+    {
+      "id": "FRD-003",
+      "family": "Fraud",
+      "name": "channel_anomaly_score",
+      "description": "Share of transactions on a previously-unused channel in the last 7 days. >0.4 indicates an account suddenly active on a new channel (web vs branch vs mobile vs ATM).",
+      "formula_pseudocode": "count(txn where channel NOT IN known_channels_180d, last_7d) / count(txn, last_7d)",
+      "window_days": 180,
+      "severity_weight": 0.6,
+      "inputs": ["mart.txn_features.channel"]
+    },
+    {
+      "id": "FRD-004",
+      "family": "Fraud",
+      "name": "geo_anomaly_distance_km",
+      "description": "Greatest single-day distance between consecutive transaction locations in the last 7 days. Spikes above 500 km within a single day are physically implausible without travel.",
+      "formula_pseudocode": "max(haversine(prev_loc, curr_loc) for consecutive txn pairs same day, last_7d)",
+      "window_days": 7,
+      "severity_weight": 0.6,
+      "inputs": ["mart.txn_features.txn_lat", "mart.txn_features.txn_lng"]
     }
   ]
 }

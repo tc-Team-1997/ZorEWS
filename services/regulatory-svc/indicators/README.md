@@ -7,11 +7,13 @@ pair.
 
 ## How the catalog drives compute
 
-The catalog at `catalog.json` is the single source of truth for the 30
+The catalog at `catalog.json` is the single source of truth for the 36
 indicator ids the prototype supports. Each entry carries:
 
 - `id` (e.g. `FIN-001`) — stable, never mutated.
-- `family` — `Financial | Behavioural | Transaction | Credit`.
+- `family` — `Financial | Behavioural | Transaction | Credit | Fraud` — the
+  Fraud family (FRD-NNN) was added 2026-05-08 per BAC §3.5 to back the
+  third alert type (fraud-suspicion).
 - `formula_pseudocode` — informal description; the runtime intent.
 - `window_days` — rolling-window length.
 - `severity_weight` — 0..1, used by `src/severity.ts` to bucket per-indicator
@@ -32,8 +34,9 @@ Implementations live one-file-per-family under `src/compute/`:
 - `behavioural.ts`   — BEH-001 … BEH-008
 - `transaction.ts`   — TXN-001 … TXN-008
 - `credit.ts`        — CRD-001 … CRD-008
+- `fraud.ts`         — FRD-001 … FRD-004 (BAC §3.5)
 
-`src/compute/index.ts` merges the four sub-registries into `COMPUTE_REGISTRY`.
+`src/compute/index.ts` merges the five sub-registries into `COMPUTE_REGISTRY`.
 A registry-completeness gate (`src/catalog.checkRegistryAgainstCatalog`)
 runs at boot and as a Jest test — every catalog id must have a compute
 fn and there must be no stray keys.
@@ -55,7 +58,7 @@ the same shape for both, so callers don't branch on the source.
 |--------|-----------------------------------|--------------------------------------------------------------------|
 | GET    | `/healthz`                        | Liveness + registry status (catalog vs compute_size, missing keys). |
 | GET    | `/indicators`                     | Returns the catalog as JSON.                                       |
-| POST   | `/indicators/compute`             | Body `{customer_id, snapshot_date}`. Returns the 30 indicator records. |
+| POST   | `/indicators/compute`             | Body `{customer_id, snapshot_date}`. Returns one record per catalog id (currently 36). |
 | POST   | `/indicators/compute/batch`       | Body `{items: [{customer_id, snapshot_date}, ...]}`. Returns one result per item. |
 
 Breached records are emitted to the configured `IndicatorEventEmitter`;
@@ -117,8 +120,8 @@ npm run dev             # starts the service on :8082 with InMemoryMartReader
 ```
 
 The integration test seeds 50 synthetic customers (25 healthy + 25
-stressed) and asserts `compute/batch` produces 30 indicator rows per
-customer with the expected breach pattern.
+stressed) and asserts `compute/batch` produces one indicator row per
+catalog id per customer (currently 36) with the expected breach pattern.
 
 ## Hand-offs
 

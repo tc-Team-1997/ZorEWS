@@ -7,7 +7,7 @@ export type RuleStatus = 'draft' | 'simulate' | 'live' | 'retired';
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 export type Comparator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'between';
 
-export type IndicatorFamily = 'FIN' | 'BEH' | 'TXN' | 'CRD';
+export type IndicatorFamily = 'FIN' | 'BEH' | 'TXN' | 'CRD' | 'FRD';
 export type IndicatorId = `${IndicatorFamily}-${string}`; // e.g. "FIN-001"
 
 export interface CmpExpr {
@@ -54,7 +54,7 @@ export interface Rule {
 
 export interface IndicatorDef {
   id: string;
-  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit';
+  family: 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
   name: string;
   description: string;
   formula_pseudocode: string;
