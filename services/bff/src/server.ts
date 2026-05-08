@@ -3585,6 +3585,208 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── T5.1 — Auto-promotion gate ────────────────────────────────────────
+  //
+  // Pulls the latest performance summary for the candidate model + runs
+  // the gate against the requested target_status. The /evaluate endpoint
+  // is read-only — returns the decision + per-check breakdown so the
+  // SPA can show a green/red dashboard. The /auto-promote endpoint
+  // additionally creates a promotion request when the gate decides
+  // 'promote'; production transitions still require human approval.
+  /** POST /v1/ai/models/:model_id/promotion-gate/evaluate
+   *  body: { target_status: ModelStatus, thresholds?: GateThresholds, since?, until? } */
+  app.post(
+    '/v1/ai/models/:model_id/promotion-gate/evaluate',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const b = (inner ?? {}) as {
+        target_status?: ModelStatus;
+        thresholds?: import('./ai_auto_promotion_gate').GateThresholds;
+        since?: string;
+        until?: string;
+      };
+      const VALID_TARGETS: ModelStatus[] = ['staging', 'shadow', 'production'];
+      if (!b.target_status || !VALID_TARGETS.includes(b.target_status)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `target_status must be one of ${VALID_TARGETS.join(',')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const m = aiModelRegistry.get(id);
+      if (!m) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_not_found', message: `model ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const filter: PerformanceFilter = {};
+        if (typeof b.since === 'string' && b.since) filter.since = b.since;
+        if (typeof b.until === 'string' && b.until) filter.until = b.until;
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, filter);
+        const summary = summarizePerformance(req.tenant!.tenant_id, id, entries);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const gate = require('./ai_auto_promotion_gate') as
+          typeof import('./ai_auto_promotion_gate');
+        const result = gate.evaluatePromotionGate(
+          {
+            summary,
+            target_status: b.target_status,
+            thresholds: b.thresholds,
+          },
+          now(),
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'gate failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/ai/models/:model_id/promotion-gate/auto-promote
+   *  body: { from_status, target_status, thresholds?, request_notes? }
+   *  - Runs the gate. If decision=='promote', creates a promotion request
+   *    and immediately approves it (system actor). Production targets get
+   *    a `requires_approval` decision instead — caller routes to the
+   *    normal approve/reject UI.
+   *  - Caller must already have the rights to manage promotions
+   *    (audit:read covers admin + supervisor). */
+  app.post(
+    '/v1/ai/models/:model_id/promotion-gate/auto-promote',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const b = (inner ?? {}) as {
+        from_status?: ModelStatus;
+        target_status?: ModelStatus;
+        thresholds?: import('./ai_auto_promotion_gate').GateThresholds;
+        request_notes?: string;
+      };
+      const VALID_TARGETS: ModelStatus[] = ['staging', 'shadow', 'production'];
+      if (!b.from_status || !b.target_status || !VALID_TARGETS.includes(b.target_status)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `from_status + target_status (in ${VALID_TARGETS.join(',')}) required`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const m = aiModelRegistry.get(id);
+      if (!m) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_not_found', message: `model ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, {});
+        const summary = summarizePerformance(req.tenant!.tenant_id, id, entries);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const gate = require('./ai_auto_promotion_gate') as
+          typeof import('./ai_auto_promotion_gate');
+        const result = gate.evaluatePromotionGate(
+          {
+            summary,
+            target_status: b.target_status,
+            thresholds: b.thresholds,
+          },
+          now(),
+        );
+        if (result.decision !== 'promote') {
+          return res.status(200).json(
+            wrapResponse(
+              {
+                gate: result,
+                promotion_request: null,
+                message:
+                  result.decision === 'requires_approval'
+                    ? 'metrics pass but production transitions require human approval'
+                    : 'gate held — see failures for the metric(s) below threshold',
+              },
+              ctx,
+            ),
+          );
+        }
+        // Auto-promote path: create a request + immediately approve as `system`.
+        const request = promotionEngine.requestPromotion(
+          req.tenant!.tenant_id,
+          {
+            model_id: id,
+            from_status: b.from_status,
+            to_status: b.target_status,
+            request_notes:
+              (b.request_notes && b.request_notes.trim()) ||
+              `Auto-promoted by gate (T5.1) — AUC ${summary.metrics.auc?.latest_value ?? '?'}, drift ${summary.metrics.drift_score?.latest_value ?? '?'}`,
+          },
+          'system:auto-promotion-gate',
+          now(),
+        );
+        const approved = promotionEngine.approve(
+          req.tenant!.tenant_id,
+          request.request_id,
+          'system:auto-promotion-gate',
+          `gate decision=promote · ${result.failures.length === 0 ? 'all checks passed' : ''}`,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(
+            {
+              gate: result,
+              promotion_request: approved,
+            },
+            ctx,
+            { code: 'EWS_201', message: 'Promoted by gate' },
+          ),
+        );
+      } catch (e) {
+        const errFn = (e as { code?: string }).code === 'invalid_transition'
+          ? mapPromotionError(e, ctx)
+          : null;
+        if (errFn) return res.status(errFn.status).json(errFn.body);
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'auto-promote failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   /**
    * POST /v1/scenario/run — T4.24 envelope + tenant.
    * body: { gdp: number, rate: number, fx: number }

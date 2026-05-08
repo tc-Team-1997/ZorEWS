@@ -1371,7 +1371,7 @@
 
 ## Phase 5 — Optimisation & DR (M18–24)
 
-- [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai**
+- [ ] T5.1 Continuous learning pipeline + auto-promotion gate — **agent-ai** _(auto-promotion gate shipped 2026-05-09 — `services/bff/src/ai_auto_promotion_gate.ts` is the pure resolver, two new routes mounted: `POST /v1/ai/models/:model_id/promotion-gate/evaluate` (read-only decision) and `POST /v1/ai/models/:model_id/promotion-gate/auto-promote` (creates + approves a PromotionRequest as `system:auto-promotion-gate` when metrics pass; production transitions always defer with `requires_approval`). Pulls latest summary from M7.5 ledger; per-target thresholds (staging/shadow/production) tunable per-call. 21 new Jest tests. **Still pending**: continuous-learning retraining loop itself — the gate is ready to graduate new versions but no training scheduler is wired.)_
 - [ ] T5.2 Aurora Global DB + S3 CRR + MSK MirrorMaker 2 — **agent-integration**
 - [ ] T5.3 DR drill runbook + game-day plan — **agent-integration**
 - [ ] T5.4 Pen-test brief + remediation playbook — **agent-integration**
