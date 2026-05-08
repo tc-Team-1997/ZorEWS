@@ -37,6 +37,7 @@ LOGS_DIR  := $(REPO_ROOT)/.logs
 # alerts default port (8082) clashes with indicators, so we override it to 8086.
 TS_SERVICES := \
   rbac-lib:infra/rbac/lib:- \
+  event-bus:services/event-bus:- \
   cases:services/regulatory-svc/cases:8083 \
   rules:services/regulatory-svc/rules:8081 \
   indicators:services/regulatory-svc/indicators:8082 \
@@ -77,18 +78,22 @@ help:
 
 # ---------- install ----------
 
-.PHONY: install install-rbac install-services install-web install-py
-install: install-rbac install-services install-web install-py
+.PHONY: install install-rbac install-event-bus install-services install-web install-py
+install: install-rbac install-event-bus install-services install-web install-py
 	@echo "==> all dependencies installed"
 
 install-rbac:
 	@echo "==> @apex-ews/rbac install + build (cases/bff/alerts/collection-adapter import dist/)"
 	@cd $(RBAC_PATH) && npm install --no-audit --no-fund && npm run build
 
+install-event-bus:
+	@echo "==> @apex-ews/event-bus install + build (alerts/cases/indicators import dist/)"
+	@cd services/event-bus && npm install --no-audit --no-fund && npm run build
+
 install-services:
 	@for entry in $(TS_SERVICES); do \
 	  name=$${entry%%:*}; rest=$${entry#*:}; path=$${rest%%:*}; \
-	  if [ "$$name" = "rbac-lib" ]; then continue; fi; \
+	  if [ "$$name" = "rbac-lib" ] || [ "$$name" = "event-bus" ]; then continue; fi; \
 	  echo "==> install $$name ($$path)"; \
 	  (cd $(REPO_ROOT)/$$path && npm install --no-audit --no-fund) || exit 1; \
 	done
