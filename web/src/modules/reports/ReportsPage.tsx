@@ -376,6 +376,15 @@ function AlertActivityView({ r }: { r: AlertActivityReport }) {
 function CaseOutcomesView({ r }: { r: CaseOutcomesReport }) {
   return (
     <>
+      <div className="flex justify-end">
+        <a
+          href="/reports/cases-detail"
+          className="text-sm text-action hover:underline"
+          data-testid="open-cases-detail"
+        >
+          Open row-level detail report →
+        </a>
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard label="Cases opened" value={r.cases_opened} tone="blue" />
         <MetricCard label="Cases closed" value={r.cases_closed} tone="success" />

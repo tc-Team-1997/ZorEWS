@@ -2801,6 +2801,212 @@ export const handlers = [
       }),
     );
   }),
+
+  // ── Cases Report — row-level detail (BAC §3.1.8) ─────────────────────
+
+  http.get('/v1/reports/cases/detail', ({ request }) => {
+    const url = new URL(request.url);
+    const fmt = (url.searchParams.get('format') ?? 'json') as
+      | 'json' | 'csv' | 'xlsx' | 'pdf';
+
+    const filter = {
+      ageBucket: url.searchParams.get('ageBucket') ?? null,
+      breached: url.searchParams.get('breached') === 'true',
+      from: url.searchParams.get('from'),
+      to: url.searchParams.get('to'),
+      branch: url.searchParams.get('branch'),
+      status: url.searchParams.get('status')?.split(',').filter(Boolean) ?? null,
+      severity: url.searchParams.get('severity')?.split(',').filter(Boolean) ?? null,
+      q: url.searchParams.get('q')?.toLowerCase() ?? null,
+      sort: url.searchParams.get('sort') ?? 'created_at',
+      dir: (url.searchParams.get('dir') ?? 'desc') as 'asc' | 'desc',
+      page: Math.max(1, Number(url.searchParams.get('page') ?? 1)),
+      page_size: Math.min(500, Math.max(1, Number(url.searchParams.get('page_size') ?? 50))),
+    };
+
+    let rows = mswCasesDetailRows();
+    if (filter.ageBucket && filter.ageBucket !== 'ALL') {
+      rows = rows.filter((r) => r.age_bucket === filter.ageBucket);
+    }
+    if (filter.breached) rows = rows.filter((r) => r.is_breached);
+    if (filter.from) rows = rows.filter((r) => r.created_at >= filter.from!);
+    if (filter.to) rows = rows.filter((r) => r.created_at <= filter.to!);
+    if (filter.branch) rows = rows.filter((r) => r.branch === filter.branch);
+    if (filter.status) rows = rows.filter((r) => filter.status!.includes(r.status));
+    if (filter.severity) rows = rows.filter((r) => filter.severity!.includes(r.severity));
+    if (filter.q) {
+      const q = filter.q;
+      rows = rows.filter((r) =>
+        `${r.case_number} ${r.borrower.name ?? ''}`.toLowerCase().includes(q),
+      );
+    }
+
+    const dirMul = filter.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      const av = mswSortKey(a, filter.sort);
+      const bv = mswSortKey(b, filter.sort);
+      if (av < bv) return -1 * dirMul;
+      if (av > bv) return 1 * dirMul;
+      return 0;
+    });
+
+    const total = rows.length;
+
+    if (fmt === 'csv') {
+      const header = [
+        'Case ID','Case Number','Borrower ID','Borrower','Product','Created Date',
+        'Age (days)','Age Bucket','SLA Target','Breached','Severity','Priority',
+        'Status','Assigned To','Assignee Name','Branch','Alert ID',
+      ].join(',');
+      const lines = rows.map((r) =>
+        [
+          r.case_id, r.case_number, r.borrower.id ?? '', r.borrower.name ?? '',
+          r.product ?? '', r.created_at, r.age_days, r.age_bucket,
+          r.sla_target_days ?? '', r.is_breached, r.severity, r.priority,
+          r.status, r.assigned_to ?? '', r.assignee_display_name ?? '',
+          r.branch ?? '', r.alert_id ?? '',
+        ].map(mswCsvEscape).join(','),
+      );
+      const body = [header, ...lines].join('\r\n') + '\r\n';
+      return new HttpResponse(body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="cases-report-mock.csv"`,
+          'X-Row-Count': String(rows.length),
+        },
+      });
+    }
+    if (fmt === 'xlsx' || fmt === 'pdf') {
+      // Return a small placeholder Blob with the right MIME — enough for the
+      // SPA download flow to fire. The real export shapes are covered by
+      // the BFF Jest suite.
+      const ct =
+        fmt === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'application/pdf';
+      const head = fmt === 'xlsx' ? 'PK' : '%PDF-1.3';
+      return new HttpResponse(`${head} mock(${rows.length} rows)`, {
+        status: 200,
+        headers: {
+          'Content-Type': ct,
+          'Content-Disposition': `attachment; filename="cases-report-mock.${fmt}"`,
+          'X-Row-Count': String(rows.length),
+        },
+      });
+    }
+
+    const start = (filter.page - 1) * filter.page_size;
+    const slice = rows.slice(start, start + filter.page_size);
+    return HttpResponse.json(
+      envelope({
+        items: slice,
+        total,
+        page: filter.page,
+        page_size: filter.page_size,
+        filters_applied: Object.fromEntries(
+          Object.entries(filter).filter(([, v]) => v !== null && v !== undefined),
+        ),
+        generated_at: new Date().toISOString(),
+        tenant_id: 'BANK_DEMO',
+      }),
+    );
+  }),
+
+  http.get('/v1/reports/cases/filters', () => {
+    const owner = readPersistedUsername() ?? 'taniya';
+    const items = Array.from(mswSavedFilters.values()).filter(
+      (f) => f.owner_id === owner || f.is_shared,
+    );
+    return HttpResponse.json(envelope({ items, total: items.length }));
+  }),
+
+  http.post('/v1/reports/cases/filters', async ({ request }) => {
+    const body = (await request.json()) as {
+      name?: string;
+      filters?: Record<string, unknown>;
+      is_shared?: boolean;
+      is_default?: boolean;
+    };
+    const name = (body.name ?? '').trim();
+    if (!name || name.length > 80) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'name must be 1-80 chars', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const owner = readPersistedUsername() ?? 'taniya';
+    if (body.is_default) {
+      // Only one default per (owner, report_type) — clear the others.
+      for (const f of mswSavedFilters.values()) {
+        if (f.owner_id === owner && f.report_type === 'cases') f.is_default = false;
+      }
+    }
+    const id = `flt-${Math.random().toString(36).slice(2, 10)}`;
+    const now = new Date().toISOString();
+    const row = {
+      filter_id: id,
+      tenant_id: 'BANK_DEMO',
+      owner_id: owner,
+      report_type: 'cases' as const,
+      name,
+      filters: body.filters ?? {},
+      is_shared: !!body.is_shared,
+      is_default: !!body.is_default,
+      created_at: now,
+      updated_at: now,
+    };
+    mswSavedFilters.set(id, row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+
+  http.put('/v1/reports/cases/filters/:id', async ({ params, request }) => {
+    const id = String(params.id);
+    const row = mswSavedFilters.get(id);
+    if (!row) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', 'saved filter not found', 'LOW'),
+        { status: 404 },
+      );
+    }
+    const patch = (await request.json()) as Partial<typeof row>;
+    if (patch.name !== undefined) {
+      const n = patch.name.trim();
+      if (!n || n.length > 80) {
+        return HttpResponse.json(
+          envelopeError('EWS_400_invalid_input', 'name must be 1-80 chars', 'MEDIUM'),
+          { status: 400 },
+        );
+      }
+      row.name = n;
+    }
+    if (patch.filters !== undefined) row.filters = patch.filters as typeof row.filters;
+    if (patch.is_shared !== undefined) row.is_shared = !!patch.is_shared;
+    if (patch.is_default !== undefined) {
+      if (patch.is_default) {
+        for (const f of mswSavedFilters.values()) {
+          if (f.owner_id === row.owner_id && f.report_type === 'cases' && f !== row) {
+            f.is_default = false;
+          }
+        }
+      }
+      row.is_default = !!patch.is_default;
+    }
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+
+  http.delete('/v1/reports/cases/filters/:id', ({ params }) => {
+    const id = String(params.id);
+    if (!mswSavedFilters.has(id)) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', 'saved filter not found', 'LOW'),
+        { status: 404 },
+      );
+    }
+    mswSavedFilters.delete(id);
+    return HttpResponse.json(envelope({ deleted: true }));
+  }),
 ];
 
 // MSW state for the saved-scenario endpoints. Lives at module scope so
@@ -2832,6 +3038,123 @@ interface MswDashboardWidget {
 const mswDashboardWidgets = new Map<string, MswDashboardWidget[]>();
 export function __resetMswDashboardWidgets(): void {
   mswDashboardWidgets.clear();
+}
+
+// ── Cases Report (BAC §3.1.8) — MSW state ─────────────────────────────
+
+interface MswCaseRow {
+  case_id: string;
+  case_number: string;
+  borrower: { id: string | null; name: string | null };
+  product: string | null;
+  case_category: string | null;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  severity: 'high' | 'medium' | 'low';
+  status: string;
+  created_at: string;
+  age_days: number;
+  age_bucket: '0-7d' | '8-30d' | '31-90d' | '90+d';
+  sla_target_days: number | null;
+  is_breached: boolean;
+  assigned_to: string | null;
+  assignee_display_name: string | null;
+  branch: string | null;
+  alert_id: string | null;
+  tags: string[];
+}
+
+interface MswSavedFilter {
+  filter_id: string;
+  tenant_id: string;
+  owner_id: string;
+  report_type: 'cases';
+  name: string;
+  filters: Record<string, unknown>;
+  is_shared: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+const mswSavedFilters = new Map<string, MswSavedFilter>();
+
+export function __resetMswSavedReportFilters(): void {
+  mswSavedFilters.clear();
+}
+
+function mswBucketFor(ageDays: number): MswCaseRow['age_bucket'] {
+  if (ageDays <= 7) return '0-7d';
+  if (ageDays <= 30) return '8-30d';
+  if (ageDays <= 90) return '31-90d';
+  return '90+d';
+}
+
+function mswCsvEscape(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  const s = typeof v === 'string' ? v : String(v);
+  if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function mswSortKey(r: MswCaseRow, col: string): string | number {
+  if (col === 'age_days') return r.age_days;
+  if (col === 'sla_target_days') return r.sla_target_days ?? Number.POSITIVE_INFINITY;
+  if (col === 'priority') return r.priority;
+  if (col === 'status') return r.status;
+  if (col === 'case_number') return r.case_number;
+  if (col === 'severity') return r.severity;
+  return r.created_at;
+}
+
+// 12-row demo set spanning all 4 buckets, breach + non-breach, multiple
+// branches/severities/statuses. The SPA never sees the real Pg fixture
+// in offline mode, so this is what shows in the grid + powers tests.
+function mswCasesDetailRows(): MswCaseRow[] {
+  const now = Date.now();
+  const ageISO = (days: number) => new Date(now - days * 86_400_000).toISOString();
+  const mk = (
+    n: number,
+    over: Partial<MswCaseRow> & { age: number; target: number | null },
+  ): MswCaseRow => {
+    const breach =
+      over.target != null && over.age > over.target && over.status !== 'CLOSED';
+    return {
+      case_id: `c-${String(n).padStart(3, '0')}`,
+      case_number: `EWS-2026-${String(n).padStart(5, '0')}`,
+      borrower: over.borrower ?? { id: `cust-${n}`, name: `Borrower ${n}` },
+      product: over.product ?? 'credit_risk',
+      case_category: over.case_category ?? over.product ?? 'credit_risk',
+      priority: over.priority ?? 'P2',
+      severity: over.severity ?? 'medium',
+      status: over.status ?? 'OPEN',
+      created_at: ageISO(over.age),
+      age_days: over.age,
+      age_bucket: mswBucketFor(over.age),
+      sla_target_days: over.target,
+      is_breached: breach,
+      assigned_to: over.assigned_to ?? 'sue.super',
+      assignee_display_name: over.assignee_display_name ?? 'Sue Wanjiru',
+      branch: over.branch ?? 'BR-NRB-01',
+      alert_id: over.alert_id ?? `a-${1000 + n}`,
+      tags: over.tags ?? [],
+    };
+  };
+  return [
+    mk(1,  { age: 1,   target: 1,   priority: 'P1', severity: 'high',   borrower: { id: 'cust-1', name: 'Acme Co' } }),
+    mk(2,  { age: 5,   target: 3,   priority: 'P2', severity: 'medium' }),
+    mk(3,  { age: 7,   target: 7,   priority: 'P3', severity: 'medium', branch: 'BR-NRB-02' }),
+    mk(4,  { age: 10,  target: 3,   priority: 'P2', severity: 'medium', status: 'INVESTIGATING' }),
+    mk(5,  { age: 15,  target: 5,   priority: 'P2', severity: 'medium', branch: 'BR-NRB-02' }),
+    mk(6,  { age: 28,  target: null, priority: 'P3', severity: 'medium', status: 'ASSIGNED' }),
+    mk(7,  { age: 35,  target: 10,  priority: 'P3', severity: 'medium', branch: 'BR-NRB-03' }),
+    mk(8,  { age: 50,  target: 0.5, priority: 'P1', severity: 'high',   product: 'fraud' }),
+    mk(9,  { age: 75,  target: 14,  priority: 'P4', severity: 'low' }),
+    mk(10, { age: 91,  target: 7,   priority: 'P3', severity: 'medium', status: 'PENDING_APPROVAL' }),
+    mk(11, { age: 120, target: 10,  priority: 'P3', severity: 'medium', status: 'CLOSED' }),
+    mk(12, { age: 200, target: 14,  priority: 'P4', severity: 'low',    branch: 'BR-NRB-03' }),
+  ];
 }
 
 // ── Scenario mock compute ───────────────────────────────────────────────

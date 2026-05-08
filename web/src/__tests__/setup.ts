@@ -1,7 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 import { server } from '@/mocks/server';
-import { __resetMswDashboardWidgets, __resetMswSavedScenarios } from '@/mocks/handlers';
+import {
+  __resetMswDashboardWidgets,
+  __resetMswSavedScenarios,
+  __resetMswSavedReportFilters,
+} from '@/mocks/handlers';
 import { useAuth } from '@/store/auth';
 // Side-effect import: initializes i18next with EN + HI bundles. Pulled in
 // here so tests that render translated components have an instance ready.
@@ -36,9 +40,25 @@ afterEach(() => {
   localStorage.clear();
   __resetMswSavedScenarios();
   __resetMswDashboardWidgets();
+  __resetMswSavedReportFilters();
   useAuth.setState({ status: 'idle', user: null, token: null });
 });
 afterAll(() => server.close());
+
+// jsdom doesn't ship URL.createObjectURL — install no-op stubs so blob
+// download flows can run in tests.
+if (!('createObjectURL' in URL)) {
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: () => 'blob:mock',
+  });
+}
+if (!('revokeObjectURL' in URL)) {
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: () => {},
+  });
+}
 
 // Recharts uses ResizeObserver — jsdom doesn't.
 class ResizeObserverStub {

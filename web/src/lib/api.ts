@@ -340,6 +340,79 @@ export type ReportPayload =
   | CaseOutcomesReport
   | RbiSummaryReport;
 
+// ── Cases Report (row-level detail, BAC §3.1.8) ────────────────────────
+
+export type CasesDetailAgeBucket = '0-7d' | '8-30d' | '31-90d' | '90+d' | 'ALL';
+export type CasesDetailSeverity = 'high' | 'medium' | 'low';
+export type CasesDetailFormat = 'json' | 'csv' | 'xlsx' | 'pdf';
+export type CasesDetailSort =
+  | 'created_at'
+  | 'age_days'
+  | 'sla_target_days'
+  | 'priority'
+  | 'status'
+  | 'case_number'
+  | 'severity';
+
+export interface CasesDetailFilter {
+  ageBucket?: Exclude<CasesDetailAgeBucket, 'ALL'>;
+  breached?: boolean;
+  from?: string;
+  to?: string;
+  branch?: string;
+  status?: string[];
+  severity?: CasesDetailSeverity[];
+  q?: string;
+  sort?: CasesDetailSort;
+  dir?: 'asc' | 'desc';
+  page?: number;
+  page_size?: number;
+}
+
+export interface CasesDetailRow {
+  case_id: string;
+  case_number: string;
+  borrower: { id: string | null; name: string | null };
+  product: string | null;
+  case_category: string | null;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  severity: CasesDetailSeverity;
+  status: string;
+  created_at: string;
+  age_days: number;
+  age_bucket: Exclude<CasesDetailAgeBucket, 'ALL'>;
+  sla_target_days: number | null;
+  is_breached: boolean;
+  assigned_to: string | null;
+  assignee_display_name: string | null;
+  branch: string | null;
+  alert_id: string | null;
+  tags: string[];
+}
+
+export interface CasesDetailReport {
+  items: CasesDetailRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  filters_applied: CasesDetailFilter;
+  generated_at: string;
+  tenant_id: string;
+}
+
+export interface CasesSavedFilter {
+  filter_id: string;
+  tenant_id: string;
+  owner_id: string;
+  report_type: 'cases';
+  name: string;
+  filters: CasesDetailFilter;
+  is_shared: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Rules v2 (banking-grade enhancements) ──────────────────────────────
 
 export type RuleProduct =
@@ -907,7 +980,91 @@ export const api = {
     http
       .delete<SlaConfigRow>(`/v1/admin/sla-config/${encodeURIComponent(id)}`)
       .then((r) => r.data),
+
+  // ── Cases Report — row-level detail (BAC §3.1.8) ──────────────────────
+
+  casesDetailReport: (filter: CasesDetailFilter) =>
+    http
+      .get<CasesDetailReport>('/v1/reports/cases/detail', {
+        params: encodeCasesDetailParams(filter, 'json'),
+      })
+      .then((r) => r.data),
+
+  /**
+   * Triggers a CSV/XLSX/PDF download in the browser. Uses an anchor +
+   * Blob so the axios interceptor still attaches auth/tenant headers.
+   * Returns void on success; throws on 4xx.
+   */
+  downloadCasesDetailReport: async (
+    filter: CasesDetailFilter,
+    format: Exclude<CasesDetailFormat, 'json'>,
+  ) => {
+    const r = await http.get<Blob>('/v1/reports/cases/detail', {
+      params: encodeCasesDetailParams(filter, format),
+      responseType: 'blob',
+    });
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+    a.download = `cases-report-${stamp}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // Saved filter presets — server-side, per-user, optionally shared.
+  listCasesSavedFilters: () =>
+    http
+      .get<{ items: CasesSavedFilter[]; total: number }>('/v1/reports/cases/filters')
+      .then((r) => r.data.items),
+
+  createCasesSavedFilter: (input: {
+    name: string;
+    filters: CasesDetailFilter;
+    is_shared?: boolean;
+    is_default?: boolean;
+  }) =>
+    http
+      .post<CasesSavedFilter>('/v1/reports/cases/filters', input)
+      .then((r) => r.data),
+
+  updateCasesSavedFilter: (
+    id: string,
+    patch: Partial<{ name: string; filters: CasesDetailFilter; is_shared: boolean; is_default: boolean }>,
+  ) =>
+    http
+      .put<CasesSavedFilter>(`/v1/reports/cases/filters/${encodeURIComponent(id)}`, patch)
+      .then((r) => r.data),
+
+  deleteCasesSavedFilter: (id: string) =>
+    http
+      .delete<{ deleted: boolean }>(`/v1/reports/cases/filters/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
 };
+
+// CSV-encode array filters so the BFF can split with .split(',')
+function encodeCasesDetailParams(
+  filter: CasesDetailFilter,
+  format: CasesDetailFormat,
+): Record<string, string | number | boolean | undefined> {
+  return {
+    format,
+    ageBucket: filter.ageBucket,
+    breached: filter.breached,
+    from: filter.from,
+    to: filter.to,
+    branch: filter.branch,
+    status: filter.status?.length ? filter.status.join(',') : undefined,
+    severity: filter.severity?.length ? filter.severity.join(',') : undefined,
+    q: filter.q,
+    sort: filter.sort,
+    dir: filter.dir,
+    page: filter.page,
+    page_size: filter.page_size,
+  };
+}
 
 // ── SLA Breach Matrix types ─────────────────────────────────────────
 
