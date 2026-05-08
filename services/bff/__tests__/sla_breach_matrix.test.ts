@@ -4,10 +4,13 @@
 // Pure function — no DB, no clock.
 
 import {
+  applyConfigPatches,
   buildSlaConfigIndex,
   computeSlaBreachMatrix,
+  diffMatrices,
   type MatrixCase,
   type SlaConfig,
+  type SlaConfigPatch,
 } from '../src/dashboard/sla_breach_matrix';
 
 const NOW = new Date('2026-05-08T12:00:00Z');
@@ -240,5 +243,108 @@ describe('buildSlaConfigIndex (lookup specificity)', () => {
     ];
     const lookup = buildSlaConfigIndex(configs);
     expect(lookup('BANK_DEMO', 'credit_risk', 'P1', null)).toBe(1);
+  });
+});
+
+describe('applyConfigPatches', () => {
+  it('replaces sla_target_days on a matching ACTIVE row', () => {
+    const configs: SlaConfig[] = [
+      cfg({ case_category: 'credit_risk', priority: 'P2', sla_target_days: 3 }),
+      cfg({ case_category: 'fraud',       priority: 'P1', sla_target_days: 0.5 }),
+    ];
+    const patches: SlaConfigPatch[] = [
+      { case_category: 'credit_risk', priority: 'P2', sla_target_days: 1 },
+    ];
+    const out = applyConfigPatches('BANK_DEMO', configs, patches);
+    expect(out).toHaveLength(2);
+    const cr = out.find((c) => c.case_category === 'credit_risk' && c.priority === 'P2');
+    expect(cr?.sla_target_days).toBe(1);
+    // unrelated rows stay untouched
+    const fr = out.find((c) => c.case_category === 'fraud');
+    expect(fr?.sla_target_days).toBe(0.5);
+  });
+
+  it('appends a synthetic ACTIVE config when no row matches (preview-only)', () => {
+    const configs: SlaConfig[] = [
+      cfg({ case_category: 'credit_risk', priority: 'P2', sla_target_days: 3 }),
+    ];
+    const patches: SlaConfigPatch[] = [
+      { case_category: 'aml_kyc', priority: 'P1', sla_target_days: 1 },
+    ];
+    const out = applyConfigPatches('BANK_DEMO', configs, patches);
+    expect(out).toHaveLength(2);
+    const aml = out.find((c) => c.case_category === 'aml_kyc');
+    expect(aml?.status).toBe('ACTIVE');
+    expect(aml?.sla_target_days).toBe(1);
+    expect(aml?.sla_config_id).toMatch(/__preview-/);
+  });
+
+  it('respects business_unit specificity (BU-specific patch does not touch general row)', () => {
+    const configs: SlaConfig[] = [
+      cfg({ sla_config_id: 'general', case_category: 'credit_risk', priority: 'P1', business_unit: null,        sla_target_days: 1 }),
+      cfg({ sla_config_id: 'corp',    case_category: 'credit_risk', priority: 'P1', business_unit: 'CORPORATE', sla_target_days: 0.5 }),
+    ];
+    const out = applyConfigPatches('BANK_DEMO', configs, [
+      { case_category: 'credit_risk', priority: 'P1', business_unit: 'CORPORATE', sla_target_days: 0.25 },
+    ]);
+    expect(out.find((c) => c.business_unit === 'CORPORATE')?.sla_target_days).toBe(0.25);
+    expect(out.find((c) => c.business_unit === null)?.sla_target_days).toBe(1);
+  });
+
+  it('does not mutate the input configs array', () => {
+    const configs: SlaConfig[] = [
+      cfg({ case_category: 'credit_risk', priority: 'P2', sla_target_days: 3 }),
+    ];
+    const snapshot = JSON.stringify(configs);
+    applyConfigPatches('BANK_DEMO', configs, [
+      { case_category: 'credit_risk', priority: 'P2', sla_target_days: 1 },
+    ]);
+    expect(JSON.stringify(configs)).toBe(snapshot);
+  });
+});
+
+describe('diffMatrices', () => {
+  const NOW = new Date('2026-05-08T12:00:00Z');
+  const cases5d: MatrixCase[] = [
+    {
+      case_id: 'c1',
+      case_category: 'credit_risk',
+      priority: 'P2',
+      business_unit: null,
+      status: 'OPEN',
+      created_at: new Date(NOW.getTime() - 5 * 86_400_000).toISOString(),
+    },
+  ];
+
+  it('reports a positive delta when the patched target tightens (more breaches)', () => {
+    // Target 7d → not breached at age 5; tighten to 3d → breached.
+    const before: SlaConfig[] = [
+      { sla_config_id: 'a', tenant_id: 'BANK_DEMO', case_category: 'credit_risk', priority: 'P2', business_unit: null, sla_target_days: 7, status: 'ACTIVE' },
+    ];
+    const after = applyConfigPatches('BANK_DEMO', before, [
+      { case_category: 'credit_risk', priority: 'P2', sla_target_days: 3 },
+    ]);
+    const cur = computeSlaBreachMatrix({ tenant_id: 'BANK_DEMO', cases: cases5d, configs: before, asOf: NOW });
+    const ptc = computeSlaBreachMatrix({ tenant_id: 'BANK_DEMO', cases: cases5d, configs: after,  asOf: NOW });
+    const diff = diffMatrices(cur, ptc);
+    expect(diff.breached_total).toBe(1);
+    const b07 = diff.by_bucket.find((b) => b.label === '0-7 days')!;
+    expect(b07.current_breached).toBe(0);
+    expect(b07.patched_breached).toBe(1);
+    expect(b07.delta).toBe(1);
+  });
+
+  it('reports a negative delta when the patched target loosens (recoveries)', () => {
+    // Target 3d → breached at age 5; loosen to 7d → recovers.
+    const before: SlaConfig[] = [
+      { sla_config_id: 'a', tenant_id: 'BANK_DEMO', case_category: 'credit_risk', priority: 'P2', business_unit: null, sla_target_days: 3, status: 'ACTIVE' },
+    ];
+    const after = applyConfigPatches('BANK_DEMO', before, [
+      { case_category: 'credit_risk', priority: 'P2', sla_target_days: 7 },
+    ]);
+    const cur = computeSlaBreachMatrix({ tenant_id: 'BANK_DEMO', cases: cases5d, configs: before, asOf: NOW });
+    const ptc = computeSlaBreachMatrix({ tenant_id: 'BANK_DEMO', cases: cases5d, configs: after,  asOf: NOW });
+    const diff = diffMatrices(cur, ptc);
+    expect(diff.breached_total).toBe(-1);
   });
 });

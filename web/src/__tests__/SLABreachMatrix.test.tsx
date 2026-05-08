@@ -12,6 +12,18 @@ import userEvent from '@testing-library/user-event';
 import { SLABreachMatrix } from '@/components/dashboard/SLABreachMatrix';
 import { renderWithProviders } from './utils';
 import type { SlaBreachMatrix } from '@/lib/api';
+import { useAuth } from '@/store/auth';
+
+function setRole(role: 'admin' | 'risk_analyst') {
+  const user = {
+    id: 'u-001',
+    username: role === 'admin' ? 'alice.admin' : 'ravi.risk',
+    roles: [role] as const,
+  };
+  localStorage.setItem('apex.ews.user', JSON.stringify(user));
+  localStorage.setItem('apex.ews.token', 'test-token');
+  useAuth.setState({ status: 'authenticated', user, token: 'test-token' });
+}
 
 const FULL_FIXTURE: SlaBreachMatrix = {
   buckets: [
@@ -107,6 +119,22 @@ describe('SLABreachMatrix', () => {
     });
     // MSW fixture surfaces 4 tiles
     expect(screen.getByTestId('sla-tile-0-7d')).toBeInTheDocument();
+  });
+
+  it('shows "Manage targets" link for admin', () => {
+    setRole('admin');
+    renderWithProviders(<SLABreachMatrix fixture={FULL_FIXTURE} />);
+    expect(screen.getByTestId('sla-matrix-manage-targets')).toBeInTheDocument();
+    expect(screen.getByTestId('sla-matrix-manage-targets')).toHaveAttribute(
+      'href',
+      '/admin/sla-config',
+    );
+  });
+
+  it('hides "Manage targets" link for non-admin/non-supervisor', () => {
+    setRole('risk_analyst');
+    renderWithProviders(<SLABreachMatrix fixture={FULL_FIXTURE} />);
+    expect(screen.queryByTestId('sla-matrix-manage-targets')).not.toBeInTheDocument();
   });
 
   it('passes business_unit through as a query filter', async () => {

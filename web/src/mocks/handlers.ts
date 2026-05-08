@@ -2702,6 +2702,63 @@ export const handlers = [
     return HttpResponse.json(envelope(next));
   }),
 
+  // ── Dashboard SLA Breach Matrix preview (BAC §3.1.9.1.4) ────────────
+  // Offline simulation: take the same fixture the GET handler returns
+  // as "current", then derive a "patched" version where the patched
+  // bucket gains/loses breaches in proportion to how much the target
+  // tightens / loosens. Just needs to be plausible — real math is on
+  // the server when MSW is off.
+  http.post('/v1/dashboard/sla-breach-matrix/preview', async ({ request }) => {
+    const body = (await request.json()) as { patches?: Array<{ case_category?: string; priority?: string; sla_target_days?: number }> };
+    if (!Array.isArray(body.patches) || body.patches.length === 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'patches required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const now = new Date().toISOString();
+    const baseBuckets = [
+      { label: '0-7 days',   min_days: 0,  max_days: 7,    total_open: 18, breached: 2,  breach_pct: 11.1, severity_split: { high: 1, medium: 1, low: 0 } },
+      { label: '8-30 days',  min_days: 8,  max_days: 30,   total_open: 12, breached: 6,  breach_pct: 50,   severity_split: { high: 3, medium: 2, low: 1 } },
+      { label: '31-90 days', min_days: 31, max_days: 90,   total_open: 7,  breached: 6,  breach_pct: 85.7, severity_split: { high: 4, medium: 1, low: 1 } },
+      { label: '90+ days',   min_days: 91, max_days: null, total_open: 3,  breached: 3,  breach_pct: 100,  severity_split: { high: 2, medium: 1, low: 0 } },
+    ];
+    // Heuristic: tighter target → more breaches in the 0-7 bucket;
+    // looser → fewer breaches in 8-30. Pick the dominant patch.
+    const p = body.patches[0];
+    const target = Number(p?.sla_target_days);
+    const isTighter = Number.isFinite(target) && target < 1;
+    const patchedBuckets = baseBuckets.map((b) => ({ ...b, severity_split: { ...b.severity_split } }));
+    if (isTighter) {
+      patchedBuckets[0].breached += 3;
+      patchedBuckets[0].breach_pct = Math.round((patchedBuckets[0].breached / patchedBuckets[0].total_open) * 1000) / 10;
+    } else {
+      patchedBuckets[1].breached = Math.max(0, patchedBuckets[1].breached - 2);
+      patchedBuckets[1].breach_pct = Math.round((patchedBuckets[1].breached / patchedBuckets[1].total_open) * 1000) / 10;
+    }
+    const filters = { tenant_id: 'BANK_DEMO' };
+    const current = { buckets: baseBuckets, generatedAt: now, filters, uncategorised_count: 4, unresolved_count: 0 };
+    const patched = { buckets: patchedBuckets, generatedAt: now, filters, uncategorised_count: 4, unresolved_count: 0 };
+    const currentTotal = baseBuckets.reduce((s, b) => s + b.breached, 0);
+    const patchedTotal = patchedBuckets.reduce((s, b) => s + b.breached, 0);
+    return HttpResponse.json(
+      envelope({
+        current,
+        patched,
+        delta: {
+          breached_total: patchedTotal - currentTotal,
+          by_bucket: baseBuckets.map((cb, i) => ({
+            label: cb.label,
+            current_breached: cb.breached,
+            patched_breached: patchedBuckets[i].breached,
+            delta: patchedBuckets[i].breached - cb.breached,
+          })),
+        },
+        patches: body.patches,
+      }),
+    );
+  }),
+
   // ── Dashboard SLA Breach Matrix (BAC §3.1.6 / §3.1.9.1.4) ───────────
   // Static-ish offline shape that surfaces enough signal to demo all
   // four buckets + breach %, severity split, fallback counts.

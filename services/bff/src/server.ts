@@ -1304,6 +1304,103 @@ export function makeApp(deps: AppDeps = {}) {
         }
       },
     );
+
+    // POST /v1/dashboard/sla-breach-matrix/preview — show the impact of
+    // a hypothetical sla_config patch BEFORE the admin saves. Returns
+    // the current matrix, the patched matrix, and a per-bucket delta.
+    // Used by the SlaConfigEditModal to surface "this change will
+    // move N cases" before commit.
+    app.post(
+      '/v1/dashboard/sla-breach-matrix/preview',
+      requireTenantMw,
+      requireRole('dashboard:sla_breach_matrix:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { applyConfigPatches, diffMatrices, computeSlaBreachMatrix } =
+            require('./dashboard/sla_breach_matrix') as
+              typeof import('./dashboard/sla_breach_matrix');
+          const tenant_id = req.tenant!.tenant_id;
+          const body = (req.body ?? {}) as { patches?: unknown };
+          if (!Array.isArray(body.patches) || body.patches.length === 0) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: 'patches must be a non-empty array', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          const validated: import('./dashboard/sla_breach_matrix').SlaConfigPatch[] = [];
+          for (const raw of body.patches) {
+            if (!raw || typeof raw !== 'object') {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: 'patch must be an object', severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+            const p = raw as Record<string, unknown>;
+            if (typeof p.case_category !== 'string' || !p.case_category.trim()) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: 'case_category required on each patch', severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+            if (p.priority !== 'P1' && p.priority !== 'P2' && p.priority !== 'P3' && p.priority !== 'P4') {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: 'priority must be P1..P4', severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+            const target = typeof p.sla_target_days === 'number' ? p.sla_target_days : Number(p.sla_target_days);
+            if (!Number.isFinite(target) || target <= 0 || target > 365) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: 'sla_target_days must be in (0, 365]', severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+            validated.push({
+              case_category: p.case_category.trim(),
+              priority: p.priority,
+              business_unit:
+                typeof p.business_unit === 'string' && p.business_unit.trim()
+                  ? p.business_unit.trim()
+                  : null,
+              sla_target_days: target,
+            });
+          }
+          const [configs, cases] = await Promise.all([
+            deps.slaMatrixSource.loadConfigs(tenant_id),
+            deps.slaMatrixSource.loadOpenCases(tenant_id, {}),
+          ]);
+          const patchedConfigs = applyConfigPatches(tenant_id, configs, validated);
+          const asOf = now();
+          const current = computeSlaBreachMatrix({ tenant_id, cases, configs, asOf });
+          const patched = computeSlaBreachMatrix({ tenant_id, cases, configs: patchedConfigs, asOf });
+          res.json(
+            wrapResponse(
+              { current, patched, delta: diffMatrices(current, patched), patches: validated },
+              ctx,
+            ),
+          );
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
   }
 
   /**
@@ -5256,7 +5353,9 @@ export function makeApp(deps: AppDeps = {}) {
           if (target === undefined) return false;
           const created = Date.parse(c.created_at);
           if (!Number.isFinite(created)) return false;
-          const ageDays = Math.max(0, Math.floor((asOfMs - created) / 86_400_000));
+          // Float days so sub-day SLAs (P1 fraud = 0.5d) work — same
+          // formula as computeSlaBreachMatrix in dashboard/sla_breach_matrix.ts.
+          const ageDays = Math.max(0, (asOfMs - created) / 86_400_000);
           return ageDays > target;
         });
       }

@@ -170,7 +170,10 @@ export function computeSlaBreachMatrix(input: {
 
     const createdMs = Date.parse(c.created_at);
     if (!Number.isFinite(createdMs)) continue;
-    const ageDays = Math.max(0, Math.floor((asOfMs - createdMs) / 86_400_000));
+    // Float days so sub-day SLAs (P1 fraud = 0.5d, etc.) work. Bucketing
+    // still uses inclusive integer thresholds via bucketFor() since the
+    // age-bucket UI is calibrated in whole days.
+    const ageDays = Math.max(0, (asOfMs - createdMs) / 86_400_000);
 
     const target = resolveTarget(input.tenant_id, c.case_category, c.priority, c.business_unit);
     if (target === undefined) {
@@ -209,6 +212,90 @@ export function computeSlaBreachMatrix(input: {
     },
     uncategorised_count: uncategorised,
     unresolved_count: unresolved,
+  };
+}
+
+// ── Preview helper ──────────────────────────────────────────────────
+//
+// Given the currently-ACTIVE configs + a list of hypothetical patches,
+// produce the patched configs array. Used by the SLA config edit
+// modal to show "this change will move N cases" before save.
+
+export interface SlaConfigPatch {
+  case_category: string;
+  priority: Priority;
+  business_unit?: string | null;
+  sla_target_days: number;
+}
+
+/**
+ * Apply patches as a config overlay:
+ *   - If a patch matches an existing ACTIVE row by identity (tenant,
+ *     category, priority, business_unit), replace its sla_target_days.
+ *   - If no match, append a synthetic ACTIVE config so a brand-new
+ *     (category, priority) combination can be previewed.
+ */
+export function applyConfigPatches(
+  tenant_id: string,
+  configs: SlaConfig[],
+  patches: SlaConfigPatch[],
+): SlaConfig[] {
+  const out = configs.map((c) => ({ ...c }));
+  const indexOf = (cat: string, prio: Priority, bu: string | null) =>
+    out.findIndex(
+      (c) =>
+        c.tenant_id === tenant_id &&
+        c.status === 'ACTIVE' &&
+        c.case_category === cat &&
+        c.priority === prio &&
+        (c.business_unit ?? null) === (bu ?? null),
+    );
+  for (const p of patches) {
+    const bu = p.business_unit ?? null;
+    const idx = indexOf(p.case_category, p.priority, bu);
+    if (idx >= 0) {
+      out[idx] = { ...out[idx], sla_target_days: p.sla_target_days };
+    } else {
+      out.push({
+        sla_config_id: `__preview-${p.case_category}-${p.priority}-${bu ?? '*'}`,
+        tenant_id,
+        case_category: p.case_category,
+        priority: p.priority,
+        business_unit: bu,
+        sla_target_days: p.sla_target_days,
+        status: 'ACTIVE',
+      });
+    }
+  }
+  return out;
+}
+
+/** Pure delta computation: subtract current from patched per-bucket. */
+export function diffMatrices(
+  current: SlaBreachMatrix,
+  patched: SlaBreachMatrix,
+): {
+  breached_total: number;
+  by_bucket: Array<{
+    label: MatrixBucket['label'];
+    current_breached: number;
+    patched_breached: number;
+    delta: number;
+  }>;
+} {
+  const currentTotal = current.buckets.reduce((s, b) => s + b.breached, 0);
+  const patchedTotal = patched.buckets.reduce((s, b) => s + b.breached, 0);
+  return {
+    breached_total: patchedTotal - currentTotal,
+    by_bucket: current.buckets.map((cb, i) => {
+      const pb = patched.buckets[i];
+      return {
+        label: cb.label,
+        current_breached: cb.breached,
+        patched_breached: pb.breached,
+        delta: pb.breached - cb.breached,
+      };
+    }),
   };
 }
 

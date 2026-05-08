@@ -868,6 +868,14 @@ export const api = {
       .get<SlaBreachMatrix>('/v1/dashboard/sla-breach-matrix', { params })
       .then((r) => r.data),
 
+  slaBreachMatrixPreview: (patches: SlaConfigPatch[]) =>
+    http
+      .post<SlaBreachMatrixPreview>(
+        '/v1/dashboard/sla-breach-matrix/preview',
+        { patches },
+      )
+      .then((r) => r.data),
+
   // ── SLA config admin (BAC §3.1.6) ─────────────────────────────────
 
   slaConfigList: (
@@ -941,6 +949,28 @@ export interface SlaBreachMatrix {
   };
   uncategorised_count: number;
   unresolved_count: number;
+}
+
+export interface SlaConfigPatch {
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  business_unit?: string | null;
+  sla_target_days: number;
+}
+
+export interface SlaBreachMatrixPreview {
+  current: SlaBreachMatrix;
+  patched: SlaBreachMatrix;
+  delta: {
+    breached_total: number;
+    by_bucket: Array<{
+      label: SlaBucketLabel;
+      current_breached: number;
+      patched_breached: number;
+      delta: number;
+    }>;
+  };
+  patches: SlaConfigPatch[];
 }
 
 // ── SLA Config admin types ─────────────────────────────────────────

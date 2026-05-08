@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { TrendingDown, TrendingUp, X } from 'lucide-react';
 import { Button } from '@/components/ui';
-import type { SlaConfigRow } from '@/lib/api';
+import { api, type SlaConfigRow } from '@/lib/api';
 
 interface Props {
   row: SlaConfigRow;
@@ -15,6 +16,7 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
   const [days, setDays] = useState(String(row.sla_target_days));
   const [notes, setNotes] = useState(row.notes ?? '');
   const [validation, setValidation] = useState<string | null>(null);
+  const [debouncedDays, setDebouncedDays] = useState(days);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -23,6 +25,44 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Debounce the target value 400ms before asking the server for a
+  // preview. Avoids hammering the resolver on every keystroke.
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedDays(days), 400);
+    return () => window.clearTimeout(id);
+  }, [days]);
+
+  const previewableTarget = useMemo(() => {
+    const n = Number(debouncedDays);
+    if (!Number.isFinite(n) || n <= 0 || n > 365) return null;
+    if (n === row.sla_target_days) return null; // no-op
+    return n;
+  }, [debouncedDays, row.sla_target_days]);
+
+  const previewQ = useQuery({
+    queryKey: [
+      'sla-config-preview',
+      row.tenant_id,
+      row.case_category,
+      row.priority,
+      row.business_unit,
+      previewableTarget,
+    ],
+    queryFn: () =>
+      api.slaBreachMatrixPreview([
+        {
+          case_category: row.case_category,
+          priority: row.priority,
+          business_unit: row.business_unit,
+          sla_target_days: previewableTarget!,
+        },
+      ]),
+    enabled: previewableTarget !== null,
+    // Preview is decision support — don't burn auto-refresh on it
+    refetchInterval: false,
+    staleTime: 30_000,
+  });
 
   const submit = () => {
     const d = Number(days);
@@ -95,6 +135,13 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
             <div className="text-2xs text-muted mt-1">
               Half-day precision allowed (e.g. 0.5 = 12h). Range (0, 365].
             </div>
+            {previewableTarget !== null && (
+              <PreviewStrip
+                isLoading={previewQ.isLoading}
+                isError={previewQ.isError}
+                deltaTotal={previewQ.data?.delta.breached_total ?? 0}
+              />
+            )}
           </div>
 
           <div>
@@ -135,6 +182,64 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PreviewStrip({
+  isLoading,
+  isError,
+  deltaTotal,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  deltaTotal: number;
+}) {
+  if (isLoading) {
+    return (
+      <div
+        className="mt-2 text-2xs text-muted bg-slate-50 border border-slate-200 rounded px-2 py-1"
+        data-testid="sla-preview-loading"
+      >
+        Computing breach impact…
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <div className="mt-2 text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+        Could not compute breach impact (saving still works).
+      </div>
+    );
+  }
+  if (deltaTotal === 0) {
+    return (
+      <div
+        className="mt-2 text-2xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1"
+        data-testid="sla-preview-zero"
+      >
+        No open cases will change breach status.
+      </div>
+    );
+  }
+  if (deltaTotal > 0) {
+    return (
+      <div
+        className="mt-2 text-2xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 flex items-center gap-1"
+        data-testid="sla-preview-positive"
+      >
+        <TrendingUp className="w-3 h-3" />
+        <strong>+{deltaTotal}</strong> case{deltaTotal === 1 ? '' : 's'} will move into breached after saving.
+      </div>
+    );
+  }
+  return (
+    <div
+      className="mt-2 text-2xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 flex items-center gap-1"
+      data-testid="sla-preview-negative"
+    >
+      <TrendingDown className="w-3 h-3" />
+      <strong>{deltaTotal}</strong> case{Math.abs(deltaTotal) === 1 ? '' : 's'} will recover from breached after saving.
     </div>
   );
 }

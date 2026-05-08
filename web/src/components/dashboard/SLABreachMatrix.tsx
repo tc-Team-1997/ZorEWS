@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Settings } from 'lucide-react';
 import {
   api,
   SLA_BUCKET_SLUG,
@@ -9,6 +9,7 @@ import {
   type SlaBucket,
 } from '@/lib/api';
 import { Badge, Button, Panel } from '@/components/ui';
+import { useAuth } from '@/store/auth';
 
 export interface SLABreachMatrixProps {
   /** Filter passthrough — wired to query params on the backend. */
@@ -151,9 +152,12 @@ export function SLABreachMatrix({
     <Panel
       title="SLA Breach Matrix"
       action={
-        <span className="text-2xs text-muted">
-          {totalOpen} open · generated {new Date(data.generatedAt).toLocaleTimeString()}
-        </span>
+        <div className="flex items-center gap-3 text-2xs text-muted">
+          <span>
+            {totalOpen} open · generated {new Date(data.generatedAt).toLocaleTimeString()}
+          </span>
+          <ManageTargetsLink />
+        </div>
       }
     >
       <div
@@ -241,5 +245,27 @@ function BucketTile({
         Click to view breached →
       </div>
     </button>
+  );
+}
+
+/** "Manage SLA targets →" link — only shown to admin / supervisor since
+ *  the page itself is gated on `admin:sla_config:list`. */
+function ManageTargetsLink() {
+  // Select the user reference itself — `s.user?.roles ?? []` would
+  // create a new [] every render and trip zustand's Object.is check,
+  // causing an infinite re-render loop.
+  const user = useAuth((s) => s.user);
+  const allowed =
+    !!user && (user.roles.includes('admin') || user.roles.includes('supervisor'));
+  if (!allowed) return null;
+  return (
+    <Link
+      to="/admin/sla-config"
+      className="text-2xs text-blue-600 hover:underline inline-flex items-center gap-1"
+      data-testid="sla-matrix-manage-targets"
+    >
+      <Settings className="w-3 h-3" />
+      Manage targets
+    </Link>
   );
 }

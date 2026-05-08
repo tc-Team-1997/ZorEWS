@@ -60,6 +60,28 @@ describe('SlaConfigPage', () => {
     expect(await screen.findByTestId('sla-edit-error')).toHaveTextContent(/365/);
   });
 
+  it('preview strip surfaces +N delta when target is tightened (sub-day)', async () => {
+    renderWithProviders(<SlaConfigPage />);
+    await screen.findAllByText('credit_risk');
+    await userEvent.click(screen.getByTestId('sla-edit-sla-seed-credit_risk-P3-all'));
+    const input = screen.getByTestId('sla-target-input') as HTMLInputElement;
+    await userEvent.clear(input);
+    // Sub-day target (0.5 = 12h) — MSW fixture treats this as tighter
+    // and returns +3 breaches.
+    await userEvent.type(input, '0.5');
+    expect(await screen.findByTestId('sla-preview-positive')).toHaveTextContent(/\+3/);
+  });
+
+  it('preview strip stays hidden when target equals the current value', async () => {
+    renderWithProviders(<SlaConfigPage />);
+    await screen.findAllByText('credit_risk');
+    await userEvent.click(screen.getByTestId('sla-edit-sla-seed-credit_risk-P3-all'));
+    // The seed target is 7d — leave it at 7 → no preview should fire.
+    expect(screen.queryByTestId('sla-preview-loading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sla-preview-positive')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sla-preview-negative')).not.toBeInTheDocument();
+  });
+
   it('happy-path edit: supersede creates a new ACTIVE row', async () => {
     renderWithProviders(<SlaConfigPage />);
     await screen.findAllByText('credit_risk');
