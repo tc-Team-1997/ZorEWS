@@ -34,12 +34,12 @@ describe('AnalyticsPage — chrome', () => {
     expect(screen.getByTestId('analytics-tab-stage-migration')).toBeInTheDocument();
   });
 
-  it('switching to a placeholder tab (pd-distribution) shows the coming-soon panel', async () => {
+  it('switching to the stage-migration placeholder shows the coming-soon panel', async () => {
     authenticate();
     const user = userEvent.setup();
     renderWithProviders(<AnalyticsPage />);
-    await user.click(screen.getByTestId('analytics-tab-pd-distribution'));
-    expect(screen.getByTestId('coming-soon-pd-distribution')).toBeInTheDocument();
+    await user.click(screen.getByTestId('analytics-tab-stage-migration'));
+    expect(screen.getByTestId('coming-soon-stage-migration')).toBeInTheDocument();
     expect(screen.queryByTestId('alert-resolution-panel')).not.toBeInTheDocument();
   });
 });
@@ -88,6 +88,41 @@ describe('AnalyticsPage — alert-resolution tab', () => {
         .parentElement!.textContent ?? '';
       // Critical is ~25% of the 200-seed (round-robin), so the count drops
       expect(next).not.toBe(allCardValue);
+    });
+  });
+});
+
+describe('AnalyticsPage — pd-distribution tab', () => {
+  it('hydrates KPI cards + histogram from MSW seed', async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyticsPage />);
+
+    await user.click(screen.getByTestId('analytics-tab-pd-distribution'));
+    await waitFor(() =>
+      expect(screen.getByTestId('pd-kpis')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('pd-kpi-customers')).toBeInTheDocument();
+    expect(screen.getByTestId('pd-kpi-bands')).toBeInTheDocument();
+    expect(screen.getByTestId('pd-distribution-chart')).toBeInTheDocument();
+  });
+
+  it('changing compare-to dropdown triggers a refetch', async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyticsPage />);
+
+    await user.click(screen.getByTestId('analytics-tab-pd-distribution'));
+    await waitFor(() =>
+      expect(screen.getByTestId('pd-kpi-customers')).toBeInTheDocument(),
+    );
+    const before = screen.getByTestId('pd-kpi-customers').textContent ?? '';
+    await user.selectOptions(screen.getByLabelText(/Compare to/i), '0');
+
+    await waitFor(() => {
+      const after = screen.getByTestId('pd-kpi-customers').textContent ?? '';
+      // No-comparison mode → "no prior comparison" sub instead of "vs N 30d ago"
+      expect(after).not.toBe(before);
     });
   });
 });

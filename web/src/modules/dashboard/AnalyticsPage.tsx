@@ -31,6 +31,7 @@ import {
   type AnalyticsSeverityFilter,
   type AlertResolutionReport,
   type RiskTrendReport,
+  type PdDistributionReport,
 } from '@/lib/api';
 
 type TabKey = 'alert-resolution' | 'risk-trend' | 'pd-distribution' | 'stage-migration';
@@ -38,7 +39,7 @@ type TabKey = 'alert-resolution' | 'risk-trend' | 'pd-distribution' | 'stage-mig
 const TABS: { key: TabKey; label: string; icon: typeof BarChart3; status: 'live' | 'pending' }[] = [
   { key: 'alert-resolution', label: 'Alert resolution', icon: BarChart3,  status: 'live' },
   { key: 'risk-trend',       label: 'Risk trend',       icon: LineIcon,   status: 'live' },
-  { key: 'pd-distribution',  label: 'PD distribution',  icon: BarChart3,  status: 'pending' },
+  { key: 'pd-distribution',  label: 'PD distribution',  icon: BarChart3,  status: 'live' },
   { key: 'stage-migration',  label: 'Stage migration',  icon: GitBranch,  status: 'pending' },
 ];
 
@@ -105,7 +106,7 @@ export function AnalyticsPage() {
         >
           {tab === 'alert-resolution' && <AlertResolutionTab />}
           {tab === 'risk-trend' && <RiskTrendTab />}
-          {tab === 'pd-distribution' && <ComingSoon title="PD distribution" />}
+          {tab === 'pd-distribution' && <PdDistributionTab />}
           {tab === 'stage-migration' && <ComingSoon title="Stage migration" />}
         </div>
       </Panel>
@@ -462,6 +463,188 @@ function RiskTrendView({ report }: { report: RiskTrendReport }) {
           the right axis = average <code>criticality_score</code> across all alerts in
           that week. Higher line + bigger red stack = higher concentrated risk.
         </p>
+      </Panel>
+    </div>
+  );
+}
+
+// ── PD Distribution tab (4c) ──────────────────────────────────────────
+
+function PdDistributionTab() {
+  // Compare-to-prior offset: 30 days back is the BAC default ("compare to
+  // prior month"). Tunable via the dropdown.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const compareDays = Number(searchParams.get('compare') ?? '30');
+
+  const setCompare = (days: number) => {
+    const sp = new URLSearchParams(searchParams);
+    if (days === 30) sp.delete('compare');
+    else sp.set('compare', String(days));
+    setSearchParams(sp, { replace: true });
+  };
+
+  const filter = useMemo(() => {
+    if (compareDays <= 0) return {};
+    const prior_as_of = new Date(Date.now() - compareDays * 86_400_000).toISOString();
+    return { prior_as_of };
+  }, [compareDays]);
+
+  const q = useQuery({
+    queryKey: ['analytics.pd-distribution', compareDays],
+    queryFn: () => api.pdDistribution(filter),
+  });
+
+  return (
+    <div className="space-y-4" data-testid="pd-distribution-panel">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label htmlFor="pd-compare" className="block text-xs font-medium text-slate-500 mb-1">
+            Compare to
+          </label>
+          <select
+            id="pd-compare"
+            value={compareDays}
+            onChange={(e) => setCompare(Number(e.target.value))}
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+          >
+            <option value={0}>(no comparison)</option>
+            <option value={7}>7 days ago</option>
+            <option value={30}>30 days ago</option>
+            <option value={90}>90 days ago</option>
+          </select>
+        </div>
+        <span className="ml-auto text-xs text-slate-500">
+          {q.data?.generated_at
+            ? `Generated ${new Date(q.data.generated_at).toLocaleString()}`
+            : ''}
+        </span>
+      </div>
+
+      {q.isLoading && <p className="py-6 text-center text-sm text-slate-500">Loading…</p>}
+      {q.isError && (
+        <p role="alert" className="py-6 text-center text-sm text-rose-600">
+          <AlertTriangle size={14} className="mr-1 inline" />
+          {(q.error as Error)?.message ?? 'Failed to load.'}
+        </p>
+      )}
+      {q.data && <PdDistributionView report={q.data} compareDays={compareDays} />}
+    </div>
+  );
+}
+
+function PdDistributionView({
+  report,
+  compareDays,
+}: {
+  report: PdDistributionReport;
+  compareDays: number;
+}) {
+  const { totals, bins, bands } = report;
+
+  // Recharts stacks the prior count on top of current using a separate series
+  // so the user can read both. Risk band background is decorative — drawn
+  // via a thin rule beneath the bars (not chart-axis-aware, so we keep it as
+  // labels in the band-summary list rather than chart overlays for now).
+  const data = bins.map((b) => ({
+    label: b.label,
+    count: b.count,
+    prior: b.prior_count ?? 0,
+    delta: b.delta ?? 0,
+  }));
+
+  const bandFill: Record<string, string> = {
+    low: color.success,
+    medium: color.warning,
+    high: color.danger,
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="pd-kpis">
+        <div data-testid="pd-kpi-customers">
+          <MetricCard
+            label="Customers in snapshot"
+            value={totals.customer_count.toLocaleString()}
+            tone="blue"
+            sub={
+              totals.prior_customer_count != null
+                ? `vs ${totals.prior_customer_count.toLocaleString()} ${compareDays}d ago`
+                : 'no prior comparison'
+            }
+          />
+        </div>
+        <MetricCard
+          label="Mean PD-proxy"
+          value={totals.mean_pd_proxy == null ? '—' : totals.mean_pd_proxy.toFixed(2)}
+          tone={
+            totals.mean_pd_proxy == null
+              ? 'neutral'
+              : totals.mean_pd_proxy >= 5
+                ? 'danger'
+                : totals.mean_pd_proxy >= 3
+                  ? 'warning'
+                  : 'success'
+          }
+          sub="criticality_score [0..10]"
+        />
+        <MetricCard
+          label="High-band share"
+          value={`${(totals.high_band_share * 100).toFixed(1)}%`}
+          tone={
+            totals.high_band_share >= 0.4
+              ? 'danger'
+              : totals.high_band_share >= 0.2
+                ? 'warning'
+                : 'success'
+          }
+          sub="customers with PD-proxy ≥ 5.0"
+        />
+        <div data-testid="pd-kpi-bands">
+          <MetricCard
+            label="Bands (low / med / high)"
+            value={`${bands[0].count.toLocaleString()} / ${bands[1].count.toLocaleString()} / ${bands[2].count.toLocaleString()}`}
+            tone="neutral"
+            sub="count of customers in each band"
+          />
+        </div>
+      </div>
+
+      <Panel title="PD-proxy distribution (10 bins, [0..10])">
+        {data.every((d) => d.count === 0) ? (
+          <p className="py-12 text-center text-sm text-slate-500" data-testid="pd-empty">
+            No customers in this snapshot.
+          </p>
+        ) : (
+          <div className="h-[340px]" data-testid="pd-distribution-chart">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} margin={{ left: 8, right: 8, top: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="count" name="Current" fill={color.blue} />
+                {totals.prior_customer_count != null && (
+                  <Bar dataKey="prior" name={`${compareDays}d ago`} fill={color.skyLight} />
+                )}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <ul className="mt-2 grid grid-cols-1 gap-1 text-xs text-slate-600 sm:grid-cols-3">
+          {bands.map((b) => (
+            <li key={b.band} className="flex items-center gap-2">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: bandFill[b.band] }}
+                aria-hidden
+              />
+              <span className="capitalize">{b.band}</span>
+              <span className="text-slate-400">[{b.lower}, {b.upper})</span>
+              <span className="ml-auto tabular">{b.count.toLocaleString()}</span>
+            </li>
+          ))}
+        </ul>
       </Panel>
     </div>
   );

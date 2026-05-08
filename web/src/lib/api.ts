@@ -450,6 +450,42 @@ export interface AlertResolutionReport {
   filters_applied: AlertResolutionFilter;
 }
 
+// PD distribution (4c)
+export type PdRiskBand = 'low' | 'medium' | 'high';
+export interface PdHistogramBin {
+  lower: number;
+  upper: number;
+  label: string;
+  count: number;
+  prior_count: number | null;
+  delta: number | null;
+}
+export interface PdRiskBandSlice {
+  band: PdRiskBand;
+  lower: number;
+  upper: number;
+  count: number;
+}
+export interface PdDistributionFilter {
+  as_of?: string;
+  prior_as_of?: string;
+  segment?: string;
+}
+export interface PdDistributionReport {
+  bins: PdHistogramBin[];
+  bands: PdRiskBandSlice[];
+  totals: {
+    customer_count: number;
+    prior_customer_count: number | null;
+    mean_pd_proxy: number | null;
+    high_band_share: number;
+  };
+  range: { lower: number; upper: number; bin_count: number };
+  generated_at: string;
+  tenant_id: string;
+  filters_applied: PdDistributionFilter;
+}
+
 // Risk-trend (4b)
 export type AnalyticsAlertSeverity = 'critical' | 'high' | 'medium' | 'low';
 export interface RiskTrendBucket {
@@ -1128,6 +1164,13 @@ export const api = {
           to: filter.to,
           segment: filter.segment,
         },
+      })
+      .then((r) => r.data),
+
+  pdDistribution: (filter: PdDistributionFilter = {}) =>
+    http
+      .get<PdDistributionReport>('/v1/analytics/pd-distribution', {
+        params: filter,
       })
       .then((r) => r.data),
 };

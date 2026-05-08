@@ -95,6 +95,69 @@ components:
         to: { type: string, format: date-time }
         severity: { $ref: "#/components/schemas/SeverityFilter" }
 
+    PdRiskBand:
+      type: string
+      enum: [low, medium, high]
+    PdHistogramBin:
+      type: object
+      required: [lower, upper, label, count, prior_count, delta]
+      properties:
+        lower: { type: number, format: float }
+        upper: { type: number, format: float }
+        label: { type: string, example: "0.0–1.0" }
+        count: { type: integer, minimum: 0 }
+        prior_count:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Same bin in the prior snapshot. null when no prior snapshot was loaded.
+        delta:
+          type: integer
+          nullable: true
+          description: count − prior_count. null when prior_count is null.
+    PdRiskBandSlice:
+      type: object
+      required: [band, lower, upper, count]
+      properties:
+        band: { $ref: "#/components/schemas/PdRiskBand" }
+        lower: { type: number, format: float }
+        upper: { type: number, format: float }
+        count: { type: integer, minimum: 0 }
+    PdDistributionFilter:
+      type: object
+      properties:
+        as_of: { type: string, format: date-time }
+        prior_as_of: { type: string, format: date-time }
+        segment: { type: string }
+    PdDistributionReport:
+      type: object
+      required: [bins, bands, totals, range, generated_at, tenant_id, filters_applied]
+      properties:
+        bins:
+          type: array
+          items: { $ref: "#/components/schemas/PdHistogramBin" }
+        bands:
+          type: array
+          items: { $ref: "#/components/schemas/PdRiskBandSlice" }
+        totals:
+          type: object
+          required: [customer_count, prior_customer_count, mean_pd_proxy, high_band_share]
+          properties:
+            customer_count: { type: integer, minimum: 0 }
+            prior_customer_count: { type: integer, nullable: true, minimum: 0 }
+            mean_pd_proxy: { type: number, format: float, nullable: true }
+            high_band_share: { type: number, format: float, minimum: 0, maximum: 1 }
+        range:
+          type: object
+          required: [lower, upper, bin_count]
+          properties:
+            lower: { type: number, format: float }
+            upper: { type: number, format: float }
+            bin_count: { type: integer, minimum: 1 }
+        generated_at: { type: string, format: date-time }
+        tenant_id: { type: string }
+        filters_applied: { $ref: "#/components/schemas/PdDistributionFilter" }
+
     RiskTrendBucket:
       type: object
       required: [week, week_start, total, by_severity, avg_criticality, high_critical_share]
@@ -196,6 +259,47 @@ components:
             severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
 
 paths:
+  /analytics/pd-distribution:
+    get:
+      summary: 10-bin histogram of latest PD-proxy per customer (T4.1 4c)
+      operationId: getAnalyticsPdDistribution
+      tags: [analytics]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexRole"
+        - in: query
+          name: as_of
+          schema: { type: string, format: date-time }
+        - in: query
+          name: prior_as_of
+          schema: { type: string, format: date-time }
+        - in: query
+          name: segment
+          schema: { type: string }
+      responses:
+        "200":
+          description: Histogram + risk-band split + totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body: { $ref: "#/components/schemas/PdDistributionReport" }
+        "400":
+          description: Invalid input (bad as_of / prior_as_of)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+        "403":
+          description: Caller's role lacks `dashboard:analytics:read`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+
   /analytics/risk-trend:
     get:
       summary: Weekly alert counts by severity + avg criticality_score (T4.1 4b)

@@ -3008,6 +3008,88 @@ export const handlers = [
     return HttpResponse.json(envelope({ deleted: true }));
   }),
 
+  // ── Analytics — PD Distribution (T4.1 4c) ────────────────────────────
+
+  http.get('/v1/analytics/pd-distribution', ({ request }) => {
+    const url = new URL(request.url);
+    for (const k of ['as_of', 'prior_as_of'] as const) {
+      const v = url.searchParams.get(k);
+      if (v && Number.isNaN(Date.parse(v))) {
+        return HttpResponse.json(
+          envelopeError('EWS_400_invalid_input', `${k} must be ISO 8601`, 'MEDIUM'),
+          { status: 400 },
+        );
+      }
+    }
+    const priorAsOf = url.searchParams.get('prior_as_of');
+    const seed = mswPdDistributionSnapshot();
+    const prior = priorAsOf ? mswPdDistributionPriorSnapshot() : null;
+
+    const range = { lower: 0, upper: 10, bins: 10 };
+    const binWidth = (range.upper - range.lower) / range.bins;
+    const tally = (rows: typeof seed) => {
+      const counts = new Array<number>(range.bins).fill(0);
+      for (const r of rows) {
+        if (!Number.isFinite(r.pd_proxy)) continue;
+        let idx: number;
+        if (r.pd_proxy < range.lower) idx = 0;
+        else if (r.pd_proxy >= range.upper) idx = range.bins - 1;
+        else idx = Math.floor((r.pd_proxy - range.lower) / binWidth);
+        counts[idx] += 1;
+      }
+      return counts;
+    };
+
+    const curCounts = tally(seed);
+    const priorCounts = prior ? tally(prior) : null;
+    const bins = curCounts.map((count, i) => {
+      const lower = range.lower + i * binWidth;
+      const upper = i === range.bins - 1 ? range.upper : range.lower + (i + 1) * binWidth;
+      const pc = priorCounts ? priorCounts[i] : null;
+      return {
+        lower,
+        upper,
+        label: `${lower.toFixed(1)}–${upper.toFixed(1)}`,
+        count,
+        prior_count: pc,
+        delta: pc == null ? null : count - pc,
+      };
+    });
+
+    const bands = [
+      { band: 'low' as const,    lower: 0, upper: 3,  count: 0 },
+      { band: 'medium' as const, lower: 3, upper: 5,  count: 0 },
+      { band: 'high' as const,   lower: 5, upper: 10, count: 0 },
+    ];
+    for (const r of seed) {
+      const b =
+        r.pd_proxy < 3 ? bands[0] :
+        r.pd_proxy < 5 ? bands[1] :
+        bands[2];
+      b.count += 1;
+    }
+
+    const sum = seed.reduce((a, r) => a + r.pd_proxy, 0);
+    const high = bands[2].count;
+
+    return HttpResponse.json(
+      envelope({
+        bins,
+        bands,
+        totals: {
+          customer_count: seed.length,
+          prior_customer_count: prior ? prior.length : null,
+          mean_pd_proxy: seed.length === 0 ? null : Math.round((sum / seed.length) * 100) / 100,
+          high_band_share: seed.length === 0 ? 0 : Math.round((high / seed.length) * 10000) / 10000,
+        },
+        range: { lower: range.lower, upper: range.upper, bin_count: range.bins },
+        generated_at: new Date().toISOString(),
+        tenant_id: 'BANK_DEMO',
+        filters_applied: priorAsOf ? { prior_as_of: priorAsOf } : {},
+      }),
+    );
+  }),
+
   // ── Analytics — Risk Trend (T4.1 4b) ─────────────────────────────────
 
   http.get('/v1/analytics/risk-trend', ({ request }) => {
@@ -3300,6 +3382,28 @@ function mswWeeklyTrend(
     if (r.closed_at) bump(isoWeek(new Date(r.closed_at)), 'closed');
   }
   return [...map.values()].sort((a, b) => a.week.localeCompare(b.week));
+}
+
+// PD-distribution seed — 300 customers with criticality_score values
+// pseudo-randomly distributed across [0, 10]. Bell-ish around 4 with a
+// long right tail so the histogram looks realistic.
+function mswPdDistributionSnapshot(): { customer_id: string; pd_proxy: number }[] {
+  const out = [];
+  for (let i = 0; i < 300; i++) {
+    // Triangular-ish distribution centred near 4, capped to [0, 10]
+    const r1 = ((i * 47) % 1000) / 1000;
+    const r2 = ((i * 53 + 17) % 1000) / 1000;
+    const v = Math.max(0, Math.min(10, (r1 + r2) * 5)); // [0, 10]
+    out.push({ customer_id: `cust-${i + 1}`, pd_proxy: Number(v.toFixed(2)) });
+  }
+  return out;
+}
+function mswPdDistributionPriorSnapshot(): { customer_id: string; pd_proxy: number }[] {
+  // Slightly improved (lower) prior — to show the delta line moving right.
+  return mswPdDistributionSnapshot().map((r) => ({
+    customer_id: r.customer_id,
+    pd_proxy: Math.max(0, r.pd_proxy - 0.5),
+  }));
 }
 
 // Risk-trend seed — same shape as the alert-resolution seed but adds

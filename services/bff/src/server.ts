@@ -991,6 +991,9 @@ export interface AppDeps {
   /** Source for the Risk Trend sub-dashboard (T4.1 4b). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   riskTrendSource?: any;
+  /** Source for the PD Distribution sub-dashboard (T4.1 4c). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdDistributionSource?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1437,6 +1440,63 @@ export function makeApp(deps: AppDeps = {}) {
           res.status(500).json(
             wrapError(
               { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  // /v1/analytics/pd-distribution — T4.1 4c.
+  // 10-bin histogram of latest criticality_score per customer, with
+  // optional prior-snapshot delta line + risk-band overlay.
+  if (deps.pdDistributionSource) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computePdDistribution } = require('./analytics/pd_distribution') as
+      typeof import('./analytics/pd_distribution');
+    app.get(
+      '/v1/analytics/pd-distribution',
+      requireTenantMw,
+      requireRole('dashboard:analytics:read'),
+      async (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const tenant_id = req.tenant!.tenant_id;
+          const filter = {
+            as_of: typeof req.query.as_of === 'string' ? req.query.as_of : undefined,
+            prior_as_of: typeof req.query.prior_as_of === 'string' ? req.query.prior_as_of : undefined,
+            segment: typeof req.query.segment === 'string' ? req.query.segment : undefined,
+          };
+          for (const k of ['as_of', 'prior_as_of'] as const) {
+            const v = filter[k];
+            if (v && Number.isNaN(Date.parse(v))) {
+              return res.status(400).json(
+                wrapError(
+                  { code: 'EWS_400_invalid_input', message: `${k} must be ISO 8601`, severity: 'MEDIUM' },
+                  ctx,
+                ),
+              );
+            }
+          }
+          const asOfDate = filter.as_of ? new Date(filter.as_of) : now();
+          const priorDate = filter.prior_as_of ? new Date(filter.prior_as_of) : null;
+          const [current, prior] = await Promise.all([
+            deps.pdDistributionSource.loadSnapshot(tenant_id, asOfDate),
+            priorDate ? deps.pdDistributionSource.loadSnapshot(tenant_id, priorDate) : Promise.resolve(null),
+          ]);
+          const out = computePdDistribution({
+            tenant_id,
+            current,
+            prior,
+            filter,
+            asOf: now(),
+          });
+          res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          res.status(500).json(
+            wrapError(
+              { code: 'EWS_500', message: e instanceof Error ? e.message : 'analytics failed', severity: 'HIGH' },
               ctx,
             ),
           );
@@ -14525,6 +14585,10 @@ if (require.main === module) {
     const { makeRiskTrendSource } = require('./analytics/risk_trend') as
       typeof import('./analytics/risk_trend');
     const { source: riskTrendSource } = await makeRiskTrendSource();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makePdDistributionSource } = require('./analytics/pd_distribution') as
+      typeof import('./analytics/pd_distribution');
+    const { source: pdDistributionSource } = await makePdDistributionSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14540,6 +14604,7 @@ if (require.main === module) {
       reportAuditPool,
       alertResolutionSource,
       riskTrendSource,
+      pdDistributionSource,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {
