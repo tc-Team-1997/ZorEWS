@@ -130,9 +130,17 @@ export interface CmsListFilters {
 const cmsBase = '/v1/cms/cases';
 
 // http.ts now auto-unwraps the {header, body} envelope at the response
-// interceptor, so `r.data` IS the body.
-function unwrap<T>(p: Promise<{ data: T }>) {
-  return p.then((r) => r.data);
+// interceptor, so `r.data` IS the body. For test setups that mock
+// http.get directly with the raw envelope shape (`{ data: { body: T } }`),
+// fall through and unwrap one more level so call sites stay shape-agnostic.
+function unwrap<T>(p: Promise<{ data: T | { body: T } }>) {
+  return p.then((r) => {
+    const d = r.data as { body?: T } | T;
+    if (d && typeof d === 'object' && 'body' in d && (d as { body: T }).body !== undefined) {
+      return (d as { body: T }).body;
+    }
+    return d as T;
+  });
 }
 
 export const cmsApi = {

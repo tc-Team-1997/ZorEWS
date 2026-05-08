@@ -166,6 +166,172 @@ const _mockServiceClients: MockServiceClient[] = [
   },
 ];
 
+// ── User Access Override (BAC §3.1.6/§3.1.7) — MSW state ─────────────
+
+interface MswOverride {
+  override_id: string; tenant_id: string; user_id: string; module_path: string;
+  override_type: 'GRANT' | 'REVOKE';
+  permission_type: 'VIEW' | 'EDIT' | 'APPROVE' | 'FULL';
+  effective_from: string; effective_till: string | null; reason: string;
+  requires_approval: boolean;
+  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'REJECTED' | 'REVOKED' | 'EXPIRED';
+  created_by: string; approved_by: string | null; rejected_by: string | null; revoked_by: string | null;
+  rejection_reason: string | null; revocation_reason: string | null; approval_note: string | null;
+  created_at: string; updated_at: string;
+  approved_at: string | null; rejected_at: string | null; revoked_at: string | null;
+}
+interface MswOverrideAudit {
+  audit_id: string; tenant_id: string;
+  entity_type: 'user_access_override'; entity_id: string;
+  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire';
+  actor_id: string; actor_role: string;
+  before_state: unknown | null; after_state: unknown | null;
+  reason: string | null;
+  request_id: string | null; ip_address: string | null; user_agent: string | null;
+  created_at: string;
+}
+interface MswCreateInput {
+  user_id: string;
+  module_paths: string[];
+  override_type?: 'GRANT' | 'REVOKE';
+  permission_type?: 'VIEW' | 'EDIT' | 'APPROVE' | 'FULL';
+  effective_from?: string;
+  effective_till?: string | null;
+  reason: string;
+  requires_approval?: boolean;
+}
+const mswOverrides: MswOverride[] = [
+  {
+    override_id: 'ov-seed-1',
+    tenant_id: 'BANK_DEMO',
+    user_id: 'u-002',
+    module_path: 'admin.audit-log',
+    override_type: 'GRANT',
+    permission_type: 'VIEW',
+    effective_from: '2026-05-01T00:00:00Z',
+    effective_till: '2026-08-01T00:00:00Z',
+    reason: 'Q2 audit support — temporary read access',
+    requires_approval: true,
+    status: 'ACTIVE',
+    created_by: 'alice.admin',
+    approved_by: 'sue.super',
+    rejected_by: null,
+    revoked_by: null,
+    rejection_reason: null,
+    revocation_reason: null,
+    approval_note: 'Reviewed scope, approved',
+    created_at: '2026-05-01T08:00:00Z',
+    updated_at: '2026-05-01T09:00:00Z',
+    approved_at: '2026-05-01T09:00:00Z',
+    rejected_at: null,
+    revoked_at: null,
+  },
+  {
+    override_id: 'ov-seed-2',
+    tenant_id: 'BANK_DEMO',
+    user_id: 'u-004',
+    module_path: 'cases.detail',
+    override_type: 'GRANT',
+    permission_type: 'EDIT',
+    effective_from: '2026-05-06T00:00:00Z',
+    effective_till: null,
+    reason: 'Field officer needs case-edit on follow-up customers',
+    requires_approval: true,
+    status: 'PENDING_APPROVAL',
+    created_by: 'alice.admin',
+    approved_by: null,
+    rejected_by: null,
+    revoked_by: null,
+    rejection_reason: null,
+    revocation_reason: null,
+    approval_note: null,
+    created_at: '2026-05-06T11:00:00Z',
+    updated_at: '2026-05-06T11:00:00Z',
+    approved_at: null,
+    rejected_at: null,
+    revoked_at: null,
+  },
+];
+const mswOverrideAudit: MswOverrideAudit[] = [
+  {
+    audit_id: 'aud-seed-1',
+    tenant_id: 'BANK_DEMO',
+    entity_type: 'user_access_override',
+    entity_id: 'ov-seed-1',
+    action: 'create',
+    actor_id: 'alice.admin',
+    actor_role: 'admin',
+    before_state: null,
+    after_state: { override_id: 'ov-seed-1', status: 'PENDING_APPROVAL' },
+    reason: 'Q2 audit support — temporary read access',
+    request_id: null,
+    ip_address: null,
+    user_agent: null,
+    created_at: '2026-05-01T08:00:00Z',
+  },
+  {
+    audit_id: 'aud-seed-2',
+    tenant_id: 'BANK_DEMO',
+    entity_type: 'user_access_override',
+    entity_id: 'ov-seed-1',
+    action: 'approve',
+    actor_id: 'sue.super',
+    actor_role: 'admin',
+    before_state: { override_id: 'ov-seed-1', status: 'PENDING_APPROVAL' },
+    after_state: { override_id: 'ov-seed-1', status: 'ACTIVE' },
+    reason: 'Reviewed scope, approved',
+    request_id: null,
+    ip_address: null,
+    user_agent: null,
+    created_at: '2026-05-01T09:00:00Z',
+  },
+];
+
+/** Mirror the BFF role_access.ts ACL — used by the offline effective-access mock. */
+function mswMockRoleAcl(userId: string): { roles: string[]; modules: { module_path: string; permissions: string[]; source: string }[] } {
+  const roles = userId.includes('admin')   ? ['admin']
+              : userId.includes('super')   ? ['supervisor']
+              : userId.includes('risk')    ? ['risk_analyst']
+              : userId.includes('collect') ? ['collection_officer']
+              : userId.includes('field')   ? ['field_officer']
+              : ['risk_analyst'];
+  const adminAcl: Record<string, string[]> = {
+    'dashboard': ['VIEW'], 'alerts': ['VIEW','EDIT','APPROVE'], 'alerts.detail': ['VIEW','EDIT'],
+    'customers': ['VIEW'], 'customers.detail': ['VIEW'],
+    'rules': ['VIEW','EDIT','APPROVE','FULL'], 'rules.detail': ['VIEW','EDIT','APPROVE','FULL'],
+    'cases': ['VIEW','EDIT','APPROVE'], 'cases.detail': ['VIEW','EDIT','APPROVE'],
+    'cases.cms': ['VIEW','EDIT','APPROVE'], 'scenarios': ['VIEW','EDIT'],
+    'reports': ['VIEW'], 'reports.snapshot': ['VIEW'],
+    'admin.users': ['VIEW','EDIT','FULL'], 'admin.audit-log': ['VIEW'],
+    'admin.user-access-override': ['VIEW','EDIT','APPROVE','FULL'],
+    'profile.sessions': ['VIEW','EDIT'], 'profile.activity': ['VIEW'],
+  };
+  const riskAcl: Record<string, string[]> = {
+    'dashboard': ['VIEW'], 'alerts': ['VIEW','EDIT'], 'alerts.detail': ['VIEW','EDIT'],
+    'customers': ['VIEW'], 'customers.detail': ['VIEW'],
+    'rules': ['VIEW','EDIT'], 'cases': ['VIEW','EDIT'], 'cases.detail': ['VIEW','EDIT'],
+    'scenarios': ['VIEW','EDIT'], 'reports': ['VIEW'],
+    'profile.sessions': ['VIEW','EDIT'], 'profile.activity': ['VIEW'],
+  };
+  const fieldAcl: Record<string, string[]> = {
+    'dashboard': ['VIEW'], 'alerts': ['VIEW'], 'cases': ['VIEW','EDIT'], 'cases.detail': ['VIEW','EDIT'],
+    'profile.sessions': ['VIEW','EDIT'], 'profile.activity': ['VIEW'],
+  };
+  const collectAcl: Record<string, string[]> = {
+    'dashboard': ['VIEW'], 'alerts': ['VIEW'], 'cases': ['VIEW','EDIT'], 'cases.detail': ['VIEW','EDIT'],
+    'cases.cms': ['VIEW','EDIT'], 'profile.sessions': ['VIEW','EDIT'], 'profile.activity': ['VIEW'],
+  };
+  const acl = roles[0] === 'admin' ? adminAcl
+            : roles[0] === 'risk_analyst' ? riskAcl
+            : roles[0] === 'collection_officer' ? collectAcl
+            : roles[0] === 'field_officer' ? fieldAcl
+            : adminAcl;
+  const modules = Object.keys(acl).sort().map((p) => ({
+    module_path: p, permissions: acl[p], source: 'role',
+  }));
+  return { roles, modules };
+}
+
 function envelope<T>(body: T, code = 'EWS_200', message = 'Processed Successfully') {
   return {
     header: {
@@ -1937,6 +2103,281 @@ export const handlers = [
     }
     _mockServiceClients.splice(idx, 1);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ── User Access Override (BAC §3.1.6/§3.1.7) ────────────────────────
+
+  http.get('/v1/admin/user-access-overrides', ({ request }) => {
+    const url = new URL(request.url);
+    const userId = url.searchParams.get('user_id');
+    const status = url.searchParams.get('status');
+    const modulePath = url.searchParams.get('module_path');
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 50)));
+    let rows = mswOverrides.slice();
+    if (userId) rows = rows.filter((o) => o.user_id === userId);
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((o) => set.has(o.status));
+    }
+    if (modulePath) rows = rows.filter((o) => o.module_path === modulePath);
+    rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({ items: rows.slice(start, start + pageSize), total: rows.length, page, page_size: pageSize }),
+    );
+  }),
+
+  http.get('/v1/admin/user-access-overrides/:id', ({ params }) => {
+    const row = mswOverrides.find((o) => o.override_id === params.id);
+    if (!row) return HttpResponse.json(envelopeError('EWS_404_not_found', `override ${params.id} not found`, 'LOW'), { status: 404 });
+    return HttpResponse.json(envelope(row));
+  }),
+
+  http.post('/v1/admin/user-access-overrides', async ({ request }) => {
+    const body = (await request.json()) as MswCreateInput;
+    const actor = readPersistedRole() ? 'alice.admin' : 'alice.admin';
+    const now = new Date().toISOString();
+    // Validation
+    if (!body.user_id || !Array.isArray(body.module_paths) || body.module_paths.length === 0) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'user_id + non-empty module_paths required', 'MEDIUM'), { status: 400 });
+    }
+    if (!body.reason || body.reason.trim().length < 10) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'reason ≥ 10 chars required', 'MEDIUM'), { status: 400 });
+    }
+    if (body.effective_till && Date.parse(body.effective_till) <= Date.now()) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'effective_till cannot be in the past', 'MEDIUM'), { status: 400 });
+    }
+    // Duplicate check
+    for (const path of body.module_paths) {
+      const dup = mswOverrides.find(
+        (o) =>
+          o.user_id === body.user_id &&
+          o.module_path === path &&
+          o.permission_type === body.permission_type &&
+          (o.status === 'ACTIVE' || o.status === 'PENDING_APPROVAL'),
+      );
+      if (dup) {
+        return HttpResponse.json(
+          envelopeError(
+            'EWS_409_duplicate_active_override',
+            `${body.user_id} already has ${dup.status.toLowerCase()} override on ${path}/${body.permission_type}`,
+            'MEDIUM',
+          ),
+          { status: 409 },
+        );
+      }
+    }
+    const created: MswOverride[] = [];
+    for (const path of body.module_paths) {
+      const requiresApproval = body.requires_approval !== false;
+      const row: MswOverride = {
+        override_id: `ov-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        tenant_id: 'BANK_DEMO',
+        user_id: body.user_id,
+        module_path: path,
+        override_type: body.override_type ?? 'GRANT',
+        permission_type: body.permission_type ?? 'VIEW',
+        effective_from: body.effective_from ?? now,
+        effective_till: body.effective_till ?? null,
+        reason: body.reason,
+        requires_approval: requiresApproval,
+        status: requiresApproval ? 'PENDING_APPROVAL' : 'ACTIVE',
+        created_by: actor,
+        approved_by: null,
+        rejected_by: null,
+        revoked_by: null,
+        rejection_reason: null,
+        revocation_reason: null,
+        approval_note: null,
+        created_at: now,
+        updated_at: now,
+        approved_at: null,
+        rejected_at: null,
+        revoked_at: null,
+      };
+      mswOverrides.push(row);
+      mswOverrideAudit.push({
+        audit_id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        tenant_id: 'BANK_DEMO',
+        entity_type: 'user_access_override',
+        entity_id: row.override_id,
+        action: 'create',
+        actor_id: actor,
+        actor_role: 'admin',
+        before_state: null,
+        after_state: row,
+        reason: body.reason,
+        request_id: null,
+        ip_address: null,
+        user_agent: null,
+        created_at: now,
+      });
+      created.push(row);
+    }
+    return HttpResponse.json(envelope({ overrides: created, created: created.length }, 'EWS_201_created', 'Created'), { status: 201 });
+  }),
+
+  http.put('/v1/admin/user-access-overrides/:id', async ({ params, request }) => {
+    const idx = mswOverrides.findIndex((o) => o.override_id === params.id);
+    if (idx < 0) return HttpResponse.json(envelopeError('EWS_404_not_found', `override ${params.id} not found`, 'LOW'), { status: 404 });
+    const before = mswOverrides[idx];
+    if (before.status !== 'PENDING_APPROVAL') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', `cannot edit override in status ${before.status}`, 'MEDIUM'), { status: 409 });
+    }
+    const patch = (await request.json()) as Partial<MswCreateInput>;
+    const now = new Date().toISOString();
+    const after: MswOverride = {
+      ...before,
+      override_type: patch.override_type ?? before.override_type,
+      permission_type: patch.permission_type ?? before.permission_type,
+      effective_from: patch.effective_from ?? before.effective_from,
+      effective_till: patch.effective_till === undefined ? before.effective_till : patch.effective_till,
+      reason: patch.reason ?? before.reason,
+      module_path: (patch.module_paths && patch.module_paths[0]) ?? before.module_path,
+      updated_at: now,
+    };
+    mswOverrides[idx] = after;
+    return HttpResponse.json(envelope(after));
+  }),
+
+  http.post('/v1/admin/user-access-overrides/:id/approve', async ({ params, request }) => {
+    const idx = mswOverrides.findIndex((o) => o.override_id === params.id);
+    if (idx < 0) return HttpResponse.json(envelopeError('EWS_404_not_found', `override ${params.id} not found`, 'LOW'), { status: 404 });
+    const before = mswOverrides[idx];
+    if (before.status !== 'PENDING_APPROVAL') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', `not pending`, 'MEDIUM'), { status: 409 });
+    }
+    const actor = readPersistedRole() === 'admin' ? readPersistedUsername() ?? 'sue.super' : 'sue.super';
+    if (actor === before.created_by) {
+      return HttpResponse.json(envelopeError('EWS_403_self_approval', 'maker cannot be checker', 'HIGH'), { status: 403 });
+    }
+    const note = ((await request.json().catch(() => ({}))) as { approval_note?: string }).approval_note ?? null;
+    const now = new Date().toISOString();
+    const after: MswOverride = { ...before, status: 'ACTIVE', approved_by: actor, approved_at: now, approval_note: note, updated_at: now };
+    mswOverrides[idx] = after;
+    mswOverrideAudit.push({
+      audit_id: `aud-${Date.now()}`,
+      tenant_id: 'BANK_DEMO', entity_type: 'user_access_override', entity_id: params.id as string,
+      action: 'approve', actor_id: actor, actor_role: 'admin',
+      before_state: before, after_state: after, reason: note, request_id: null, ip_address: null, user_agent: null, created_at: now,
+    });
+    return HttpResponse.json(envelope(after));
+  }),
+
+  http.post('/v1/admin/user-access-overrides/:id/reject', async ({ params, request }) => {
+    const idx = mswOverrides.findIndex((o) => o.override_id === params.id);
+    if (idx < 0) return HttpResponse.json(envelopeError('EWS_404_not_found', `override ${params.id} not found`, 'LOW'), { status: 404 });
+    const before = mswOverrides[idx];
+    if (before.status !== 'PENDING_APPROVAL') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', `not pending`, 'MEDIUM'), { status: 409 });
+    }
+    const reason = ((await request.json()) as { rejection_reason?: string }).rejection_reason ?? '';
+    if (reason.trim().length < 10) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'rejection_reason ≥ 10 chars required', 'MEDIUM'), { status: 400 });
+    }
+    const actor = readPersistedUsername() ?? 'sue.super';
+    if (actor === before.created_by) {
+      return HttpResponse.json(envelopeError('EWS_403_self_approval', 'maker cannot reject own request', 'HIGH'), { status: 403 });
+    }
+    const now = new Date().toISOString();
+    const after: MswOverride = { ...before, status: 'REJECTED', rejected_by: actor, rejected_at: now, rejection_reason: reason, updated_at: now };
+    mswOverrides[idx] = after;
+    mswOverrideAudit.push({
+      audit_id: `aud-${Date.now()}`,
+      tenant_id: 'BANK_DEMO', entity_type: 'user_access_override', entity_id: params.id as string,
+      action: 'reject', actor_id: actor, actor_role: 'admin',
+      before_state: before, after_state: after, reason, request_id: null, ip_address: null, user_agent: null, created_at: now,
+    });
+    return HttpResponse.json(envelope(after));
+  }),
+
+  http.post('/v1/admin/user-access-overrides/:id/revoke', async ({ params, request }) => {
+    const idx = mswOverrides.findIndex((o) => o.override_id === params.id);
+    if (idx < 0) return HttpResponse.json(envelopeError('EWS_404_not_found', `override ${params.id} not found`, 'LOW'), { status: 404 });
+    const before = mswOverrides[idx];
+    if (before.status !== 'ACTIVE') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', `only ACTIVE can be revoked`, 'MEDIUM'), { status: 409 });
+    }
+    const reason = ((await request.json()) as { revocation_reason?: string }).revocation_reason ?? '';
+    if (reason.trim().length < 10) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'revocation_reason ≥ 10 chars required', 'MEDIUM'), { status: 400 });
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const after: MswOverride = { ...before, status: 'REVOKED', revoked_by: actor, revoked_at: now, revocation_reason: reason, updated_at: now };
+    mswOverrides[idx] = after;
+    mswOverrideAudit.push({
+      audit_id: `aud-${Date.now()}`,
+      tenant_id: 'BANK_DEMO', entity_type: 'user_access_override', entity_id: params.id as string,
+      action: 'revoke', actor_id: actor, actor_role: 'admin',
+      before_state: before, after_state: after, reason, request_id: null, ip_address: null, user_agent: null, created_at: now,
+    });
+    return HttpResponse.json(envelope(after));
+  }),
+
+  http.get('/v1/admin/users/:user_id/effective-access', ({ params }) => {
+    const userId = params.user_id as string;
+    // Mirror the BFF resolver: union role ACL + ACTIVE+in-force overrides.
+    const roleAcl = mswMockRoleAcl(userId);
+    const now = Date.now();
+    const inForce = mswOverrides.filter((o) => {
+      if (o.user_id !== userId) return false;
+      if (o.status !== 'ACTIVE') return false;
+      if (Date.parse(o.effective_from) > now) return false;
+      if (o.effective_till && Date.parse(o.effective_till) <= now) return false;
+      return true;
+    });
+    const merged = new Map<string, Set<string>>();
+    const sources = new Map<string, Set<string>>();
+    for (const r of roleAcl.modules) {
+      merged.set(r.module_path, new Set(r.permissions));
+      sources.set(r.module_path, new Set(['role']));
+    }
+    for (const o of inForce) {
+      const cur = merged.get(o.module_path) ?? new Set<string>();
+      const src = sources.get(o.module_path) ?? new Set<string>();
+      if (o.override_type === 'GRANT') {
+        cur.add(o.permission_type);
+        src.add(`override:${o.override_id}`);
+      } else if (o.permission_type === 'FULL') {
+        cur.clear();
+      } else {
+        cur.delete(o.permission_type);
+      }
+      if (cur.size === 0) {
+        merged.delete(o.module_path);
+      } else {
+        merged.set(o.module_path, cur);
+        sources.set(o.module_path, src);
+      }
+    }
+    const ORDER = ['VIEW', 'EDIT', 'APPROVE', 'FULL'];
+    const effective = Array.from(merged.entries()).map(([path, perms]) => ({
+      module_path: path,
+      permissions: ORDER.filter((p) => perms.has(p)),
+      source: Array.from(sources.get(path) ?? ['role']).sort().join(','),
+    })).sort((a, b) => a.module_path.localeCompare(b.module_path));
+    return HttpResponse.json(
+      envelope({
+        user_id: userId,
+        computed_at: new Date().toISOString(),
+        role_access: roleAcl,
+        overrides_applied: inForce,
+        effective,
+      }),
+    );
+  }),
+
+  http.get('/v1/admin/admin-audit-log', ({ request }) => {
+    const url = new URL(request.url);
+    const entityId = url.searchParams.get('entity_id');
+    const actorId = url.searchParams.get('actor_id');
+    let rows = mswOverrideAudit.slice();
+    if (entityId) rows = rows.filter((a) => a.entity_id === entityId);
+    if (actorId) rows = rows.filter((a) => a.actor_id === actorId);
+    rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return HttpResponse.json(envelope({ items: rows, total: rows.length, page: 1, page_size: 50 }));
   }),
 ];
 

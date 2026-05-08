@@ -32,6 +32,8 @@ import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
 import { AdminTenantsPage } from '@/modules/admin/AdminTenantsPage';
 import { AdminServiceClientsPage } from '@/modules/admin/AdminServiceClientsPage';
+import { UserAccessOverrideListPage } from '@/modules/admin/userAccessOverride/UserAccessOverrideListPage';
+import { EffectiveAccessPage } from '@/modules/admin/userAccessOverride/EffectiveAccessPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -90,6 +92,11 @@ export function App() {
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />
             <Route path="admin/tenants" element={<AdminTenantsPage />} />
             <Route path="admin/service-clients" element={<AdminServiceClientsPage />} />
+            <Route path="admin/user-access-override" element={<UserAccessOverrideListPage />} />
+            <Route
+              path="admin/user-access-override/users/:user_id/effective-access"
+              element={<EffectiveAccessPage />}
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -777,7 +777,245 @@ export const api = {
 
   tenantDelete: (tenant_id: string) =>
     http.delete(`/v1/tenants/${encodeURIComponent(tenant_id)}`).then(() => undefined),
+
+  // ── User Access Override (BAC §3.1.6/§3.1.7) ──────────────────────
+
+  uaoList: (params: {
+    user_id?: string;
+    status?: string;
+    module_path?: string;
+    page?: number;
+    page_size?: number;
+  } = {}) =>
+    http
+      .get<{ items: UserAccessOverride[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/user-access-overrides',
+        { params },
+      )
+      .then((r) => r.data),
+
+  uaoGet: (id: string) =>
+    http
+      .get<UserAccessOverride>(`/v1/admin/user-access-overrides/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  uaoCreate: (input: CreateOverrideInput) =>
+    http
+      .post<{ overrides: UserAccessOverride[]; created: number }>(
+        '/v1/admin/user-access-overrides',
+        input,
+      )
+      .then((r) => r.data),
+
+  uaoUpdate: (id: string, patch: UpdateOverrideInput) =>
+    http
+      .put<UserAccessOverride>(`/v1/admin/user-access-overrides/${encodeURIComponent(id)}`, patch)
+      .then((r) => r.data),
+
+  uaoApprove: (id: string, approval_note?: string) =>
+    http
+      .post<UserAccessOverride>(
+        `/v1/admin/user-access-overrides/${encodeURIComponent(id)}/approve`,
+        { approval_note },
+      )
+      .then((r) => r.data),
+
+  uaoReject: (id: string, rejection_reason: string) =>
+    http
+      .post<UserAccessOverride>(
+        `/v1/admin/user-access-overrides/${encodeURIComponent(id)}/reject`,
+        { rejection_reason },
+      )
+      .then((r) => r.data),
+
+  uaoRevoke: (id: string, revocation_reason: string) =>
+    http
+      .post<UserAccessOverride>(
+        `/v1/admin/user-access-overrides/${encodeURIComponent(id)}/revoke`,
+        { revocation_reason },
+      )
+      .then((r) => r.data),
+
+  uaoEffectiveAccess: (user_id: string) =>
+    http
+      .get<EffectiveAccess>(
+        `/v1/admin/users/${encodeURIComponent(user_id)}/effective-access`,
+      )
+      .then((r) => r.data),
+
+  uaoAuditLog: (params: { entity_id?: string; actor_id?: string; page?: number; page_size?: number } = {}) =>
+    http
+      .get<{ items: AdminAuditLogRow[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/admin-audit-log',
+        { params },
+      )
+      .then((r) => r.data),
 };
+
+// ── User Access Override types ──────────────────────────────────────
+
+export type OverrideType = 'GRANT' | 'REVOKE';
+export type PermissionType = 'VIEW' | 'EDIT' | 'APPROVE' | 'FULL';
+export type OverrideStatus =
+  | 'PENDING_APPROVAL'
+  | 'ACTIVE'
+  | 'REJECTED'
+  | 'REVOKED'
+  | 'EXPIRED';
+
+/** Server-allowlisted SPA module identifiers — keep in sync with
+ *  services/bff/src/admin/types.ts MODULE_PATH_ALLOWLIST. */
+export const MODULE_PATH_TREE: ReadonlyArray<{ group: string; paths: ReadonlyArray<{ value: string; label: string }> }> = [
+  {
+    group: 'Dashboard',
+    paths: [{ value: 'dashboard', label: 'Dashboard' }],
+  },
+  {
+    group: 'Alerts',
+    paths: [
+      { value: 'alerts', label: 'Alert list' },
+      { value: 'alerts.detail', label: 'Alert detail' },
+    ],
+  },
+  {
+    group: 'Customers',
+    paths: [
+      { value: 'customers', label: 'Customer list' },
+      { value: 'customers.detail', label: 'Customer 360' },
+    ],
+  },
+  {
+    group: 'Rules',
+    paths: [
+      { value: 'rules', label: 'Rule list' },
+      { value: 'rules.detail', label: 'Rule detail' },
+      { value: 'rules.builder', label: 'Rule builder' },
+      { value: 'rules.ews', label: 'EWS rules' },
+    ],
+  },
+  {
+    group: 'Cases',
+    paths: [
+      { value: 'cases', label: 'Case list' },
+      { value: 'cases.detail', label: 'Case detail' },
+      { value: 'cases.cms', label: 'CMS case list' },
+      { value: 'cases.cms.detail', label: 'CMS case detail' },
+    ],
+  },
+  {
+    group: 'Scenarios',
+    paths: [
+      { value: 'scenarios', label: 'Scenario list' },
+      { value: 'scenarios.detail', label: 'Scenario detail' },
+    ],
+  },
+  {
+    group: 'Reports',
+    paths: [
+      { value: 'reports', label: 'Reports landing' },
+      { value: 'reports.snapshot', label: 'Snapshot report' },
+      { value: 'reports.alerts', label: 'Alerts report' },
+      { value: 'reports.cases', label: 'Cases report' },
+      { value: 'reports.rbi', label: 'RBI report' },
+    ],
+  },
+  {
+    group: 'Admin',
+    paths: [
+      { value: 'admin.users', label: 'User management' },
+      { value: 'admin.audit-log', label: 'Audit log' },
+      { value: 'admin.integrations', label: 'Integrations' },
+      { value: 'admin.webhooks', label: 'Webhooks' },
+      { value: 'admin.tenants', label: 'Tenants' },
+      { value: 'admin.user-access-override', label: 'User access override' },
+      { value: 'integrations.health', label: 'Integration health' },
+    ],
+  },
+  {
+    group: 'Profile',
+    paths: [
+      { value: 'profile.sessions', label: 'My sessions' },
+      { value: 'profile.activity', label: 'Login activity' },
+    ],
+  },
+] as const;
+
+export interface UserAccessOverride {
+  override_id: string;
+  tenant_id: string;
+  user_id: string;
+  module_path: string;
+  override_type: OverrideType;
+  permission_type: PermissionType;
+  effective_from: string;
+  effective_till: string | null;
+  reason: string;
+  requires_approval: boolean;
+  status: OverrideStatus;
+  created_by: string;
+  approved_by: string | null;
+  rejected_by: string | null;
+  revoked_by: string | null;
+  rejection_reason: string | null;
+  revocation_reason: string | null;
+  approval_note: string | null;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  rejected_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreateOverrideInput {
+  user_id: string;
+  module_paths: string[];
+  override_type: OverrideType;
+  permission_type: PermissionType;
+  effective_from: string;
+  effective_till: string | null;
+  reason: string;
+  requires_approval: boolean;
+}
+
+export interface UpdateOverrideInput {
+  module_paths?: string[];
+  override_type?: OverrideType;
+  permission_type?: PermissionType;
+  effective_from?: string;
+  effective_till?: string | null;
+  reason?: string;
+}
+
+export interface EffectiveAccessRow {
+  module_path: string;
+  permissions: PermissionType[];
+  source: string;
+}
+
+export interface EffectiveAccess {
+  user_id: string;
+  computed_at: string;
+  role_access: { roles: string[]; modules: EffectiveAccessRow[] };
+  overrides_applied: UserAccessOverride[];
+  effective: EffectiveAccessRow[];
+}
+
+export interface AdminAuditLogRow {
+  audit_id: string;
+  tenant_id: string;
+  entity_type: 'user_access_override';
+  entity_id: string;
+  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire';
+  actor_id: string;
+  actor_role: string;
+  before_state: unknown | null;
+  after_state: unknown | null;
+  reason: string | null;
+  request_id: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────
 

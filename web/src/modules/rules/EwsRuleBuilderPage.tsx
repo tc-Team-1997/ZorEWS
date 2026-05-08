@@ -99,26 +99,38 @@ const CATEGORIES: EwsRuleCategory[] = [
 
 // ── API ──────────────────────────────────────────────────────────────
 
+// Tolerant body extractor — http.ts auto-unwraps the {header, body}
+// envelope at the response interceptor, so `r.data` is normally the body.
+// Tests mock http.get directly with `{ data: { body: T } }` (the raw
+// envelope shape), so this helper peeks inside `body` if present.
+function bodyOf<T>(r: { data: T | { body: T } }): T {
+  const d = r.data as { body?: T } | T;
+  if (d && typeof d === 'object' && 'body' in d && (d as { body: T }).body !== undefined) {
+    return (d as { body: T }).body;
+  }
+  return d as T;
+}
+
 const ewsApi = {
   list: () =>
     http.get<{ items: EwsRule[]; total: number }>('/v1/ews/rules')
-      .then((r) => r.data.items),
+      .then((r) => bodyOf(r).items),
   indicators: () =>
     http.get<{ items: EwsIndicator[] }>('/v1/ews/rules/indicators')
-      .then((r) => r.data.items),
+      .then((r) => bodyOf(r).items),
   create: (rule: unknown) =>
-    http.post<EwsRule>('/v1/ews/rules', rule).then((r) => r.data),
+    http.post<EwsRule>('/v1/ews/rules', rule).then((r) => bodyOf(r)),
   remove: (id: string) =>
-    http.delete<EwsRule>(`/v1/ews/rules/${id}`).then((r) => r.data),
+    http.delete<EwsRule>(`/v1/ews/rules/${id}`).then((r) => bodyOf(r)),
   activate: (id: string) =>
-    http.post<EwsRule>(`/v1/ews/rules/${id}/activate`, {}).then((r) => r.data),
+    http.post<EwsRule>(`/v1/ews/rules/${id}/activate`, {}).then((r) => bodyOf(r)),
   test: (id: string, values: Record<string, number | string>) =>
     http
       .post<{ matched: boolean; matched_indicators: string[]; score_impact: number; alert_severity: AlertSeverity }>(
         `/v1/ews/rules/${id}/test`,
         { values },
       )
-      .then((r) => r.data),
+      .then((r) => bodyOf(r)),
 };
 
 // ── Component ────────────────────────────────────────────────────────

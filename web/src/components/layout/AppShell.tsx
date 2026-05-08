@@ -56,6 +56,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/webhooks', i18nKey: 'webhooks', icon: Webhook, requireRole: ['admin'] },
   { to: '/admin/tenants', i18nKey: 'tenants', icon: Building2, requireRole: ['admin'] },
   { to: '/admin/service-clients', i18nKey: 'service_clients', icon: Key, requireRole: ['admin'] },
+  { to: '/admin/user-access-override', i18nKey: 'user_access_override', icon: ShieldCheck, requireRole: ['admin', 'supervisor'] },
 ] as const;
 
 // 15-min idle limit, 2-min warning window — banking standard.

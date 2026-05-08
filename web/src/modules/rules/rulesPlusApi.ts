@@ -36,8 +36,18 @@ export interface RuleDiffEntry {
   kind: 'changed' | 'added' | 'removed';
 }
 
-function unwrap<T>(p: Promise<{ data: T }>): Promise<T> {
-  return p.then((r) => r.data);
+// http.ts auto-unwraps the {header, body} envelope at the response
+// interceptor, so `r.data` IS the body. Tests that mock http directly
+// pass `{ data: { body: T } }` — peek inside `body` if present so
+// call sites are shape-agnostic.
+function unwrap<T>(p: Promise<{ data: T | { body: T } }>): Promise<T> {
+  return p.then((r) => {
+    const d = r.data as { body?: T } | T;
+    if (d && typeof d === 'object' && 'body' in d && (d as { body: T }).body !== undefined) {
+      return (d as { body: T }).body;
+    }
+    return d as T;
+  });
 }
 
 export const rulesPlusApi = {
