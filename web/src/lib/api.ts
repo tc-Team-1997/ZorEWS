@@ -906,6 +906,19 @@ export const api = {
     period: ReportPeriod,
     format: 'csv' | 'pdf' | 'xlsx',
   ) => {
+    if (format === 'pdf' || format === 'xlsx') {
+      // Client-side render — fetches the JSON payload and builds the file
+      // in the browser. The MSW handler at /v1/reports/:type only produces
+      // real bytes for CSV, so this path keeps PDF/Excel downloads valid
+      // in dev mode + still works against the real BFF (it just ignores
+      // the server's bytes for those formats).
+      const payload = await api.getReport(type, period);
+      // Lazy-load the heavy export deps so the main bundle stays light.
+      const ex = await import('./reportsExport');
+      if (format === 'pdf') ex.downloadReportPdf(payload);
+      else await ex.downloadReportXlsx(payload);
+      return;
+    }
     const r = await http.get<Blob>(`/v1/reports/${type}`, {
       params: { period, format },
       responseType: 'blob',
