@@ -161,14 +161,23 @@ export class PgSmartQueue {
     this.entries.set(alert.alert_id, entry);
     this.bucketOrder[bucket].push(alert.alert_id);
 
+    // Single CTE: parent alert insert + initial assignment row in one
+    // round-trip. Wrapping both inserts in the same statement guarantees
+    // the FK target exists by the time the queue_assignments row writes,
+    // closing the FK race that previously emitted noisy
+    // `queue_assignments_alert_id_fkey` warnings.
     void this.pool
       .query(
-        `INSERT INTO app_alerts.alerts (
-            alert_id, tenant_id, severity, customer_id, customer_name, rule_id, rule_name,
-            indicators, confidence, customer_exposure_kes, criticality_score,
-            assignee, status, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (alert_id) DO NOTHING`,
+        `WITH alert_upsert AS (
+           INSERT INTO app_alerts.alerts (
+             alert_id, tenant_id, severity, customer_id, customer_name, rule_id, rule_name,
+             indicators, confidence, customer_exposure_kes, criticality_score,
+             assignee, status, created_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           ON CONFLICT (alert_id) DO NOTHING
+         )
+         INSERT INTO app_alerts.queue_assignments (alert_id, queue, assigned_to, assigned_by)
+         VALUES ($1, $15, NULL, 'system')`,
         [
           alert.alert_id,
           tenant_id,
@@ -192,22 +201,11 @@ export class PgSmartQueue {
           null, // assignee — set on first assign()
           'open',
           new Date(alert.raised_at),
+          bucket,
         ],
       )
       .catch((err) =>
-        this.logger(`failed to insert alert ${alert.alert_id}`, err),
-      );
-    // Initial assignment row ("system" enqueue) so the assignment log is
-    // a complete audit trail of the alert's life in the queue.
-    void this.pool
-      .query(
-        `INSERT INTO app_alerts.queue_assignments (
-            alert_id, queue, assigned_to, assigned_by
-         ) VALUES ($1, $2, NULL, 'system')`,
-        [alert.alert_id, bucket],
-      )
-      .catch((err) =>
-        this.logger(`failed to insert initial queue assignment ${alert.alert_id}`, err),
+        this.logger(`failed to insert alert+assignment ${alert.alert_id}`, err),
       );
     return entry;
   }
