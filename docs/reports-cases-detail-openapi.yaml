@@ -1,0 +1,459 @@
+openapi: 3.0.3
+info:
+  title: APEX EWS — Cases Report (detail)
+  version: "1.0.0"
+  description: |
+    Row-level Cases Report (BAC §3.1.8) with the same age buckets +
+    SLA breach math the Dashboard SLA Breach Matrix uses
+    (BAC §3.1.9.1.4). Same source of truth, two surfaces.
+
+    The endpoint serves four formats off one URL:
+      - `format=json` — paginated rows for the SPA grid (default)
+      - `format=csv`  — RFC 4180 CSV, up to 50_000 rows
+      - `format=xlsx` — 2-sheet workbook (Cases + Filters), up to 50_000 rows
+      - `format=pdf`  — A4 landscape, 12-column subset, up to 5_000 rows
+
+    Joins:
+      `app_cases.cms_cases` × `app_admin.sla_config`
+      × `app_iam.users` (assignee join)
+
+    SLA target resolves with the same specific-then-fallback ladder the
+    dashboard uses (case_category × priority × business_unit, then
+    `default_fallback`).
+
+    Saved filters (per-user, optionally shared) are served from
+    `app_admin.saved_report_filters`; one `is_default` per
+    (owner, report_type) is the on-load preset.
+
+servers:
+  - url: /v1
+    description: Mounted on the BFF service (default port 8084)
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      in: header
+      name: X-Tenant-ID
+      required: true
+      schema: { type: string, example: BANK_DEMO }
+    Channel:
+      in: header
+      name: X-Channel
+      required: true
+      schema:
+        type: string
+        enum: [LOS, MOBILE, BRANCH, API, AGENT_PORTAL]
+    ApexUser:
+      in: header
+      name: x-apex-user
+      required: false
+      schema: { type: string, example: taniya }
+      description: Acting user — recorded on saved-filter rows + audit log entries.
+    ApexRole:
+      in: header
+      name: x-apex-role
+      required: false
+      schema:
+        type: string
+        enum: [admin, supervisor, risk_analyst, collection_officer, field_officer]
+      description: Role used by the export RBAC gate (see `EWS_403_export_denied`).
+
+  schemas:
+    AgeBucket:
+      type: string
+      enum: ["0-7d", "8-30d", "31-90d", "90+d", "ALL"]
+    Severity:
+      type: string
+      enum: [high, medium, low]
+    Priority:
+      type: string
+      enum: [P1, P2, P3, P4]
+    ExportFormat:
+      type: string
+      enum: [json, csv, xlsx, pdf]
+    ReportType:
+      type: string
+      enum: [cases, alerts, snapshot, rbi]
+    SortColumn:
+      type: string
+      enum: [created_at, age_days, sla_target_days, priority, status, case_number, severity]
+
+    Borrower:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string, nullable: true, example: "cust-1" }
+        name: { type: string, nullable: true, example: "Acme Co" }
+
+    CaseRow:
+      type: object
+      description: One row of the cases report. Mirrors the CSV/XLSX columns.
+      required:
+        - case_id
+        - case_number
+        - borrower
+        - product
+        - case_category
+        - priority
+        - severity
+        - status
+        - created_at
+        - age_days
+        - age_bucket
+        - sla_target_days
+        - is_breached
+        - assigned_to
+        - assignee_display_name
+        - branch
+        - alert_id
+        - tags
+      properties:
+        case_id:               { type: string, format: uuid }
+        case_number:           { type: string, example: "C-001" }
+        borrower:              { $ref: "#/components/schemas/Borrower" }
+        product:               { type: string, nullable: true }
+        case_category:         { type: string, nullable: true }
+        priority:              { $ref: "#/components/schemas/Priority" }
+        severity:              { $ref: "#/components/schemas/Severity" }
+        status:                { type: string, example: "OPEN" }
+        created_at:            { type: string, format: date-time }
+        age_days:              { type: number, format: float, minimum: 0 }
+        age_bucket:
+          type: string
+          enum: ["0-7d", "8-30d", "31-90d", "90+d"]
+        sla_target_days:       { type: number, format: float, nullable: true }
+        is_breached:           { type: boolean }
+        assigned_to:           { type: string, nullable: true }
+        assignee_display_name: { type: string, nullable: true }
+        branch:                { type: string, nullable: true }
+        alert_id:              { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+
+    CasesDetailFilter:
+      type: object
+      description: Filter object echoed back in the response.
+      properties:
+        ageBucket: { $ref: "#/components/schemas/AgeBucket" }
+        breached:  { type: boolean }
+        from:      { type: string, format: date-time }
+        to:        { type: string, format: date-time }
+        branch:    { type: string }
+        status:
+          type: array
+          items: { type: string }
+        severity:
+          type: array
+          items: { $ref: "#/components/schemas/Severity" }
+        q:         { type: string, description: "Free-text — matches case_number + borrower name (case-insensitive)" }
+        sort:      { $ref: "#/components/schemas/SortColumn" }
+        dir:
+          type: string
+          enum: [asc, desc]
+        page:      { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 500 }
+
+    CasesDetailReport:
+      type: object
+      required: [items, total, page, page_size, filters_applied, generated_at, tenant_id]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CaseRow" }
+        total:        { type: integer, minimum: 0 }
+        page:         { type: integer, minimum: 1 }
+        page_size:    { type: integer, minimum: 1 }
+        filters_applied: { $ref: "#/components/schemas/CasesDetailFilter" }
+        generated_at: { type: string, format: date-time }
+        tenant_id:    { type: string }
+
+    SavedFilter:
+      type: object
+      required: [filter_id, tenant_id, owner_id, report_type, name, filters, is_shared, is_default, created_at, updated_at]
+      properties:
+        filter_id:   { type: string, format: uuid }
+        tenant_id:   { type: string }
+        owner_id:    { type: string }
+        report_type: { $ref: "#/components/schemas/ReportType" }
+        name:        { type: string, minLength: 1, maxLength: 80 }
+        filters:     { $ref: "#/components/schemas/CasesDetailFilter" }
+        is_shared:   { type: boolean }
+        is_default:  { type: boolean }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    CreateSavedFilterInput:
+      type: object
+      required: [name, filters]
+      properties:
+        name:       { type: string, minLength: 1, maxLength: 80 }
+        filters:    { $ref: "#/components/schemas/CasesDetailFilter" }
+        is_shared:  { type: boolean, default: false }
+        is_default: { type: boolean, default: false }
+
+    UpdateSavedFilterInput:
+      type: object
+      description: Partial — only provided fields are updated.
+      properties:
+        name:       { type: string, minLength: 1, maxLength: 80 }
+        filters:    { $ref: "#/components/schemas/CasesDetailFilter" }
+        is_shared:  { type: boolean }
+        is_default: { type: boolean }
+
+    EwsHeader:
+      type: object
+      required: [status, requestId, timestamp]
+      properties:
+        status:    { type: string, enum: [SUCCESS, FAILURE] }
+        requestId: { type: string, format: uuid }
+        timestamp: { type: string, format: date-time }
+
+    EwsError:
+      type: object
+      required: [header, error]
+      properties:
+        header: { $ref: "#/components/schemas/EwsHeader" }
+        error:
+          type: object
+          required: [code, message, severity]
+          properties:
+            code:
+              type: string
+              enum:
+                - EWS_400_invalid_input
+                - EWS_403_export_denied
+                - EWS_404_not_found
+                - EWS_409_conflict
+                - EWS_413_too_many_rows
+                - EWS_500
+            message:  { type: string }
+            severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
+
+paths:
+  /reports/cases/detail:
+    get:
+      summary: Cases Report — paginated rows or single export blob
+      operationId: getCasesDetailReport
+      tags: [reports]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexUser"
+        - $ref: "#/components/parameters/ApexRole"
+        - in: query
+          name: ageBucket
+          schema: { $ref: "#/components/schemas/AgeBucket" }
+        - in: query
+          name: breached
+          schema: { type: boolean }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: branch
+          schema: { type: string }
+        - in: query
+          name: status
+          description: CSV list of case statuses (e.g. `OPEN,IN_REVIEW`)
+          schema: { type: string }
+        - in: query
+          name: severity
+          description: CSV list of severities
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: sort
+          schema: { $ref: "#/components/schemas/SortColumn" }
+        - in: query
+          name: dir
+          schema:
+            type: string
+            enum: [asc, desc]
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        - in: query
+          name: format
+          schema: { $ref: "#/components/schemas/ExportFormat" }
+      responses:
+        "200":
+          description: Report rows (json) or export blob (csv/xlsx/pdf).
+          headers:
+            X-Generated-At:
+              schema: { type: string, format: date-time }
+              description: When the snapshot was computed (echoed for export filenames)
+            X-Row-Count:
+              schema: { type: integer }
+              description: Row count in the export body
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body:   { $ref: "#/components/schemas/CasesDetailReport" }
+            text/csv:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid input (format, ageBucket, sort column, etc.)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+        "403":
+          description: |
+            Role can view but not export this format (`reports:cases:export`
+            required for csv/xlsx/pdf).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+        "413":
+          description: |
+            Result set exceeds the format-specific row cap
+            (csv: 50_000 · xlsx: 50_000 · pdf: 5_000). Narrow the filter
+            or pick a different format.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+
+  /reports/cases/filters:
+    get:
+      summary: List saved filter presets for the cases report
+      operationId: listCasesSavedFilters
+      tags: [reports]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexUser"
+      responses:
+        "200":
+          description: Caller's own filters + any tenant-shared filters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body:
+                    type: object
+                    required: [items, total]
+                    properties:
+                      total: { type: integer, minimum: 0 }
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/SavedFilter" }
+    post:
+      summary: Create a saved filter preset
+      operationId: createCasesSavedFilter
+      tags: [reports]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSavedFilterInput" }
+      responses:
+        "201":
+          description: Saved filter created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body:   { $ref: "#/components/schemas/SavedFilter" }
+        "400":
+          description: Validation failed (empty name, name too long, etc.)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+
+  /reports/cases/filters/{filter_id}:
+    put:
+      summary: Update a saved filter preset
+      operationId: updateCasesSavedFilter
+      tags: [reports]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexUser"
+        - in: path
+          name: filter_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSavedFilterInput" }
+      responses:
+        "200":
+          description: Updated row.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body:   { $ref: "#/components/schemas/SavedFilter" }
+        "404":
+          description: Filter not found (or not owned by caller).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }
+    delete:
+      summary: Delete a saved filter preset
+      operationId: deleteCasesSavedFilter
+      tags: [reports]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/ApexUser"
+        - in: path
+          name: filter_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deletion confirmed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [header, body]
+                properties:
+                  header: { $ref: "#/components/schemas/EwsHeader" }
+                  body:
+                    type: object
+                    required: [deleted]
+                    properties:
+                      deleted: { type: boolean, example: true }
+        "404":
+          description: Filter not found (or not owned by caller).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EwsError" }

@@ -966,6 +966,20 @@ export interface AppDeps {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slaConfigStore?: any;
+  /**
+   * Source for the Cases Report detail (BAC §3.1.8). When provided,
+   * mounts /v1/reports/cases/detail + /v1/reports/cases/filters.
+   * Bootstrap wires this to a Pg-backed source via
+   * makeCasesDetailSource() when BFF_PG_URL || ADMIN_PG_URL is set.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  casesDetailSource?: any;
+  /** Saved-filter store (paired with casesDetailSource). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  savedFilterStore?: any;
+  /** Optional Pg pool used to record export audit rows. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  reportAuditPool?: any;
 }
 
 export function makeApp(deps: AppDeps = {}) {
@@ -1086,6 +1100,23 @@ export function makeApp(deps: AppDeps = {}) {
     app.use(
       makeSlaConfigRouter({
         store: deps.slaConfigStore,
+        requireTenantMw,
+        requireRole,
+        now,
+      }),
+    );
+  }
+
+  // ---------- /v1/reports/cases/* — Cases Report (BAC §3.1.8) ----------
+  if (deps.casesDetailSource && deps.savedFilterStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeCasesDetailRouter } = require('./reports/cases_detail_routes') as
+      typeof import('./reports/cases_detail_routes');
+    app.use(
+      makeCasesDetailRouter({
+        source: deps.casesDetailSource,
+        savedFilterStore: deps.savedFilterStore,
+        auditPool: deps.reportAuditPool ?? null,
         requireTenantMw,
         requireRole,
         now,
@@ -14358,6 +14389,16 @@ if (require.main === module) {
     const { makeSlaConfigStore } = require('./admin/sla_config_store') as
       typeof import('./admin/sla_config_store');
     const { store: slaConfigStore } = await makeSlaConfigStore();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeCasesDetailSource } = require('./reports/cases_detail_query') as
+      typeof import('./reports/cases_detail_query');
+    const { source: casesDetailSource, pool: casesDetailPool } = await makeCasesDetailSource();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeSavedFilterStore } = require('./reports/saved_filters_store') as
+      typeof import('./reports/saved_filters_store');
+    const { store: savedFilterStore, pool: savedFilterPool } = await makeSavedFilterStore();
+    // Reuse whichever pool is live for audit rows (both target the same DB).
+    const reportAuditPool = casesDetailPool ?? savedFilterPool ?? null;
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
@@ -14368,6 +14409,9 @@ if (require.main === module) {
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
       slaConfigStore,
+      casesDetailSource,
+      savedFilterStore,
+      reportAuditPool,
     });
     const { defaultEwsRuleStore } = require('./ews_rules') as { defaultEwsRuleStore: EwsRuleStore };
     for (const t of ['BANK_DEMO', 'BIL']) {

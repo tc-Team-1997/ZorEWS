@@ -72,6 +72,10 @@
     "admin:user_access_override:approve":      ["admin"],
     "admin:user_access_override:revoke":       ["admin"],
     "admin:user_access_override:bulk_revoke":  ["admin"],
-    "admin:user_access_override:audit":        ["admin", "supervisor"]
+    "admin:user_access_override:audit":        ["admin", "supervisor"],
+
+    "reports:cases:view":                      ["admin", "supervisor", "risk_analyst"],
+    "reports:cases:export":                    ["admin", "supervisor"],
+    "reports:saved_filters:manage":            ["admin", "supervisor", "risk_analyst"]
   }
 }
