@@ -139,15 +139,13 @@ describe('EscalationWorkerPage (M14.25c)', () => {
     expect(await screen.findByTestId('esc-worker-recent-empty')).toBeInTheDocument();
   });
 
-  it('recent-dispatches list populates after a tick', async () => {
+  it('recent-dispatches list populates after a tick (invalidated immediately)', async () => {
     renderWithProviders(<EscalationWorkerPage />);
     await screen.findByTestId('esc-worker-recent-empty');
     await userEvent.click(screen.getByTestId('esc-worker-tick'));
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('esc-worker-recent-list')).toBeInTheDocument();
-      },
-      { timeout: 8_000 }, // 5s refetchInterval + slack
-    );
-  }, 10_000);
+    // Tick onSuccess invalidates the recent-dispatches query, so the
+    // list should land within the testing-library default 1s — no need
+    // to wait for the 5s refetch tick.
+    expect(await screen.findByTestId('esc-worker-recent-list')).toBeInTheDocument();
+  });
 });

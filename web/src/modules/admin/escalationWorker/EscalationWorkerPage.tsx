@@ -14,7 +14,7 @@
 //      last_error if any. Refreshed every 5s.
 
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Mail, MessageSquare, Plus, Send, Smartphone, Trash2, Zap } from 'lucide-react';
 import {
   api,
@@ -137,11 +137,22 @@ export function EscalationWorkerPage() {
       setTickResult(null);
     },
   });
+  const queryClient = useQueryClient();
   const tick = useMutation({
     mutationFn: api.escalationsTick,
     onSuccess: (data) => {
       setTickResult(data);
       setPreviewResult(null);
+      // Pull the recent-dispatches list up-front instead of waiting up
+      // to 5s for the next poll — feels like the tick "took" instantly.
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'escalations', 'worker', 'recent-dispatches'],
+      });
+      // Worker status reflects last_run_dispatched after a tick when
+      // the cron is wired; refresh sooner than 5s for the same reason.
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'escalations', 'worker', 'status'],
+      });
     },
   });
 
