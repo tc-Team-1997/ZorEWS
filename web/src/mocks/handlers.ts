@@ -454,6 +454,96 @@ function _mkTemplate(
   };
 }
 
+// ── Escalation Matrix fixture (M14.17/M14.20) ───────────────────────
+
+interface MswEscalationRule {
+  escalation_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  level_1_after_minutes: number;
+  level_1_role: string;
+  level_2_after_minutes: number | null;
+  level_2_role: string | null;
+  level_3_after_minutes: number | null;
+  level_3_role: string | null;
+  status: 'ACTIVE' | 'ARCHIVED';
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MswEscalationCreateInput {
+  name: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  level_1_after_minutes: number;
+  level_1_role: string;
+  level_2_after_minutes?: number | null;
+  level_2_role?: string | null;
+  level_3_after_minutes?: number | null;
+  level_3_role?: string | null;
+}
+
+const ESC_ROLES = ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'];
+
+function _mkEsc(
+  name: string,
+  case_category: string,
+  priority: 'P1' | 'P2' | 'P3' | 'P4',
+  l1m: number, l1r: string,
+  l2m: number | null = null, l2r: string | null = null,
+  l3m: number | null = null, l3r: string | null = null,
+): MswEscalationRule {
+  const now = new Date('2026-05-09T08:00:00.000Z').toISOString();
+  return {
+    escalation_id: `esc-seed-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
+    tenant_id: 'BANK_DEMO',
+    name,
+    case_category,
+    priority,
+    level_1_after_minutes: l1m,
+    level_1_role: l1r,
+    level_2_after_minutes: l2m,
+    level_2_role: l2r,
+    level_3_after_minutes: l3m,
+    level_3_role: l3r,
+    status: 'ACTIVE',
+    created_by: 'system:seed',
+    updated_by: null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+const mswEscalationRules: MswEscalationRule[] = [
+  _mkEsc('BANK Fraud P1 fast-escalate', 'fraud', 'P1', 15, 'supervisor', 60, 'risk_analyst', 240, 'admin'),
+  _mkEsc('BANK Credit P2 standard',     'credit_risk', 'P2', 60, 'supervisor', 240, 'risk_analyst'),
+  _mkEsc('BANK KYC P3 reminder',        'kyc', 'P3', 480, 'supervisor'),
+  _mkEsc('BANK Compliance P1 fast',     'compliance', 'P1', 30, 'risk_analyst', 120, 'admin'),
+  _mkEsc('BANK Default P3 fallback',    'default_fallback', 'P3', 1440, 'supervisor'),
+];
+
+function _validateEscChain(
+  l1m: number,
+  l2m: number | null, l2r: string | null,
+  l3m: number | null, l3r: string | null,
+): string | null {
+  if (!Number.isInteger(l1m) || l1m < 0) return 'level_1_after_minutes must be a non-negative integer';
+  const l2set = l2m !== null && l2m !== undefined;
+  const l2rset = l2r !== null && l2r !== undefined;
+  if (l2set !== l2rset) return 'level_2_after_minutes and level_2_role must be set together';
+  if (l2set && (l2m as number) <= l1m) return 'level_2_after_minutes must be greater than level_1_after_minutes';
+  const l3set = l3m !== null && l3m !== undefined;
+  const l3rset = l3r !== null && l3r !== undefined;
+  if (l3set !== l3rset) return 'level_3_after_minutes and level_3_role must be set together';
+  if (l3set && !l2set) return 'level_3 cannot be set without level_2';
+  if (l3set && (l3m as number) <= (l2m as number)) return 'level_3_after_minutes must be greater than level_2_after_minutes';
+  return null;
+}
+
 const mswNotificationTemplates: MswNotificationTemplate[] = [
   _mkTemplate(
     'Case Opened — RM email',
@@ -3064,6 +3154,173 @@ export const handlers = [
       updated_at: now,
     };
     mswNotificationTemplates[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  // ── Escalation Matrix admin (T6 M14.17/M14.20) ──────────────────────
+
+  // /resolve declared BEFORE /:id so the literal doesn't get shadowed.
+  http.get('/v1/admin/escalation-matrix/resolve', ({ request }) => {
+    const url = new URL(request.url);
+    const cat = url.searchParams.get('case_category');
+    const prio = url.searchParams.get('priority');
+    if (!cat || !prio) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'case_category + priority required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const matches = mswEscalationRules
+      .filter((r) => r.status === 'ACTIVE' && r.case_category === cat && r.priority === prio)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return HttpResponse.json(envelope({ rule: matches[0] ?? null }));
+  }),
+
+  http.get('/v1/admin/escalation-matrix', ({ request }) => {
+    const url = new URL(request.url);
+    const cat = url.searchParams.get('case_category');
+    const prio = url.searchParams.get('priority');
+    const status = url.searchParams.get('status');
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
+    let rows = mswEscalationRules.slice();
+    if (cat) rows = rows.filter((r) => r.case_category === cat);
+    if (prio) rows = rows.filter((r) => r.priority === prio);
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((r) => set.has(r.status));
+    }
+    rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({
+        items: rows.slice(start, start + pageSize),
+        total: rows.length,
+        page,
+        page_size: pageSize,
+      }),
+    );
+  }),
+
+  http.get('/v1/admin/escalation-matrix/:id', ({ params }) => {
+    const r = mswEscalationRules.find((x) => x.escalation_id === params.id);
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/admin/escalation-matrix', async ({ request }) => {
+    const body = (await request.json()) as MswEscalationCreateInput;
+    if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'), { status: 400 });
+    }
+    if (!ESC_ROLES.includes(body.level_1_role)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', `level_1_role must be one of ${ESC_ROLES.join('|')}`, 'MEDIUM'), { status: 400 });
+    }
+    if (body.level_2_role !== null && body.level_2_role !== undefined && !ESC_ROLES.includes(body.level_2_role)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', `level_2_role must be one of ${ESC_ROLES.join('|')}`, 'MEDIUM'), { status: 400 });
+    }
+    if (body.level_3_role !== null && body.level_3_role !== undefined && !ESC_ROLES.includes(body.level_3_role)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', `level_3_role must be one of ${ESC_ROLES.join('|')}`, 'MEDIUM'), { status: 400 });
+    }
+    const chainErr = _validateEscChain(
+      body.level_1_after_minutes,
+      body.level_2_after_minutes ?? null, body.level_2_role ?? null,
+      body.level_3_after_minutes ?? null, body.level_3_role ?? null,
+    );
+    if (chainErr) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', chainErr, 'MEDIUM'), { status: 400 });
+    }
+    const dup = mswEscalationRules.find(
+      (r) => r.name.toLowerCase() === body.name.trim().toLowerCase(),
+    );
+    if (dup) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_duplicate_escalation_name', `escalation "${body.name}" already used`, 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const row: MswEscalationRule = {
+      escalation_id: `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id: 'BANK_DEMO',
+      name: body.name.trim(),
+      case_category: body.case_category,
+      priority: body.priority,
+      level_1_after_minutes: body.level_1_after_minutes,
+      level_1_role: body.level_1_role,
+      level_2_after_minutes: body.level_2_after_minutes ?? null,
+      level_2_role: body.level_2_role ?? null,
+      level_3_after_minutes: body.level_3_after_minutes ?? null,
+      level_3_role: body.level_3_role ?? null,
+      status: 'ACTIVE',
+      created_by: actor,
+      updated_by: null,
+      created_at: now,
+      updated_at: now,
+    };
+    mswEscalationRules.push(row);
+    return HttpResponse.json(envelope(row, 'EWS_201_created', 'Created'), { status: 201 });
+  }),
+
+  http.patch('/v1/admin/escalation-matrix/:id', async ({ params, request }) => {
+    const idx = mswEscalationRules.findIndex((x) => x.escalation_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswEscalationRules[idx];
+    if (old.status === 'ARCHIVED') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', 'cannot update an archived rule', 'MEDIUM'), { status: 409 });
+    }
+    const patch = (await request.json()) as Partial<MswEscalationCreateInput>;
+    const merged = {
+      level_1_after_minutes: patch.level_1_after_minutes ?? old.level_1_after_minutes,
+      level_1_role: patch.level_1_role ?? old.level_1_role,
+      level_2_after_minutes: patch.level_2_after_minutes !== undefined ? patch.level_2_after_minutes : old.level_2_after_minutes,
+      level_2_role: patch.level_2_role !== undefined ? patch.level_2_role : old.level_2_role,
+      level_3_after_minutes: patch.level_3_after_minutes !== undefined ? patch.level_3_after_minutes : old.level_3_after_minutes,
+      level_3_role: patch.level_3_role !== undefined ? patch.level_3_role : old.level_3_role,
+    };
+    if (!ESC_ROLES.includes(merged.level_1_role)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', `level_1_role must be one of ${ESC_ROLES.join('|')}`, 'MEDIUM'), { status: 400 });
+    }
+    const chainErr = _validateEscChain(
+      merged.level_1_after_minutes,
+      merged.level_2_after_minutes, merged.level_2_role,
+      merged.level_3_after_minutes, merged.level_3_role,
+    );
+    if (chainErr) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', chainErr, 'MEDIUM'), { status: 400 });
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswEscalationRule = {
+      ...old,
+      name: patch.name ?? old.name,
+      ...merged,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswEscalationRules[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.delete('/v1/admin/escalation-matrix/:id', ({ params }) => {
+    const idx = mswEscalationRules.findIndex((x) => x.escalation_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswEscalationRules[idx];
+    if (old.status === 'ARCHIVED') return HttpResponse.json(envelope(old));
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswEscalationRule = { ...old, status: 'ARCHIVED', updated_by: actor, updated_at: now };
+    mswEscalationRules[idx] = updated;
     return HttpResponse.json(envelope(updated));
   }),
 

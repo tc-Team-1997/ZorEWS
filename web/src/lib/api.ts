@@ -1181,6 +1181,51 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // ── Escalation Matrix admin (T6 M14.17/M14.20) ─────────────────────
+
+  escalationMatrixList: (
+    params: {
+      case_category?: string;
+      priority?: EscalationPriority;
+      status?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
+    http
+      .get<{ items: EscalationMatrixRuleRow[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/escalation-matrix',
+        { params },
+      )
+      .then((r) => r.data),
+
+  escalationMatrixResolve: (case_category: string, priority: EscalationPriority) =>
+    http
+      .get<{ rule: EscalationMatrixRuleRow | null }>('/v1/admin/escalation-matrix/resolve', {
+        params: { case_category, priority },
+      })
+      .then((r) => r.data),
+
+  escalationMatrixCreate: (input: EscalationMatrixCreateInput) =>
+    http
+      .post<EscalationMatrixRuleRow>('/v1/admin/escalation-matrix', input)
+      .then((r) => r.data),
+
+  escalationMatrixUpdate: (id: string, patch: EscalationMatrixUpdateInput) =>
+    http
+      .patch<EscalationMatrixRuleRow>(
+        `/v1/admin/escalation-matrix/${encodeURIComponent(id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+
+  escalationMatrixArchive: (id: string) =>
+    http
+      .delete<EscalationMatrixRuleRow>(
+        `/v1/admin/escalation-matrix/${encodeURIComponent(id)}`,
+      )
+      .then((r) => r.data),
+
   // ── Cases Report — row-level detail (BAC §3.1.8) ──────────────────────
 
   casesDetailReport: (filter: CasesDetailFilter) =>
@@ -1439,6 +1484,60 @@ export interface NotificationTemplateUpdateInput {
   subject?: string | null;
   body?: string;
   locale?: string;
+}
+
+// ── Escalation Matrix types (T6 M14.17) ────────────────────────────
+
+export const ESCALATION_ROLES = [
+  'admin',
+  'risk_analyst',
+  'supervisor',
+  'collection_officer',
+  'field_officer',
+] as const;
+export type EscalationRole = (typeof ESCALATION_ROLES)[number];
+export type EscalationStatus = 'ACTIVE' | 'ARCHIVED';
+export type EscalationPriority = 'P1' | 'P2' | 'P3' | 'P4';
+
+export interface EscalationMatrixRuleRow {
+  escalation_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: EscalationPriority;
+  level_1_after_minutes: number;
+  level_1_role: EscalationRole;
+  level_2_after_minutes: number | null;
+  level_2_role: EscalationRole | null;
+  level_3_after_minutes: number | null;
+  level_3_role: EscalationRole | null;
+  status: EscalationStatus;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EscalationMatrixCreateInput {
+  name: string;
+  case_category: string;
+  priority: EscalationPriority;
+  level_1_after_minutes: number;
+  level_1_role: EscalationRole;
+  level_2_after_minutes?: number | null;
+  level_2_role?: EscalationRole | null;
+  level_3_after_minutes?: number | null;
+  level_3_role?: EscalationRole | null;
+}
+
+export interface EscalationMatrixUpdateInput {
+  name?: string;
+  level_1_after_minutes?: number;
+  level_1_role?: EscalationRole;
+  level_2_after_minutes?: number | null;
+  level_2_role?: EscalationRole | null;
+  level_3_after_minutes?: number | null;
+  level_3_role?: EscalationRole | null;
 }
 
 // ── User Access Override types ──────────────────────────────────────
