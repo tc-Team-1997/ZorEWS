@@ -69,6 +69,11 @@
     "admin:sla_config:update":                 ["admin"],
     "admin:sla_config:archive":                ["admin"],
 
+    "admin:notification_templates:list":       ["admin", "supervisor"],
+    "admin:notification_templates:create":     ["admin"],
+    "admin:notification_templates:update":     ["admin"],
+    "admin:notification_templates:archive":    ["admin"],
+
     "admin:user_access_override:list":         ["admin", "supervisor"],
     "admin:user_access_override:create":       ["admin"],
     "admin:user_access_override:approve":      ["admin"],

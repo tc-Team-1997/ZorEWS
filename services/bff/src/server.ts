@@ -969,6 +969,14 @@ export interface AppDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slaConfigStore?: any;
   /**
+   * Admin CRUD store for app_admin.notification_templates (T6 M14.16).
+   * When provided, mounts /v1/admin/notification-templates routes.
+   * Bootstrap path may wire this to a PG-backed store; in-memory
+   * default is suitable for tests + dev.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  notificationTemplateStore?: any;
+  /**
    * Source for the Cases Report detail (BAC §3.1.8). When provided,
    * mounts /v1/reports/cases/detail + /v1/reports/cases/filters.
    * Bootstrap wires this to a Pg-backed source via
@@ -1119,6 +1127,21 @@ export function makeApp(deps: AppDeps = {}) {
     app.use(
       makeSlaConfigRouter({
         store: deps.slaConfigStore,
+        requireTenantMw,
+        requireRole,
+        now,
+      }),
+    );
+  }
+
+  // ---------- /v1/admin/notification-templates (T6 M14.16) ------------
+  if (deps.notificationTemplateStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeNotificationTemplatesRouter } = require('./admin/notification_templates_routes') as
+      typeof import('./admin/notification_templates_routes');
+    app.use(
+      makeNotificationTemplatesRouter({
+        store: deps.notificationTemplateStore,
         requireTenantMw,
         requireRole,
         now,
