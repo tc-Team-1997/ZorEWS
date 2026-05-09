@@ -1,4 +1,4 @@
-// SPA admin page for the M14.25 escalation worker (M14.25c).
+// SPA admin page for the M14.25 escalation worker (M14.25c, M14.25d).
 //
 // Lets ops:
 //   1. Build a synthetic open-case list (id + category + priority +
@@ -9,13 +9,12 @@
 //   3. Click Run tick → POST /v1/admin/escalations/tick, see the
 //      dispatched[] confirmation. Subsequent ticks at the same time
 //      are no-ops (already_dispatched_count goes up).
-//
-// No real CmsCaseSource yet — that's M14.25b's cron wrapper. For now
-// this page is the manual-trigger UX so ops can validate scenario +
-// matrix + template wiring end-to-end.
+//   4. (M14.25d) See the live cron status — running/disabled, interval,
+//      tenants, total runs, last_run_at + dispatched/inspected counts,
+//      last_error if any. Refreshed every 5s.
 
 import { useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Mail, MessageSquare, Plus, Send, Smartphone, Trash2, Zap } from 'lucide-react';
 import {
   api,
@@ -155,6 +154,13 @@ export function EscalationWorkerPage() {
   const result = tickResult ?? previewResult;
   const dueRows = result?.due ?? [];
 
+  const workerStatus = useQuery({
+    queryKey: ['admin', 'escalations', 'worker', 'status'],
+    queryFn: api.escalationsWorkerStatus,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
+  });
+
   const dueColumns: Column<EscalationDueRow & { id: string }>[] = useMemo(
     () => [
       {
@@ -228,8 +234,110 @@ export function EscalationWorkerPage() {
     <div>
       <PageHeader
         title="Escalation worker"
-        subtitle="Preview / tick the M14.25 worker against synthetic open cases. Real cron-driven trigger lands in M14.25b."
+        subtitle="Preview / tick the M14.25 worker against synthetic open cases. The cron runs server-side when ESCALATION_WORKER_INTERVAL_SEC is set."
       />
+
+      {/* ── M14.25d cron status panel ── */}
+      <div
+        className="mb-4 rounded-md border border-slate-200 bg-white p-3"
+        data-testid="esc-worker-status-panel"
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Worker status</h3>
+          {workerStatus.data ? (
+            workerStatus.data.cron_wired ? (
+              <span data-testid="esc-worker-status-running-badge">
+                <Badge
+                  tone={workerStatus.data.running ? 'success' : 'neutral'}
+                  className="text-2xs"
+                >
+                  {workerStatus.data.running ? 'Running' : 'Stopped'}
+                </Badge>
+              </span>
+            ) : (
+              <span data-testid="esc-worker-status-disabled-badge">
+                <Badge tone="neutral" className="text-2xs">
+                  Cron disabled
+                </Badge>
+              </span>
+            )
+          ) : workerStatus.isLoading ? (
+            <span className="text-2xs text-muted">Loading…</span>
+          ) : null}
+        </div>
+        {workerStatus.data && !workerStatus.data.cron_wired && (
+          <p className="text-2xs text-muted" data-testid="esc-worker-status-disabled-hint">
+            Set <span className="font-mono">ESCALATION_WORKER_INTERVAL_SEC</span> on the BFF to opt
+            in; the cron iterates every active tenant on each tick.
+          </p>
+        )}
+        {workerStatus.data && workerStatus.data.cron_wired && (
+          <div className="grid grid-cols-2 gap-2 text-2xs sm:grid-cols-4">
+            <div>
+              <div className="text-muted">Interval</div>
+              <div className="font-mono" data-testid="esc-worker-status-interval">
+                {Math.round(workerStatus.data.interval_ms / 1000)}s
+              </div>
+            </div>
+            <div>
+              <div className="text-muted">Tenants</div>
+              <div className="font-mono" data-testid="esc-worker-status-tenants">
+                {workerStatus.data.tenants.length === 0
+                  ? '—'
+                  : workerStatus.data.tenants.join(', ')}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted">Total runs</div>
+              <div className="font-mono tabular-nums" data-testid="esc-worker-status-total-runs">
+                {workerStatus.data.total_runs}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted">Last run</div>
+              <div className="font-mono" data-testid="esc-worker-status-last-run">
+                {workerStatus.data.last_run_at
+                  ? new Date(workerStatus.data.last_run_at).toLocaleTimeString()
+                  : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted">Last dispatched</div>
+              <div className="font-mono tabular-nums" data-testid="esc-worker-status-last-dispatched">
+                {workerStatus.data.last_run_dispatched}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted">Last inspected</div>
+              <div className="font-mono tabular-nums" data-testid="esc-worker-status-last-inspected">
+                {workerStatus.data.last_run_inspected}
+              </div>
+            </div>
+            <div className="col-span-2">
+              <div className="text-muted">Last error</div>
+              <div
+                className={
+                  workerStatus.data.last_error
+                    ? 'font-mono text-rose-700'
+                    : 'font-mono text-emerald-700'
+                }
+                data-testid="esc-worker-status-last-error"
+              >
+                {workerStatus.data.last_error ?? 'none'}
+              </div>
+            </div>
+          </div>
+        )}
+        {workerStatus.isError && (
+          <p
+            className="text-2xs text-rose-700"
+            role="alert"
+            data-testid="esc-worker-status-error"
+          >
+            Status unavailable: {(workerStatus.error as Error)?.message ?? 'unknown error'}
+          </p>
+        )}
+      </div>
 
       {/* ── Synthetic open-case form ── */}
       <div className="mb-4 rounded-md border border-slate-200 bg-white p-3">

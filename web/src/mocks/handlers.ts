@@ -3925,6 +3925,26 @@ export const handlers = [
     return HttpResponse.json(envelope(result.payload));
   }),
 
+  // ── M14.25b worker status ─────────────────────────────────────────
+  // The cron only runs server-side under ESCALATION_WORKER_INTERVAL_SEC,
+  // so the MSW mock returns cron_wired=false + zeros — same shape so
+  // the SPA renders the disabled state uniformly.
+  http.get('/v1/admin/escalations/worker/status', () =>
+    HttpResponse.json(
+      envelope({
+        running: false,
+        interval_ms: 0,
+        tenants: [] as string[],
+        total_runs: 0,
+        last_run_at: null,
+        last_run_dispatched: 0,
+        last_run_inspected: 0,
+        last_error: null,
+        cron_wired: false,
+      }),
+    ),
+  ),
+
   http.post('/v1/admin/escalations/tick', async ({ request }) => {
     const tenant = readTenantFromReq(request);
     const body = (await request.json()) as { open_cases?: unknown };

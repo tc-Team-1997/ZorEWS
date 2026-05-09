@@ -1237,6 +1237,11 @@ export const api = {
       .post<EscalationTickResult>('/v1/admin/escalations/tick', { open_cases })
       .then((r) => r.data),
 
+  escalationsWorkerStatus: () =>
+    http
+      .get<EscalationWorkerStatus>('/v1/admin/escalations/worker/status')
+      .then((r) => r.data),
+
   // ── Escalation Matrix admin (T6 M14.17/M14.20) ─────────────────────
 
   escalationMatrixList: (
@@ -1698,6 +1703,21 @@ export interface EscalationPreviewResult {
 
 export interface EscalationTickResult extends EscalationPreviewResult {
   dispatched: NotificationDispatchEntry[];
+}
+
+/** Snapshot of the M14.25b cron's last-run state. When the cron isn't
+ *  wired (default), `cron_wired=false` and the rest are zeros — same
+ *  shape so the SPA renders uniformly. */
+export interface EscalationWorkerStatus {
+  running: boolean;
+  interval_ms: number;
+  tenants: readonly string[];
+  total_runs: number;
+  last_run_at: string | null;
+  last_run_dispatched: number;
+  last_run_inspected: number;
+  last_error: string | null;
+  cron_wired: boolean;
 }
 
 // ── Escalation Matrix types (T6 M14.17) ────────────────────────────

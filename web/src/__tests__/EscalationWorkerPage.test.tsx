@@ -113,4 +113,18 @@ describe('EscalationWorkerPage (M14.25c)', () => {
     expect(screen.getByTestId('esc-worker-preview')).toBeInTheDocument();
     expect(screen.queryByTestId('esc-worker-tick')).not.toBeInTheDocument();
   });
+
+  // M14.25d — Worker status panel
+  it('renders the cron status panel with the disabled badge in the default deployment', async () => {
+    renderWithProviders(<EscalationWorkerPage />);
+    expect(await screen.findByTestId('esc-worker-status-panel')).toBeInTheDocument();
+    expect(await screen.findByTestId('esc-worker-status-disabled-badge')).toHaveTextContent(
+      /Cron disabled/i,
+    );
+    expect(screen.getByTestId('esc-worker-status-disabled-hint')).toHaveTextContent(
+      /ESCALATION_WORKER_INTERVAL_SEC/,
+    );
+    // Disabled state suppresses the metrics grid (interval/tenants/etc).
+    expect(screen.queryByTestId('esc-worker-status-interval')).not.toBeInTheDocument();
+  });
 });
