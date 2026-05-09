@@ -1068,7 +1068,17 @@ export const api = {
       )
       .then((r) => r.data),
 
-  uaoAuditLog: (params: { entity_id?: string; actor_id?: string; page?: number; page_size?: number } = {}) =>
+  uaoAuditLog: (
+    params: {
+      entity_id?: string;
+      actor_id?: string;
+      entity_type?: AdminAuditEntityType;
+      from?: string;
+      to?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
     http
       .get<{ items: AdminAuditLogRow[]; total: number; page: number; page_size: number }>(
         '/v1/admin/admin-audit-log',
@@ -1510,12 +1520,28 @@ export const USER_BRANCH_MAP: Record<string, { branch: string; department: strin
   'u-005': { branch: 'BR-MSA-02', department: 'Field Ops' },
 };
 
+export type AdminAuditEntityType =
+  | 'user_access_override'
+  | 'report_export'
+  | 'ews_rule_version';
+
+export type AdminAuditAction =
+  | 'create'
+  | 'update'
+  | 'approve'
+  | 'reject'
+  | 'revoke'
+  | 'expire'
+  | 'export'
+  | 'view'
+  | 'revert';
+
 export interface AdminAuditLogRow {
   audit_id: string;
   tenant_id: string;
-  entity_type: 'user_access_override';
+  entity_type: AdminAuditEntityType;
   entity_id: string;
-  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire';
+  action: AdminAuditAction;
   actor_id: string;
   actor_role: string;
   before_state: unknown | null;

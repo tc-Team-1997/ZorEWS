@@ -138,9 +138,9 @@ export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterTy
   };
 
   const wrap =
-    (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>): RequestHandler =>
+    (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>
     (req, res, next) => {
-      fn(req, res, next).catch((e) => handleErr(e, req, res));
+      void fn(req, res, next).catch((e) => handleErr(e, req, res));
     };
 
   // ── GET /v1/admin/user-access-overrides ────────────────────────────
@@ -389,9 +389,28 @@ export function makeUserAccessOverrideRouter(deps: OverrideRouterDeps): RouterTy
     wrap(async (req, res) => {
       const ctx = extractCtx(req, now);
       const q = req.query;
+      const VALID_ENTITY_TYPES = ['user_access_override', 'report_export', 'ews_rule_version'];
+      const entityType = typeof q.entity_type === 'string' ? q.entity_type : undefined;
+      if (entityType && !VALID_ENTITY_TYPES.includes(entityType)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `entity_type must be one of ${VALID_ENTITY_TYPES.join(',')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
       const out = await store.listAuditLog(req.tenant!.tenant_id, {
         entity_id: typeof q.entity_id === 'string' ? q.entity_id : undefined,
         actor_id: typeof q.actor_id === 'string' ? q.actor_id : undefined,
+        entity_type: entityType as
+          | 'user_access_override'
+          | 'report_export'
+          | 'ews_rule_version'
+          | undefined,
         from: typeof q.from === 'string' ? q.from : undefined,
         to: typeof q.to === 'string' ? q.to : undefined,
         page: typeof q.page === 'string' ? Number(q.page) : undefined,

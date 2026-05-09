@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import type {
+  AdminAuditEntityType,
   AdminAuditLogRow,
   CreateOverrideInput,
   ListOverridesFilter,
@@ -89,7 +90,7 @@ export interface UserAccessOverrideStore {
   ): Promise<UserAccessOverride[]>;
   listAuditLog(
     tenant_id: string,
-    filter: { entity_id?: string; actor_id?: string; from?: string; to?: string; page?: number; page_size?: number },
+    filter: { entity_id?: string; actor_id?: string; entity_type?: AdminAuditEntityType; from?: string; to?: string; page?: number; page_size?: number },
   ): Promise<{ items: AdminAuditLogRow[]; total: number; page: number; page_size: number }>;
 }
 
@@ -390,7 +391,7 @@ export class InMemoryUserAccessOverrideStore implements UserAccessOverrideStore 
 
   async listAuditLog(
     tenant_id: string,
-    filter: { entity_id?: string; actor_id?: string; from?: string; to?: string; page?: number; page_size?: number },
+    filter: { entity_id?: string; actor_id?: string; entity_type?: AdminAuditEntityType; from?: string; to?: string; page?: number; page_size?: number },
   ): Promise<{ items: AdminAuditLogRow[]; total: number; page: number; page_size: number }> {
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(200, Math.max(1, filter.page_size ?? 50));
@@ -398,6 +399,7 @@ export class InMemoryUserAccessOverrideStore implements UserAccessOverrideStore 
       .filter((a) => a.tenant_id === tenant_id)
       .filter((a) => !filter.entity_id || a.entity_id === filter.entity_id)
       .filter((a) => !filter.actor_id || a.actor_id === filter.actor_id)
+      .filter((a) => !filter.entity_type || a.entity_type === filter.entity_type)
       .filter((a) => !filter.from || a.created_at >= filter.from)
       .filter((a) => !filter.to || a.created_at <= filter.to)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -758,16 +760,17 @@ export class PgUserAccessOverrideStore implements UserAccessOverrideStore {
 
   async listAuditLog(
     tenant_id: string,
-    filter: { entity_id?: string; actor_id?: string; from?: string; to?: string; page?: number; page_size?: number },
+    filter: { entity_id?: string; actor_id?: string; entity_type?: AdminAuditEntityType; from?: string; to?: string; page?: number; page_size?: number },
   ): Promise<{ items: AdminAuditLogRow[]; total: number; page: number; page_size: number }> {
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(200, Math.max(1, filter.page_size ?? 50));
     const where: string[] = ['tenant_id = $1'];
     const args: unknown[] = [tenant_id];
-    if (filter.entity_id) { args.push(filter.entity_id); where.push(`entity_id = $${args.length}`); }
-    if (filter.actor_id)  { args.push(filter.actor_id);  where.push(`actor_id = $${args.length}`); }
-    if (filter.from)      { args.push(filter.from);      where.push(`created_at >= $${args.length}`); }
-    if (filter.to)        { args.push(filter.to);        where.push(`created_at <= $${args.length}`); }
+    if (filter.entity_id)   { args.push(filter.entity_id);   where.push(`entity_id = $${args.length}`); }
+    if (filter.actor_id)    { args.push(filter.actor_id);    where.push(`actor_id = $${args.length}`); }
+    if (filter.entity_type) { args.push(filter.entity_type); where.push(`entity_type = $${args.length}`); }
+    if (filter.from)        { args.push(filter.from);        where.push(`created_at >= $${args.length}`); }
+    if (filter.to)          { args.push(filter.to);          where.push(`created_at <= $${args.length}`); }
     const whereSql = where.join(' AND ');
 
     const totalRes = await this.pool.query<{ c: string }>(

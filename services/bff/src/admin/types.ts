@@ -168,13 +168,37 @@ export interface ListOverridesResult {
   page_size: number;
 }
 
-/** Audit-log row — mirrors app_admin.admin_audit_log. */
+/** Audit-log row — mirrors app_admin.admin_audit_log.
+ *
+ *  `entity_type` + `action` are intentionally widened beyond the original
+ *  user_access_override surface so newer fan-out sites can land their
+ *  rows in the same table:
+ *    - 'report_export'    + action='export' / 'view' (BAC §3.1.8 cases-detail)
+ *    - 'ews_rule_version' + action='revert'          (RP-1 rule revert)
+ *  The DB CHECK constraint in 020_saved_report_filters.sql is the canonical
+ *  enum source; this type intentionally mirrors it. */
+export type AdminAuditEntityType =
+  | 'user_access_override'
+  | 'report_export'
+  | 'ews_rule_version';
+
+export type AdminAuditAction =
+  | 'create'
+  | 'update'
+  | 'approve'
+  | 'reject'
+  | 'revoke'
+  | 'expire'
+  | 'export'
+  | 'view'
+  | 'revert';
+
 export interface AdminAuditLogRow {
   audit_id: string;
   tenant_id: string;
-  entity_type: 'user_access_override';
+  entity_type: AdminAuditEntityType;
   entity_id: string;
-  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire';
+  action: AdminAuditAction;
   actor_id: string;
   actor_role: string;
   before_state: unknown | null;
