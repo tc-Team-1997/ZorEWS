@@ -73,6 +73,8 @@
     "admin:notification_templates:create":     ["admin"],
     "admin:notification_templates:update":     ["admin"],
     "admin:notification_templates:archive":    ["admin"],
+    "admin:notification_templates:preview":    ["admin", "supervisor"],
+    "admin:notification_templates:test_fire":  ["admin"],
 
     "admin:escalation_matrix:list":            ["admin", "supervisor"],
     "admin:escalation_matrix:create":          ["admin"],

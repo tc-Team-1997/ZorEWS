@@ -977,6 +977,14 @@ export interface AppDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   notificationTemplateStore?: any;
   /**
+   * Append-only dispatch log (T6 M14.24). When set, the template
+   * routes mount Preview / Test-fire / GET /dispatches. Without it
+   * the GET degrades gracefully (returns empty); the POST /test-fire
+   * returns 503.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  notificationDispatchStore?: any;
+  /**
    * Admin CRUD store for app_admin.escalation_matrix (T6 M14.17).
    * When provided, mounts /v1/admin/escalation-matrix routes.
    */
@@ -1156,7 +1164,7 @@ export function makeApp(deps: AppDeps = {}) {
     );
   }
 
-  // ---------- /v1/admin/notification-templates (T6 M14.16) ------------
+  // ---------- /v1/admin/notification-templates (T6 M14.16, M14.24) ----
   if (deps.notificationTemplateStore) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { makeNotificationTemplatesRouter } = require('./admin/notification_templates_routes') as
@@ -1164,6 +1172,10 @@ export function makeApp(deps: AppDeps = {}) {
     app.use(
       makeNotificationTemplatesRouter({
         store: deps.notificationTemplateStore,
+        // M14.24 — preview/test-fire/dispatches log routes mount when
+        // a dispatch store is wired. Bootstrap path defaults to the
+        // in-memory FIFO store; PG-backed lands in M14.24b.
+        dispatchStore: deps.notificationDispatchStore,
         requireTenantMw,
         requireRole,
         now,
@@ -15391,6 +15403,11 @@ if (require.main === module) {
     const { makeNotificationTemplateStore } = require('./admin/notification_templates_store') as
       typeof import('./admin/notification_templates_store');
     const { store: notificationTemplateStore } = await makeNotificationTemplateStore();
+    // M14.24 dispatch log — in-memory FIFO for now; M14.24b adds PG.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { InMemoryNotificationDispatchStore } = require('./admin/notification_dispatch_store') as
+      typeof import('./admin/notification_dispatch_store');
+    const notificationDispatchStore = new InMemoryNotificationDispatchStore();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { makeEscalationMatrixStore } = require('./admin/escalation_matrix_store') as
       typeof import('./admin/escalation_matrix_store');
@@ -15457,6 +15474,7 @@ if (require.main === module) {
       slaMatrixSource,
       slaConfigStore,
       notificationTemplateStore,
+      notificationDispatchStore,
       escalationMatrixStore,
       caseScenarioStore,
       caseScenarioHistoryStore,
