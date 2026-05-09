@@ -74,6 +74,11 @@
     "admin:notification_templates:update":     ["admin"],
     "admin:notification_templates:archive":    ["admin"],
 
+    "admin:escalation_matrix:list":            ["admin", "supervisor"],
+    "admin:escalation_matrix:create":          ["admin"],
+    "admin:escalation_matrix:update":          ["admin"],
+    "admin:escalation_matrix:archive":         ["admin"],
+
     "admin:user_access_override:list":         ["admin", "supervisor"],
     "admin:user_access_override:create":       ["admin"],
     "admin:user_access_override:approve":      ["admin"],

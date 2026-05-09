@@ -42,6 +42,17 @@ export interface NotificationTemplate {
 
 export type EscalationStatus = 'ACTIVE' | 'ARCHIVED';
 
+/** Mirror of the canonical RBAC role list (infra/rbac/matrix.json).
+ *  Re-exported from escalation_matrix_store.ts. */
+export const ESCALATION_ROLES = [
+  'admin',
+  'risk_analyst',
+  'supervisor',
+  'collection_officer',
+  'field_officer',
+] as const;
+export type EscalationRole = (typeof ESCALATION_ROLES)[number];
+
 export interface EscalationMatrixRule {
   escalation_id: string;
   tenant_id: string;
@@ -49,13 +60,13 @@ export interface EscalationMatrixRule {
   case_category: string;
   priority: Priority;
   level_1_after_minutes: number;
-  level_1_role: string;
+  level_1_role: EscalationRole;
   /** Both level_2 columns set together or both null — DB CHECK enforced. */
   level_2_after_minutes: number | null;
-  level_2_role: string | null;
+  level_2_role: EscalationRole | null;
   /** Both level_3 columns set together or both null AND level_2 set. */
   level_3_after_minutes: number | null;
-  level_3_role: string | null;
+  level_3_role: EscalationRole | null;
   status: EscalationStatus;
   created_by: string;
   updated_by: string | null;

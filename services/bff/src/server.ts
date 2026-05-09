@@ -977,6 +977,12 @@ export interface AppDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   notificationTemplateStore?: any;
   /**
+   * Admin CRUD store for app_admin.escalation_matrix (T6 M14.17).
+   * When provided, mounts /v1/admin/escalation-matrix routes.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  escalationMatrixStore?: any;
+  /**
    * Source for the Cases Report detail (BAC §3.1.8). When provided,
    * mounts /v1/reports/cases/detail + /v1/reports/cases/filters.
    * Bootstrap wires this to a Pg-backed source via
@@ -1142,6 +1148,21 @@ export function makeApp(deps: AppDeps = {}) {
     app.use(
       makeNotificationTemplatesRouter({
         store: deps.notificationTemplateStore,
+        requireTenantMw,
+        requireRole,
+        now,
+      }),
+    );
+  }
+
+  // ---------- /v1/admin/escalation-matrix (T6 M14.17) -----------------
+  if (deps.escalationMatrixStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeEscalationMatrixRouter } = require('./admin/escalation_matrix_routes') as
+      typeof import('./admin/escalation_matrix_routes');
+    app.use(
+      makeEscalationMatrixRouter({
+        store: deps.escalationMatrixStore,
         requireTenantMw,
         requireRole,
         now,
