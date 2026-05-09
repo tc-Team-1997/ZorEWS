@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -113,9 +113,22 @@ function bodyOf<T>(r: { data: T | { body: T } }): T {
   return d as T;
 }
 
+interface EwsListFilters {
+  category?: EwsRuleCategory;
+  state?: EwsRuleState;
+  is_active?: boolean;
+}
+
 const ewsApi = {
-  list: () =>
-    http.get<{ items: EwsRule[]; total: number }>('/v1/ews/rules')
+  list: (filters: EwsListFilters = {}) =>
+    http
+      .get<{ items: EwsRule[]; total: number }>('/v1/ews/rules', {
+        params: {
+          category: filters.category,
+          state: filters.state,
+          is_active: filters.is_active,
+        },
+      })
       .then((r) => bodyOf(r).items),
   indicators: () =>
     http.get<{ items: EwsIndicator[] }>('/v1/ews/rules/indicators')
@@ -137,11 +150,60 @@ const ewsApi = {
 
 // ── Component ────────────────────────────────────────────────────────
 
+const RULE_STATES: EwsRuleState[] = ['draft', 'pending_review', 'active', 'deprecated'];
+const RULE_CATEGORIES: EwsRuleCategory[] = [
+  'credit', 'lapse', 'fraud', 'kyc', 'transaction', 'agent', 'ops', 'concentration', 'behaviour', 'score',
+];
+
+function isRuleState(s: string | null): s is EwsRuleState {
+  return s !== null && (RULE_STATES as string[]).includes(s);
+}
+function isRuleCategory(s: string | null): s is EwsRuleCategory {
+  return s !== null && (RULE_CATEGORIES as string[]).includes(s);
+}
+
 export function EwsRuleBuilderPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const rulesQ = useQuery({ queryKey: ['ews-rules'], queryFn: ewsApi.list });
+  // URL-driven filters so /rules/ews?state=active&category=credit is shareable.
+  const stateParam = searchParams.get('state');
+  const stateFilter: EwsRuleState | null = isRuleState(stateParam) ? stateParam : null;
+  const categoryParam = searchParams.get('category');
+  const categoryFilter: EwsRuleCategory | null = isRuleCategory(categoryParam) ? categoryParam : null;
+  const activeParam = searchParams.get('is_active');
+  const activeFilter: boolean | null =
+    activeParam === 'true' ? true : activeParam === 'false' ? false : null;
+
+  const setFilter = (
+    next: { state?: EwsRuleState | null; category?: EwsRuleCategory | null; is_active?: boolean | null },
+  ) => {
+    const sp = new URLSearchParams(searchParams);
+    if ('state' in next) {
+      if (next.state === null) sp.delete('state');
+      else if (next.state !== undefined) sp.set('state', next.state);
+    }
+    if ('category' in next) {
+      if (next.category === null) sp.delete('category');
+      else if (next.category !== undefined) sp.set('category', next.category);
+    }
+    if ('is_active' in next) {
+      if (next.is_active === null) sp.delete('is_active');
+      else if (next.is_active !== undefined) sp.set('is_active', String(next.is_active));
+    }
+    setSearchParams(sp, { replace: true });
+  };
+
+  const filters: EwsListFilters = {};
+  if (stateFilter) filters.state = stateFilter;
+  if (categoryFilter) filters.category = categoryFilter;
+  if (activeFilter !== null) filters.is_active = activeFilter;
+
+  const rulesQ = useQuery({
+    queryKey: ['ews-rules', stateFilter, categoryFilter, activeFilter],
+    queryFn: () => ewsApi.list(filters),
+  });
   const indicatorsQ = useQuery({ queryKey: ['ews-indicators'], queryFn: ewsApi.indicators });
 
   const [showCreate, setShowCreate] = useState(false);
@@ -226,6 +288,79 @@ export function EwsRuleBuilderPage() {
         <div className="mb-3 text-xs text-slate-500">
           Active rules evaluate on every /v1/ews/rules/evaluate call. Draft rules don't fire.
         </div>
+
+        {/* ── Filter row (URL-driven so views are shareable) ─────────── */}
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" data-testid="rule-filters">
+          <span className="font-medium text-slate-500">State:</span>
+          <button
+            type="button"
+            data-testid="rule-filter-state-all"
+            onClick={() => setFilter({ state: null })}
+            className={`rounded-full border px-2 py-0.5 ${
+              stateFilter === null
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                : 'border-slate-300 text-slate-600'
+            }`}
+          >
+            All
+          </button>
+          {RULE_STATES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              data-testid={`rule-filter-state-${s}`}
+              onClick={() => setFilter({ state: stateFilter === s ? null : s })}
+              className={`rounded-full border px-2 py-0.5 ${
+                stateFilter === s
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-slate-300 text-slate-600'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+
+          <span className="mx-2 h-4 w-px bg-slate-200" />
+
+          <span className="font-medium text-slate-500">Category:</span>
+          <select
+            data-testid="rule-filter-category"
+            value={categoryFilter ?? ''}
+            onChange={(e) =>
+              setFilter({
+                category: e.target.value === '' ? null : (e.target.value as EwsRuleCategory),
+              })
+            }
+            className="rounded border border-slate-300 px-2 py-0.5"
+          >
+            <option value="">All categories</option>
+            {RULE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+
+          <label className="flex items-center gap-1 text-slate-600">
+            <input
+              type="checkbox"
+              data-testid="rule-filter-active-only"
+              checked={activeFilter === true}
+              onChange={(e) => setFilter({ is_active: e.target.checked ? true : null })}
+            />
+            Active only
+          </label>
+
+          {(stateFilter || categoryFilter || activeFilter !== null) && (
+            <button
+              type="button"
+              data-testid="rule-filter-clear"
+              onClick={() => setFilter({ state: null, category: null, is_active: null })}
+              className="ml-auto text-slate-500 underline hover:text-slate-700"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {rulesQ.isLoading ? (
           <div className="text-sm text-slate-500">Loading…</div>
         ) : rules.length === 0 ? (

@@ -146,4 +146,91 @@ describe('EwsRuleBuilderPage', () => {
       expect(screen.getByText(/No rules yet/)).toBeInTheDocument();
     });
   });
+
+  // ── Filters (URL-driven so views are shareable) ──────────────────────
+  it('renders the state filter chips + category select + active-only toggle', async () => {
+    wrap(<EwsRuleBuilderPage />);
+    await waitFor(() => screen.getByText('High EMI Bounce Risk'));
+    expect(screen.getByTestId('rule-filters')).toBeInTheDocument();
+    expect(screen.getByTestId('rule-filter-state-active')).toBeInTheDocument();
+    expect(screen.getByTestId('rule-filter-state-draft')).toBeInTheDocument();
+    expect(screen.getByTestId('rule-filter-category')).toBeInTheDocument();
+    expect(screen.getByTestId('rule-filter-active-only')).toBeInTheDocument();
+  });
+
+  it('clicking a state chip refetches with state= query param', async () => {
+    const user = userEvent.setup();
+    wrap(<EwsRuleBuilderPage />);
+    await waitFor(() => screen.getByText('High EMI Bounce Risk'));
+    const httpGet = http.get as unknown as ReturnType<typeof vi.fn>;
+    httpGet.mockClear();
+    httpGet.mockImplementation((url: string) => {
+      if (url === '/v1/ews/rules')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/ews/rules/indicators')
+        return Promise.resolve({ data: { body: { items: [SAMPLE_INDICATOR] } } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+    await user.click(screen.getByTestId('rule-filter-state-active'));
+    await waitFor(() => {
+      const calls = httpGet.mock.calls.filter(
+        (c: unknown[]) => c[0] === '/v1/ews/rules',
+      );
+      const last = calls[calls.length - 1];
+      expect(last?.[1]?.params?.state).toBe('active');
+    });
+  });
+
+  it('selecting a category sends category= in the request', async () => {
+    const user = userEvent.setup();
+    wrap(<EwsRuleBuilderPage />);
+    await waitFor(() => screen.getByText('High EMI Bounce Risk'));
+    const httpGet = http.get as unknown as ReturnType<typeof vi.fn>;
+    httpGet.mockClear();
+    await user.selectOptions(screen.getByTestId('rule-filter-category'), 'credit');
+    await waitFor(() => {
+      const calls = httpGet.mock.calls.filter(
+        (c: unknown[]) => c[0] === '/v1/ews/rules',
+      );
+      const last = calls[calls.length - 1];
+      expect(last?.[1]?.params?.category).toBe('credit');
+    });
+  });
+
+  it('toggling Active-only sends is_active=true', async () => {
+    const user = userEvent.setup();
+    wrap(<EwsRuleBuilderPage />);
+    await waitFor(() => screen.getByText('High EMI Bounce Risk'));
+    const httpGet = http.get as unknown as ReturnType<typeof vi.fn>;
+    httpGet.mockClear();
+    await user.click(screen.getByTestId('rule-filter-active-only'));
+    await waitFor(() => {
+      const calls = httpGet.mock.calls.filter(
+        (c: unknown[]) => c[0] === '/v1/ews/rules',
+      );
+      const last = calls[calls.length - 1];
+      expect(last?.[1]?.params?.is_active).toBe(true);
+    });
+  });
+
+  it('Clear filters resets all params', async () => {
+    const user = userEvent.setup();
+    wrap(<EwsRuleBuilderPage />);
+    await waitFor(() => screen.getByText('High EMI Bounce Risk'));
+    // Apply two filters
+    await user.click(screen.getByTestId('rule-filter-state-active'));
+    await user.click(screen.getByTestId('rule-filter-active-only'));
+    expect(screen.getByTestId('rule-filter-clear')).toBeInTheDocument();
+    const httpGet = http.get as unknown as ReturnType<typeof vi.fn>;
+    httpGet.mockClear();
+    await user.click(screen.getByTestId('rule-filter-clear'));
+    await waitFor(() => {
+      const calls = httpGet.mock.calls.filter(
+        (c: unknown[]) => c[0] === '/v1/ews/rules',
+      );
+      const last = calls[calls.length - 1];
+      expect(last?.[1]?.params?.state).toBeUndefined();
+      expect(last?.[1]?.params?.is_active).toBeUndefined();
+    });
+  });
 });
