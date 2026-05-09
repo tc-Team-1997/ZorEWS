@@ -1135,6 +1135,52 @@ export const api = {
       .delete<SlaConfigRow>(`/v1/admin/sla-config/${encodeURIComponent(id)}`)
       .then((r) => r.data),
 
+  // ── Notification Templates admin (T6 M14.16) ────────────────────────
+
+  notificationTemplatesList: (
+    params: {
+      channel?: NotificationChannel;
+      status?: string;
+      include_deleted?: boolean;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
+    http
+      .get<{ items: NotificationTemplateRow[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/notification-templates',
+        { params },
+      )
+      .then((r) => r.data),
+
+  notificationTemplateCreate: (input: NotificationTemplateCreateInput) =>
+    http
+      .post<NotificationTemplateRow>('/v1/admin/notification-templates', input)
+      .then((r) => r.data),
+
+  notificationTemplateUpdate: (id: string, patch: NotificationTemplateUpdateInput) =>
+    http
+      .patch<NotificationTemplateRow>(
+        `/v1/admin/notification-templates/${encodeURIComponent(id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+
+  notificationTemplateActivate: (id: string) =>
+    http
+      .post<NotificationTemplateRow>(
+        `/v1/admin/notification-templates/${encodeURIComponent(id)}/activate`,
+        {},
+      )
+      .then((r) => r.data),
+
+  notificationTemplateArchive: (id: string) =>
+    http
+      .delete<NotificationTemplateRow>(
+        `/v1/admin/notification-templates/${encodeURIComponent(id)}`,
+      )
+      .then((r) => r.data),
+
   // ── Cases Report — row-level detail (BAC §3.1.8) ──────────────────────
 
   casesDetailReport: (filter: CasesDetailFilter) =>
@@ -1356,6 +1402,43 @@ export interface SlaConfigCreateInput {
 export interface SlaConfigUpdateInput {
   sla_target_days?: number;
   notes?: string | null;
+}
+
+// ── Notification Templates types (T6 M14.16) ───────────────────────
+
+export type NotificationChannel = 'EMAIL' | 'SMS' | 'IN_APP';
+export type NotificationTemplateStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export interface NotificationTemplateRow {
+  template_id: string;
+  tenant_id: string;
+  name: string;
+  channel: NotificationChannel;
+  /** NULL for SMS, NON-NULL for EMAIL/IN_APP. */
+  subject: string | null;
+  body: string;
+  locale: string;
+  status: NotificationTemplateStatus;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface NotificationTemplateCreateInput {
+  name: string;
+  channel: NotificationChannel;
+  subject?: string | null;
+  body: string;
+  locale?: string;
+}
+
+export interface NotificationTemplateUpdateInput {
+  name?: string;
+  subject?: string | null;
+  body?: string;
+  locale?: string;
 }
 
 // ── User Access Override types ──────────────────────────────────────

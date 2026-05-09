@@ -41,6 +41,7 @@ import { AdminServiceClientsPage } from '@/modules/admin/AdminServiceClientsPage
 import { UserAccessOverrideListPage } from '@/modules/admin/userAccessOverride/UserAccessOverrideListPage';
 import { EffectiveAccessPage } from '@/modules/admin/userAccessOverride/EffectiveAccessPage';
 import { SlaConfigPage } from '@/modules/admin/slaConfig/SlaConfigPage';
+import { NotificationTemplatesPage } from '@/modules/admin/notificationTemplates/NotificationTemplatesPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -111,6 +112,7 @@ export function App() {
               element={<EffectiveAccessPage />}
             />
             <Route path="admin/sla-config" element={<SlaConfigPage />} />
+            <Route path="admin/notification-templates" element={<NotificationTemplatesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

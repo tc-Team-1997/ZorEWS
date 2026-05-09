@@ -403,6 +403,91 @@ function _mkSla(
     updated_at: now,
   };
 }
+// ── Notification Templates fixture (M14.16/M14.19) ──────────────────
+
+interface MswNotificationTemplate {
+  template_id: string;
+  tenant_id: string;
+  name: string;
+  channel: 'EMAIL' | 'SMS' | 'IN_APP';
+  subject: string | null;
+  body: string;
+  locale: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+interface MswNotificationTemplateCreateInput {
+  name: string;
+  channel: 'EMAIL' | 'SMS' | 'IN_APP';
+  subject?: string | null;
+  body: string;
+  locale?: string;
+}
+
+function _mkTemplate(
+  name: string,
+  channel: 'EMAIL' | 'SMS' | 'IN_APP',
+  subject: string | null,
+  body: string,
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED' = 'ACTIVE',
+): MswNotificationTemplate {
+  const now = new Date('2026-05-09T08:00:00.000Z').toISOString();
+  return {
+    template_id: `tpl-seed-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
+    tenant_id: 'BANK_DEMO',
+    name,
+    channel,
+    subject,
+    body,
+    locale: 'en-IN',
+    status,
+    created_by: 'system:seed',
+    updated_by: null,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+  };
+}
+
+const mswNotificationTemplates: MswNotificationTemplate[] = [
+  _mkTemplate(
+    'Case Opened — RM email',
+    'EMAIL',
+    'New case {{case_number}} assigned to you',
+    'Hi {{rm_name}},\n\nA new {{priority}} case ({{case_number}}) has been opened for {{customer_name}}.\nCategory: {{case_category}}\n\nPlease action within {{sla_target_days}} day(s).\n\n— ZorEWS',
+  ),
+  _mkTemplate(
+    'Case SLA breach warning — RM SMS',
+    'SMS',
+    null,
+    'ZorEWS: Case {{case_number}} is at {{progress_pct}}% of SLA. Action ASAP.',
+  ),
+  _mkTemplate(
+    'Escalation L1 — Supervisor in-app',
+    'IN_APP',
+    'Case {{case_number}} escalated to you',
+    'Case {{case_number}} ({{priority}} {{case_category}}) was not actioned within {{escalated_after_minutes}} minutes.',
+  ),
+  _mkTemplate(
+    'Customer KYC reminder — SMS',
+    'SMS',
+    null,
+    'ZorEWS: Hi {{customer_name}}, please update your KYC by {{kyc_due_date}} to avoid service disruption.',
+  ),
+  _mkTemplate(
+    'Case Closed — RM email',
+    'EMAIL',
+    'Case {{case_number}} closed: {{resolution_category}}',
+    'Hi {{rm_name}},\n\nCase {{case_number}} for {{customer_name}} has been closed.\nResolution: {{resolution_category}}\nNotes: {{resolution_notes}}',
+    'DRAFT',
+  ),
+];
+
 const mswSlaConfigs: MswSlaConfig[] = [
   _mkSla('credit_risk', 'P1', null, 1.0,  'Critical credit incident'),
   _mkSla('credit_risk', 'P2', null, 3.0,  'High credit risk — RM follow-up'),
@@ -2775,6 +2860,211 @@ export const handlers = [
     };
     mswSlaConfigs[idx] = next;
     return HttpResponse.json(envelope(next));
+  }),
+
+  // ── Notification Templates admin (T6 M14.16/M14.19) ────────────────
+
+  http.get('/v1/admin/notification-templates', ({ request }) => {
+    const url = new URL(request.url);
+    const channel = url.searchParams.get('channel');
+    const status = url.searchParams.get('status');
+    const includeDeleted = url.searchParams.get('include_deleted') === 'true';
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
+    let rows = mswNotificationTemplates.slice();
+    if (!includeDeleted) rows = rows.filter((r) => r.deleted_at === null);
+    if (channel) rows = rows.filter((r) => r.channel === channel);
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((r) => set.has(r.status));
+    }
+    rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({
+        items: rows.slice(start, start + pageSize),
+        total: rows.length,
+        page,
+        page_size: pageSize,
+      }),
+    );
+  }),
+
+  http.get('/v1/admin/notification-templates/:id', ({ params }) => {
+    const r = mswNotificationTemplates.find((x) => x.template_id === params.id);
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/admin/notification-templates', async ({ request }) => {
+    const body = (await request.json()) as MswNotificationTemplateCreateInput;
+    if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.channel !== 'EMAIL' && body.channel !== 'SMS' && body.channel !== 'IN_APP') {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'channel must be EMAIL/SMS/IN_APP', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.channel === 'SMS' && body.subject !== null && body.subject !== undefined && body.subject !== '') {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'subject must be null for SMS channel', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.channel !== 'SMS' && (!body.subject || body.subject.trim().length === 0)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', `subject required for ${body.channel} channel`, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (typeof body.body !== 'string' || body.body.length === 0 || body.body.length > 10000) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'body length must be 1..10000', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const locale = body.locale ?? 'en-IN';
+    const dup = mswNotificationTemplates.find(
+      (r) =>
+        r.deleted_at === null &&
+        r.name.toLowerCase() === body.name.trim().toLowerCase() &&
+        r.locale === locale,
+    );
+    if (dup) {
+      return HttpResponse.json(
+        envelopeError(
+          'EWS_409_duplicate_template_name',
+          `template "${body.name}" already used in locale ${locale}`,
+          'MEDIUM',
+        ),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const row: MswNotificationTemplate = {
+      template_id: `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id: 'BANK_DEMO',
+      name: body.name.trim(),
+      channel: body.channel,
+      subject: body.channel === 'SMS' ? null : (body.subject as string).trim(),
+      body: body.body,
+      locale,
+      status: 'DRAFT',
+      created_by: actor,
+      updated_by: null,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    };
+    mswNotificationTemplates.push(row);
+    return HttpResponse.json(envelope(row, 'EWS_201_created', 'Created'), { status: 201 });
+  }),
+
+  http.patch('/v1/admin/notification-templates/:id', async ({ params, request }) => {
+    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const old = mswNotificationTemplates[idx];
+    if (old.deleted_at !== null) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_invalid_state', 'cannot update an archived template', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const patch = (await request.json()) as {
+      name?: string;
+      subject?: string | null;
+      body?: string;
+      locale?: string;
+    };
+    if (patch.subject !== undefined && patch.subject !== null) {
+      if (old.channel === 'SMS') {
+        return HttpResponse.json(
+          envelopeError('EWS_400_invalid_input', 'subject must be null for SMS channel', 'MEDIUM'),
+          { status: 400 },
+        );
+      }
+    }
+    if (patch.body !== undefined && (patch.body.length === 0 || patch.body.length > 10000)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'body length must be 1..10000', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswNotificationTemplate = {
+      ...old,
+      name: patch.name ?? old.name,
+      subject: patch.subject !== undefined ? patch.subject : old.subject,
+      body: patch.body ?? old.body,
+      locale: patch.locale ?? old.locale,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswNotificationTemplates[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.post('/v1/admin/notification-templates/:id/activate', ({ params }) => {
+    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const old = mswNotificationTemplates[idx];
+    if (old.deleted_at !== null || old.status === 'ARCHIVED') {
+      return HttpResponse.json(
+        envelopeError('EWS_409_invalid_state', 'cannot activate an archived template', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    if (old.status === 'ACTIVE') return HttpResponse.json(envelope(old));
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswNotificationTemplate = { ...old, status: 'ACTIVE', updated_by: actor, updated_at: now };
+    mswNotificationTemplates[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.delete('/v1/admin/notification-templates/:id', ({ params }) => {
+    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const old = mswNotificationTemplates[idx];
+    if (old.deleted_at !== null) return HttpResponse.json(envelope(old));
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswNotificationTemplate = {
+      ...old,
+      status: 'ARCHIVED',
+      deleted_at: now,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswNotificationTemplates[idx] = updated;
+    return HttpResponse.json(envelope(updated));
   }),
 
   // ── Dashboard SLA Breach Matrix preview (BAC §3.1.9.1.4) ────────────
