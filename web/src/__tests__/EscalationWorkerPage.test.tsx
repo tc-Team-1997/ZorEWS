@@ -127,4 +127,27 @@ describe('EscalationWorkerPage (M14.25c)', () => {
     // Disabled state suppresses the metrics grid (interval/tenants/etc).
     expect(screen.queryByTestId('esc-worker-status-interval')).not.toBeInTheDocument();
   });
+
+  // M14.25e — Recent dispatches panel
+  it('renders the recent-dispatches panel + full-log link; empty state before any tick', async () => {
+    renderWithProviders(<EscalationWorkerPage />);
+    expect(await screen.findByTestId('esc-worker-recent-dispatches')).toBeInTheDocument();
+    expect(screen.getByTestId('esc-worker-recent-fulllog')).toHaveAttribute(
+      'href',
+      '/admin/notification-templates/dispatches?trigger=escalation_worker',
+    );
+    expect(await screen.findByTestId('esc-worker-recent-empty')).toBeInTheDocument();
+  });
+
+  it('recent-dispatches list populates after a tick', async () => {
+    renderWithProviders(<EscalationWorkerPage />);
+    await screen.findByTestId('esc-worker-recent-empty');
+    await userEvent.click(screen.getByTestId('esc-worker-tick'));
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('esc-worker-recent-list')).toBeInTheDocument();
+      },
+      { timeout: 8_000 }, // 5s refetchInterval + slack
+    );
+  }, 10_000);
 });

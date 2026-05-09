@@ -23,7 +23,10 @@ import {
   type EscalationPreviewResult,
   type EscalationTickResult,
   type NotificationChannel,
+  type NotificationDispatchEntry,
+  type NotificationDispatchStatus,
 } from '@/lib/api';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import {
   Badge,
@@ -46,6 +49,12 @@ const CHANNEL_ICON: Record<NotificationChannel, typeof Mail> = {
   EMAIL: Mail,
   SMS: Smartphone,
   IN_APP: MessageSquare,
+};
+
+const DISPATCH_STATUS_TONE: Record<NotificationDispatchStatus, BadgeTone> = {
+  sent: 'success',
+  preview: 'neutral',
+  failed: 'danger',
 };
 
 interface CaseRow {
@@ -157,6 +166,20 @@ export function EscalationWorkerPage() {
   const workerStatus = useQuery({
     queryKey: ['admin', 'escalations', 'worker', 'status'],
     queryFn: api.escalationsWorkerStatus,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
+  });
+
+  // M14.25e — recent escalation_worker dispatches, refreshed alongside
+  // the status panel so a "Run tick" lands rows here within 5s without
+  // a manual page hop.
+  const recentDispatches = useQuery({
+    queryKey: ['admin', 'escalations', 'worker', 'recent-dispatches'],
+    queryFn: () =>
+      api.notificationDispatchesList({
+        trigger: 'escalation_worker',
+        page_size: 20,
+      }),
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   });
@@ -497,6 +520,71 @@ export function EscalationWorkerPage() {
           have already been dispatched.
         </p>
       ) : null}
+
+      {/* ── M14.25e: recent escalation-trigger dispatches (last 20, 5s poll) ── */}
+      <div
+        className="mt-6 rounded-md border border-slate-200 bg-white p-3"
+        data-testid="esc-worker-recent-dispatches"
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Recent escalation dispatches</h3>
+          <Link
+            to="/admin/notification-templates/dispatches?trigger=escalation_worker"
+            className="text-2xs text-blue-600 hover:underline"
+            data-testid="esc-worker-recent-fulllog"
+          >
+            View full log →
+          </Link>
+        </div>
+        {recentDispatches.isLoading ? (
+          <p className="py-4 text-center text-2xs text-muted">Loading…</p>
+        ) : recentDispatches.isError ? (
+          <p
+            className="py-4 text-center text-2xs text-rose-700"
+            role="alert"
+            data-testid="esc-worker-recent-error"
+          >
+            Failed to load: {(recentDispatches.error as Error)?.message}
+          </p>
+        ) : (recentDispatches.data?.items ?? []).length === 0 ? (
+          <p
+            className="py-4 text-center text-2xs text-muted"
+            data-testid="esc-worker-recent-empty"
+          >
+            No escalation dispatches yet. Click <span className="font-mono">Run tick</span> above
+            to fire a few.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100" data-testid="esc-worker-recent-list">
+            {(recentDispatches.data?.items ?? []).slice(0, 20).map((r: NotificationDispatchEntry) => {
+              const Icon = CHANNEL_ICON[r.channel];
+              return (
+                <li
+                  key={r.dispatch_id}
+                  className="flex items-center gap-3 py-1.5 text-2xs"
+                  data-testid={`esc-worker-recent-row-${r.dispatch_id}`}
+                >
+                  <span className="w-32 shrink-0 font-mono text-muted">
+                    {new Date(r.performed_at).toLocaleTimeString()}
+                  </span>
+                  <span className="w-40 shrink-0 truncate font-medium" title={r.template_name}>
+                    <Icon className="mr-0.5 inline h-3 w-3" /> {r.template_name}
+                  </span>
+                  <span className="w-40 shrink-0 truncate text-muted" title={r.recipient}>
+                    {r.recipient}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-muted" title={r.reference ?? ''}>
+                    {r.reference ?? '—'}
+                  </span>
+                  <Badge tone={DISPATCH_STATUS_TONE[r.status]} className="text-2xs uppercase">
+                    {r.status}
+                  </Badge>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

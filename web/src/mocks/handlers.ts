@@ -451,6 +451,10 @@ interface MswDispatchEntry {
 
 const mswDispatchLog: MswDispatchEntry[] = [];
 
+export function __resetMswDispatchLog(): void {
+  mswDispatchLog.length = 0;
+}
+
 interface MswRenderResult {
   channel: 'EMAIL' | 'SMS' | 'IN_APP';
   subject: string | null;
