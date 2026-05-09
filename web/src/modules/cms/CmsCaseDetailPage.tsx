@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { SetCategoryModal } from './SetCategoryModal';
@@ -30,8 +30,37 @@ type Tab = (typeof TABS)[number];
 export function CmsCaseDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [tab, setTab] = useState<Tab>('Overview');
+  // Tab + Investigation-row deep-link state.
+  // ?tab=Investigation + ?note= / ?attachment= comes from the
+  // CaseTrackingTimeline COMMENT/ATTACHMENT click handlers — auto-jump
+  // to the Investigation tab and scroll-highlight the row.
+  const tabParam = searchParams.get('tab') as Tab | null;
+  const noteHighlight = searchParams.get('note');
+  const attachmentHighlight = searchParams.get('attachment');
+  const initialTab: Tab =
+    tabParam && (TABS as readonly string[]).includes(tabParam)
+      ? tabParam
+      : noteHighlight || attachmentHighlight
+        ? 'Investigation'
+        : 'Overview';
+  const [tab, setTab] = useState<Tab>(initialTab);
+
+  // Live URL → tab sync: when the timeline navigates to
+  // ?tab=Investigation&note=... while the user is already on the page,
+  // honour the param without a remount.
+  useEffect(() => {
+    if (tabParam && (TABS as readonly string[]).includes(tabParam) && tabParam !== tab) {
+      setTab(tabParam);
+    } else if ((noteHighlight || attachmentHighlight) && tab !== 'Investigation') {
+      setTab('Investigation');
+    }
+    // We intentionally don't depend on `tab` — that would force the tab
+    // back whenever the user manually clicks a different tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam, noteHighlight, attachmentHighlight]);
+
   const [assigneeInput, setAssigneeInput] = useState('');
   const [escalateReason, setEscalateReason] = useState('');
   const [showCloseForm, setShowCloseForm] = useState(false);
@@ -200,6 +229,18 @@ export function CmsCaseDetailPage() {
               isLocked={isLocked}
               notes={notesQ.data?.items ?? []}
               attachments={attachmentsQ.data?.items ?? []}
+              highlightNoteId={noteHighlight}
+              highlightAttachmentId={attachmentHighlight}
+              onHighlightConsumed={() => {
+                // Strip the deep-link params after we've scrolled +
+                // flashed, so a manual reload doesn't re-trigger the
+                // animation and the URL stays clean for sharing.
+                const next = new URLSearchParams(searchParams);
+                let dirty = false;
+                if (next.has('note')) { next.delete('note'); dirty = true; }
+                if (next.has('attachment')) { next.delete('attachment'); dirty = true; }
+                if (dirty) setSearchParams(next, { replace: true });
+              }}
               onNoteAdd={() => {
                 void qc.invalidateQueries({ queryKey: ['cms-case-notes', id] });
               }}
@@ -213,10 +254,9 @@ export function CmsCaseDetailPage() {
             <CaseTrackingTimeline
               caseId={id}
               onJumpToComment={() => {
-                // Switch to Investigation tab so the note panel is visible.
-                // The note_id is already in the URL via the timeline's
-                // navigate(href) call — Investigation tab can read it
-                // when CMS-6 ships scroll-to-note.
+                // Switch to Investigation tab so the note panel is
+                // visible. The note_id stays on the URL (?note=...) so
+                // InvestigationTab's scroll-and-flash effect catches it.
                 setTab('Investigation');
               }}
             />
@@ -391,6 +431,9 @@ function InvestigationTab({
   isLocked,
   notes,
   attachments,
+  highlightNoteId,
+  highlightAttachmentId,
+  onHighlightConsumed,
   onNoteAdd,
   onAttachmentAdd,
 }: {
@@ -400,6 +443,9 @@ function InvestigationTab({
     ? R extends { items: infer X } ? X : never : never;
   attachments: ReturnType<typeof cmsApi.attachments.list> extends Promise<infer R>
     ? R extends { items: infer X } ? X : never : never;
+  highlightNoteId: string | null;
+  highlightAttachmentId: string | null;
+  onHighlightConsumed: () => void;
   onNoteAdd: () => void;
   onAttachmentAdd: () => void;
 }) {
@@ -407,6 +453,43 @@ function InvestigationTab({
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(1024);
   const [mimeType, setMimeType] = useState('application/pdf');
+
+  // Track which row key is currently flashing — drives the highlight
+  // ring class. Cleared after the animation window so the row settles
+  // back to its normal style.
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll-to-and-flash for ?note=<id> / ?attachment=<id> deep links.
+  // Runs once per (highlight, list-loaded) pair: we wait for the row
+  // to be in the DOM, then scroll + apply the flash class for ~1.8s,
+  // then ask the parent to drop the URL param.
+  const noteCount = (notes as { length: number }).length;
+  const attCount = (attachments as { length: number }).length;
+  useEffect(() => {
+    const target = highlightNoteId
+      ? `note:${highlightNoteId}`
+      : highlightAttachmentId
+        ? `att:${highlightAttachmentId}`
+        : null;
+    if (!target) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const node = container.querySelector<HTMLElement>(`[data-row-key="${target}"]`);
+    if (!node) return; // list not loaded yet — effect re-runs when counts change
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashKey(target);
+    const t = window.setTimeout(() => {
+      setFlashKey(null);
+      onHighlightConsumed();
+    }, 1800);
+    return () => window.clearTimeout(t);
+  }, [highlightNoteId, highlightAttachmentId, noteCount, attCount, onHighlightConsumed]);
+
+  const flashClass = (key: string) =>
+    flashKey === key
+      ? ' ring-2 ring-blue-400 ring-offset-1 bg-blue-50 transition-shadow duration-500'
+      : '';
 
   const noteAddMut = useMutation({
     mutationFn: () => cmsApi.notes.add(caseId, noteText.trim()),
@@ -430,7 +513,7 @@ function InvestigationTab({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={containerRef}>
       <Panel title={`Notes (${(notes as { length: number }).length})`}>
         {!isLocked ? (
           <div className="mb-3 flex gap-1">
@@ -452,7 +535,12 @@ function InvestigationTab({
         <div className="space-y-2">
           {(notes as Array<{ note_id: string; user_id: string; note_text: string; created_at: string; is_internal: boolean }>)
             .map((n) => (
-              <div key={n.note_id} className="rounded border border-slate-200 p-2 text-sm">
+              <div
+                key={n.note_id}
+                data-row-key={`note:${n.note_id}`}
+                data-testid={`investigation-note-${n.note_id}`}
+                className={`rounded border border-slate-200 p-2 text-sm${flashClass(`note:${n.note_id}`)}`}
+              >
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span>{n.user_id}</span>
                   <span>{new Date(n.created_at).toLocaleString()}</span>
@@ -506,7 +594,9 @@ function InvestigationTab({
             .map((a) => (
               <div
                 key={a.attachment_id}
-                className="flex items-center justify-between rounded border border-slate-200 p-2 text-sm"
+                data-row-key={`att:${a.attachment_id}`}
+                data-testid={`investigation-attachment-${a.attachment_id}`}
+                className={`flex items-center justify-between rounded border border-slate-200 p-2 text-sm${flashClass(`att:${a.attachment_id}`)}`}
               >
                 <div>
                   <span className="font-mono text-xs">{a.file_name}</span>

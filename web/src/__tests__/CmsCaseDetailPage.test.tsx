@@ -123,6 +123,72 @@ describe('CmsCaseDetailPage', () => {
   });
 });
 
+describe('CmsCaseDetailPage — Investigation deep-link (note/attachment)', () => {
+  // The CaseTrackingTimeline navigates to
+  // /cms/cases/:id?tab=Investigation&note=<id> (or &attachment=<id>) when
+  // a COMMENT/ATTACHMENT card is clicked. The detail page should:
+  //   1. open the Investigation tab automatically
+  //   2. scroll the matching row into view
+  //   3. flash a highlight ring on the row, then strip the URL param
+  const NOTE = {
+    note_id: 'n-001',
+    case_id: 'cs-1',
+    user_id: 'alice',
+    note_text: 'Customer confirms hardship',
+    is_internal: false,
+    created_at: '2026-05-09T12:00:00.000Z',
+  };
+  const ATT = {
+    attachment_id: 'a-001',
+    case_id: 'cs-1',
+    file_name: 'kyc.pdf',
+    file_size: 4096,
+    mime_type: 'application/pdf',
+    virus_scan_status: 'clean',
+    uploaded_by: 'alice',
+    uploaded_at: '2026-05-09T12:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    // jsdom doesn't implement scrollIntoView — the effect would throw
+    // without this stub.
+    Element.prototype.scrollIntoView = vi.fn();
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases/cs-1') return Promise.resolve({ data: { body: DETAIL } });
+      if (url === '/v1/cms/cases/cs-1/notes')
+        return Promise.resolve({ data: { body: { items: [NOTE], total: 1 } } });
+      if (url === '/v1/cms/cases/cs-1/attachments')
+        return Promise.resolve({ data: { body: { items: [ATT], total: 1 } } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it('opens Investigation tab + flashes the matching note row', async () => {
+    wrap('/cms/cases/cs-1?tab=Investigation&note=n-001');
+    const row = await screen.findByTestId('investigation-note-n-001');
+    expect(row.className).toMatch(/ring-2/);
+    expect(row.className).toMatch(/bg-blue-50/);
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('opens Investigation tab + flashes the matching attachment row', async () => {
+    wrap('/cms/cases/cs-1?tab=Investigation&attachment=a-001');
+    const row = await screen.findByTestId('investigation-attachment-a-001');
+    expect(row.className).toMatch(/ring-2/);
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('non-deep-link visit does not flash any row', async () => {
+    const user = userEvent.setup();
+    wrap('/cms/cases/cs-1');
+    await waitFor(() => screen.getByText('Investigation'));
+    await user.click(screen.getByText('Investigation'));
+    const row = await screen.findByTestId('investigation-note-n-001');
+    expect(row.className).not.toMatch(/ring-2/);
+  });
+});
+
 describe('CmsCaseDetailPage — re-categorise flow', () => {
   beforeEach(async () => {
     // Auth: admin so the Edit button is visible.
