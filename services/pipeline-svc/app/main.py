@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 KNOWN_DAGS = {"cbs_ingestion", "bureau_sync", "feature_build"}
 
 app = FastAPI(
-    title="APEX EWS — pipeline-svc",
+    title="ZorEWS — pipeline-svc",
     version="0.1.0",
     description="Stub trigger / status surface in front of MWAA DAGs.",
 )

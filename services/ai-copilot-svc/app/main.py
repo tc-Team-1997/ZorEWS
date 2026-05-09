@@ -105,7 +105,7 @@ class HealthResponse(BaseModel):
 # ----------------------------------------------------------------------
 # App + state
 # ----------------------------------------------------------------------
-app = FastAPI(title="APEX EWS — AI Copilot", version="0.1.0")
+app = FastAPI(title="ZorEWS — AI Copilot", version="0.1.0")
 
 
 class _State:
