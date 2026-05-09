@@ -192,9 +192,9 @@ function rbiXlsx(wb: ExcelJS.Workbook, r: RbiSummaryReport): void {
 
 export async function reportToXlsx(payload: ReportPayload, meta: XlsxMeta): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'APEX EWS';
+  wb.creator = 'ZorEWS';
   wb.created = new Date();
-  wb.title = `APEX EWS · ${payload.type} · ${payload.period}`;
+  wb.title = `ZorEWS · ${payload.type} · ${payload.period}`;
 
   addMetaSheet(wb, payload, meta);
   switch (payload.type) {

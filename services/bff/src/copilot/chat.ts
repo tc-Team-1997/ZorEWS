@@ -251,7 +251,7 @@ function answerSummary(ctx: ChatContext): string {
 }
 
 const HELP_TEXT = [
-  'I\'m the APEX EWS copilot — a context-aware assistant for risk operations.',
+  'I\'m the ZorEWS copilot — a context-aware assistant for risk operations.',
   '',
   'I can:',
   '  • Explain a customer\'s PD and the top SHAP drivers',
@@ -270,7 +270,7 @@ export function respond(req: ChatRequest): ChatResponse {
   let reply: string;
   switch (intent) {
     case 'greeting':
-      reply = `Hi! I\'m the APEX EWS copilot. ${
+      reply = `Hi! I\'m the ZorEWS copilot. ${
         ctx.entity
           ? `I can see you\'re looking at ${entityLabel(ctx.entity)}.`
           : `What can I help you with on the ${page === 'unknown' ? 'current page' : page} screen?`

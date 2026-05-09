@@ -81,7 +81,7 @@ describe('listSmsTemplates / getSmsTemplate', () => {
 describe('renderSmsTemplate', () => {
   test('substitutes vars into body', () => {
     const r = renderSmsTemplate('OTP_LOGIN', { otp: 123456, minutes_valid: 5 });
-    expect(r.body).toBe('APEX EWS login OTP: 123456. Valid for 5 minutes. Do not share.');
+    expect(r.body).toBe('ZorEWS login OTP: 123456. Valid for 5 minutes. Do not share.');
     expect(r.missing_vars).toEqual([]);
   });
 

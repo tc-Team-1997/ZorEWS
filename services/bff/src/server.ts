@@ -12798,7 +12798,7 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       const delivery = await webhookDispatcher.deliverOne(sub, 'webhook.test', {
-        message: 'APEX EWS webhook test event',
+        message: 'ZorEWS webhook test event',
         subscription_id: sub.id,
         tenant_id: sub.tenant_id,
         sent_at: now().toISOString(),

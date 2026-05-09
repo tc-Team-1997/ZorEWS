@@ -68,7 +68,7 @@ export function exportCsv(rows: CaseRow[], _meta: ExportMeta): string {
 
 export async function exportXlsx(rows: CaseRow[], meta: ExportMeta): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = `APEX EWS · ${meta.generated_by}`;
+  wb.creator = `ZorEWS · ${meta.generated_by}`;
   wb.created = new Date(meta.generated_at);
 
   // Sheet 1 — Cases
@@ -200,7 +200,7 @@ export async function exportPdf(rows: CaseRow[], meta: ExportMeta): Promise<Buff
       .fontSize(7)
       .fillColor('gray')
       .text(
-        `BAC §3.1.8 · APEX EWS · This report is confidential — do not redistribute`,
+        `BAC §3.1.8 · ZorEWS · This report is confidential — do not redistribute`,
         doc.page.margins.left,
         doc.page.height - doc.page.margins.bottom - 12,
         { width: doc.page.width - doc.page.margins.left - doc.page.margins.right, align: 'center' },

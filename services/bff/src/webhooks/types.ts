@@ -2,7 +2,7 @@
 //
 // Outbound webhook subsystem — lets external systems (AML hub, collection
 // platform, branch ops dashboard, etc.) subscribe to alert + scenario
-// events from APEX EWS. Recipients verify the HMAC-SHA256 signature in
+// events from ZorEWS. Recipients verify the HMAC-SHA256 signature in
 // the X-APEX-Signature header against their shared secret.
 //
 // Domain shape mirrors the contract documented in

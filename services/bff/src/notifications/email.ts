@@ -126,7 +126,7 @@ const TEMPLATES: Record<EmailTemplateId, TemplateDef> = {
       'Indicator: {{indicator}}\n' +
       'Risk score: {{risk_score}}\n' +
       'Case: {{case_id}}\n\n' +
-      'This requires immediate action. Open the case in APEX EWS to triage.',
+      'This requires immediate action. Open the case in ZorEWS to triage.',
   },
   ALERT_ORANGE: {
     id: 'ALERT_ORANGE',
@@ -138,7 +138,7 @@ const TEMPLATES: Record<EmailTemplateId, TemplateDef> = {
       'Customer: {{customer_name}}\n' +
       'Indicator: {{indicator}}\n' +
       'Risk score: {{risk_score}}\n\n' +
-      'Investigate within the standard SLA. Open APEX EWS to review.',
+      'Investigate within the standard SLA. Open ZorEWS to review.',
   },
   CASE_ASSIGNED: {
     id: 'CASE_ASSIGNED',
@@ -149,7 +149,7 @@ const TEMPLATES: Record<EmailTemplateId, TemplateDef> = {
       'Hi {{assignee_name}},\n\n' +
       'You have been assigned case {{case_id}} for customer {{customer_name}}.\n' +
       'SLA: {{sla_hours}} hours from now.\n\n' +
-      'Open APEX EWS to begin triage.',
+      'Open ZorEWS to begin triage.',
   },
   SLA_BREACH: {
     id: 'SLA_BREACH',
@@ -159,7 +159,7 @@ const TEMPLATES: Record<EmailTemplateId, TemplateDef> = {
     body_text:
       'Case {{case_id}} ({{customer_name}}) has breached its SLA by ' +
       '{{hours_overdue}} hours.\n\n' +
-      'Escalation required. Open APEX EWS for the case detail.',
+      'Escalation required. Open ZorEWS for the case detail.',
   },
 };
 

@@ -19,7 +19,7 @@ function makeChatApp(role: string | null = 'admin') {
 describe('copilot brain — respond()', () => {
   test('greeting → friendly preamble + suggestions', () => {
     const out = respond({ message: 'hello there' });
-    expect(out.reply.toLowerCase()).toContain('apex ews copilot');
+    expect(out.reply.toLowerCase()).toContain('zorews copilot');
     expect(out.suggestions.length).toBeGreaterThan(0);
     expect(out.used_context.matched_intent).toBe('greeting');
   });

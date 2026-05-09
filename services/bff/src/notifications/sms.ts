@@ -99,7 +99,7 @@ const TEMPLATES: Record<SmsTemplateId, TemplateDef> = {
     id: 'OTP_LOGIN',
     description: 'One-time login passcode',
     required_vars: ['otp', 'minutes_valid'],
-    body: 'APEX EWS login OTP: {{otp}}. Valid for {{minutes_valid}} minutes. Do not share.',
+    body: 'ZorEWS login OTP: {{otp}}. Valid for {{minutes_valid}} minutes. Do not share.',
   },
   KYC_REMINDER: {
     id: 'KYC_REMINDER',

@@ -63,7 +63,7 @@ describe('fanout end-to-end', () => {
 
     // SMS is bounded to 160 chars and is single-segment
     expect(sms.sent[0].message.body.length).toBeLessThanOrEqual(160);
-    expect(sms.sent[0].message.body).toContain('[APEX EWS]');
+    expect(sms.sent[0].message.body).toContain('[ZorEWS]');
     expect(sms.sent[0].message.body).toContain('CRITICAL');
   });
 

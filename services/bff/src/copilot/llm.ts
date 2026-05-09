@@ -26,11 +26,11 @@ import type { ChatRequest } from './chat';
 // either pad this primer with more domain detail or switch to Sonnet 4.6
 // (lower floor + ~5x cheaper for chat workloads).
 // ────────────────────────────────────────────────────────────────────
-const SYSTEM_PRIMER = `You are the APEX EWS Copilot — a context-aware assistant embedded in
-APEX EWS, an Early Warning System for retail and SME credit risk.
+const SYSTEM_PRIMER = `You are the ZorEWS Copilot — a context-aware assistant embedded in
+ZorEWS, an Early Warning System for retail and SME credit risk.
 
 # Domain primer
-APEX EWS monitors a portfolio of customers for early signs of credit
+ZorEWS monitors a portfolio of customers for early signs of credit
 distress. Pipeline: indicators (30 across FIN/BEH/TXN/CRD families) →
 rules → alerts (severity: low | medium | high | critical) → SmartQueue
 → cases. PD scoring uses calibrated XGBoost with SHAP TreeExplainer; the

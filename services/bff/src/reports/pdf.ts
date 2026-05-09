@@ -54,7 +54,7 @@ function drawHeader(doc: PDFKit.PDFDocument, title: string, meta: PdfMeta) {
   doc
     .fillColor('#0d2b6a')
     .fontSize(HEADER_FONT_SIZE)
-    .text('APEX EWS', 76, 38, { lineBreak: false });
+    .text('ZorEWS', 76, 38, { lineBreak: false });
 
   doc
     .fillColor('#525a72')
@@ -316,9 +316,9 @@ export function reportToPdf(payload: ReportPayload, meta: PdfMeta): Promise<Buff
         margins: { top: 36, bottom: 36, left: 36, right: 36 },
         bufferPages: true,
         info: {
-          Title: `APEX EWS · ${payload.type} · ${payload.period}`,
+          Title: `ZorEWS · ${payload.type} · ${payload.period}`,
           Author: meta.generated_by,
-          Subject: 'APEX EWS report',
+          Subject: 'ZorEWS report',
           Keywords: 'apex-ews,banking,ews,risk',
         },
       });

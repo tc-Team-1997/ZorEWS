@@ -11,7 +11,7 @@ export interface RenderedEmail {
 }
 
 export function renderAlertEmail(alert: AlertSummary, displayName?: string): RenderedEmail {
-  const subject = `[APEX EWS] ${alert.severity} alert · ${alert.rule_id ?? alert.alert_id}`;
+  const subject = `[ZorEWS] ${alert.severity} alert · ${alert.rule_id ?? alert.alert_id}`;
   const greeting = displayName ? `Hi ${displayName},` : 'Hi,';
   const summary = alert.reason_summary ?? 'An alert was raised on your portfolio.';
   const pdRow =
@@ -24,7 +24,7 @@ export function renderAlertEmail(alert: AlertSummary, displayName?: string): Ren
   const body = `<!doctype html>
 <html><body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#2C2C2A;">
   <div style="max-width:560px;margin:0 auto;padding:24px;">
-    <h2 style="color:#0D2B6A;margin:0 0 8px;">APEX EWS alert</h2>
+    <h2 style="color:#0D2B6A;margin:0 0 8px;">ZorEWS alert</h2>
     <p>${greeting}</p>
     <p>${escapeHtml(summary)}</p>
     <table style="border-collapse:collapse;margin:12px 0;">
@@ -36,7 +36,7 @@ export function renderAlertEmail(alert: AlertSummary, displayName?: string): Ren
       ${levelRow}
       <tr><td><strong>Raised at</strong></td><td>${alert.raised_at}</td></tr>
     </table>
-    <p style="font-size:12px;color:#6b7280;">You receive this because your role subscribes to APEX EWS regulatory alerts. Reply to this email or open the case in the EWS console to take action.</p>
+    <p style="font-size:12px;color:#6b7280;">You receive this because your role subscribes to ZorEWS regulatory alerts. Reply to this email or open the case in the EWS console to take action.</p>
   </div>
 </body></html>`;
   return { subject, body };
