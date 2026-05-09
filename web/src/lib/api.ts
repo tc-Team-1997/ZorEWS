@@ -1226,6 +1226,76 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // ── Case Scenarios admin (T6 M14.18/M14.21) ────────────────────────
+
+  caseScenariosList: (
+    params: {
+      status?: string;
+      case_category?: string;
+      priority?: CaseScenarioPriority;
+      trigger_indicator_id?: string;
+      include_deleted?: boolean;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
+    http
+      .get<{ items: CaseScenarioRow[]; total: number; page: number; page_size: number }>(
+        '/v1/admin/case-scenarios',
+        { params },
+      )
+      .then((r) => r.data),
+
+  caseScenarioGet: (id: string) =>
+    http
+      .get<CaseScenarioRow>(`/v1/admin/case-scenarios/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  caseScenarioCreate: (input: CaseScenarioCreateInput) =>
+    http
+      .post<CaseScenarioRow>('/v1/admin/case-scenarios', input)
+      .then((r) => r.data),
+
+  caseScenarioUpdate: (id: string, patch: CaseScenarioUpdateInput) =>
+    http
+      .patch<CaseScenarioRow>(
+        `/v1/admin/case-scenarios/${encodeURIComponent(id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+
+  caseScenarioActivate: (id: string) =>
+    http
+      .post<CaseScenarioRow>(
+        `/v1/admin/case-scenarios/${encodeURIComponent(id)}/activate`,
+        {},
+      )
+      .then((r) => r.data),
+
+  caseScenarioArchive: (id: string) =>
+    http
+      .delete<CaseScenarioRow>(`/v1/admin/case-scenarios/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  caseScenarioRestore: (id: string) =>
+    http
+      .post<CaseScenarioRow>(
+        `/v1/admin/case-scenarios/${encodeURIComponent(id)}/restore`,
+        {},
+      )
+      .then((r) => r.data),
+
+  caseScenarioHistory: (
+    id: string,
+    params: { page?: number; page_size?: number } = {},
+  ) =>
+    http
+      .get<{ items: CaseScenarioHistoryEntry[]; total: number; page: number; page_size: number }>(
+        `/v1/admin/case-scenarios/${encodeURIComponent(id)}/history`,
+        { params },
+      )
+      .then((r) => r.data),
+
   // ── Cases Report — row-level detail (BAC §3.1.8) ──────────────────────
 
   casesDetailReport: (filter: CasesDetailFilter) =>
@@ -1538,6 +1608,80 @@ export interface EscalationMatrixUpdateInput {
   level_2_role?: EscalationRole | null;
   level_3_after_minutes?: number | null;
   level_3_role?: EscalationRole | null;
+}
+
+// ── Case Scenarios types (T6 M14.18) ───────────────────────────────
+
+export type CaseScenarioStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+export type CaseScenarioPriority = 'P1' | 'P2' | 'P3' | 'P4';
+
+export interface CaseScenarioChecklistItem {
+  title: string;
+  required: boolean;
+}
+
+export interface CaseScenarioRow {
+  scenario_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: CaseScenarioPriority;
+  trigger_indicator_id: string | null;
+  trigger_threshold: number | null;
+  default_escalation_id: string;
+  notification_template_id: string | null;
+  checklist: CaseScenarioChecklistItem[];
+  status: CaseScenarioStatus;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface CaseScenarioCreateInput {
+  name: string;
+  case_category: string;
+  priority: CaseScenarioPriority;
+  trigger_indicator_id?: string | null;
+  trigger_threshold?: number | null;
+  default_escalation_id: string;
+  notification_template_id?: string | null;
+  checklist?: CaseScenarioChecklistItem[];
+}
+
+export interface CaseScenarioUpdateInput {
+  name?: string;
+  case_category?: string;
+  priority?: CaseScenarioPriority;
+  trigger_indicator_id?: string | null;
+  trigger_threshold?: number | null;
+  default_escalation_id?: string;
+  notification_template_id?: string | null;
+  checklist?: CaseScenarioChecklistItem[];
+}
+
+export type CaseScenarioHistoryAction =
+  | 'create'
+  | 'update'
+  | 'activate'
+  | 'archive'
+  | 'restore';
+
+export type CaseScenarioDiffOp =
+  | { op: 'add'; path: string; value: unknown }
+  | { op: 'remove'; path: string }
+  | { op: 'replace'; path: string; value: unknown };
+
+export interface CaseScenarioHistoryEntry {
+  history_id: number;
+  scenario_id: string;
+  tenant_id: string;
+  action: CaseScenarioHistoryAction;
+  diff: CaseScenarioDiffOp[];
+  after_state: Record<string, unknown>;
+  performed_by: string;
+  performed_at: string;
 }
 
 // ── User Access Override types ──────────────────────────────────────

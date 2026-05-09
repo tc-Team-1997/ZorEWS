@@ -518,6 +518,133 @@ function _mkEsc(
   };
 }
 
+// ── Case Scenarios fixture (M14.18/M14.21) ──────────────────────────
+
+interface MswCaseScenarioChecklistItem {
+  title: string;
+  required: boolean;
+}
+interface MswCaseScenario {
+  scenario_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  trigger_indicator_id: string | null;
+  trigger_threshold: number | null;
+  default_escalation_id: string;
+  notification_template_id: string | null;
+  checklist: MswCaseScenarioChecklistItem[];
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+interface MswCaseScenarioCreateInput {
+  name: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  trigger_indicator_id?: string | null;
+  trigger_threshold?: number | null;
+  default_escalation_id: string;
+  notification_template_id?: string | null;
+  checklist?: MswCaseScenarioChecklistItem[];
+}
+type MswScenarioDiffOp =
+  | { op: 'add'; path: string; value: unknown }
+  | { op: 'remove'; path: string }
+  | { op: 'replace'; path: string; value: unknown };
+interface MswCaseScenarioHistoryEntry {
+  history_id: number;
+  scenario_id: string;
+  tenant_id: string;
+  action: 'create' | 'update' | 'activate' | 'archive' | 'restore';
+  diff: MswScenarioDiffOp[];
+  after_state: Record<string, unknown>;
+  performed_by: string;
+  performed_at: string;
+}
+
+const mswCaseScenarios: MswCaseScenario[] = [];
+const mswCaseScenarioHistory: MswCaseScenarioHistoryEntry[] = [];
+let mswScenarioHistoryNextId = 1;
+
+const SCENARIO_TRACKED_FIELDS = [
+  'name',
+  'case_category',
+  'priority',
+  'trigger_indicator_id',
+  'trigger_threshold',
+  'default_escalation_id',
+  'notification_template_id',
+  'checklist',
+  'status',
+] as const;
+
+function _scenarioDiff(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+): MswScenarioDiffOp[] {
+  const out: MswScenarioDiffOp[] = [];
+  for (const f of SCENARIO_TRACKED_FIELDS) {
+    const a = before?.[f];
+    const b = after?.[f];
+    const aHas = before !== null && a !== undefined && a !== null;
+    const bHas = after !== null && b !== undefined && b !== null;
+    if (!aHas && !bHas) continue;
+    if (!aHas && bHas) { out.push({ op: 'add', path: `/${f}`, value: b }); continue; }
+    if (aHas && !bHas) { out.push({ op: 'remove', path: `/${f}` }); continue; }
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      out.push({ op: 'replace', path: `/${f}`, value: b });
+    }
+  }
+  return out;
+}
+
+function _appendScenarioHistory(
+  scenario_id: string,
+  action: 'create' | 'update' | 'activate' | 'archive' | 'restore',
+  before: MswCaseScenario | null,
+  after: MswCaseScenario,
+  performed_by: string,
+  performed_at: string,
+): void {
+  mswCaseScenarioHistory.push({
+    history_id: mswScenarioHistoryNextId++,
+    scenario_id,
+    tenant_id: 'BANK_DEMO',
+    action,
+    diff: _scenarioDiff(
+      before as Record<string, unknown> | null,
+      after as unknown as Record<string, unknown>,
+    ),
+    after_state: { ...(after as unknown as Record<string, unknown>) },
+    performed_by,
+    performed_at,
+  });
+}
+
+/** FK validation against the live MSW template + escalation stores —
+ *  matches the BFF resolver shape (returns null = ok, else error msg). */
+function _validateScenarioFKs(
+  escalation_id: string,
+  template_id: string | null | undefined,
+): string | null {
+  const esc = mswEscalationRules.find((r) => r.escalation_id === escalation_id);
+  if (!esc) return `escalation_id ${escalation_id} not found`;
+  if (esc.status !== 'ACTIVE') return `escalation_id ${escalation_id} is ${esc.status}; only ACTIVE rules can back a scenario`;
+  if (template_id) {
+    const tpl = mswNotificationTemplates.find((r) => r.template_id === template_id);
+    if (!tpl) return `notification_template_id ${template_id} not found`;
+    if (tpl.deleted_at !== null || tpl.status === 'ARCHIVED') {
+      return `notification_template_id ${template_id} is archived/deleted`;
+    }
+  }
+  return null;
+}
+
 const mswEscalationRules: MswEscalationRule[] = [
   _mkEsc('BANK Fraud P1 fast-escalate', 'fraud', 'P1', 15, 'supervisor', 60, 'risk_analyst', 240, 'admin'),
   _mkEsc('BANK Credit P2 standard',     'credit_risk', 'P2', 60, 'supervisor', 240, 'risk_analyst'),
@@ -813,6 +940,63 @@ function illegal(c: CaseDetail, attempted: Transition) {
     { status: 409 },
   );
 }
+
+// Seed 2 demo case scenarios. Placed after every fixture array so the
+// FK-validator helpers see them as resolvable on first access.
+(function _seedScenarios() {
+  const fraudEsc = mswEscalationRules.find((r) => r.name === 'BANK Fraud P1 fast-escalate');
+  const kycEsc = mswEscalationRules.find((r) => r.name === 'BANK KYC P3 reminder');
+  const emailTpl = mswNotificationTemplates.find((r) => r.name === 'Case Opened — RM email');
+  const smsTpl = mswNotificationTemplates.find((r) => r.name === 'Customer KYC reminder — SMS');
+  if (!fraudEsc || !kycEsc) return;
+  const seedTs = new Date('2026-05-09T08:30:00.000Z').toISOString();
+  const fraudScenario: MswCaseScenario = {
+    scenario_id: 'sc-seed-fraud-p1-sudden-dpd',
+    tenant_id: 'BANK_DEMO',
+    name: 'Fraud P1 sudden DPD spike',
+    case_category: 'fraud',
+    priority: 'P1',
+    trigger_indicator_id: 'FRD-001',
+    trigger_threshold: 0.85,
+    default_escalation_id: fraudEsc.escalation_id,
+    notification_template_id: emailTpl?.template_id ?? null,
+    checklist: [
+      { title: 'Verify recent transactions with customer', required: true },
+      { title: 'Freeze card if confirmed', required: true },
+      { title: 'File RBI fraud report (FMR-1)', required: true },
+    ],
+    status: 'ACTIVE',
+    created_by: 'system:seed',
+    updated_by: null,
+    created_at: seedTs,
+    updated_at: seedTs,
+    deleted_at: null,
+  };
+  const kycScenario: MswCaseScenario = {
+    scenario_id: 'sc-seed-kyc-p3-doc-expired',
+    tenant_id: 'BANK_DEMO',
+    name: 'KYC document expired (P3)',
+    case_category: 'kyc',
+    priority: 'P3',
+    trigger_indicator_id: 'KYC-001',
+    trigger_threshold: 1,
+    default_escalation_id: kycEsc.escalation_id,
+    notification_template_id: smsTpl?.template_id ?? null,
+    checklist: [
+      { title: 'SMS customer with KYC reminder', required: true },
+      { title: 'Block new account openings if expired > 90d', required: false },
+    ],
+    status: 'DRAFT',
+    created_by: 'system:seed',
+    updated_by: null,
+    created_at: seedTs,
+    updated_at: seedTs,
+    deleted_at: null,
+  };
+  mswCaseScenarios.push(fraudScenario, kycScenario);
+  _appendScenarioHistory(fraudScenario.scenario_id, 'create', null, fraudScenario, 'system:seed', seedTs);
+  _appendScenarioHistory(kycScenario.scenario_id, 'create', null, kycScenario, 'system:seed', seedTs);
+})();
 
 export const handlers = [
   // ── Auth ──────────────────────────────────────────────────────────
@@ -3321,6 +3505,245 @@ export const handlers = [
     const now = new Date().toISOString();
     const updated: MswEscalationRule = { ...old, status: 'ARCHIVED', updated_by: actor, updated_at: now };
     mswEscalationRules[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  // ── Case Scenarios admin (T6 M14.18/M14.21) ─────────────────────────
+
+  // /:id/history declared BEFORE /:id so the literal /history doesn't get
+  // mistaken for an id segment.
+  http.get('/v1/admin/case-scenarios/:id/history', ({ params }) => {
+    const id = String(params.id);
+    const sc = mswCaseScenarios.find((x) => x.scenario_id === id);
+    if (!sc) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `scenario ${id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const items = mswCaseScenarioHistory
+      .filter((r) => r.scenario_id === id)
+      .sort((a, b) => b.history_id - a.history_id);
+    return HttpResponse.json(
+      envelope({ items, total: items.length, page: 1, page_size: 100 }),
+    );
+  }),
+
+  http.get('/v1/admin/case-scenarios', ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status');
+    const cat = url.searchParams.get('case_category');
+    const prio = url.searchParams.get('priority');
+    const trigger = url.searchParams.get('trigger_indicator_id');
+    const includeDeleted = url.searchParams.get('include_deleted') === 'true';
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
+    let rows = mswCaseScenarios.slice();
+    if (!includeDeleted) rows = rows.filter((r) => r.deleted_at === null);
+    if (cat) rows = rows.filter((r) => r.case_category === cat);
+    if (prio) rows = rows.filter((r) => r.priority === prio);
+    if (trigger) rows = rows.filter((r) => r.trigger_indicator_id === trigger);
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((r) => set.has(r.status));
+    }
+    rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({
+        items: rows.slice(start, start + pageSize),
+        total: rows.length,
+        page,
+        page_size: pageSize,
+      }),
+    );
+  }),
+
+  http.get('/v1/admin/case-scenarios/:id', ({ params }) => {
+    const r = mswCaseScenarios.find((x) => x.scenario_id === params.id);
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/admin/case-scenarios', async ({ request }) => {
+    const body = (await request.json()) as MswCaseScenarioCreateInput;
+    if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'), { status: 400 });
+    }
+    const fkErr = _validateScenarioFKs(body.default_escalation_id, body.notification_template_id ?? null);
+    if (fkErr) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_fk', fkErr, 'MEDIUM'), { status: 400 });
+    }
+    if (
+      (body.trigger_indicator_id != null) !==
+      (body.trigger_threshold != null)
+    ) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'trigger_indicator_id and trigger_threshold must be set together', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const dup = mswCaseScenarios.find(
+      (r) => r.deleted_at === null && r.name.toLowerCase() === body.name.trim().toLowerCase(),
+    );
+    if (dup) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_duplicate_scenario_name', `scenario "${body.name}" already used`, 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const row: MswCaseScenario = {
+      scenario_id: `sc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id: 'BANK_DEMO',
+      name: body.name.trim(),
+      case_category: body.case_category,
+      priority: body.priority,
+      trigger_indicator_id: body.trigger_indicator_id ?? null,
+      trigger_threshold: body.trigger_threshold ?? null,
+      default_escalation_id: body.default_escalation_id,
+      notification_template_id: body.notification_template_id ?? null,
+      checklist: body.checklist ?? [],
+      status: 'DRAFT',
+      created_by: actor,
+      updated_by: null,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    };
+    mswCaseScenarios.push(row);
+    _appendScenarioHistory(row.scenario_id, 'create', null, row, actor, now);
+    return HttpResponse.json(envelope(row, 'EWS_201_created', 'Created'), { status: 201 });
+  }),
+
+  http.patch('/v1/admin/case-scenarios/:id', async ({ params, request }) => {
+    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswCaseScenarios[idx];
+    if (old.deleted_at !== null) {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', 'cannot update an archived scenario', 'MEDIUM'), { status: 409 });
+    }
+    const patch = (await request.json()) as Partial<MswCaseScenarioCreateInput>;
+    const mergedTriggerId = patch.trigger_indicator_id !== undefined ? patch.trigger_indicator_id : old.trigger_indicator_id;
+    const mergedTriggerTh = patch.trigger_threshold !== undefined ? patch.trigger_threshold : old.trigger_threshold;
+    if ((mergedTriggerId != null) !== (mergedTriggerTh != null)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'trigger_indicator_id and trigger_threshold must be set together', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (patch.default_escalation_id || patch.notification_template_id !== undefined) {
+      const fkErr = _validateScenarioFKs(
+        patch.default_escalation_id ?? old.default_escalation_id,
+        patch.notification_template_id !== undefined ? patch.notification_template_id : old.notification_template_id,
+      );
+      if (fkErr) {
+        return HttpResponse.json(envelopeError('EWS_400_invalid_fk', fkErr, 'MEDIUM'), { status: 400 });
+      }
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswCaseScenario = {
+      ...old,
+      name: patch.name ?? old.name,
+      case_category: patch.case_category ?? old.case_category,
+      priority: patch.priority ?? old.priority,
+      trigger_indicator_id: mergedTriggerId,
+      trigger_threshold: mergedTriggerTh,
+      default_escalation_id: patch.default_escalation_id ?? old.default_escalation_id,
+      notification_template_id:
+        patch.notification_template_id !== undefined
+          ? patch.notification_template_id
+          : old.notification_template_id,
+      checklist: patch.checklist ?? old.checklist,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswCaseScenarios[idx] = updated;
+    _appendScenarioHistory(updated.scenario_id, 'update', old, updated, actor, now);
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.post('/v1/admin/case-scenarios/:id/activate', ({ params }) => {
+    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswCaseScenarios[idx];
+    if (old.deleted_at !== null || old.status === 'ARCHIVED') {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', 'cannot activate an archived scenario', 'MEDIUM'), { status: 409 });
+    }
+    if (old.status === 'ACTIVE') return HttpResponse.json(envelope(old));
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswCaseScenario = { ...old, status: 'ACTIVE', updated_by: actor, updated_at: now };
+    mswCaseScenarios[idx] = updated;
+    _appendScenarioHistory(updated.scenario_id, 'activate', old, updated, actor, now);
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.post('/v1/admin/case-scenarios/:id/restore', ({ params }) => {
+    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswCaseScenarios[idx];
+    if (old.deleted_at === null) {
+      return HttpResponse.json(envelopeError('EWS_409_invalid_state', 'scenario is not archived', 'MEDIUM'), { status: 409 });
+    }
+    const dup = mswCaseScenarios.find(
+      (r) => r.scenario_id !== old.scenario_id && r.deleted_at === null && r.name.toLowerCase() === old.name.toLowerCase(),
+    );
+    if (dup) {
+      return HttpResponse.json(
+        envelopeError(
+          'EWS_409_duplicate_scenario_name',
+          `name "${old.name}" was reused while archived; rename before restore`,
+          'MEDIUM',
+        ),
+        { status: 409 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswCaseScenario = {
+      ...old,
+      status: 'DRAFT',
+      deleted_at: null,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswCaseScenarios[idx] = updated;
+    _appendScenarioHistory(updated.scenario_id, 'restore', old, updated, actor, now);
+    return HttpResponse.json(envelope(updated));
+  }),
+
+  http.delete('/v1/admin/case-scenarios/:id', ({ params }) => {
+    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
+    }
+    const old = mswCaseScenarios[idx];
+    if (old.deleted_at !== null) return HttpResponse.json(envelope(old));
+    const actor = readPersistedUsername() ?? 'alice.admin';
+    const now = new Date().toISOString();
+    const updated: MswCaseScenario = {
+      ...old,
+      status: 'ARCHIVED',
+      deleted_at: now,
+      updated_by: actor,
+      updated_at: now,
+    };
+    mswCaseScenarios[idx] = updated;
+    _appendScenarioHistory(updated.scenario_id, 'archive', old, updated, actor, now);
     return HttpResponse.json(envelope(updated));
   }),
 

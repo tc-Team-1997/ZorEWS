@@ -27,7 +27,8 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: /customers/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /rules/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /cases/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /scenario/i })).toBeInTheDocument();
+    // Disambiguated from /admin/case-scenarios admin entry (M14.21)
+    expect(screen.getByRole('link', { name: /^scenario/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
     expect(screen.getByText('alice.admin')).toBeInTheDocument();
   });

@@ -22,6 +22,7 @@ import {
   Key,
   Mail,
   ArrowUpFromLine,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -64,6 +65,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/sla-config', i18nKey: 'sla_config', icon: Clock, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/notification-templates', i18nKey: 'notification_templates', icon: Mail, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/escalation-matrix', i18nKey: 'escalation_matrix', icon: ArrowUpFromLine, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/case-scenarios', i18nKey: 'case_scenarios', icon: Zap, requireRole: ['admin', 'supervisor'] },
 ] as const;
 
 // 15-min idle limit, 2-min warning window — banking standard.
