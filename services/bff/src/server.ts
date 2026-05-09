@@ -983,6 +983,22 @@ export interface AppDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   escalationMatrixStore?: any;
   /**
+   * Admin CRUD store for app_admin.case_scenarios (T6 M14.18).
+   * When provided, mounts /v1/admin/case-scenarios routes.
+   * The store carries injected resolvers for FK validation against
+   * escalation_matrix + notification_templates plus an optional
+   * history fan-out target.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  caseScenarioStore?: any;
+  /**
+   * Append-only history store for app_admin.case_scenario_history.
+   * When set, GET /v1/admin/case-scenarios/:id/history returns
+   * paginated entries (mutation log w/ RFC-6902-flavoured diff).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  caseScenarioHistoryStore?: any;
+  /**
    * Source for the Cases Report detail (BAC §3.1.8). When provided,
    * mounts /v1/reports/cases/detail + /v1/reports/cases/filters.
    * Bootstrap wires this to a Pg-backed source via
@@ -1163,6 +1179,22 @@ export function makeApp(deps: AppDeps = {}) {
     app.use(
       makeEscalationMatrixRouter({
         store: deps.escalationMatrixStore,
+        requireTenantMw,
+        requireRole,
+        now,
+      }),
+    );
+  }
+
+  // ---------- /v1/admin/case-scenarios (T6 M14.18) --------------------
+  if (deps.caseScenarioStore) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeCaseScenariosRouter } = require('./admin/case_scenarios_routes') as
+      typeof import('./admin/case_scenarios_routes');
+    app.use(
+      makeCaseScenariosRouter({
+        store: deps.caseScenarioStore,
+        history: deps.caseScenarioHistoryStore,
         requireTenantMw,
         requireRole,
         now,
