@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { SetCategoryModal } from './SetCategoryModal';
+import { CaseTrackingTimeline } from './CaseTrackingTimeline';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -54,12 +55,6 @@ export function CmsCaseDetailPage() {
     queryFn: () => cmsApi.attachments.list(id),
     enabled: !!id,
   });
-  const historyQ = useQuery({
-    queryKey: ['cms-case-history', id],
-    queryFn: () => cmsApi.history(id, 100),
-    enabled: !!id && tab === 'Timeline',
-  });
-
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['cms-case', id] });
     void qc.invalidateQueries({ queryKey: ['cms-cases'] });
@@ -215,25 +210,16 @@ export function CmsCaseDetailPage() {
           ) : null}
 
           {tab === 'Timeline' ? (
-            <Panel title="Audit timeline">
-              {historyQ.isLoading ? (
-                <div className="text-sm text-slate-500">Loading…</div>
-              ) : (
-                <ol className="space-y-2">
-                  {(historyQ.data?.items ?? []).map((h) => (
-                    <li key={h.history_id} className="rounded border border-slate-200 p-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-slate-500">{h.action_type}</span>
-                        <span className="text-slate-400">
-                          {new Date(h.performed_at).toLocaleString()}
-                        </span>
-                        <span className="text-slate-600">by {h.performed_by}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </Panel>
+            <CaseTrackingTimeline
+              caseId={id}
+              onJumpToComment={() => {
+                // Switch to Investigation tab so the note panel is visible.
+                // The note_id is already in the URL via the timeline's
+                // navigate(href) call — Investigation tab can read it
+                // when CMS-6 ships scroll-to-note.
+                setTab('Investigation');
+              }}
+            />
           ) : null}
 
           {tab === 'Related' ? (

@@ -95,6 +95,73 @@ export interface CmsHistoryEntry {
   performed_at: string;
 }
 
+// ─── Tracking timeline (BAC §3.1.5) ─────────────────────────────────
+
+export type TrackingEventType =
+  | 'STATUS_CHANGE'
+  | 'COMMENT'
+  | 'ATTACHMENT'
+  | 'ASSIGNMENT_CHANGE'
+  | 'ESCALATION'
+  | 'CAUSAL_ANALYSIS_UPDATE'
+  | 'CAP_UPDATE'
+  | 'APPROVAL';
+
+export interface StatusChangePayload {
+  from_status: string;
+  to_status: string;
+}
+export interface CommentPayload {
+  note_id: string;
+  snippet: string;
+  is_internal: boolean;
+}
+export interface AttachmentPayload {
+  attachment_id: string;
+  file_name: string;
+  mime: string;
+  size_bytes: number;
+  change: 'added' | 'deleted';
+}
+export interface AssignmentChangePayload {
+  assigned_from: string | null;
+  assigned_to: string | null;
+}
+export interface EscalationPayload {
+  reason: string | null;
+}
+export interface StubPayload {
+  stub: true;
+  message: string;
+}
+
+export type TrackingPayload =
+  | StatusChangePayload
+  | CommentPayload
+  | AttachmentPayload
+  | AssignmentChangePayload
+  | EscalationPayload
+  | StubPayload;
+
+export interface TrackingEvent {
+  event_id: string;
+  case_id: string;
+  type: TrackingEventType;
+  ts: string;
+  actor: string;
+  linkable: boolean;
+  locked?: { reason: string };
+  payload: TrackingPayload;
+  href?: string;
+}
+
+export interface TrackingResponse {
+  case_id: string;
+  items: TrackingEvent[];
+  total: number;
+  generated_at: string;
+}
+
 export interface CmsStats {
   total: number;
   by_status: Record<CmsCaseState, number>;
@@ -205,6 +272,16 @@ export const cmsApi = {
   history: (case_id: string, limit = 50) =>
     unwrap<{ items: CmsHistoryEntry[]; total: number }>(
       http.get(`${cmsBase}/${case_id}/history`, { params: { limit } }),
+    ),
+
+  /** GET /v1/cms/cases/:case_id/tracking?include_stubs= — typed
+   *  tracking timeline used by <CaseTrackingTimeline /> on the
+   *  case detail page (BAC §3.1.5). */
+  tracking: (case_id: string, include_stubs = false) =>
+    unwrap<TrackingResponse>(
+      http.get(`${cmsBase}/${case_id}/tracking`, {
+        params: include_stubs ? { include_stubs: 'true' } : undefined,
+      }),
     ),
 
   stats: () => unwrap<CmsStats>(http.get(`${cmsBase}/stats`)),
