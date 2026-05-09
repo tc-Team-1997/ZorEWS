@@ -23,7 +23,7 @@ const describeIfPg = PG_URL ? describe : describe.skip;
 const ACTOR = { actor_id: 'alice.admin' };
 const NOW1 = new Date('2026-05-09T10:00:00Z');
 const NOW2 = new Date('2026-05-09T11:00:00Z');
-const TENANT = 'TEST_M14_22';
+const TENANT = 'TEST_M14_22_TPL';
 
 describeIfPg('PgNotificationTemplateStore (integration — requires ADMIN_PG_URL)', () => {
   let pool: Pool;

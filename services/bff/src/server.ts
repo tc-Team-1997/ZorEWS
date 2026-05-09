@@ -1007,6 +1007,15 @@ export interface AppDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   caseScenarioHistoryStore?: any;
   /**
+   * Optional cron handle (T6 M14.25b). When provided, the escalation
+   * worker's GET /worker/status route reports live metadata. Bootstrap
+   * starts the cron when ESCALATION_WORKER_INTERVAL_SEC is set; tests
+   * + dev runs without the env get a status route that reports
+   * cron_wired=false.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  escalationWorkerCron?: any;
+  /**
    * Source for the Cases Report detail (BAC §3.1.8). When provided,
    * mounts /v1/reports/cases/detail + /v1/reports/cases/filters.
    * Bootstrap wires this to a Pg-backed source via
@@ -1214,9 +1223,11 @@ export function makeApp(deps: AppDeps = {}) {
     );
   }
 
-  // ---------- /v1/admin/escalations/* (T6 M14.25) ---------------------
+  // ---------- /v1/admin/escalations/* (T6 M14.25 + M14.25b status) ---
   // Mounts when the full triad (scenarios + matrix + templates +
   // dispatch log) is wired so the worker can resolve the chain.
+  // The optional `escalationWorkerCron` deps slot enables the
+  // /worker/status route to surface live cron metadata.
   if (
     deps.caseScenarioStore &&
     deps.escalationMatrixStore &&
@@ -1232,6 +1243,7 @@ export function makeApp(deps: AppDeps = {}) {
         escalationMatrixStore: deps.escalationMatrixStore,
         templateStore: deps.notificationTemplateStore,
         dispatchStore: deps.notificationDispatchStore,
+        cron: deps.escalationWorkerCron,
         requireTenantMw,
         requireRole,
         now,
@@ -15490,6 +15502,37 @@ if (require.main === module) {
       typeof import('./analytics/stage_migration');
     const { source: stageMigrationSource } = await makeStageMigrationSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
+    // T6 M14.25b — escalation worker cron. Off by default; opt-in via
+    // ESCALATION_WORKER_INTERVAL_SEC. Tenants come from
+    // ESCALATION_WORKER_TENANTS (CSV), default BANK_DEMO,BIL.
+    let escalationWorkerCron:
+      | InstanceType<typeof import('./admin/escalation_worker').EscalationWorkerCron>
+      | undefined;
+    const escIntervalSec = Number(process.env.ESCALATION_WORKER_INTERVAL_SEC ?? '0');
+    if (Number.isFinite(escIntervalSec) && escIntervalSec > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { CmsCaseSourceFromStore, EscalationWorkerCron } = require('./admin/escalation_worker') as
+        typeof import('./admin/escalation_worker');
+      const tenants = (process.env.ESCALATION_WORKER_TENANTS ?? 'BANK_DEMO,BIL')
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      escalationWorkerCron = new EscalationWorkerCron({
+        scenarioStore: caseScenarioStore,
+        escalationMatrixStore,
+        templateStore: notificationTemplateStore,
+        dispatchStore: notificationDispatchStore,
+        caseSource: new CmsCaseSourceFromStore(defaultCmsCaseStore),
+        tenants,
+        intervalMs: escIntervalSec * 1000,
+        performed_by: 'system:escalation-worker',
+      });
+      escalationWorkerCron.start();
+      // eslint-disable-next-line no-console
+      console.log(
+        `escalation worker cron started — every ${escIntervalSec}s across [${tenants.join(', ')}]`,
+      );
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -15504,6 +15547,7 @@ if (require.main === module) {
       escalationMatrixStore,
       caseScenarioStore,
       caseScenarioHistoryStore,
+      escalationWorkerCron,
       casesDetailSource,
       savedFilterStore,
       reportAuditPool,

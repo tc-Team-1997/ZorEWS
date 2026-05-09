@@ -32,11 +32,16 @@ import {
   computeDueEscalations,
   dispatchDueEscalations,
   filterAlreadyDispatched,
+  type EscalationWorkerCron,
   type EscalationWorkerDeps,
   type OpenCaseRef,
 } from './escalation_worker';
 
 export interface EscalationWorkerRouterDeps extends EscalationWorkerDeps {
+  /** When the cron is wired (via env), the status route mounts. Without
+   *  it the route 200s with running=false and zeroes — same shape so
+   *  the SPA can render uniformly. */
+  cron?: EscalationWorkerCron;
   requireTenantMw: RequestHandler;
   requireRole: (op: string) => RequestHandler;
   now?: () => Date;
@@ -105,6 +110,7 @@ export function makeEscalationWorkerRouter(
     escalationMatrixStore,
     templateStore,
     dispatchStore,
+    cron,
     requireTenantMw,
     requireRole,
   } = deps;
@@ -154,6 +160,39 @@ export function makeEscalationWorkerRouter(
       already_dispatched_count: computed.due.length - filtered.length,
     };
   }
+
+  // GET /v1/admin/escalations/worker/status (M14.25b) — exposes the
+  // cron's last-run snapshot so the SPA can show "the worker is
+  // running, fired N dispatches across M tenants at <ts>" without
+  // having to scrape the dispatch log.
+  router.get(
+    '/v1/admin/escalations/worker/status',
+    requireTenantMw,
+    requireRole('admin:escalations:preview'),
+    wrap(async (req, res) => {
+      const ctx = extractCtx(req, now);
+      if (!cron) {
+        res.json(
+          wrapResponse(
+            {
+              running: false,
+              interval_ms: 0,
+              tenants: [],
+              total_runs: 0,
+              last_run_at: null,
+              last_run_dispatched: 0,
+              last_run_inspected: 0,
+              last_error: null,
+              cron_wired: false,
+            },
+            ctx,
+          ),
+        );
+        return;
+      }
+      res.json(wrapResponse({ ...cron.status(), cron_wired: true }, ctx));
+    }),
+  );
 
   router.post(
     '/v1/admin/escalations/preview',
