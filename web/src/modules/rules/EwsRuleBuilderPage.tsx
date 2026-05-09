@@ -16,7 +16,6 @@ import {
 import { http } from '@/lib/http';
 import { Badge, type BadgeTone, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { EwsRuleDiffViewer } from './EwsRuleDiffViewer';
 import { rulesPlusApi } from './rulesPlusApi';
 
 // ── Types (mirror BFF EwsRule shape) ─────────────────────────────────
@@ -146,8 +145,8 @@ export function EwsRuleBuilderPage() {
   const [testRule, setTestRule] = useState<EwsRule | null>(null);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof ewsApi.test>> | null>(null);
   const [testValues, setTestValues] = useState<Record<string, string>>({});
-  // RP-2: per-row diff modal + clone-flow state.
-  const [diffRuleId, setDiffRuleId] = useState<string | null>(null);
+  // RP-2: clone-flow state. (Diff viewer is now its own routable page
+  // at /rules/ews/:rule_id/diff — no modal state needed here.)
   const [cloneSource, setCloneSource] = useState<EwsRule | null>(null);
   const [cloneNewId, setCloneNewId] = useState('');
   const [cloneNewName, setCloneNewName] = useState('');
@@ -338,13 +337,6 @@ export function EwsRuleBuilderPage() {
           }}
           result={testResult}
           submitting={testMut.isPending}
-        />
-      ) : null}
-
-      {diffRuleId ? (
-        <EwsRuleDiffViewer
-          ruleId={diffRuleId}
-          onClose={() => setDiffRuleId(null)}
         />
       ) : null}
 
