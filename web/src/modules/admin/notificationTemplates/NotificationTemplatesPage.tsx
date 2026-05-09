@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Mail, MessageSquare, Pencil, Plus, Smartphone, Trash2 } from 'lucide-react';
+import { CheckCircle2, Eye, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
 import {
   api,
   type NotificationChannel,
@@ -17,6 +17,8 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { NotificationTemplateFormModal } from './NotificationTemplateFormModal';
+import { NotificationTemplatePreviewModal } from './NotificationTemplatePreviewModal';
+import { NotificationTemplateTestFireModal } from './NotificationTemplateTestFireModal';
 
 const STATUS_TONE: Record<NotificationTemplateStatus, BadgeTone> = {
   DRAFT: 'neutral',
@@ -46,6 +48,8 @@ export function NotificationTemplatesPage() {
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('ALL');
   const [editing, setEditing] = useState<NotificationTemplateRow | null>(null);
   const [creating, setCreating] = useState(false);
+  const [previewing, setPreviewing] = useState<NotificationTemplateRow | null>(null);
+  const [testFiring, setTestFiring] = useState<NotificationTemplateRow | null>(null);
 
   const list = useQuery({
     queryKey: ['notification-templates', statusFilter, channelFilter],
@@ -162,12 +166,38 @@ export function NotificationTemplatesPage() {
           {r.deleted_at === null && (
             <button
               type="button"
-              onClick={() => setEditing(r)}
-              className="text-2xs text-blue-600 hover:underline inline-flex items-center gap-1"
-              data-testid={`tpl-edit-${r.template_id}`}
+              onClick={() => setPreviewing(r)}
+              className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1"
+              data-testid={`tpl-preview-${r.template_id}`}
             >
-              <Pencil className="w-3 h-3" /> Edit
+              <Eye className="w-3 h-3" /> Preview
             </button>
+          )}
+          {r.deleted_at === null && r.status !== 'ARCHIVED' && (
+            <>
+              <span className="text-2xs text-muted">·</span>
+              <button
+                type="button"
+                onClick={() => setTestFiring(r)}
+                className="text-2xs text-violet-700 hover:underline inline-flex items-center gap-1"
+                data-testid={`tpl-testfire-${r.template_id}`}
+              >
+                <Send className="w-3 h-3" /> Test fire
+              </button>
+            </>
+          )}
+          {r.deleted_at === null && (
+            <>
+              <span className="text-2xs text-muted">·</span>
+              <button
+                type="button"
+                onClick={() => setEditing(r)}
+                className="text-2xs text-blue-600 hover:underline inline-flex items-center gap-1"
+                data-testid={`tpl-edit-${r.template_id}`}
+              >
+                <Pencil className="w-3 h-3" /> Edit
+              </button>
+            </>
           )}
           {r.status === 'DRAFT' && (
             <>
@@ -199,7 +229,7 @@ export function NotificationTemplatesPage() {
           )}
         </div>
       ),
-      width: 220,
+      width: 360,
     },
   ];
 
@@ -304,6 +334,21 @@ export function NotificationTemplatesPage() {
           onSubmit={(patch) => update.mutate({ id: editing.template_id, patch })}
           isPending={update.isPending}
           error={update.error}
+        />
+      )}
+      {previewing && (
+        <NotificationTemplatePreviewModal
+          template={previewing}
+          onClose={() => setPreviewing(null)}
+        />
+      )}
+      {testFiring && (
+        <NotificationTemplateTestFireModal
+          template={testFiring}
+          onClose={() => setTestFiring(null)}
+          onSent={() =>
+            queryClient.invalidateQueries({ queryKey: ['notification-dispatches'] })
+          }
         />
       )}
     </div>

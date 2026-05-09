@@ -429,6 +429,74 @@ interface MswNotificationTemplateCreateInput {
   locale?: string;
 }
 
+// ── M14.24 dispatch log fixtures ────────────────────────────────────
+
+interface MswDispatchEntry {
+  dispatch_id: string;
+  tenant_id: string;
+  template_id: string;
+  template_name: string;
+  channel: 'EMAIL' | 'SMS' | 'IN_APP';
+  recipient: string;
+  trigger: 'admin_test_fire' | 'case_create_pipeline' | 'escalation_worker';
+  reference: string | null;
+  rendered_subject: string | null;
+  rendered_body: string;
+  missing_vars: string[];
+  status: 'sent' | 'preview' | 'failed';
+  status_reason: string | null;
+  performed_by: string;
+  performed_at: string;
+}
+
+const mswDispatchLog: MswDispatchEntry[] = [];
+
+interface MswRenderResult {
+  channel: 'EMAIL' | 'SMS' | 'IN_APP';
+  subject: string | null;
+  body: string;
+  missing_vars: string[];
+  used_vars: string[];
+}
+
+const _RENDER_TOKEN_RE =
+  /\{\{\s*([a-zA-Z_][\w.]*)\s*(?:\|\s*default:\s*"([^"]*)"\s*)?\}\}/g;
+
+function _renderField(
+  template: string,
+  vars: Record<string, unknown>,
+  used: Set<string>,
+  missing: Set<string>,
+): string {
+  return template.replace(_RENDER_TOKEN_RE, (full, name: string, def?: string) => {
+    used.add(name);
+    const v = vars[name];
+    const present = v !== null && v !== undefined && !(typeof v === 'string' && v.length === 0);
+    if (present) return String(v);
+    if (def !== undefined) return def;
+    missing.add(name);
+    return full;
+  });
+}
+
+function _renderTemplate(
+  tpl: MswNotificationTemplate,
+  vars: Record<string, unknown>,
+): MswRenderResult {
+  const used = new Set<string>();
+  const missing = new Set<string>();
+  const subject =
+    tpl.subject !== null ? _renderField(tpl.subject, vars, used, missing) : null;
+  const body = _renderField(tpl.body, vars, used, missing);
+  return {
+    channel: tpl.channel,
+    subject,
+    body,
+    missing_vars: [...missing].sort(),
+    used_vars: [...used].sort(),
+  };
+}
+
 function _mkTemplate(
   tenant_id: string,
   name: string,
@@ -3399,6 +3467,44 @@ export const handlers = [
     );
   }),
 
+  // M14.24 GET /dispatches declared BEFORE GET /:id so the literal
+  // /dispatches doesn't match :id="dispatches" first.
+  http.get('/v1/admin/notification-templates/dispatches', ({ request }) => {
+    const tenant = readTenantFromReq(request);
+    const url = new URL(request.url);
+    const template_id = url.searchParams.get('template_id');
+    const reference = url.searchParams.get('reference');
+    const trigger = url.searchParams.get('trigger');
+    const status = url.searchParams.get('status');
+    const since = url.searchParams.get('since');
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
+    let rows = mswDispatchLog.filter((r) => r.tenant_id === tenant);
+    if (template_id) rows = rows.filter((r) => r.template_id === template_id);
+    if (reference) rows = rows.filter((r) => r.reference === reference);
+    if (trigger) rows = rows.filter((r) => r.trigger === trigger);
+    if (status) {
+      const set = new Set(status.split(',').map((s) => s.trim()));
+      rows = rows.filter((r) => set.has(r.status));
+    }
+    if (since) {
+      const sinceMs = new Date(since).getTime();
+      if (Number.isFinite(sinceMs)) {
+        rows = rows.filter((r) => new Date(r.performed_at).getTime() >= sinceMs);
+      }
+    }
+    rows.sort((a, b) => b.performed_at.localeCompare(a.performed_at));
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json(
+      envelope({
+        items: rows.slice(start, start + pageSize),
+        total: rows.length,
+        page,
+        page_size: pageSize,
+      }),
+    );
+  }),
+
   http.get('/v1/admin/notification-templates/:id', ({ params, request }) => {
     const tenant = readTenantFromReq(request);
     const r = mswNotificationTemplates.find(
@@ -3588,6 +3694,116 @@ export const handlers = [
     };
     mswNotificationTemplates[idx] = updated;
     return HttpResponse.json(envelope(updated));
+  }),
+
+  // M14.24 preview + test-fire (GET /dispatches lives further up so
+  // it doesn't get shadowed by GET /:id).
+
+  http.post('/v1/admin/notification-templates/:id/preview', async ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const tpl = mswNotificationTemplates.find(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
+    if (!tpl) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const body = (await request.json()) as { vars?: unknown };
+    if (body.vars !== undefined && body.vars !== null && typeof body.vars !== 'object') {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'vars must be an object', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const rendered = _renderTemplate(tpl, (body.vars as Record<string, unknown>) ?? {});
+    return HttpResponse.json(envelope(rendered));
+  }),
+
+  http.post('/v1/admin/notification-templates/:id/test-fire', async ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const tpl = mswNotificationTemplates.find(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
+    if (!tpl) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    if (tpl.deleted_at !== null || tpl.status === 'ARCHIVED') {
+      return HttpResponse.json(
+        envelopeError('EWS_409_invalid_state', 'cannot test-fire an archived template', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const body = (await request.json()) as {
+      vars?: unknown;
+      recipient?: unknown;
+      reference?: unknown;
+      refuse_when_missing?: unknown;
+    };
+    if (typeof body.recipient !== 'string' || !body.recipient.trim()) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'recipient required (string)', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.recipient.length > 200) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'recipient max 200 chars', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.vars !== null && body.vars !== undefined && (typeof body.vars !== 'object' || Array.isArray(body.vars))) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'vars must be an object', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const vars = (body.vars as Record<string, unknown> | undefined) ?? {};
+    const refuseMissing = body.refuse_when_missing === true;
+    const reference =
+      typeof body.reference === 'string' && body.reference.trim()
+        ? body.reference.trim().slice(0, 200)
+        : null;
+    const rendered = _renderTemplate(tpl, vars);
+    if (refuseMissing && rendered.missing_vars.length > 0) {
+      return HttpResponse.json(
+        envelopeError(
+          'EWS_422_missing_template_vars',
+          `refuse_when_missing: template references unset vars: ${rendered.missing_vars.join(', ')}`,
+          'MEDIUM',
+        ),
+        { status: 422 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'admin';
+    const now = new Date().toISOString();
+    const dispatch: MswDispatchEntry = {
+      dispatch_id: `disp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id: tenant,
+      template_id: tpl.template_id,
+      template_name: tpl.name,
+      channel: tpl.channel,
+      recipient: body.recipient.trim(),
+      trigger: 'admin_test_fire',
+      reference,
+      rendered_subject: rendered.subject,
+      rendered_body: rendered.body,
+      missing_vars: rendered.missing_vars,
+      status: 'sent',
+      status_reason:
+        rendered.missing_vars.length > 0
+          ? `dispatched with ${rendered.missing_vars.length} missing var(s)`
+          : null,
+      performed_by: actor,
+      performed_at: now,
+    };
+    mswDispatchLog.push(dispatch);
+    while (mswDispatchLog.length > 500) mswDispatchLog.shift();
+    return HttpResponse.json(envelope({ rendered, dispatch }));
   }),
 
   // ── Escalation Matrix admin (T6 M14.17/M14.20) ──────────────────────

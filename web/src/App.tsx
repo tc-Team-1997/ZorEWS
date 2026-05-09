@@ -42,6 +42,7 @@ import { UserAccessOverrideListPage } from '@/modules/admin/userAccessOverride/U
 import { EffectiveAccessPage } from '@/modules/admin/userAccessOverride/EffectiveAccessPage';
 import { SlaConfigPage } from '@/modules/admin/slaConfig/SlaConfigPage';
 import { NotificationTemplatesPage } from '@/modules/admin/notificationTemplates/NotificationTemplatesPage';
+import { NotificationDispatchesPage } from '@/modules/admin/notificationTemplates/NotificationDispatchesPage';
 import { EscalationMatrixPage } from '@/modules/admin/escalationMatrix/EscalationMatrixPage';
 import { CaseScenariosPage } from '@/modules/admin/caseScenarios/CaseScenariosPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
@@ -115,6 +116,7 @@ export function App() {
             />
             <Route path="admin/sla-config" element={<SlaConfigPage />} />
             <Route path="admin/notification-templates" element={<NotificationTemplatesPage />} />
+            <Route path="admin/notification-dispatches" element={<NotificationDispatchesPage />} />
             <Route path="admin/escalation-matrix" element={<EscalationMatrixPage />} />
             <Route path="admin/case-scenarios" element={<CaseScenariosPage />} />
           </Route>

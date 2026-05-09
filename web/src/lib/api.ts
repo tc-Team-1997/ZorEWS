@@ -1181,6 +1181,50 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // ── M14.24 — preview + test-fire + dispatches log ─────────────────
+
+  notificationTemplatePreview: (
+    id: string,
+    vars: Record<string, unknown>,
+  ) =>
+    http
+      .post<NotificationRenderResult>(
+        `/v1/admin/notification-templates/${encodeURIComponent(id)}/preview`,
+        { vars },
+      )
+      .then((r) => r.data),
+
+  notificationTemplateTestFire: (
+    id: string,
+    input: NotificationTestFireInput,
+  ) =>
+    http
+      .post<{ rendered: NotificationRenderResult; dispatch: NotificationDispatchEntry }>(
+        `/v1/admin/notification-templates/${encodeURIComponent(id)}/test-fire`,
+        input,
+      )
+      .then((r) => r.data),
+
+  notificationDispatchesList: (
+    params: {
+      template_id?: string;
+      reference?: string;
+      trigger?: NotificationDispatchTrigger;
+      status?: string;
+      since?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) =>
+    http
+      .get<{
+        items: NotificationDispatchEntry[];
+        total: number;
+        page: number;
+        page_size: number;
+      }>('/v1/admin/notification-templates/dispatches', { params })
+      .then((r) => r.data),
+
   // ── Escalation Matrix admin (T6 M14.17/M14.20) ─────────────────────
 
   escalationMatrixList: (
@@ -1554,6 +1598,52 @@ export interface NotificationTemplateUpdateInput {
   subject?: string | null;
   body?: string;
   locale?: string;
+}
+
+// ── Notification render + dispatch (T6 M14.24) ─────────────────────
+
+export interface NotificationRenderResult {
+  channel: NotificationChannel;
+  subject: string | null;
+  body: string;
+  /** Vars referenced in the template that were not provided AND have
+   *  no `| default:` clause. Empty if the render was complete. */
+  missing_vars: string[];
+  /** Vars actually referenced by the template (distinct from
+   *  Object.keys(vars) — only the ones used). */
+  used_vars: string[];
+}
+
+export type NotificationDispatchTrigger =
+  | 'admin_test_fire'
+  | 'case_create_pipeline'
+  | 'escalation_worker';
+
+export type NotificationDispatchStatus = 'sent' | 'preview' | 'failed';
+
+export interface NotificationDispatchEntry {
+  dispatch_id: string;
+  tenant_id: string;
+  template_id: string;
+  template_name: string;
+  channel: NotificationChannel;
+  recipient: string;
+  trigger: NotificationDispatchTrigger;
+  reference: string | null;
+  rendered_subject: string | null;
+  rendered_body: string;
+  missing_vars: string[];
+  status: NotificationDispatchStatus;
+  status_reason: string | null;
+  performed_by: string;
+  performed_at: string;
+}
+
+export interface NotificationTestFireInput {
+  vars: Record<string, unknown>;
+  recipient: string;
+  reference?: string | null;
+  refuse_when_missing?: boolean;
 }
 
 // ── Escalation Matrix types (T6 M14.17) ────────────────────────────
