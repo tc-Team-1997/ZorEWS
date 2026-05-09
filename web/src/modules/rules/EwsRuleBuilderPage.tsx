@@ -60,6 +60,9 @@ interface EwsRule {
   created_at: string;
   updated_at: string;
   deprecated_at: string | null;
+  /** Latest recorded SemVer from app.ews_rule_versions, or null if no
+   *  snapshots exist (legacy rules pre-dating the version log). */
+  latest_semver?: string | null;
 }
 
 interface EwsIndicator {
@@ -245,6 +248,16 @@ export function EwsRuleBuilderPage() {
                       {r.action.alert_severity}
                     </Badge>
                     <span className="text-xs text-slate-400">w={r.action.weight}</span>
+                    {r.latest_semver && (
+                      <Link
+                        to={`/rules/ews/${encodeURIComponent(r.rule_id)}/diff`}
+                        className="rounded border border-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 hover:border-slate-400 hover:text-slate-900"
+                        title="Open diff viewer"
+                        data-testid={`rule-semver-${r.rule_id}`}
+                      >
+                        v{r.latest_semver}
+                      </Link>
+                    )}
                   </div>
                   <div className="mt-1 text-sm font-medium">{r.name}</div>
                   <div className="text-xs text-slate-500">{r.description}</div>

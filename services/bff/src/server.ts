@@ -13949,7 +13949,13 @@ export function makeApp(deps: AppDeps = {}) {
         (filter as { is_active: boolean }).is_active = q.is_active === 'true';
       }
       const items = ewsRuleStore.list(req.tenant!.tenant_id, filter as Parameters<EwsRuleStore['list']>[1]);
-      return res.json(wrapResponse({ items, total: items.length }, ctx));
+      // Enrich each row with the latest recorded SemVer so the SPA list
+      // can show a v X.Y.Z badge without N extra round-trips.
+      const enriched = items.map((rule) => ({
+        ...rule,
+        latest_semver: ewsRuleVersionsStore.latestSemver(req.tenant!.tenant_id, rule.rule_id),
+      }));
+      return res.json(wrapResponse({ items: enriched, total: enriched.length }, ctx));
     },
   );
 
