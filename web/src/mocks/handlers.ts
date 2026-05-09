@@ -182,8 +182,11 @@ interface MswOverride {
 }
 interface MswOverrideAudit {
   audit_id: string; tenant_id: string;
-  entity_type: 'user_access_override'; entity_id: string;
-  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire';
+  /** Multi-source per the BFF type union: user_access_override (the
+   *  legacy seed), report_export (BAC §3.1.8), ews_rule_version (RP-1). */
+  entity_type: 'user_access_override' | 'report_export' | 'ews_rule_version';
+  entity_id: string;
+  action: 'create' | 'update' | 'approve' | 'reject' | 'revoke' | 'expire' | 'export' | 'view' | 'revert';
   actor_id: string; actor_role: string;
   before_state: unknown | null; after_state: unknown | null;
   reason: string | null;
@@ -284,6 +287,65 @@ const mswOverrideAudit: MswOverrideAudit[] = [
     ip_address: null,
     user_agent: null,
     created_at: '2026-05-01T09:00:00Z',
+  },
+];
+
+// Extra audit seeds for the AdminActivityPage demo: a couple of report
+// exports + a rule revert. These are read-only — never appended to.
+const mswExtraAuditSeeds: MswOverrideAudit[] = [
+  {
+    audit_id: 'aud-export-1',
+    tenant_id: 'BANK_DEMO',
+    entity_type: 'report_export',
+    entity_id: 'cases:detail',
+    action: 'export',
+    actor_id: 'taniya',
+    actor_role: 'admin',
+    before_state: null,
+    after_state: { format: 'csv', rows: 8, bytes: 1506, duration_ms: 31, filters: { ageBucket: '8-30d' } },
+    reason: null,
+    request_id: null,
+    ip_address: '127.0.0.1',
+    user_agent: 'Mozilla/5.0 (smoke)',
+    created_at: '2026-05-08T16:11:03.284Z',
+  },
+  {
+    audit_id: 'aud-export-2',
+    tenant_id: 'BANK_DEMO',
+    entity_type: 'report_export',
+    entity_id: 'cases:detail',
+    action: 'export',
+    actor_id: 'taniya',
+    actor_role: 'admin',
+    before_state: null,
+    after_state: { format: 'pdf', rows: 8, bytes: 2551, duration_ms: 84 },
+    reason: null,
+    request_id: null,
+    ip_address: '127.0.0.1',
+    user_agent: 'Mozilla/5.0 (smoke)',
+    created_at: '2026-05-08T16:11:03.249Z',
+  },
+  {
+    audit_id: 'aud-revert-1',
+    tenant_id: 'BANK_DEMO',
+    entity_type: 'ews_rule_version',
+    entity_id: 'rule-version-uuid-1',
+    action: 'revert',
+    actor_id: 'alice',
+    actor_role: 'admin',
+    before_state: null,
+    after_state: {
+      rule_id: 'RULE_CREDIT_001',
+      reverted_to_semver: '1.0.0',
+      new_semver: '1.2.1',
+      new_version_id: 'rule-version-uuid-1',
+      reason: 'production caused regression — rollback',
+    },
+    reason: null,
+    request_id: null,
+    ip_address: '127.0.0.1',
+    user_agent: 'Mozilla/5.0 (smoke)',
+    created_at: '2026-05-09T10:30:00.000Z',
   },
 ];
 
@@ -2506,7 +2568,20 @@ export const handlers = [
     const url = new URL(request.url);
     const entityId = url.searchParams.get('entity_id');
     const actorId = url.searchParams.get('actor_id');
-    let rows = mswOverrideAudit.slice();
+    const entityType = url.searchParams.get('entity_type');
+    const VALID_ENTITY_TYPES = ['user_access_override', 'report_export', 'ews_rule_version'];
+    if (entityType && !VALID_ENTITY_TYPES.includes(entityType)) {
+      return HttpResponse.json(
+        envelopeError(
+          'EWS_400_invalid_input',
+          `entity_type must be one of ${VALID_ENTITY_TYPES.join(',')}`,
+          'MEDIUM',
+        ),
+        { status: 400 },
+      );
+    }
+    let rows = [...mswOverrideAudit, ...mswExtraAuditSeeds];
+    if (entityType) rows = rows.filter((a) => a.entity_type === entityType);
     if (entityId) rows = rows.filter((a) => a.entity_id === entityId);
     if (actorId) rows = rows.filter((a) => a.actor_id === actorId);
     rows.sort((a, b) => b.created_at.localeCompare(a.created_at));

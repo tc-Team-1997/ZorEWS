@@ -31,6 +31,7 @@ import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
+import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
 import { AdminTenantsPage } from '@/modules/admin/AdminTenantsPage';
@@ -95,6 +96,7 @@ export function App() {
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
+            <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />
             <Route path="admin/tenants" element={<AdminTenantsPage />} />
