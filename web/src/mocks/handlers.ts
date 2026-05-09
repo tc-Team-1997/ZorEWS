@@ -497,6 +497,195 @@ function _renderTemplate(
   };
 }
 
+// ── M14.25 escalation worker resolver (mirrors the BFF) ──────────────
+
+interface MswEscalationOpenCase {
+  case_id: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  opened_at: string;
+  context_vars?: Record<string, unknown>;
+}
+
+interface MswEscalationDueRow {
+  case_id: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  level: 1 | 2 | 3;
+  role: string;
+  after_minutes: number;
+  case_age_minutes: number;
+  scenario_id: string;
+  escalation_id: string;
+  template_id: string | null;
+  template_name: string;
+  channel: 'EMAIL' | 'SMS' | 'IN_APP';
+  rendered_subject: string | null;
+  rendered_body: string;
+  missing_vars: string[];
+}
+
+interface MswEscalationPayload {
+  due: MswEscalationDueRow[];
+  cases_inspected: number;
+  cases_with_no_scenario: number;
+  cases_with_archived_escalation: number;
+  already_dispatched_count: number;
+}
+
+function _validateOpenCase(raw: unknown, idx: number): MswEscalationOpenCase | { error: string } {
+  if (!raw || typeof raw !== 'object') return { error: `open_cases[${idx}] must be an object` };
+  const r = raw as Record<string, unknown>;
+  if (typeof r.case_id !== 'string' || !r.case_id.trim()) return { error: `open_cases[${idx}].case_id required` };
+  if (typeof r.case_category !== 'string' || !r.case_category.trim()) return { error: `open_cases[${idx}].case_category required` };
+  if (typeof r.priority !== 'string' || !['P1', 'P2', 'P3', 'P4'].includes(r.priority)) {
+    return { error: `open_cases[${idx}].priority must be P1..P4` };
+  }
+  if (typeof r.opened_at !== 'string' || !Number.isFinite(new Date(r.opened_at).getTime())) {
+    return { error: `open_cases[${idx}].opened_at must be ISO 8601` };
+  }
+  return {
+    case_id: r.case_id.trim(),
+    case_category: r.case_category.trim(),
+    priority: r.priority as MswEscalationOpenCase['priority'],
+    opened_at: r.opened_at,
+    context_vars:
+      r.context_vars && typeof r.context_vars === 'object' && !Array.isArray(r.context_vars)
+        ? (r.context_vars as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function _computeEscalationsForRequest(
+  tenant: string,
+  raw_open_cases: unknown,
+  now: Date,
+): { payload: MswEscalationPayload } | { error: string } {
+  if (!Array.isArray(raw_open_cases)) return { error: 'open_cases must be an array' };
+  if (raw_open_cases.length > 1000) return { error: 'open_cases max 1000 per request' };
+  const cases: MswEscalationOpenCase[] = [];
+  for (let i = 0; i < raw_open_cases.length; i++) {
+    const v = _validateOpenCase(raw_open_cases[i], i);
+    if ('error' in v) return v;
+    cases.push(v);
+  }
+
+  const due: MswEscalationDueRow[] = [];
+  let no_scenario = 0;
+  let archived_esc = 0;
+  const nowMs = now.getTime();
+
+  // Pre-filter scenarios + escalation rules to this tenant.
+  const tenantScenarios = mswCaseScenarios.filter(
+    (s) => s.tenant_id === tenant && s.deleted_at === null && s.status === 'ACTIVE',
+  );
+
+  for (const c of cases) {
+    const matches = tenantScenarios
+      .filter((s) => s.case_category === c.case_category && s.priority === c.priority)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    if (matches.length === 0) {
+      no_scenario++;
+      continue;
+    }
+    const scenario = matches[0]!;
+    const rule = mswEscalationRules.find(
+      (r) => r.tenant_id === tenant && r.escalation_id === scenario.default_escalation_id,
+    );
+    if (!rule || rule.status !== 'ACTIVE') {
+      archived_esc++;
+      continue;
+    }
+    const tpl = scenario.notification_template_id
+      ? mswNotificationTemplates.find(
+          (t) => t.tenant_id === tenant && t.template_id === scenario.notification_template_id,
+        )
+      : null;
+    const tplActive = tpl && tpl.deleted_at === null && tpl.status === 'ACTIVE';
+    const ageMinutes = Math.floor((nowMs - new Date(c.opened_at).getTime()) / 60_000);
+
+    const renderVars: Record<string, unknown> = {
+      case_id: c.case_id,
+      case_number: c.case_id,
+      case_category: c.case_category,
+      priority: c.priority,
+      case_age_minutes: ageMinutes,
+      ...(c.context_vars ?? {}),
+    };
+
+    const levels: Array<{ level: 1 | 2 | 3; after: number; role: string | null }> = [
+      { level: 1, after: rule.level_1_after_minutes, role: rule.level_1_role },
+      { level: 2, after: rule.level_2_after_minutes ?? -1, role: rule.level_2_role },
+      { level: 3, after: rule.level_3_after_minutes ?? -1, role: rule.level_3_role },
+    ];
+
+    for (const lv of levels) {
+      if (lv.after < 0 || lv.role === null) continue;
+      if (ageMinutes < lv.after) continue;
+
+      let channel: 'EMAIL' | 'SMS' | 'IN_APP' = 'IN_APP';
+      let template_name = '(no template)';
+      let rendered_subject: string | null = '(no template configured for scenario)';
+      let rendered_body = `Case ${c.case_id} reached escalation L${lv.level} (${lv.after}m) → role ${lv.role}`;
+      let missing_vars: string[] = [];
+      if (tplActive && tpl) {
+        channel = tpl.channel;
+        template_name = tpl.name;
+        const r = _renderTemplate(tpl, {
+          ...renderVars,
+          escalation_role: lv.role,
+          escalation_level: lv.level,
+        });
+        rendered_subject = r.subject;
+        rendered_body = r.body;
+        missing_vars = r.missing_vars;
+      }
+
+      due.push({
+        case_id: c.case_id,
+        case_category: c.case_category,
+        priority: c.priority,
+        level: lv.level,
+        role: lv.role,
+        after_minutes: lv.after,
+        case_age_minutes: ageMinutes,
+        scenario_id: scenario.scenario_id,
+        escalation_id: rule.escalation_id,
+        template_id: tplActive ? scenario.notification_template_id : null,
+        template_name,
+        channel,
+        rendered_subject,
+        rendered_body,
+        missing_vars,
+      });
+    }
+  }
+
+  // Idempotency filter — drop rows already present in mswDispatchLog
+  // for this tenant under reference=case:<id>:lvl:<n>+trigger=escalation_worker.
+  const fired = new Set(
+    mswDispatchLog
+      .filter(
+        (e) =>
+          e.tenant_id === tenant &&
+          e.trigger === 'escalation_worker' &&
+          e.reference !== null,
+      )
+      .map((e) => e.reference!),
+  );
+  const total_due = due.length;
+  const filtered = due.filter((d) => !fired.has(`case:${d.case_id}:lvl:${d.level}`));
+  return {
+    payload: {
+      due: filtered,
+      cases_inspected: cases.length,
+      cases_with_no_scenario: no_scenario,
+      cases_with_archived_escalation: archived_esc,
+      already_dispatched_count: total_due - filtered.length,
+    },
+  };
+}
+
 function _mkTemplate(
   tenant_id: string,
   name: string,
@@ -3719,6 +3908,62 @@ export const handlers = [
     }
     const rendered = _renderTemplate(tpl, (body.vars as Record<string, unknown>) ?? {});
     return HttpResponse.json(envelope(rendered));
+  }),
+
+  // ── M14.25 escalation worker (preview + tick) ──────────────────────
+
+  http.post('/v1/admin/escalations/preview', async ({ request }) => {
+    const tenant = readTenantFromReq(request);
+    const body = (await request.json()) as { open_cases?: unknown };
+    const result = _computeEscalationsForRequest(tenant, body.open_cases, new Date());
+    if ('error' in result) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', result.error, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json(envelope(result.payload));
+  }),
+
+  http.post('/v1/admin/escalations/tick', async ({ request }) => {
+    const tenant = readTenantFromReq(request);
+    const body = (await request.json()) as { open_cases?: unknown };
+    const now = new Date();
+    const result = _computeEscalationsForRequest(tenant, body.open_cases, now);
+    if ('error' in result) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', result.error, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const actor = readPersistedUsername() ?? 'admin';
+    const dispatched: MswDispatchEntry[] = [];
+    for (const d of result.payload.due) {
+      const entry: MswDispatchEntry = {
+        dispatch_id: `disp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        tenant_id: tenant,
+        template_id: d.template_id ?? '00000000-0000-0000-0000-000000000000',
+        template_name: d.template_name,
+        channel: d.channel,
+        recipient: `role:${d.role}`,
+        trigger: 'escalation_worker',
+        reference: `case:${d.case_id}:lvl:${d.level}`,
+        rendered_subject: d.rendered_subject,
+        rendered_body: d.rendered_body,
+        missing_vars: d.missing_vars,
+        status: 'sent',
+        status_reason:
+          d.missing_vars.length > 0
+            ? `dispatched with ${d.missing_vars.length} missing var(s)`
+            : null,
+        performed_by: actor,
+        performed_at: now.toISOString(),
+      };
+      mswDispatchLog.push(entry);
+      while (mswDispatchLog.length > 500) mswDispatchLog.shift();
+      dispatched.push(entry);
+    }
+    return HttpResponse.json(envelope({ ...result.payload, dispatched }));
   }),
 
   http.post('/v1/admin/notification-templates/:id/test-fire', async ({ params, request }) => {

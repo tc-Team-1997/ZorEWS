@@ -1225,6 +1225,18 @@ export const api = {
       }>('/v1/admin/notification-templates/dispatches', { params })
       .then((r) => r.data),
 
+  // ── Escalation worker (T6 M14.25/M14.25c) ─────────────────────────
+
+  escalationsPreview: (open_cases: EscalationOpenCase[]) =>
+    http
+      .post<EscalationPreviewResult>('/v1/admin/escalations/preview', { open_cases })
+      .then((r) => r.data),
+
+  escalationsTick: (open_cases: EscalationOpenCase[]) =>
+    http
+      .post<EscalationTickResult>('/v1/admin/escalations/tick', { open_cases })
+      .then((r) => r.data),
+
   // ── Escalation Matrix admin (T6 M14.17/M14.20) ─────────────────────
 
   escalationMatrixList: (
@@ -1644,6 +1656,48 @@ export interface NotificationTestFireInput {
   recipient: string;
   reference?: string | null;
   refuse_when_missing?: boolean;
+}
+
+// ── Escalation worker (T6 M14.25) ──────────────────────────────────
+
+export interface EscalationOpenCase {
+  case_id: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  opened_at: string;
+  context_vars?: Record<string, unknown>;
+}
+
+export interface EscalationDueRow {
+  case_id: string;
+  case_category: string;
+  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  level: 1 | 2 | 3;
+  role: string;
+  after_minutes: number;
+  case_age_minutes: number;
+  scenario_id: string;
+  escalation_id: string;
+  template_id: string | null;
+  template_name: string;
+  channel: NotificationChannel;
+  rendered_subject: string | null;
+  rendered_body: string;
+  missing_vars: string[];
+}
+
+export interface EscalationPreviewResult {
+  due: EscalationDueRow[];
+  cases_inspected: number;
+  cases_with_no_scenario: number;
+  cases_with_archived_escalation: number;
+  /** Number of (case, level) pairs that were due but already
+   *  dispatched in a prior tick (filtered out before returning). */
+  already_dispatched_count: number;
+}
+
+export interface EscalationTickResult extends EscalationPreviewResult {
+  dispatched: NotificationDispatchEntry[];
 }
 
 // ── Escalation Matrix types (T6 M14.17) ────────────────────────────

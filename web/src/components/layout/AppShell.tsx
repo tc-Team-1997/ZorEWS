@@ -24,6 +24,7 @@ import {
   ArrowUpFromLine,
   Zap,
   Send,
+  PlayCircle,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -67,6 +68,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/notification-templates', i18nKey: 'notification_templates', icon: Mail, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/notification-dispatches', i18nKey: 'notification_dispatches', icon: Send, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/escalation-matrix', i18nKey: 'escalation_matrix', icon: ArrowUpFromLine, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/escalation-worker', i18nKey: 'escalation_worker', icon: PlayCircle, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/case-scenarios', i18nKey: 'case_scenarios', icon: Zap, requireRole: ['admin', 'supervisor'] },
 ] as const;
 
