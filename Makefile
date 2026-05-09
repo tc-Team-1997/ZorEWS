@@ -45,10 +45,11 @@ TS_SERVICES := \
   bff:services/bff:8084 \
   collection-adapter:services/collection-adapter:8085 \
   notification-svc:services/notification-svc:- \
-  auth-svc:services/auth-svc:8080
+  auth-svc:services/auth-svc:8080 \
+  integration-mocks:services/integration-mocks:8091
 
 # Subset that participate in `make up` (have an HTTP server with /healthz).
-RUNNABLE := cases rules indicators alerts bff collection-adapter auth-svc
+RUNNABLE := cases rules indicators alerts bff collection-adapter auth-svc integration-mocks
 
 WEB_PATH      := web
 RBAC_PATH     := infra/rbac/lib
