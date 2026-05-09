@@ -17,6 +17,7 @@
 //   - status IN (ACTIVE, ARCHIVED)
 
 import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
 import {
   ESCALATION_ROLES,
   PRIORITIES,
@@ -451,4 +452,255 @@ export class InMemoryEscalationMatrixStore implements EscalationMatrixStore {
     this.rows[idx] = updated;
     return { ...updated };
   }
+}
+
+// ─── PG-backed implementation ────────────────────────────────────────
+
+interface PgRow {
+  escalation_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: string;
+  level_1_after_minutes: number;
+  level_1_role: string;
+  level_2_after_minutes: number | null;
+  level_2_role: string | null;
+  level_3_after_minutes: number | null;
+  level_3_role: string | null;
+  status: string;
+  created_by: string;
+  updated_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function rowToRule(r: PgRow): EscalationMatrixRule {
+  return {
+    escalation_id: String(r.escalation_id),
+    tenant_id: String(r.tenant_id),
+    name: String(r.name),
+    case_category: String(r.case_category),
+    priority: r.priority as Priority,
+    level_1_after_minutes: Number(r.level_1_after_minutes),
+    level_1_role: r.level_1_role as EscalationRole,
+    level_2_after_minutes: r.level_2_after_minutes !== null ? Number(r.level_2_after_minutes) : null,
+    level_2_role: r.level_2_role !== null ? (r.level_2_role as EscalationRole) : null,
+    level_3_after_minutes: r.level_3_after_minutes !== null ? Number(r.level_3_after_minutes) : null,
+    level_3_role: r.level_3_role !== null ? (r.level_3_role as EscalationRole) : null,
+    status: r.status as EscalationStatus,
+    created_by: String(r.created_by),
+    updated_by: r.updated_by !== null ? String(r.updated_by) : null,
+    created_at: (r.created_at as Date).toISOString(),
+    updated_at: (r.updated_at as Date).toISOString(),
+  };
+}
+
+export class PgEscalationMatrixStore implements EscalationMatrixStore {
+  constructor(private readonly pool: Pool) {}
+
+  async list(tenant_id: string, filter: ListFilter): Promise<ListResult> {
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, filter.page_size ?? 100));
+    const where: string[] = ['tenant_id = $1'];
+    const args: unknown[] = [tenant_id];
+    if (filter.case_category) {
+      args.push(filter.case_category);
+      where.push(`case_category = $${args.length}`);
+    }
+    if (filter.priority) {
+      args.push(filter.priority);
+      where.push(`priority = $${args.length}`);
+    }
+    if (filter.status && filter.status.length > 0) {
+      args.push(filter.status);
+      where.push(`status = ANY($${args.length}::text[])`);
+    }
+    const whereSql = where.join(' AND ');
+    const totalRes = await this.pool.query<{ c: string }>(
+      `SELECT count(*) AS c FROM app_admin.escalation_matrix WHERE ${whereSql}`,
+      args,
+    );
+    const total = Number(totalRes.rows[0]?.c ?? 0);
+    args.push(pageSize, (page - 1) * pageSize);
+    const r = await this.pool.query<PgRow>(
+      `SELECT * FROM app_admin.escalation_matrix
+        WHERE ${whereSql}
+        ORDER BY updated_at DESC
+        LIMIT $${args.length - 1} OFFSET $${args.length}`,
+      args,
+    );
+    return { items: r.rows.map(rowToRule), total, page, page_size: pageSize };
+  }
+
+  async get(tenant_id: string, id: string): Promise<EscalationMatrixRule | null> {
+    const r = await this.pool.query<PgRow>(
+      `SELECT * FROM app_admin.escalation_matrix
+        WHERE tenant_id = $1 AND escalation_id = $2`,
+      [tenant_id, id],
+    );
+    return r.rows[0] ? rowToRule(r.rows[0]) : null;
+  }
+
+  async resolveFor(
+    tenant_id: string,
+    case_category: string,
+    priority: Priority,
+  ): Promise<EscalationMatrixRule | null> {
+    const r = await this.pool.query<PgRow>(
+      `SELECT * FROM app_admin.escalation_matrix
+        WHERE tenant_id = $1 AND case_category = $2 AND priority = $3
+              AND status = 'ACTIVE'
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [tenant_id, case_category, priority],
+    );
+    return r.rows[0] ? rowToRule(r.rows[0]) : null;
+  }
+
+  async create(
+    tenant_id: string,
+    input: CreateEscalationInput,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<EscalationMatrixRule> {
+    const id = randomUUID();
+    try {
+      const r = await this.pool.query<PgRow>(
+        `INSERT INTO app_admin.escalation_matrix
+           (escalation_id, tenant_id, name, case_category, priority,
+            level_1_after_minutes, level_1_role,
+            level_2_after_minutes, level_2_role,
+            level_3_after_minutes, level_3_role,
+            status, created_by, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ACTIVE',$12,$13,$13)
+         RETURNING *`,
+        [
+          id, tenant_id, input.name, input.case_category, input.priority,
+          input.level_1_after_minutes, input.level_1_role,
+          input.level_2_after_minutes ?? null, input.level_2_role ?? null,
+          input.level_3_after_minutes ?? null, input.level_3_role ?? null,
+          actor.actor_id, now,
+        ],
+      );
+      return rowToRule(r.rows[0]!);
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err?.code === '23505') {
+        throw new EscalationMatrixError(
+          409,
+          'EWS_409_duplicate_escalation_name',
+          `escalation name already used`,
+        );
+      }
+      throw e;
+    }
+  }
+
+  async update(
+    tenant_id: string,
+    id: string,
+    patch: UpdateEscalationInput,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<EscalationMatrixRule> {
+    const existing = await this.get(tenant_id, id);
+    if (!existing) {
+      throw new EscalationMatrixError(404, 'EWS_404_not_found', `escalation rule ${id} not found`);
+    }
+    if (existing.status === 'ARCHIVED') {
+      throw new EscalationMatrixError(409, 'EWS_409_invalid_state', 'cannot update an archived escalation rule');
+    }
+    // Merge + re-validate the chain (mirrors InMemory implementation).
+    const merged: {
+      level_1_after_minutes: number;
+      level_2_after_minutes: number | null;
+      level_2_role: EscalationRole | null;
+      level_3_after_minutes: number | null;
+      level_3_role: EscalationRole | null;
+    } = {
+      level_1_after_minutes: patch.level_1_after_minutes ?? existing.level_1_after_minutes,
+      level_2_after_minutes:
+        patch.level_2_after_minutes !== undefined ? patch.level_2_after_minutes : existing.level_2_after_minutes,
+      level_2_role:
+        patch.level_2_role !== undefined ? patch.level_2_role : existing.level_2_role,
+      level_3_after_minutes:
+        patch.level_3_after_minutes !== undefined ? patch.level_3_after_minutes : existing.level_3_after_minutes,
+      level_3_role:
+        patch.level_3_role !== undefined ? patch.level_3_role : existing.level_3_role,
+    };
+    validateLevelChain(
+      merged.level_1_after_minutes,
+      merged.level_2_after_minutes, merged.level_2_role,
+      merged.level_3_after_minutes, merged.level_3_role,
+    );
+    try {
+      const r = await this.pool.query<PgRow>(
+        `UPDATE app_admin.escalation_matrix
+            SET name                  = COALESCE($3, name),
+                level_1_after_minutes = $4,
+                level_1_role          = COALESCE($5, level_1_role),
+                level_2_after_minutes = $6,
+                level_2_role          = $7,
+                level_3_after_minutes = $8,
+                level_3_role          = $9,
+                updated_by            = $10,
+                updated_at            = $11
+          WHERE tenant_id = $1 AND escalation_id = $2
+          RETURNING *`,
+        [
+          tenant_id, id,
+          patch.name ?? null,
+          merged.level_1_after_minutes,
+          patch.level_1_role ?? null,
+          merged.level_2_after_minutes,
+          merged.level_2_role,
+          merged.level_3_after_minutes,
+          merged.level_3_role,
+          actor.actor_id, now,
+        ],
+      );
+      return rowToRule(r.rows[0]!);
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err?.code === '23505') {
+        throw new EscalationMatrixError(
+          409,
+          'EWS_409_duplicate_escalation_name',
+          `escalation name already used`,
+        );
+      }
+      throw e;
+    }
+  }
+
+  async archive(
+    tenant_id: string,
+    id: string,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<EscalationMatrixRule> {
+    const existing = await this.get(tenant_id, id);
+    if (!existing) {
+      throw new EscalationMatrixError(404, 'EWS_404_not_found', `escalation rule ${id} not found`);
+    }
+    if (existing.status === 'ARCHIVED') return existing; // idempotent
+    const r = await this.pool.query<PgRow>(
+      `UPDATE app_admin.escalation_matrix
+          SET status = 'ARCHIVED', updated_by = $3, updated_at = $4
+        WHERE tenant_id = $1 AND escalation_id = $2
+        RETURNING *`,
+      [tenant_id, id, actor.actor_id, now],
+    );
+    return rowToRule(r.rows[0]!);
+  }
+}
+
+export async function makeEscalationMatrixStore(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ store: EscalationMatrixStore; pool: Pool | null }> {
+  const url = env.ADMIN_PG_URL ?? env.BFF_PG_URL;
+  if (!url) return { store: new InMemoryEscalationMatrixStore(), pool: null };
+  const pool = new Pool({ connectionString: url, max: 4 });
+  return { store: new PgEscalationMatrixStore(pool), pool };
 }

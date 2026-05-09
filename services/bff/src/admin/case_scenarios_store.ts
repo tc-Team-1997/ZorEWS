@@ -17,6 +17,7 @@
 //     fan-out is silently skipped (dev-mode fallback).
 
 import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
 import {
   PRIORITIES,
   type CaseScenario,
@@ -606,4 +607,423 @@ export class InMemoryCaseScenarioStore implements CaseScenarioStore {
     await this.appendHistory(tenant_id, id, 'restore', old, updated, actor, now);
     return { ...updated };
   }
+}
+
+// ─── PG-backed implementation ────────────────────────────────────────
+
+interface PgScenarioRow {
+  scenario_id: string;
+  tenant_id: string;
+  name: string;
+  case_category: string;
+  priority: string;
+  trigger_indicator_id: string | null;
+  trigger_threshold: string | number | null;
+  default_escalation_id: string;
+  notification_template_id: string | null;
+  checklist: unknown;
+  status: string;
+  created_by: string;
+  updated_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
+}
+
+function rowToScenario(r: PgScenarioRow): CaseScenario {
+  return {
+    scenario_id: String(r.scenario_id),
+    tenant_id: String(r.tenant_id),
+    name: String(r.name),
+    case_category: String(r.case_category),
+    priority: r.priority as Priority,
+    trigger_indicator_id: r.trigger_indicator_id !== null ? String(r.trigger_indicator_id) : null,
+    trigger_threshold: r.trigger_threshold !== null ? Number(r.trigger_threshold) : null,
+    default_escalation_id: String(r.default_escalation_id),
+    notification_template_id: r.notification_template_id !== null ? String(r.notification_template_id) : null,
+    checklist: (r.checklist as CaseScenarioChecklistItem[]) ?? [],
+    status: r.status as CaseScenarioStatus,
+    created_by: String(r.created_by),
+    updated_by: r.updated_by !== null ? String(r.updated_by) : null,
+    created_at: (r.created_at as Date).toISOString(),
+    updated_at: (r.updated_at as Date).toISOString(),
+    deleted_at: r.deleted_at !== null ? (r.deleted_at as Date).toISOString() : null,
+  };
+}
+
+/**
+ * PG-backed FK resolvers — drop-in replacements for the in-memory ones.
+ * Use these when wiring the PgCaseScenarioStore so FK validation hits
+ * the real escalation_matrix + notification_templates tables.
+ */
+export function makePgScenarioFkResolvers(pool: Pool): Pick<
+  CaseScenarioStoreDeps,
+  'resolveEscalation' | 'resolveTemplate'
+> {
+  return {
+    resolveEscalation: async (tenant_id, escalation_id) => {
+      const r = await pool.query<{ status: string }>(
+        `SELECT status FROM app_admin.escalation_matrix
+          WHERE tenant_id = $1 AND escalation_id = $2`,
+        [tenant_id, escalation_id],
+      );
+      const row = r.rows[0];
+      if (!row) return null;
+      return { status: row.status as 'ACTIVE' | 'ARCHIVED' };
+    },
+    resolveTemplate: async (tenant_id, template_id) => {
+      const r = await pool.query<{ status: string; deleted_at: Date | null }>(
+        `SELECT status, deleted_at FROM app_admin.notification_templates
+          WHERE tenant_id = $1 AND template_id = $2`,
+        [tenant_id, template_id],
+      );
+      const row = r.rows[0];
+      if (!row) return null;
+      return {
+        status: row.status as 'DRAFT' | 'ACTIVE' | 'ARCHIVED',
+        deleted_at: row.deleted_at !== null ? (row.deleted_at as Date).toISOString() : null,
+      };
+    },
+  };
+}
+
+export class PgCaseScenarioStore implements CaseScenarioStore {
+  constructor(
+    private readonly pool: Pool,
+    private readonly deps: CaseScenarioStoreDeps,
+  ) {}
+
+  // ── FK guards (delegate to deps so test mocks still work) ────────
+  private async assertEscalationOk(tenant_id: string, escalation_id: string): Promise<void> {
+    const row = await this.deps.resolveEscalation(tenant_id, escalation_id);
+    if (!row) {
+      throw new CaseScenarioError(400, 'EWS_400_invalid_fk', `escalation_id ${escalation_id} not found in tenant ${tenant_id}`);
+    }
+    if (row.status !== 'ACTIVE') {
+      throw new CaseScenarioError(400, 'EWS_400_invalid_fk', `escalation_id ${escalation_id} is ${row.status}; only ACTIVE rules can back a scenario`);
+    }
+  }
+  private async assertTemplateOk(tenant_id: string, template_id: string): Promise<void> {
+    const row = await this.deps.resolveTemplate(tenant_id, template_id);
+    if (!row) {
+      throw new CaseScenarioError(400, 'EWS_400_invalid_fk', `notification_template_id ${template_id} not found in tenant ${tenant_id}`);
+    }
+    if (row.deleted_at !== null || row.status === 'ARCHIVED') {
+      throw new CaseScenarioError(400, 'EWS_400_invalid_fk', `notification_template_id ${template_id} is archived/deleted`);
+    }
+  }
+
+  private async appendHistory(
+    tenant_id: string,
+    scenario_id: string,
+    action: 'create' | 'update' | 'activate' | 'archive' | 'restore',
+    before: CaseScenario | null,
+    after: CaseScenario,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<DiffOp[]> {
+    const beforeRec = before ? (before as unknown as Record<string, unknown>) : null;
+    const afterRec = after as unknown as Record<string, unknown>;
+    const diff = diffRows(beforeRec, afterRec);
+    if (this.deps.history) {
+      try {
+        await this.deps.history.append(
+          tenant_id,
+          { scenario_id, action, diff, after_state: { ...afterRec }, performed_by: actor.actor_id },
+          now,
+        );
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `case_scenario_history append failed for scenario_id=${scenario_id}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+    return diff;
+  }
+
+  async list(tenant_id: string, filter: ListFilter): Promise<ListResult> {
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, filter.page_size ?? 100));
+    const where: string[] = ['tenant_id = $1'];
+    const args: unknown[] = [tenant_id];
+    if (!filter.include_deleted) where.push('deleted_at IS NULL');
+    if (filter.status && filter.status.length > 0) {
+      args.push(filter.status);
+      where.push(`status = ANY($${args.length}::text[])`);
+    }
+    if (filter.case_category) {
+      args.push(filter.case_category);
+      where.push(`case_category = $${args.length}`);
+    }
+    if (filter.priority) {
+      args.push(filter.priority);
+      where.push(`priority = $${args.length}`);
+    }
+    if (filter.trigger_indicator_id) {
+      args.push(filter.trigger_indicator_id);
+      where.push(`trigger_indicator_id = $${args.length}`);
+    }
+    const whereSql = where.join(' AND ');
+    const totalRes = await this.pool.query<{ c: string }>(
+      `SELECT count(*) AS c FROM app_admin.case_scenarios WHERE ${whereSql}`,
+      args,
+    );
+    const total = Number(totalRes.rows[0]?.c ?? 0);
+    args.push(pageSize, (page - 1) * pageSize);
+    const r = await this.pool.query<PgScenarioRow>(
+      `SELECT * FROM app_admin.case_scenarios
+        WHERE ${whereSql}
+        ORDER BY updated_at DESC
+        LIMIT $${args.length - 1} OFFSET $${args.length}`,
+      args,
+    );
+    return { items: r.rows.map(rowToScenario), total, page, page_size: pageSize };
+  }
+
+  async get(tenant_id: string, id: string): Promise<CaseScenario | null> {
+    const r = await this.pool.query<PgScenarioRow>(
+      `SELECT * FROM app_admin.case_scenarios
+        WHERE tenant_id = $1 AND scenario_id = $2`,
+      [tenant_id, id],
+    );
+    return r.rows[0] ? rowToScenario(r.rows[0]) : null;
+  }
+
+  async create(
+    tenant_id: string,
+    input: ReturnType<typeof validateCreate>,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<CaseScenario> {
+    await this.assertEscalationOk(tenant_id, input.default_escalation_id);
+    if (input.notification_template_id) {
+      await this.assertTemplateOk(tenant_id, input.notification_template_id);
+    }
+    const id = randomUUID();
+    let row: CaseScenario;
+    try {
+      const r = await this.pool.query<PgScenarioRow>(
+        `INSERT INTO app_admin.case_scenarios
+           (scenario_id, tenant_id, name, case_category, priority,
+            trigger_indicator_id, trigger_threshold,
+            default_escalation_id, notification_template_id,
+            checklist, status, created_by, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'DRAFT',$11,$12,$12)
+         RETURNING *`,
+        [
+          id, tenant_id, input.name, input.case_category, input.priority,
+          input.trigger_indicator_id, input.trigger_threshold,
+          input.default_escalation_id, input.notification_template_id,
+          JSON.stringify(input.checklist),
+          actor.actor_id, now,
+        ],
+      );
+      row = rowToScenario(r.rows[0]!);
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err?.code === '23505') {
+        throw new CaseScenarioError(
+          409,
+          'EWS_409_duplicate_scenario_name',
+          `scenario name already used`,
+        );
+      }
+      throw e;
+    }
+    await this.appendHistory(tenant_id, row.scenario_id, 'create', null, row, actor, now);
+    return row;
+  }
+
+  async update(
+    tenant_id: string,
+    id: string,
+    patch: UpdateCaseScenarioInput,
+    actor: ActorContext,
+    now: Date,
+  ): Promise<CaseScenario> {
+    const old = await this.get(tenant_id, id);
+    if (!old) {
+      throw new CaseScenarioError(404, 'EWS_404_not_found', `scenario ${id} not found`);
+    }
+    if (old.deleted_at !== null) {
+      throw new CaseScenarioError(409, 'EWS_409_invalid_state', 'cannot update an archived scenario');
+    }
+    // Trigger pair re-check
+    const mergedTriggerId =
+      patch.trigger_indicator_id !== undefined ? patch.trigger_indicator_id : old.trigger_indicator_id;
+    const mergedTriggerTh =
+      patch.trigger_threshold !== undefined ? patch.trigger_threshold : old.trigger_threshold;
+    const triggerIdSet = mergedTriggerId !== null && mergedTriggerId !== undefined && mergedTriggerId !== '';
+    const triggerThSet = mergedTriggerTh !== null && mergedTriggerTh !== undefined;
+    if (triggerIdSet !== triggerThSet) {
+      throw new CaseScenarioError(
+        400,
+        'EWS_400_invalid_input',
+        'trigger_indicator_id and trigger_threshold must be set together (or both null)',
+      );
+    }
+    if (patch.default_escalation_id) {
+      await this.assertEscalationOk(tenant_id, patch.default_escalation_id);
+    }
+    if (patch.notification_template_id !== undefined && patch.notification_template_id !== null) {
+      await this.assertTemplateOk(tenant_id, patch.notification_template_id);
+    }
+    let updated: CaseScenario;
+    try {
+      const r = await this.pool.query<PgScenarioRow>(
+        `UPDATE app_admin.case_scenarios
+            SET name                     = COALESCE($3, name),
+                case_category            = COALESCE($4, case_category),
+                priority                 = COALESCE($5, priority),
+                trigger_indicator_id     = $6,
+                trigger_threshold        = $7,
+                default_escalation_id    = COALESCE($8, default_escalation_id),
+                notification_template_id = $9,
+                checklist                = COALESCE($10::jsonb, checklist),
+                updated_by               = $11,
+                updated_at               = $12
+          WHERE tenant_id = $1 AND scenario_id = $2
+          RETURNING *`,
+        [
+          tenant_id, id,
+          patch.name ?? null,
+          patch.case_category ?? null,
+          patch.priority ?? null,
+          triggerIdSet ? mergedTriggerId : null,
+          triggerThSet ? mergedTriggerTh : null,
+          patch.default_escalation_id ?? null,
+          patch.notification_template_id !== undefined ? patch.notification_template_id : old.notification_template_id,
+          patch.checklist !== undefined ? JSON.stringify(patch.checklist) : null,
+          actor.actor_id, now,
+        ],
+      );
+      updated = rowToScenario(r.rows[0]!);
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err?.code === '23505') {
+        throw new CaseScenarioError(
+          409,
+          'EWS_409_duplicate_scenario_name',
+          `scenario name already used`,
+        );
+      }
+      throw e;
+    }
+    await this.appendHistory(tenant_id, id, 'update', old, updated, actor, now);
+    return updated;
+  }
+
+  async activate(tenant_id: string, id: string, actor: ActorContext, now: Date): Promise<CaseScenario> {
+    const old = await this.get(tenant_id, id);
+    if (!old) {
+      throw new CaseScenarioError(404, 'EWS_404_not_found', `scenario ${id} not found`);
+    }
+    if (old.deleted_at !== null || old.status === 'ARCHIVED') {
+      throw new CaseScenarioError(409, 'EWS_409_invalid_state', 'cannot activate an archived scenario');
+    }
+    if (old.status === 'ACTIVE') return old;
+    await this.assertEscalationOk(tenant_id, old.default_escalation_id);
+    if (old.notification_template_id) {
+      await this.assertTemplateOk(tenant_id, old.notification_template_id);
+    }
+    const r = await this.pool.query<PgScenarioRow>(
+      `UPDATE app_admin.case_scenarios
+          SET status = 'ACTIVE', updated_by = $3, updated_at = $4
+        WHERE tenant_id = $1 AND scenario_id = $2
+        RETURNING *`,
+      [tenant_id, id, actor.actor_id, now],
+    );
+    const updated = rowToScenario(r.rows[0]!);
+    await this.appendHistory(tenant_id, id, 'activate', old, updated, actor, now);
+    return updated;
+  }
+
+  async archive(tenant_id: string, id: string, actor: ActorContext, now: Date): Promise<CaseScenario> {
+    const old = await this.get(tenant_id, id);
+    if (!old) {
+      throw new CaseScenarioError(404, 'EWS_404_not_found', `scenario ${id} not found`);
+    }
+    if (old.deleted_at !== null) return old;
+    const r = await this.pool.query<PgScenarioRow>(
+      `UPDATE app_admin.case_scenarios
+          SET status = 'ARCHIVED', deleted_at = $4, updated_by = $3, updated_at = $4
+        WHERE tenant_id = $1 AND scenario_id = $2
+        RETURNING *`,
+      [tenant_id, id, actor.actor_id, now],
+    );
+    const updated = rowToScenario(r.rows[0]!);
+    await this.appendHistory(tenant_id, id, 'archive', old, updated, actor, now);
+    return updated;
+  }
+
+  async restore(tenant_id: string, id: string, actor: ActorContext, now: Date): Promise<CaseScenario> {
+    const old = await this.get(tenant_id, id);
+    if (!old) {
+      throw new CaseScenarioError(404, 'EWS_404_not_found', `scenario ${id} not found`);
+    }
+    if (old.deleted_at === null) {
+      throw new CaseScenarioError(409, 'EWS_409_invalid_state', 'scenario is not archived; nothing to restore');
+    }
+    // Re-check unique-name guard via a probe query
+    const dupRes = await this.pool.query<{ scenario_id: string }>(
+      `SELECT scenario_id FROM app_admin.case_scenarios
+        WHERE tenant_id = $1 AND scenario_id <> $2
+              AND deleted_at IS NULL
+              AND lower(name) = lower($3)
+        LIMIT 1`,
+      [tenant_id, id, old.name],
+    );
+    if (dupRes.rows[0]) {
+      throw new CaseScenarioError(
+        409,
+        'EWS_409_duplicate_scenario_name',
+        `name "${old.name}" was reused while archived (id=${dupRes.rows[0].scenario_id}); rename before restore`,
+      );
+    }
+    const r = await this.pool.query<PgScenarioRow>(
+      `UPDATE app_admin.case_scenarios
+          SET status = 'DRAFT', deleted_at = NULL, updated_by = $3, updated_at = $4
+        WHERE tenant_id = $1 AND scenario_id = $2
+        RETURNING *`,
+      [tenant_id, id, actor.actor_id, now],
+    );
+    const updated = rowToScenario(r.rows[0]!);
+    await this.appendHistory(tenant_id, id, 'restore', old, updated, actor, now);
+    return updated;
+  }
+}
+
+export async function makeCaseScenarioStore(
+  env: NodeJS.ProcessEnv = process.env,
+  deps?: Partial<CaseScenarioStoreDeps>,
+): Promise<{ store: CaseScenarioStore; pool: Pool | null }> {
+  const url = env.ADMIN_PG_URL ?? env.BFF_PG_URL;
+  if (!url) {
+    if (!deps?.resolveEscalation || !deps?.resolveTemplate) {
+      throw new Error(
+        'makeCaseScenarioStore: deps.resolveEscalation + resolveTemplate required when no PG URL is set',
+      );
+    }
+    return {
+      store: new InMemoryCaseScenarioStore({
+        resolveEscalation: deps.resolveEscalation,
+        resolveTemplate: deps.resolveTemplate,
+        history: deps.history,
+      }),
+      pool: null,
+    };
+  }
+  const pool = new Pool({ connectionString: url, max: 4 });
+  const fk = makePgScenarioFkResolvers(pool);
+  return {
+    store: new PgCaseScenarioStore(pool, {
+      resolveEscalation: deps?.resolveEscalation ?? fk.resolveEscalation,
+      resolveTemplate: deps?.resolveTemplate ?? fk.resolveTemplate,
+      history: deps?.history,
+    }),
+    pool,
+  };
 }

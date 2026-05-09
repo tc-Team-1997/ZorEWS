@@ -15384,6 +15384,42 @@ if (require.main === module) {
     const { makeSlaConfigStore } = require('./admin/sla_config_store') as
       typeof import('./admin/sla_config_store');
     const { store: slaConfigStore } = await makeSlaConfigStore();
+    // T6 M14.22 — PG-back the 4 M14.15 stores. All 4 share the same
+    // ADMIN_PG_URL/BFF_PG_URL switch; with no env they fall back to
+    // in-memory implementations (matches the M14.16-18 default).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeNotificationTemplateStore } = require('./admin/notification_templates_store') as
+      typeof import('./admin/notification_templates_store');
+    const { store: notificationTemplateStore } = await makeNotificationTemplateStore();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeEscalationMatrixStore } = require('./admin/escalation_matrix_store') as
+      typeof import('./admin/escalation_matrix_store');
+    const { store: escalationMatrixStore } = await makeEscalationMatrixStore();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeCaseScenarioHistoryStore } = require('./admin/case_scenario_history_store') as
+      typeof import('./admin/case_scenario_history_store');
+    const { store: caseScenarioHistoryStore } = await makeCaseScenarioHistoryStore();
+    // case_scenarios needs FK resolvers — when running in-memory we
+    // wire them to the sibling InMemory* stores so the dev-mode demo
+    // works without a DB. PG mode wires Pg-backed resolvers via the
+    // factory's auto-injection.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeCaseScenarioStore } = require('./admin/case_scenarios_store') as
+      typeof import('./admin/case_scenarios_store');
+    const { store: caseScenarioStore } = await makeCaseScenarioStore(process.env, {
+      // Only used in the in-memory branch — PG mode auto-resolves.
+      resolveEscalation: async (tenant_id, escalation_id) => {
+        const row = await escalationMatrixStore.get(tenant_id, escalation_id);
+        return row ? { status: row.status } : null;
+      },
+      resolveTemplate: async (tenant_id, template_id) => {
+        const row = await notificationTemplateStore.get(tenant_id, template_id);
+        return row
+          ? { status: row.status, deleted_at: row.deleted_at }
+          : null;
+      },
+      history: caseScenarioHistoryStore,
+    });
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { makeCasesDetailSource } = require('./reports/cases_detail_query') as
       typeof import('./reports/cases_detail_query');
@@ -15420,6 +15456,10 @@ if (require.main === module) {
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
       slaConfigStore,
+      notificationTemplateStore,
+      escalationMatrixStore,
+      caseScenarioStore,
+      caseScenarioHistoryStore,
       casesDetailSource,
       savedFilterStore,
       reportAuditPool,
