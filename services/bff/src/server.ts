@@ -1214,6 +1214,31 @@ export function makeApp(deps: AppDeps = {}) {
     );
   }
 
+  // ---------- /v1/admin/escalations/* (T6 M14.25) ---------------------
+  // Mounts when the full triad (scenarios + matrix + templates +
+  // dispatch log) is wired so the worker can resolve the chain.
+  if (
+    deps.caseScenarioStore &&
+    deps.escalationMatrixStore &&
+    deps.notificationTemplateStore &&
+    deps.notificationDispatchStore
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { makeEscalationWorkerRouter } = require('./admin/escalation_worker_routes') as
+      typeof import('./admin/escalation_worker_routes');
+    app.use(
+      makeEscalationWorkerRouter({
+        scenarioStore: deps.caseScenarioStore,
+        escalationMatrixStore: deps.escalationMatrixStore,
+        templateStore: deps.notificationTemplateStore,
+        dispatchStore: deps.notificationDispatchStore,
+        requireTenantMw,
+        requireRole,
+        now,
+      }),
+    );
+  }
+
   // ---------- /v1/reports/cases/* — Cases Report (BAC §3.1.8) ----------
   if (deps.casesDetailSource && deps.savedFilterStore) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports

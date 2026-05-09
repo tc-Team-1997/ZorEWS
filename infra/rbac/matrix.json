@@ -87,6 +87,9 @@
     "admin:case_scenarios:lifecycle":          ["admin"],
     "admin:case_scenarios:archive":            ["admin"],
 
+    "admin:escalations:preview":               ["admin", "supervisor"],
+    "admin:escalations:tick":                  ["admin"],
+
     "admin:user_access_override:list":         ["admin", "supervisor"],
     "admin:user_access_override:create":       ["admin"],
     "admin:user_access_override:approve":      ["admin"],
