@@ -148,4 +148,17 @@ describe('CaseScenariosPage', () => {
     // Performed by system:seed (scoped inside the modal)
     expect(within(modal).getByText(/system:seed/)).toBeInTheDocument();
   });
+
+  // M14.27 — Duplicate
+  it('duplicate clones a scenario as a new DRAFT with " (copy)" suffix', async () => {
+    renderWithProviders(<CaseScenariosPage />);
+    await screen.findByText(/Fraud P1 sudden DPD spike/i);
+    const dupBtn = await screen.findByTestId('cs-duplicate-sc-seed-bank-fraud-p1-sudden-dpd');
+    await userEvent.click(dupBtn);
+    // Clone lands as DRAFT — switch pivot and confirm
+    await userEvent.click(screen.getByTestId('cs-pivot-draft'));
+    await waitFor(() => {
+      expect(screen.getByText(/Fraud P1 sudden DPD spike \(copy\)/i)).toBeInTheDocument();
+    });
+  });
 });

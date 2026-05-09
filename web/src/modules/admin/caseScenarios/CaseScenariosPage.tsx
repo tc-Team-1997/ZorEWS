@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
+  Copy,
   History,
   Pencil,
   Plus,
@@ -77,6 +78,24 @@ export function CaseScenariosPage() {
   const activate = useMutation({ mutationFn: api.caseScenarioActivate, onSuccess: refresh });
   const archive = useMutation({ mutationFn: api.caseScenarioArchive, onSuccess: refresh });
   const restore = useMutation({ mutationFn: api.caseScenarioRestore, onSuccess: refresh });
+  // M14.27 — clone an existing scenario as a fresh DRAFT. The BFF
+  // enforces name uniqueness per tenant, so we suffix the clone with
+  // " (copy)"; if that already exists the BFF returns 409 and the
+  // mutation surfaces the error inline.
+  const duplicate = useMutation({
+    mutationFn: (row: CaseScenarioRow) =>
+      api.caseScenarioCreate({
+        name: `${row.name} (copy)`.slice(0, 120),
+        case_category: row.case_category,
+        priority: row.priority,
+        trigger_indicator_id: row.trigger_indicator_id,
+        trigger_threshold: row.trigger_threshold,
+        default_escalation_id: row.default_escalation_id,
+        notification_template_id: row.notification_template_id,
+        checklist: row.checklist,
+      }),
+    onSuccess: refresh,
+  });
 
   const filtered = useMemo(() => {
     const items = list.data?.items ?? [];
@@ -189,6 +208,21 @@ export function CaseScenariosPage() {
               </button>
             </>
           )}
+          {r.deleted_at === null && (
+            <>
+              <span className="text-2xs text-muted">·</span>
+              <button
+                type="button"
+                onClick={() => duplicate.mutate(r)}
+                disabled={duplicate.isPending}
+                className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+                data-testid={`cs-duplicate-${r.scenario_id}`}
+                title="Clone as a new DRAFT"
+              >
+                <Copy className="w-3 h-3" /> Duplicate
+              </button>
+            </>
+          )}
           {r.status === 'DRAFT' && (
             <>
               <span className="text-2xs text-muted">·</span>
@@ -233,7 +267,7 @@ export function CaseScenariosPage() {
           )}
         </div>
       ),
-      width: 280,
+      width: 360,
     },
   ];
 
