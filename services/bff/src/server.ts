@@ -6454,6 +6454,55 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/cms/cases/:case_id/tracking?include_stubs=
+   *
+   *  Per-case tracking timeline — wraps the existing history rows with
+   *  type discrimination + payload context so the SPA's Timeline tab can
+   *  render each card as a clickable drill-down with appropriate
+   *  per-type behaviour. Stub events for cross-service sources
+   *  (CAS / CAP / approval) only appear when ?include_stubs=true. */
+  app.get(
+    '/v1/cms/cases/:case_id/tracking',
+    requireTenantMw,
+    requireRole('cases:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.case_id ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      const cur = cmsCaseStore.get(tenant_id, id);
+      if (!cur) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_case', message: `case ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const role = (req.headers['x-apex-role'] as string | undefined) ?? '';
+      const ATT_ROLES = ['admin', 'risk_analyst', 'supervisor', 'collection_officer'];
+      const canDownloadAttachment = ATT_ROLES.includes(role);
+      const include_stubs = req.query.include_stubs === 'true';
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { computeCaseTracking } = require('./cms/case_tracking') as
+        typeof import('./cms/case_tracking');
+      const out = computeCaseTracking({
+        tenant_id,
+        case_id: id,
+        history: cmsCaseStore.listHistory(tenant_id, id, 200),
+        notes: cmsCaseStore.listNotes(tenant_id, id),
+        attachments: cmsCaseStore.listAttachments(tenant_id, id),
+        canDownloadAttachment,
+        include_stubs,
+      });
+      return res.json(
+        wrapResponse(
+          { ...out, generated_at: now().toISOString() },
+          ctx,
+        ),
+      );
+    },
+  );
+
   // ── CMS-4 — automation surface ───────────────────────────────────────
   //
   // 4 new routes wired against cms_automation.ts. All literal segments
