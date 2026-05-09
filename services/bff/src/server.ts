@@ -208,6 +208,7 @@ import {
   approveWithFourEyes,
   buildCloneInput,
   bumpSemver,
+  classifyEditBump,
   defaultEwsRuleVersionsStore,
   diffRuleSnapshots,
   isSemver,
@@ -13967,6 +13968,21 @@ export function makeApp(deps: AppDeps = {}) {
       const created_by = ewsApexUser(req);
       try {
         const rule = ewsRuleStore.create(req.tenant!.tenant_id, inner, created_by, now());
+        // Snapshot v0.1.0 — closes the gap where freshly-created rules
+        // had no version history, so the Diff Viewer could never show
+        // anything until a clone happened.
+        try {
+          ewsRuleVersionsStore.recordVersion({
+            tenant_id: req.tenant!.tenant_id,
+            rule,
+            semver: SEMVER_INITIAL,
+            created_by,
+            reason: 'initial draft',
+            now: now(),
+          });
+        } catch {
+          // duplicate / store error — never block the create response.
+        }
         try {
           auditTrailStore.record(
             req.tenant!.tenant_id,
@@ -13978,7 +13994,7 @@ export function makeApp(deps: AppDeps = {}) {
               resource_id: rule.rule_id,
               outcome: 'success',
               severity: 'info',
-              metadata: { name: rule.name, category: rule.category },
+              metadata: { name: rule.name, category: rule.category, semver: SEMVER_INITIAL },
             },
             now(),
           );
@@ -14028,11 +14044,39 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       const updated_by = ewsApexUser(req);
+      const tenant_id = req.tenant!.tenant_id;
+      const prev = ewsRuleStore.get(tenant_id, id);
       try {
-        const rule = ewsRuleStore.replace(req.tenant!.tenant_id, id, inner, updated_by, now());
+        const rule = ewsRuleStore.replace(tenant_id, id, inner, updated_by, now());
+        // Snapshot the post-edit body. Bump from the latest recorded
+        // semver (or v0.1.0 fallback if this is the first edit on a
+        // legacy rule that pre-dated the version log). classifyEditBump
+        // picks minor for substantive changes vs patch for metadata.
+        try {
+          const latest =
+            ewsRuleVersionsStore.latestSemver(tenant_id, id) ?? SEMVER_INITIAL;
+          const bump = prev ? classifyEditBump(prev, rule) : 'minor';
+          const next = bumpSemver(latest, bump);
+          // Optional reason on the body: { rule, change_reason? }
+          const wrap = (inner ?? {}) as { change_reason?: unknown };
+          const reason =
+            typeof wrap.change_reason === 'string' && wrap.change_reason.trim()
+              ? wrap.change_reason.trim().slice(0, 500)
+              : 'rule edited';
+          ewsRuleVersionsStore.recordVersion({
+            tenant_id,
+            rule,
+            semver: next,
+            created_by: updated_by,
+            reason,
+            now: now(),
+          });
+        } catch {
+          // never block the update on a snapshot failure.
+        }
         try {
           auditTrailStore.record(
-            req.tenant!.tenant_id,
+            tenant_id,
             {
               actor_username: updated_by,
               actor_role: 'admin',

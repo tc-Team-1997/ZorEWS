@@ -577,18 +577,117 @@ describe('RP-1 — POST /submit + /approve + /reject', () => {
   });
 });
 
+// ─── Auto-snapshot on CREATE + PUT ────────────────────────────────────
+//
+// Before this hook landed, the diff viewer showed empty history for any
+// rule that hadn't been cloned. The CREATE handler now auto-records
+// v0.1.0; the PUT handler bumps minor (substantive) or patch (metadata)
+// off the latest semver via classifyEditBump.
+
+describe('RP-1 — auto-snapshot on CREATE + PUT', () => {
+  test('POST /v1/ews/rules auto-records v0.1.0 with reason="initial draft"', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    const versions = ewsRuleVersionsStore.listVersions('BIL', 'RULE_CREDIT_001');
+    expect(versions).toHaveLength(1);
+    expect(versions[0].semver).toBe('0.1.0');
+    expect(versions[0].reason).toBe('initial draft');
+    expect(versions[0].created_by).toBe('jane');
+  });
+
+  test('PUT /v1/ews/rules/:id with substantive edit bumps MINOR', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    const r = await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({
+        ...VALID,
+        // substantive change — `action` is in SUBSTANTIVE_FIELDS
+        action: { alert_severity: 'ORANGE', weight: 30 },
+      });
+    expect(r.status).toBe(200);
+    const versions = ewsRuleVersionsStore.listVersions('BIL', 'RULE_CREDIT_001');
+    expect(versions).toHaveLength(2);
+    expect(versions[0].semver).toBe('0.2.0'); // minor bump from 0.1.0
+    expect(versions[0].reason).toBe('rule edited');
+    expect(versions[0].created_by).toBe('alice');
+  });
+
+  test('PUT /v1/ews/rules/:id with metadata-only edit bumps PATCH', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    const r = await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({
+        ...VALID,
+        // metadata change — description is in METADATA_FIELDS
+        description: 'tightened wording for compliance review',
+      });
+    expect(r.status).toBe(200);
+    const versions = ewsRuleVersionsStore.listVersions('BIL', 'RULE_CREDIT_001');
+    expect(versions[0].semver).toBe('0.1.1'); // patch bump from 0.1.0
+  });
+
+  test('PUT carries through user-supplied change_reason', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({
+        ...VALID,
+        action: { alert_severity: 'ORANGE', weight: 30 },
+        change_reason: 'lowered severity per ops review',
+      });
+    const versions = ewsRuleVersionsStore.listVersions('BIL', 'RULE_CREDIT_001');
+    expect(versions[0].reason).toBe('lowered severity per ops review');
+  });
+
+  test('multiple PUTs accumulate semvers in order', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    // patch
+    await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({ ...VALID, description: 'p1' });
+    // minor (substantive)
+    await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({
+        ...VALID,
+        description: 'p1',
+        action: { alert_severity: 'ORANGE', weight: 30 },
+      });
+    // patch again
+    await request(app)
+      .put('/v1/ews/rules/RULE_CREDIT_001')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({
+        ...VALID,
+        description: 'p2',
+        action: { alert_severity: 'ORANGE', weight: 30 },
+      });
+    const versions = ewsRuleVersionsStore.listVersions('BIL', 'RULE_CREDIT_001');
+    expect(versions.map((v) => v.semver)).toEqual(['0.2.1', '0.2.0', '0.1.1', '0.1.0']);
+  });
+});
+
 describe('RP-1 — versions + diff routes', () => {
   test('GET /versions returns the snapshots', async () => {
     const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    // createRule now auto-records v0.1.0 (closes the diff-viewer empty-history gap)
     await createRule(app);
-    // Stamp two snapshots under the rule_id we just created
-    ewsRuleVersionsStore.recordVersion({
-      tenant_id: 'BIL',
-      rule: mkRule({ rule_id: 'RULE_CREDIT_001' }),
-      semver: '0.1.0',
-      created_by: 'jane',
-      now: NOW,
-    });
+    // Stamp one more snapshot manually to verify list shape
     ewsRuleVersionsStore.recordVersion({
       tenant_id: 'BIL',
       rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'Renamed' }),
@@ -600,7 +699,7 @@ describe('RP-1 — versions + diff routes', () => {
       .get('/v1/ews/rules/RULE_CREDIT_001/versions')
       .set(TH_BIL);
     expect(r.status).toBe(200);
-    expect(r.body.body.total).toBe(2);
+    expect(r.body.body.total).toBe(2); // 1 auto + 1 manual
     expect(r.body.body.latest_semver).toBe('0.1.1');
   });
 
