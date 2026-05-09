@@ -11,6 +11,7 @@
 // unbounded.
 
 import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
 import type { NotificationChannel } from './case_scenarios_types';
 
 export type DispatchTrigger =
@@ -155,4 +156,137 @@ export class InMemoryNotificationDispatchStore
       page_size: pageSize,
     };
   }
+}
+
+// ─── PG-backed implementation (M14.24c) ───────────────────────────────
+
+interface PgRow {
+  dispatch_id: string;
+  tenant_id: string;
+  template_id: string;
+  template_name: string;
+  channel: string;
+  recipient: string;
+  trigger: string;
+  reference: string | null;
+  rendered_subject: string | null;
+  rendered_body: string;
+  missing_vars: unknown;
+  status: string;
+  status_reason: string | null;
+  performed_by: string;
+  performed_at: Date;
+}
+
+function rowToEntry(r: PgRow): DispatchEntry {
+  return {
+    dispatch_id: String(r.dispatch_id),
+    tenant_id: String(r.tenant_id),
+    template_id: String(r.template_id),
+    template_name: String(r.template_name),
+    channel: r.channel as NotificationChannel,
+    recipient: String(r.recipient),
+    trigger: r.trigger as DispatchTrigger,
+    reference: r.reference !== null ? String(r.reference) : null,
+    rendered_subject: r.rendered_subject !== null ? String(r.rendered_subject) : null,
+    rendered_body: String(r.rendered_body),
+    missing_vars: Array.isArray(r.missing_vars) ? (r.missing_vars as string[]) : [],
+    status: r.status as DispatchStatus,
+    status_reason: r.status_reason !== null ? String(r.status_reason) : null,
+    performed_by: String(r.performed_by),
+    performed_at: (r.performed_at as Date).toISOString(),
+  };
+}
+
+export class PgNotificationDispatchStore implements NotificationDispatchStore {
+  constructor(private readonly pool: Pool) {}
+
+  async append(
+    tenant_id: string,
+    input: AppendDispatchInput,
+    now: Date,
+  ): Promise<DispatchEntry> {
+    const id = randomUUID();
+    const r = await this.pool.query<PgRow>(
+      `INSERT INTO app_admin.notification_dispatch_log
+         (dispatch_id, tenant_id, template_id, template_name, channel,
+          recipient, trigger, reference, rendered_subject, rendered_body,
+          missing_vars, status, status_reason, performed_by, performed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15)
+       RETURNING *`,
+      [
+        id, tenant_id,
+        input.template_id, input.template_name, input.channel,
+        input.recipient, input.trigger, input.reference ?? null,
+        input.rendered_subject, input.rendered_body,
+        JSON.stringify(input.missing_vars),
+        input.status, input.status_reason ?? null,
+        input.performed_by, now,
+      ],
+    );
+    return rowToEntry(r.rows[0]!);
+  }
+
+  async list(
+    tenant_id: string,
+    filter: ListDispatchFilter,
+  ): Promise<ListDispatchResult> {
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, filter.page_size ?? 100));
+    const where: string[] = ['tenant_id = $1'];
+    const args: unknown[] = [tenant_id];
+    if (filter.template_id) {
+      args.push(filter.template_id);
+      where.push(`template_id = $${args.length}`);
+    }
+    if (filter.trigger) {
+      args.push(filter.trigger);
+      where.push(`trigger = $${args.length}`);
+    }
+    if (filter.reference) {
+      args.push(filter.reference);
+      where.push(`reference = $${args.length}`);
+    }
+    if (filter.status && filter.status.length > 0) {
+      args.push(filter.status);
+      where.push(`status = ANY($${args.length}::text[])`);
+    }
+    if (filter.since) {
+      args.push(filter.since);
+      where.push(`performed_at >= $${args.length}`);
+    }
+    const whereSql = where.join(' AND ');
+    const totalRes = await this.pool.query<{ c: string }>(
+      `SELECT count(*) AS c FROM app_admin.notification_dispatch_log WHERE ${whereSql}`,
+      args,
+    );
+    const total = Number(totalRes.rows[0]?.c ?? 0);
+    args.push(pageSize, (page - 1) * pageSize);
+    const r = await this.pool.query<PgRow>(
+      `SELECT * FROM app_admin.notification_dispatch_log
+        WHERE ${whereSql}
+        ORDER BY performed_at DESC
+        LIMIT $${args.length - 1} OFFSET $${args.length}`,
+      args,
+    );
+    return {
+      items: r.rows.map(rowToEntry),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+}
+
+/** Env-driven factory — returns PG-backed store when ADMIN_PG_URL or
+ *  BFF_PG_URL is set, in-memory FIFO otherwise. Mirrors the
+ *  makeNotificationTemplateStore / makeEscalationMatrixStore pattern
+ *  from M14.22. */
+export async function makeNotificationDispatchStore(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ store: NotificationDispatchStore; pool: Pool | null }> {
+  const url = env.ADMIN_PG_URL ?? env.BFF_PG_URL;
+  if (!url) return { store: new InMemoryNotificationDispatchStore(), pool: null };
+  const pool = new Pool({ connectionString: url, max: 4 });
+  return { store: new PgNotificationDispatchStore(pool), pool };
 }

@@ -15403,11 +15403,12 @@ if (require.main === module) {
     const { makeNotificationTemplateStore } = require('./admin/notification_templates_store') as
       typeof import('./admin/notification_templates_store');
     const { store: notificationTemplateStore } = await makeNotificationTemplateStore();
-    // M14.24 dispatch log — in-memory FIFO for now; M14.24b adds PG.
+    // M14.24 dispatch log — env-gated factory (M14.24c). PG-backed
+    // when ADMIN_PG_URL/BFF_PG_URL is set; in-memory FIFO otherwise.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { InMemoryNotificationDispatchStore } = require('./admin/notification_dispatch_store') as
+    const { makeNotificationDispatchStore } = require('./admin/notification_dispatch_store') as
       typeof import('./admin/notification_dispatch_store');
-    const notificationDispatchStore = new InMemoryNotificationDispatchStore();
+    const { store: notificationDispatchStore } = await makeNotificationDispatchStore();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { makeEscalationMatrixStore } = require('./admin/escalation_matrix_store') as
       typeof import('./admin/escalation_matrix_store');
