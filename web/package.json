@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "APEX EWS — Web SPA (Vite + React + Tailwind, DMS-mirrored design system)",
+  "description": "ZorEWS — Web SPA (Vite + React + Tailwind, DMS-mirrored design system)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

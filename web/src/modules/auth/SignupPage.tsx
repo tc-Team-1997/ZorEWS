@@ -113,7 +113,7 @@ export function SignupPage() {
               <ShieldCheck size={14} className="text-white" strokeWidth={2.25} />
             </div>
             <div>
-              <p className="text-ink text-sm font-semibold leading-tight">APEX EWS</p>
+              <p className="text-ink text-sm font-semibold leading-tight">ZorEWS</p>
               <p className="text-muted text-[11px]">Early Warning System</p>
             </div>
           </div>

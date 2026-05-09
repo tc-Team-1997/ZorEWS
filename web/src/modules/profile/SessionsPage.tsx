@@ -59,7 +59,7 @@ export function SessionsPage() {
     <div>
       <PageHeader
         title="Active sessions"
-        subtitle="Devices currently signed in to your APEX EWS account · revoke any you don't recognise"
+        subtitle="Devices currently signed in to your ZorEWS account · revoke any you don't recognise"
       />
 
       <Panel

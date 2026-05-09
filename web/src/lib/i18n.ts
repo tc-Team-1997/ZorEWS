@@ -71,7 +71,7 @@ const en = {
     heading: 'Sign in',
     subtitle: 'Risk operations for authorised staff only',
     forgot_password: 'Forgot password?',
-    new_to_apex: 'New to APEX EWS?',
+    new_to_apex: 'New to ZorEWS?',
     create_account: 'Create an account',
     invalid_credentials: 'Invalid credentials. Please try again.',
     locked_account: 'Account is locked. Contact your administrator.',
@@ -91,7 +91,7 @@ const en = {
   forgot: {
     heading: 'Reset your password',
     subtitle:
-      "Enter your APEX EWS username or email address — we'll generate a single-use reset link valid for 15 minutes.",
+      "Enter your ZorEWS username or email address — we'll generate a single-use reset link valid for 15 minutes.",
     identifier_label: 'Username or email',
     send_link: 'Send reset link',
     back_to_signin: '← Back to sign in',
@@ -139,7 +139,7 @@ const en = {
   sessions: {
     heading: 'Active sessions',
     subtitle:
-      "Devices currently signed in to your APEX EWS account · revoke any you don't recognise",
+      "Devices currently signed in to your ZorEWS account · revoke any you don't recognise",
     your_sessions: 'Your sessions',
     sign_out_other: 'Sign out other devices',
     this_device: 'This device',
@@ -209,7 +209,7 @@ const hi: typeof en = {
     heading: 'साइन इन करें',
     subtitle: 'केवल अधिकृत कर्मचारियों के लिए जोखिम संचालन',
     forgot_password: 'पासवर्ड भूल गए?',
-    new_to_apex: 'APEX EWS पर नए?',
+    new_to_apex: 'ZorEWS पर नए?',
     create_account: 'खाता बनाएं',
     invalid_credentials: 'अमान्य क्रेडेंशियल। कृपया पुनः प्रयास करें।',
     locked_account: 'खाता लॉक है। अपने प्रशासक से संपर्क करें।',
@@ -229,7 +229,7 @@ const hi: typeof en = {
   forgot: {
     heading: 'अपना पासवर्ड रीसेट करें',
     subtitle:
-      'अपना APEX EWS उपयोगकर्ता नाम या ईमेल पता दर्ज करें — हम 15 मिनट के लिए वैध एकल-उपयोग रीसेट लिंक बनाएंगे।',
+      'अपना ZorEWS उपयोगकर्ता नाम या ईमेल पता दर्ज करें — हम 15 मिनट के लिए वैध एकल-उपयोग रीसेट लिंक बनाएंगे।',
     identifier_label: 'उपयोगकर्ता नाम या ईमेल',
     send_link: 'रीसेट लिंक भेजें',
     back_to_signin: '← साइन इन पर वापस',
@@ -277,7 +277,7 @@ const hi: typeof en = {
   sessions: {
     heading: 'सक्रिय सत्र',
     subtitle:
-      'वर्तमान में आपके APEX EWS खाते में साइन इन डिवाइस · किसी भी अनजाने को रद्द करें',
+      'वर्तमान में आपके ZorEWS खाते में साइन इन डिवाइस · किसी भी अनजाने को रद्द करें',
     your_sessions: 'आपके सत्र',
     sign_out_other: 'अन्य डिवाइस से साइन आउट करें',
     this_device: 'यह डिवाइस',

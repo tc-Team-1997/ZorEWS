@@ -130,7 +130,7 @@ export function AppShell() {
             <ShieldCheck size={16} className="text-white" strokeWidth={2.25} />
           </div>
           <div>
-            <p className="text-white text-[13px] font-semibold leading-tight">APEX EWS</p>
+            <p className="text-white text-[13px] font-semibold leading-tight">ZorEWS</p>
             <p className="text-white/60 text-[10px] leading-tight">Early Warning System</p>
           </div>
         </div>

@@ -2128,13 +2128,13 @@ export const handlers = [
     let reply = '';
     switch (intent) {
       case 'greeting':
-        reply = `Hi! I'm the APEX EWS copilot. ${
+        reply = `Hi! I'm the ZorEWS copilot. ${
           entityLabel ? `I can see you're looking at ${entityLabel}.` : `What can I help you with on the ${page === 'unknown' ? 'current page' : page} screen?`
         }`;
         break;
       case 'help':
         reply =
-          "I'm the APEX EWS copilot — a context-aware assistant for risk operations.\n\nI can:\n  • Explain a customer's PD and the top SHAP drivers\n  • Summarise an alert, case, or the dashboard\n  • Recommend next actions tailored to your role\n  • Help you triage queues by severity\n\nMy answers are templated and grounded in what's on the page you're looking at — not a free-form LLM (yet).";
+          "I'm the ZorEWS copilot — a context-aware assistant for risk operations.\n\nI can:\n  • Explain a customer's PD and the top SHAP drivers\n  • Summarise an alert, case, or the dashboard\n  • Recommend next actions tailored to your role\n  • Help you triage queues by severity\n\nMy answers are templated and grounded in what's on the page you're looking at — not a free-form LLM (yet).";
         break;
       case 'thanks':
         reply = 'Anytime. Ping me whenever a number on the page needs unpacking.';
@@ -2738,7 +2738,7 @@ export const handlers = [
       id: `wd-${Math.random().toString(36).slice(2, 10)}`,
       subscription_id: sub.id,
       event_type: 'webhook.test',
-      payload: { message: 'APEX EWS webhook test event', subscription_id: sub.id, sent_at: ts },
+      payload: { message: 'ZorEWS webhook test event', subscription_id: sub.id, sent_at: ts },
       attempts: 1,
       status: 'success',
       response_status: 200,

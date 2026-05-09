@@ -79,7 +79,7 @@ export function buildReportPdf(payload: ReportPayload): jsPDF {
   const margin = 40;
 
   doc.setFontSize(16);
-  doc.text('APEX EWS — Reports', margin, margin);
+  doc.text('ZorEWS — Reports', margin, margin);
   doc.setFontSize(9);
   doc.setTextColor(110);
   doc.text(`Type: ${payload.type}`, margin, margin + 16);
@@ -249,7 +249,7 @@ function addRbiPdf(doc: jsPDF, p: RbiSummaryReport, startY: number): void {
 export async function downloadReportXlsx(payload: ReportPayload): Promise<void> {
   const sheets: Array<{ data: Cell[][]; sheet: string }> = [];
   const meta: Cell[][] = [
-    [{ value: 'APEX EWS — Reports', fontWeight: 'bold' }],
+    [{ value: 'ZorEWS — Reports', fontWeight: 'bold' }],
     [{ value: 'Type', fontWeight: 'bold' }, { value: payload.type, type: String }],
     [{ value: 'Period', fontWeight: 'bold' }, { value: periodLabel(payload), type: String }],
     [{ value: 'Generated', fontWeight: 'bold' }, { value: payload.generated_at, type: String }],

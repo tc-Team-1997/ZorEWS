@@ -149,7 +149,7 @@ describe('scenarioToCsv() shape', () => {
 
   it('contains all four sections with the expected header rows', () => {
     const csv = scenarioToCsv(sample);
-    expect(csv).toContain('# APEX EWS — Scenario simulation result');
+    expect(csv).toContain('# ZorEWS — Scenario simulation result');
     expect(csv).toContain('# IFRS 9 stage migration');
     expect(csv).toContain('# Segment-wise impact');
     expect(csv).toContain('# Top-affected customers');

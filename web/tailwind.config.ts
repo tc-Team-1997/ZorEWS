@@ -1,7 +1,7 @@
 import type { Config } from 'tailwindcss';
 
 /**
- * APEX EWS — tokens mirrored from DMS for consistent banking UI.
+ * ZorEWS — tokens mirrored from DMS for consistent banking UI.
  * Source of truth lives in `.dms-reference/dms-tailwind.config.ts`.
  * DO NOT add raw hex values to TSX — reference these tokens.
  */

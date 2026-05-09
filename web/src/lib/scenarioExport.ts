@@ -55,7 +55,7 @@ function csvRow(cells: unknown[]): string {
 export function scenarioToCsv(result: ScenarioResult): string {
   const lines: string[] = [];
 
-  lines.push('# APEX EWS — Scenario simulation result');
+  lines.push('# ZorEWS — Scenario simulation result');
   lines.push(`# Computed at,${result.computed_at}`);
   lines.push(`# GDP shock (%),${result.inputs.gdp}`);
   lines.push(`# Rate shock (bps),${result.inputs.rate}`);
@@ -111,7 +111,7 @@ export function buildScenarioPdf(result: ScenarioResult): jsPDF {
   const margin = 40;
 
   doc.setFontSize(16);
-  doc.text('APEX EWS — Scenario Simulation Report', margin, margin);
+  doc.text('ZorEWS — Scenario Simulation Report', margin, margin);
   doc.setFontSize(9);
   doc.setTextColor(110);
   doc.text(`Computed at: ${result.computed_at}`, margin, margin + 16);
@@ -242,7 +242,7 @@ export async function downloadScenarioXlsx(
   filenameStem = 'scenario',
 ): Promise<void> {
   const summarySheet: Cell[][] = [
-    [{ value: 'APEX EWS — Scenario Simulation Report', fontWeight: 'bold' }],
+    [{ value: 'ZorEWS — Scenario Simulation Report', fontWeight: 'bold' }],
     [{ value: 'Computed at', fontWeight: 'bold' }, { value: result.computed_at, type: String }],
     [
       { value: 'GDP shock (%)', fontWeight: 'bold' },
