@@ -12161,8 +12161,23 @@ export function makeApp(deps: AppDeps = {}) {
         }
         limit = n;
       }
+      // M14.14 — optional ?acknowledged=true|false filter
+      let acknowledged: boolean | undefined;
+      const ackRaw = req.query.acknowledged;
+      if (typeof ackRaw === 'string' && ackRaw.trim()) {
+        if (ackRaw === 'true') acknowledged = true;
+        else if (ackRaw === 'false') acknowledged = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'acknowledged must be true|false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
       const tenantId = req.tenant!.tenant_id;
-      const items = adapterSlaBreachEventStore.list(tenantId, since, limit);
+      const items = adapterSlaBreachEventStore.query(tenantId, { since, limit, acknowledged });
       const total = adapterSlaBreachEventStore.count(tenantId);
       return res.json(
         wrapResponse({ items, total, returned: items.length }, ctx),
@@ -12180,6 +12195,81 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const cleared = adapterSlaBreachEventStore.clear(req.tenant!.tenant_id);
       return res.json(wrapResponse({ cleared }, ctx));
+    },
+  );
+
+  /** POST /v1/ingestion/adapters/sla-breaches/:event_id/acknowledge (T6 M14.14)
+   *  — operator acknowledges a recorded breach event so downstream
+   *  alerting can dedup repeat pages on the same incident. Body
+   *  `{ note?: string }` (optional 0-500 char free text). Idempotent
+   *  — re-ack on an already-acknowledged event returns 200 with
+   *  `already: true` and leaves the original ack metadata intact so
+   *  the audit trail stays honest about who acked first. */
+  app.post(
+    '/v1/ingestion/adapters/sla-breaches/:event_id/acknowledge',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const eventId = req.params.event_id ?? '';
+      if (!eventId.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'event_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const noteIn =
+        inner && typeof inner === 'object' && 'note' in (inner as object)
+          ? (inner as { note?: unknown }).note
+          : undefined;
+      let note: string | undefined;
+      if (noteIn !== undefined && noteIn !== null) {
+        if (typeof noteIn !== 'string') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'note must be a string', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        const trimmed = noteIn.trim();
+        if (trimmed.length > 500) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'note max length is 500 chars', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        if (trimmed.length > 0) note = trimmed;
+      }
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const result = adapterSlaBreachEventStore.acknowledge(
+        req.tenant!.tenant_id,
+        eventId,
+        actor,
+        now(),
+        note,
+      );
+      if (!result.event) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_event', message: `unknown breach event: ${eventId}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(
+        wrapResponse({ event: result.event, already: result.already }, ctx),
+      );
     },
   );
 

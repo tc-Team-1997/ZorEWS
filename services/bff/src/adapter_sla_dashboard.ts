@@ -245,19 +245,56 @@ export interface AdapterSlaBreachEvent {
   p95_latency_ms: number | null;
   /** Echo of the targets used to evaluate the breach. */
   sla_targets: AdapterSlaTargets;
+  // ── M14.14 acknowledgement (optional / backwards-compatible) ─────
+  acknowledged_by?: string;
+  acknowledged_at?: string;
+  acknowledgement_note?: string;
+}
+
+/** Result of an acknowledge() call. `already` distinguishes a no-op
+ *  re-ack from a fresh one so the route can return 200 vs 409 if needed.
+ *  `null` event means the id wasn't found in the tenant's history. */
+export interface AdapterSlaBreachAckResult {
+  event: AdapterSlaBreachEvent | null;
+  already: boolean;
+}
+
+export interface AdapterSlaBreachListOptions {
+  since?: Date;
+  limit?: number;
+  /** M14.14 — when set, restrict to acknowledged or unacknowledged
+   *  rows. Omitted = both (legacy behaviour). */
+  acknowledged?: boolean;
 }
 
 export interface AdapterSlaBreachEventStore {
   record(e: AdapterSlaBreachEvent): void;
-  /** Newest-first; optional `since` filter on `observed_at`. */
+  /** Newest-first; optional `since` filter on `observed_at`. The
+   *  3-arg legacy call shape is preserved as a positional shortcut. */
   list(
     tenant_id: string,
     since?: Date,
     limit?: number,
   ): readonly AdapterSlaBreachEvent[];
+  /** M14.14 — same as `list` but accepts the `acknowledged` filter. */
+  query(
+    tenant_id: string,
+    opts: AdapterSlaBreachListOptions,
+  ): readonly AdapterSlaBreachEvent[];
   count(tenant_id: string): number;
   /** Wipe a tenant's history. Returns the number of rows cleared. */
   clear(tenant_id: string): number;
+  /** M14.14 — stamp ack metadata on a recorded event. Idempotent on
+   *  an already-acknowledged event (returns `already: true`, leaves
+   *  the original ack metadata untouched so the audit trail is
+   *  honest). */
+  acknowledge(
+    tenant_id: string,
+    event_id: string,
+    by: string,
+    at: Date,
+    note?: string,
+  ): AdapterSlaBreachAckResult;
 }
 
 export const ADAPTER_SLA_BREACH_EVENT_CAP = 200;
@@ -279,13 +316,24 @@ export class InMemoryAdapterSlaBreachEventStore
     since?: Date,
     limit?: number,
   ): readonly AdapterSlaBreachEvent[] {
+    return this.query(tenant_id, { since, limit });
+  }
+
+  query(
+    tenant_id: string,
+    opts: AdapterSlaBreachListOptions,
+  ): readonly AdapterSlaBreachEvent[] {
     const arr = this.map.get(tenant_id) ?? [];
-    const filtered = since
-      ? arr.filter((e) => new Date(e.observed_at).getTime() >= since.getTime())
-      : arr;
+    const sinceMs = opts.since?.getTime();
+    const filtered = arr.filter((e) => {
+      if (sinceMs !== undefined && new Date(e.observed_at).getTime() < sinceMs) return false;
+      if (opts.acknowledged === true && !e.acknowledged_at) return false;
+      if (opts.acknowledged === false && e.acknowledged_at) return false;
+      return true;
+    });
     const newestFirst = [...filtered].reverse();
-    return typeof limit === 'number' && limit > 0
-      ? newestFirst.slice(0, limit)
+    return typeof opts.limit === 'number' && opts.limit > 0
+      ? newestFirst.slice(0, opts.limit)
       : newestFirst;
   }
 
@@ -297,6 +345,31 @@ export class InMemoryAdapterSlaBreachEventStore
     const n = this.map.get(tenant_id)?.length ?? 0;
     this.map.delete(tenant_id);
     return n;
+  }
+
+  acknowledge(
+    tenant_id: string,
+    event_id: string,
+    by: string,
+    at: Date,
+    note?: string,
+  ): AdapterSlaBreachAckResult {
+    const arr = this.map.get(tenant_id);
+    if (!arr) return { event: null, already: false };
+    const idx = arr.findIndex((e) => e.event_id === event_id);
+    if (idx < 0) return { event: null, already: false };
+    const existing = arr[idx]!;
+    if (existing.acknowledged_at) {
+      return { event: existing, already: true };
+    }
+    const updated: AdapterSlaBreachEvent = {
+      ...existing,
+      acknowledged_by: by,
+      acknowledged_at: at.toISOString(),
+      ...(note ? { acknowledgement_note: note } : {}),
+    };
+    arr[idx] = updated;
+    return { event: updated, already: false };
   }
 }
 

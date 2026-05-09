@@ -1112,3 +1112,244 @@ describe('DELETE /v1/ingestion/adapters/sla-breaches (M14.13)', () => {
     expect(r.status).toBe(403);
   });
 });
+
+// ─── M14.14 — Breach acknowledgement ─────────────────────────────────
+
+describe('InMemoryAdapterSlaBreachEventStore.acknowledge (M14.14)', () => {
+  function seed(): InMemoryAdapterSlaBreachEventStore {
+    const s = new InMemoryAdapterSlaBreachEventStore();
+    s.record({
+      event_id: 'e-1', tenant_id: 'BIL', connector_id: 'a',
+      connector_name: 'a', source_system: 'TEST',
+      observed_at: '2026-05-06T08:00:00.000Z',
+      sla_breaches: ['success_rate_below_target'],
+      success_rate: 0.5, p95_latency_ms: 1000, sla_targets: DEFAULT_SLA_TARGETS,
+    });
+    s.record({
+      event_id: 'e-2', tenant_id: 'BIL', connector_id: 'b',
+      connector_name: 'b', source_system: 'TEST',
+      observed_at: '2026-05-06T09:00:00.000Z',
+      sla_breaches: ['p95_latency_above_target'],
+      success_rate: 1.0, p95_latency_ms: 60_000, sla_targets: DEFAULT_SLA_TARGETS,
+    });
+    return s;
+  }
+
+  test('stamps acknowledged_by + acknowledged_at on first ack', () => {
+    const s = seed();
+    const at = new Date('2026-05-06T10:00:00.000Z');
+    const r = s.acknowledge('BIL', 'e-1', 'alice', at);
+    expect(r.already).toBe(false);
+    expect(r.event?.acknowledged_by).toBe('alice');
+    expect(r.event?.acknowledged_at).toBe(at.toISOString());
+    expect(r.event?.acknowledgement_note).toBeUndefined();
+  });
+
+  test('stores the optional note when provided', () => {
+    const s = seed();
+    const r = s.acknowledge('BIL', 'e-1', 'alice', NOW, 'Investigating with infra');
+    expect(r.event?.acknowledgement_note).toBe('Investigating with infra');
+  });
+
+  test('re-ack returns already:true and preserves original metadata', () => {
+    const s = seed();
+    const firstAt = new Date('2026-05-06T10:00:00.000Z');
+    s.acknowledge('BIL', 'e-1', 'alice', firstAt, 'first');
+    const second = s.acknowledge('BIL', 'e-1', 'bob', new Date('2026-05-06T11:00:00.000Z'), 'second');
+    expect(second.already).toBe(true);
+    expect(second.event?.acknowledged_by).toBe('alice');
+    expect(second.event?.acknowledged_at).toBe(firstAt.toISOString());
+    expect(second.event?.acknowledgement_note).toBe('first');
+  });
+
+  test('returns event:null when event_id unknown for the tenant', () => {
+    const s = seed();
+    const r = s.acknowledge('BIL', 'no-such', 'alice', NOW);
+    expect(r.event).toBeNull();
+    expect(r.already).toBe(false);
+  });
+
+  test('does not cross tenants — acking BIL event from BANK_DEMO is a no-op', () => {
+    const s = seed();
+    const r = s.acknowledge('BANK_DEMO', 'e-1', 'alice', NOW);
+    expect(r.event).toBeNull();
+  });
+
+  test('query({ acknowledged: true }) filters to acked rows', () => {
+    const s = seed();
+    s.acknowledge('BIL', 'e-1', 'alice', NOW);
+    const acked = s.query('BIL', { acknowledged: true });
+    expect(acked.map((e) => e.event_id)).toEqual(['e-1']);
+  });
+
+  test('query({ acknowledged: false }) filters to unacked rows', () => {
+    const s = seed();
+    s.acknowledge('BIL', 'e-1', 'alice', NOW);
+    const open = s.query('BIL', { acknowledged: false });
+    expect(open.map((e) => e.event_id)).toEqual(['e-2']);
+  });
+
+  test('query() with no acknowledged filter returns both (legacy parity)', () => {
+    const s = seed();
+    s.acknowledge('BIL', 'e-1', 'alice', NOW);
+    const all = s.query('BIL', {});
+    expect(all.length).toBe(2);
+  });
+});
+
+describe('POST /v1/ingestion/adapters/sla-breaches/:event_id/acknowledge (M14.14)', () => {
+  function seedStore(): InMemoryAdapterSlaBreachEventStore {
+    const s = new InMemoryAdapterSlaBreachEventStore();
+    s.record({
+      event_id: 'e-1', tenant_id: 'BIL', connector_id: 'a',
+      connector_name: 'a', source_system: 'TEST',
+      observed_at: '2026-05-06T08:00:00.000Z',
+      sla_breaches: ['success_rate_below_target'],
+      success_rate: 0.5, p95_latency_ms: 1000, sla_targets: DEFAULT_SLA_TARGETS,
+    });
+    return s;
+  }
+
+  test('200 stamps acknowledged_by from x-apex-user + acknowledged_at = now()', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set({ ...TH_BIL, 'x-apex-user': 'alice' })
+      .send({});
+    expect(r.status).toBe(200);
+    expect(r.body.body.already).toBe(false);
+    expect(r.body.body.event.acknowledged_by).toBe('alice');
+    expect(r.body.body.event.acknowledged_at).toBe(NOW.toISOString());
+  });
+
+  test('200 with optional note in body persists it', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set({ ...TH_BIL, 'x-apex-user': 'alice' })
+      .send({ note: 'Source system DR — known incident #INC-42' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.event.acknowledgement_note).toBe('Source system DR — known incident #INC-42');
+  });
+
+  test('200 already:true on re-ack, original metadata preserved', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set({ ...TH_BIL, 'x-apex-user': 'alice' })
+      .send({ note: 'first' });
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set({ ...TH_BIL, 'x-apex-user': 'bob' })
+      .send({ note: 'second' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.already).toBe(true);
+    expect(r.body.body.event.acknowledged_by).toBe('alice');
+    expect(r.body.body.event.acknowledgement_note).toBe('first');
+  });
+
+  test('404 on unknown event_id', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/no-such/acknowledge')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe('EWS_404_unknown_event');
+  });
+
+  test('400 when note exceeds 500 chars', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set(TH_BIL)
+      .send({ note: 'x'.repeat(501) });
+    expect(r.status).toBe(400);
+  });
+
+  test('400 when note is non-string', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set(TH_BIL)
+      .send({ note: 42 });
+    expect(r.status).toBe(400);
+  });
+
+  test('non-allowed role → 403', async () => {
+    const breachStore = seedStore();
+    const { app } = makeDashApp('case_owner', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(403);
+  });
+
+  test('cross-tenant ack of another tenant\'s event → 404', async () => {
+    const breachStore = seedStore(); // event under BIL
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .post('/v1/ingestion/adapters/sla-breaches/e-1/acknowledge')
+      .set({ ...TH_BIL, 'X-Tenant-ID': 'BANK_DEMO' })
+      .send({});
+    expect(r.status).toBe(404);
+  });
+});
+
+describe('GET /v1/ingestion/adapters/sla-breaches?acknowledged= (M14.14)', () => {
+  function seedTwo(): InMemoryAdapterSlaBreachEventStore {
+    const s = new InMemoryAdapterSlaBreachEventStore();
+    s.record({
+      event_id: 'e-1', tenant_id: 'BIL', connector_id: 'a',
+      connector_name: 'a', source_system: 'TEST',
+      observed_at: '2026-05-06T08:00:00.000Z',
+      sla_breaches: ['success_rate_below_target'],
+      success_rate: 0.5, p95_latency_ms: 1000, sla_targets: DEFAULT_SLA_TARGETS,
+    });
+    s.record({
+      event_id: 'e-2', tenant_id: 'BIL', connector_id: 'b',
+      connector_name: 'b', source_system: 'TEST',
+      observed_at: '2026-05-06T09:00:00.000Z',
+      sla_breaches: ['p95_latency_above_target'],
+      success_rate: 1.0, p95_latency_ms: 60_000, sla_targets: DEFAULT_SLA_TARGETS,
+    });
+    s.acknowledge('BIL', 'e-1', 'alice', NOW);
+    return s;
+  }
+
+  test('?acknowledged=true returns only acked events', async () => {
+    const breachStore = seedTwo();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-breaches?acknowledged=true')
+      .set(TH_BIL);
+    expect(r.status).toBe(200);
+    expect(r.body.body.items.map((e: { event_id: string }) => e.event_id)).toEqual(['e-1']);
+    expect(r.body.body.total).toBe(2); // total tracks store size, not filtered count
+  });
+
+  test('?acknowledged=false returns only unacked events', async () => {
+    const breachStore = seedTwo();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-breaches?acknowledged=false')
+      .set(TH_BIL);
+    expect(r.body.body.items.map((e: { event_id: string }) => e.event_id)).toEqual(['e-2']);
+  });
+
+  test('400 on invalid acknowledged value', async () => {
+    const breachStore = seedTwo();
+    const { app } = makeDashApp('admin', undefined, undefined, breachStore);
+    const r = await request(app)
+      .get('/v1/ingestion/adapters/sla-breaches?acknowledged=maybe')
+      .set(TH_BIL);
+    expect(r.status).toBe(400);
+  });
+});
