@@ -137,4 +137,17 @@ describe('NotificationTemplatesPage', () => {
     await userEvent.click(screen.getByTestId('tpl-pivot-archived'));
     expect(await screen.findByText(/Case Opened — RM email/i)).toBeInTheDocument();
   });
+
+  // M14.26 — Duplicate
+  it('duplicate clones a row as a new DRAFT with " (copy)" suffix', async () => {
+    renderWithProviders(<NotificationTemplatesPage />);
+    await screen.findByText(/Case Opened — RM email/i);
+    const dupBtn = await screen.findByTestId(/^tpl-duplicate-tpl-seed-bank_demo-case-opened/);
+    await userEvent.click(dupBtn);
+    // The clone lands as a DRAFT — switch pivot and confirm
+    await userEvent.click(screen.getByTestId('tpl-pivot-draft'));
+    await waitFor(() => {
+      expect(screen.getByText(/Case Opened — RM email \(copy\)/i)).toBeInTheDocument();
+    });
+  });
 });

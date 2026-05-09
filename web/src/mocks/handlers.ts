@@ -1062,6 +1062,21 @@ const mswNotificationTemplates: MswNotificationTemplate[] = [
   ),
 ];
 
+// Deep snapshot of the seeded templates so __resetMswNotificationTemplates()
+// can restore the array between tests without re-running the _mkTemplate
+// builder (which captures a `now` timestamp). Each template is JSON-cloned
+// so per-row mutations on `status` / `deleted_at` / `subject` / `body`
+// don't bleed into the snapshot.
+const _seedNotificationTemplatesSnapshot: MswNotificationTemplate[] =
+  mswNotificationTemplates.map((t) => ({ ...t }));
+
+export function __resetMswNotificationTemplates(): void {
+  mswNotificationTemplates.length = 0;
+  for (const seed of _seedNotificationTemplatesSnapshot) {
+    mswNotificationTemplates.push({ ...seed });
+  }
+}
+
 const mswSlaConfigs: MswSlaConfig[] = [
   _mkSla('credit_risk', 'P1', null, 1.0,  'Critical credit incident'),
   _mkSla('credit_risk', 'P2', null, 3.0,  'High credit risk — RM follow-up'),

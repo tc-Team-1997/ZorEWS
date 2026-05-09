@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Eye, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
+import { CheckCircle2, Copy, Eye, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
 import {
   api,
   type NotificationChannel,
@@ -85,6 +85,21 @@ export function NotificationTemplatesPage() {
   });
   const archive = useMutation({
     mutationFn: api.notificationTemplateArchive,
+    onSuccess: refresh,
+  });
+  // M14.26 — clone an existing row as a fresh DRAFT. Server-side is
+  // a plain create; the row's name/channel/subject/body/locale are
+  // forwarded with " (copy)" appended (truncated to fit the 80-char
+  // name cap on the BFF).
+  const duplicate = useMutation({
+    mutationFn: (row: NotificationTemplateRow) =>
+      api.notificationTemplateCreate({
+        name: `${row.name} (copy)`.slice(0, 80),
+        channel: row.channel,
+        subject: row.subject,
+        body: row.body,
+        locale: row.locale,
+      }),
     onSuccess: refresh,
   });
 
@@ -196,6 +211,21 @@ export function NotificationTemplatesPage() {
                 data-testid={`tpl-edit-${r.template_id}`}
               >
                 <Pencil className="w-3 h-3" /> Edit
+              </button>
+            </>
+          )}
+          {r.deleted_at === null && (
+            <>
+              <span className="text-2xs text-muted">·</span>
+              <button
+                type="button"
+                onClick={() => duplicate.mutate(r)}
+                disabled={duplicate.isPending}
+                className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+                data-testid={`tpl-duplicate-${r.template_id}`}
+                title="Clone as a new DRAFT"
+              >
+                <Copy className="w-3 h-3" /> Duplicate
               </button>
             </>
           )}
