@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -137,6 +137,7 @@ const ewsApi = {
 
 export function EwsRuleBuilderPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const rulesQ = useQuery({ queryKey: ['ews-rules'], queryFn: ewsApi.list });
   const indicatorsQ = useQuery({ queryKey: ['ews-indicators'], queryFn: ewsApi.indicators });
@@ -266,8 +267,9 @@ export function EwsRuleBuilderPage() {
                   </Button>
                   <Button
                     variant="ghost"
-                    onClick={() => setDiffRuleId(r.rule_id)}
+                    onClick={() => navigate(`/rules/ews/${encodeURIComponent(r.rule_id)}/diff`)}
                     title="View version diff (RP-1)"
+                    data-testid={`open-diff-${r.rule_id}`}
                   >
                     <GitCompare size={14} />
                   </Button>

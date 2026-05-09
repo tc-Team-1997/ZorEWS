@@ -3293,7 +3293,198 @@ export const handlers = [
       }),
     );
   }),
+
+  // ── EWS Rules versioning + revert (RP-1 + diff-page) ─────────────────
+  http.get('/v1/ews/rules/:rule_id/versions', ({ params }) => {
+    const items = mswEwsRuleVersions(String(params.rule_id));
+    return HttpResponse.json(
+      envelope({
+        items,
+        total: items.length,
+        rule_id: params.rule_id,
+        latest_semver: items[0]?.semver ?? null,
+      }),
+    );
+  }),
+
+  http.get('/v1/ews/rules/:rule_id/versions/:semver', ({ params }) => {
+    const v = mswEwsRuleVersions(String(params.rule_id)).find(
+      (x) => x.semver === String(params.semver),
+    );
+    if (!v) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_version', `version not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(v));
+  }),
+
+  http.post('/v1/ews/rules/:rule_id/versions/diff', async ({ request, params }) => {
+    const body = (await request.json()) as { from?: string; to?: string; format?: string };
+    if (!body.from || !body.to) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'from + to required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (body.format && body.format !== 'fields' && body.format !== 'snapshots') {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'format must be fields|snapshots', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const versions = mswEwsRuleVersions(String(params.rule_id));
+    const A = versions.find((v) => v.semver === body.from);
+    const B = versions.find((v) => v.semver === body.to);
+    if (!A || !B) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_version', `version not found`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const diff = mswDiffSnapshots(A.snapshot, B.snapshot);
+    const out: Record<string, unknown> = {
+      rule_id: params.rule_id,
+      from: body.from,
+      to: body.to,
+      diff,
+      change_count: diff.length,
+    };
+    if (body.format === 'snapshots') {
+      out.from_snapshot = A;
+      out.to_snapshot = B;
+    }
+    return HttpResponse.json(envelope(out));
+  }),
+
+  http.post(
+    '/v1/ews/rules/:rule_id/versions/:semver/revert',
+    async ({ request, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { reason?: string };
+      const versions = mswEwsRuleVersions(String(params.rule_id));
+      const target = versions.find((v) => v.semver === String(params.semver));
+      if (!target) {
+        return HttpResponse.json(
+          envelopeError('EWS_404_unknown_version', `version not found`, 'LOW'),
+          { status: 404 },
+        );
+      }
+      const latest = versions[0]?.semver ?? '0.1.0';
+      const [maj, min, pat] = latest.split('.').map(Number);
+      const newSemver = `${maj}.${min}.${pat + 1}`;
+      const snap = {
+        version_id: `mock-rev-${Date.now()}`,
+        rule_id: String(params.rule_id),
+        tenant_id: 'BANK_DEMO',
+        semver: newSemver,
+        snapshot: target.snapshot,
+        created_by: 'msw-actor',
+        created_at: new Date().toISOString(),
+        reason: body.reason ?? `Reverted to v${target.semver} by msw-actor`,
+      };
+      __mswEwsRuleRevertedVersions.set(snap.version_id, snap);
+      return HttpResponse.json(envelope(snap), { status: 201 });
+    },
+  ),
 ];
+
+// ── EWS Rules versions seed (RP-1 + diff-page) ───────────────────────
+
+interface MswEwsRuleVersion {
+  version_id: string;
+  rule_id: string;
+  tenant_id: string;
+  semver: string;
+  snapshot: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  reason: string | null;
+}
+
+// Per-test additions live here so a revert in one test doesn't leak
+// into another. Reset via __resetMswEwsRuleVersions() in setup.ts.
+const __mswEwsRuleRevertedVersions = new Map<string, MswEwsRuleVersion>();
+export function __resetMswEwsRuleVersions(): void {
+  __mswEwsRuleRevertedVersions.clear();
+}
+
+// Static seed: 3 versions per rule_id, sorted descending by semver.
+function mswEwsRuleVersions(rule_id: string): MswEwsRuleVersion[] {
+  const seed: MswEwsRuleVersion[] = [
+    {
+      version_id: `${rule_id}-v3`,
+      rule_id,
+      tenant_id: 'BANK_DEMO',
+      semver: '1.2.0',
+      snapshot: {
+        rule_id,
+        name: 'High EMI Bounce Risk',
+        description: '3+ EMI bounces in 90 days · refined threshold',
+        action: { alert_severity: 'RED', weight: 30 },
+      },
+      created_by: 'jane.maker',
+      created_at: '2026-05-08T10:00:00.000Z',
+      reason: 'tightened weight 25→30 after FP review',
+    },
+    {
+      version_id: `${rule_id}-v2`,
+      rule_id,
+      tenant_id: 'BANK_DEMO',
+      semver: '1.1.0',
+      snapshot: {
+        rule_id,
+        name: 'High EMI Bounce Risk',
+        description: '3+ EMI bounces in 90 days',
+        action: { alert_severity: 'RED', weight: 25 },
+      },
+      created_by: 'jane.maker',
+      created_at: '2026-05-05T14:30:00.000Z',
+      reason: 'first activation',
+    },
+    {
+      version_id: `${rule_id}-v1`,
+      rule_id,
+      tenant_id: 'BANK_DEMO',
+      semver: '0.1.0',
+      snapshot: {
+        rule_id,
+        name: 'EMI Bounce Risk (draft)',
+        description: 'placeholder',
+        action: { alert_severity: 'ORANGE', weight: 15 },
+      },
+      created_by: 'jane.maker',
+      created_at: '2026-05-01T09:00:00.000Z',
+      reason: null,
+    },
+  ];
+  // Append any reverts created during the current test session
+  const reverted = Array.from(__mswEwsRuleRevertedVersions.values()).filter(
+    (v) => v.rule_id === rule_id,
+  );
+  return [...reverted, ...seed].sort((a, b) => b.semver.localeCompare(a.semver));
+}
+
+function mswDiffSnapshots(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): Array<{ field: string; before: unknown; after: unknown; kind: 'added' | 'removed' | 'changed' }> {
+  const fields = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const out: Array<{
+    field: string;
+    before: unknown;
+    after: unknown;
+    kind: 'added' | 'removed' | 'changed';
+  }> = [];
+  for (const f of fields) {
+    if (!(f in a) && f in b) out.push({ field: f, before: undefined, after: b[f], kind: 'added' });
+    else if (f in a && !(f in b))
+      out.push({ field: f, before: a[f], after: undefined, kind: 'removed' });
+    else if (JSON.stringify(a[f]) !== JSON.stringify(b[f]))
+      out.push({ field: f, before: a[f], after: b[f], kind: 'changed' });
+  }
+  return out;
+}
 
 // MSW state for the saved-scenario endpoints. Lives at module scope so
 // tests across files don't accidentally share data — setupTests.ts

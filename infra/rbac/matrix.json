@@ -45,6 +45,7 @@
     "rules:simulate":               ["admin", "risk_analyst", "supervisor"],
     "rules:promote":                ["admin", "supervisor"],
     "rules:retire":                 ["admin", "supervisor"],
+    "rules:revert":                 ["admin", "supervisor"],
 
     "customers:list":               ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
     "customers:read_risk_profile":  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],

@@ -92,6 +92,35 @@ export const rulesPlusApi = {
       change_count: number;
     }>(http.post(`/v1/ews/rules/${rule_id}/versions/diff`, { from, to })),
 
+  /** Same diff route, but include the full from/to snapshots so the
+   *  page can render side-by-side JSON without a second round-trip. */
+  diffWithSnapshots: (rule_id: string, from: string, to: string) =>
+    unwrap<{
+      rule_id: string;
+      from: string;
+      to: string;
+      diff: RuleDiffEntry[];
+      change_count: number;
+      from_snapshot: RuleVersionSnapshot;
+      to_snapshot: RuleVersionSnapshot;
+    }>(
+      http.post(`/v1/ews/rules/${rule_id}/versions/diff`, {
+        from,
+        to,
+        format: 'snapshots',
+      }),
+    ),
+
+  /** Admin-only — creates a new version whose snapshot equals the
+   *  named version. Audit row written server-side. */
+  revert: (rule_id: string, target_semver: string, reason?: string) =>
+    unwrap<RuleVersionSnapshot>(
+      http.post(
+        `/v1/ews/rules/${rule_id}/versions/${encodeURIComponent(target_semver)}/revert`,
+        { reason },
+      ),
+    ),
+
   approvals: (rule_id: string) =>
     unwrap<{ items: RuleApproval[]; total: number; pending: RuleApproval | null }>(
       http.get(`/v1/ews/rules/${rule_id}/approvals`),

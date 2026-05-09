@@ -679,6 +679,247 @@ describe('RP-1 — versions + diff routes', () => {
       .send({ from: 'bad', to: '1.0.0' });
     expect(r.status).toBe(400);
   });
+
+  // ── format=snapshots — added so the SPA can render side-by-side
+  //    JSON without a second round-trip per /:semver fetch.
+  test('POST /versions/diff format=snapshots includes from_snapshot + to_snapshot', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'A' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'B' }),
+      semver: '1.1.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/diff')
+      .set(TH_BIL)
+      .send({ from: '1.0.0', to: '1.1.0', format: 'snapshots' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.from_snapshot.semver).toBe('1.0.0');
+    expect(r.body.body.to_snapshot.semver).toBe('1.1.0');
+    expect(r.body.body.from_snapshot.snapshot.name).toBe('A');
+    expect(r.body.body.to_snapshot.snapshot.name).toBe('B');
+    // Field-by-field diff still present
+    expect(r.body.body.diff.length).toBe(1);
+  });
+
+  test('POST /versions/diff default format omits snapshots (back-compat)', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'A' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'B' }),
+      semver: '1.1.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/diff')
+      .set(TH_BIL)
+      .send({ from: '1.0.0', to: '1.1.0' });
+    expect(r.status).toBe(200);
+    expect(r.body.body.from_snapshot).toBeUndefined();
+    expect(r.body.body.to_snapshot).toBeUndefined();
+  });
+
+  test('POST /versions/diff bad format → 400', async () => {
+    const { app } = makeAppR('admin');
+    await createRule(app);
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/diff')
+      .set(TH_BIL)
+      .send({ from: '1.0.0', to: '1.1.0', format: 'unicorn' });
+    expect(r.status).toBe(400);
+  });
+});
+
+// ─── Revert ──────────────────────────────────────────────────────────
+
+describe('RP-1 — POST /v1/ews/rules/:id/versions/:semver/revert', () => {
+  test('happy: creates a new version equal to the named snapshot, bumping patch', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'Old name' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001', name: 'Latest name' }),
+      semver: '1.1.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({});
+    expect(r.status).toBe(201);
+    expect(r.body.body.semver).toBe('1.1.1'); // patch-bumped off latest
+    expect(r.body.body.snapshot.name).toBe('Old name'); // payload from 1.0.0
+    expect(r.body.body.created_by).toBe('alice');
+    expect(r.body.body.reason).toMatch(/Reverted to v1\.0\.0/);
+  });
+
+  test('user-supplied reason wins over the default', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({ reason: 'production caused regression — rollback' });
+    expect(r.status).toBe(201);
+    expect(r.body.body.reason).toBe('production caused regression — rollback');
+  });
+
+  test('400 on bad semver in URL', async () => {
+    const { app } = makeAppR('admin');
+    await createRule(app);
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/bad/revert')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(400);
+  });
+
+  test('404 on unknown rule', async () => {
+    const { app } = makeAppR('admin');
+    const r = await request(app)
+      .post('/v1/ews/rules/NOPE/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(404);
+  });
+
+  test('404 on unknown version', async () => {
+    const { app } = makeAppR('admin');
+    await createRule(app);
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/9.9.9/revert')
+      .set(TH_BIL)
+      .send({});
+    expect(r.status).toBe(404);
+  });
+
+  test('409 when a pending approval is in flight (4-eyes guard)', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('admin');
+    await createRule(app, 'jane');
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    // submit creates a pending approval
+    await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/submit')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'jane')
+      .send({});
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({});
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('EWS_409_pending_approval');
+  });
+
+  test('403 for risk_analyst (rules:revert is admin/supervisor only)', async () => {
+    const { app, ewsRuleVersionsStore } = makeAppR('risk_analyst');
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'analyst')
+      .send({});
+    expect(r.status).toBe(403);
+  });
+
+  test('audit log: writes one row to admin_audit_log via reportAuditPool', async () => {
+    type AuditCall = { sql: string; args: unknown[] };
+    const audit: AuditCall[] = [];
+    const fakePool = {
+      query: async (sql: string, args: unknown[]) => {
+        audit.push({ sql, args });
+        return { rowCount: 1, rows: [] };
+      },
+    };
+    const ewsRuleStore = new InMemoryEwsRuleStore();
+    const ewsRuleVersionsStore = new InMemoryEwsRuleVersionsStore();
+    const { app } = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      ewsRuleStore,
+      ewsRuleVersionsStore,
+      reportAuditPool: fakePool,
+      now: () => NOW,
+      getRole: () => 'admin',
+    });
+    await createRule(app);
+    ewsRuleVersionsStore.recordVersion({
+      tenant_id: 'BIL',
+      rule: mkRule({ rule_id: 'RULE_CREDIT_001' }),
+      semver: '1.0.0',
+      created_by: 'jane',
+      now: NOW,
+    });
+    const r = await request(app)
+      .post('/v1/ews/rules/RULE_CREDIT_001/versions/1.0.0/revert')
+      .set(TH_BIL)
+      .set('X-APEX-USER', 'alice')
+      .send({ reason: 'rollback' });
+    expect(r.status).toBe(201);
+    // Audit is fire-and-forget; flush microtasks
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(audit.length).toBe(1);
+    expect(audit[0].sql).toMatch(/admin_audit_log/);
+    const args = audit[0].args;
+    expect(args[0]).toBe('BIL');                       // tenant_id
+    expect(args[2]).toBe('alice');                     // actor_id
+    const after = JSON.parse(args[4] as string) as Record<string, unknown>;
+    expect(after.rule_id).toBe('RULE_CREDIT_001');
+    expect(after.reverted_to_semver).toBe('1.0.0');
+    expect(after.new_semver).toBe('1.0.1');
+  });
 });
 
 describe('RP-1 — GET /approvals', () => {

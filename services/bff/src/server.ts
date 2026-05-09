@@ -207,6 +207,7 @@ import {
   SEMVER_INITIAL,
   approveWithFourEyes,
   buildCloneInput,
+  bumpSemver,
   defaultEwsRuleVersionsStore,
   diffRuleSnapshots,
   isSemver,
@@ -14545,7 +14546,11 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   /** POST /v1/ews/rules/:rule_id/versions/diff
-   *  body { from, to } → field-by-field diff. */
+   *  body { from, to, format? }
+   *    - format='fields'    (default) → returns field-by-field RuleDiffEntry[]
+   *    - format='snapshots' (T-diff)  → returns the same diff PLUS the
+   *      full from + to snapshots so the SPA can render side-by-side
+   *      JSON without a second round-trip. */
   app.post(
     '/v1/ews/rules/:rule_id/versions/diff',
     requireTenantMw,
@@ -14558,11 +14563,25 @@ export function makeApp(deps: AppDeps = {}) {
         raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
           ? (raw as { body: unknown }).body
           : raw;
-      const w = (inner ?? {}) as { from?: unknown; to?: unknown };
+      const w = (inner ?? {}) as { from?: unknown; to?: unknown; format?: unknown };
       if (!isSemver(w.from) || !isSemver(w.to)) {
         return res.status(400).json(
           wrapError(
             { code: 'EWS_400_invalid_input', message: 'from + to must be SemVer (X.Y.Z)', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const format =
+        w.format === 'snapshots' ? 'snapshots' : 'fields';
+      if (w.format !== undefined && w.format !== 'fields' && w.format !== 'snapshots') {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'format must be one of fields,snapshots',
+              severity: 'MEDIUM',
+            },
             ctx,
           ),
         );
@@ -14583,11 +14602,158 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       const diff = diffRuleSnapshots(A.snapshot, B.snapshot);
-      return res.json(
-        wrapResponse(
-          { rule_id: id, from: w.from, to: w.to, diff, change_count: diff.length },
-          ctx,
-        ),
+      const body: Record<string, unknown> = {
+        rule_id: id,
+        from: w.from,
+        to: w.to,
+        diff,
+        change_count: diff.length,
+      };
+      if (format === 'snapshots') {
+        body.from_snapshot = A;
+        body.to_snapshot = B;
+      }
+      return res.json(wrapResponse(body, ctx));
+    },
+  );
+
+  /** POST /v1/ews/rules/:rule_id/versions/:semver/revert
+   *  body { reason? } → creates a new version whose snapshot equals the
+   *  named version. Bumps the patch number off the latest. Audit row
+   *  written to admin_audit_log via the report-audit pool. Refuses if
+   *  the rule has a pending approval (4-eyes invariant). */
+  app.post(
+    '/v1/ews/rules/:rule_id/versions/:semver/revert',
+    requireTenantMw,
+    requireRole('rules:revert'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.rule_id ?? '';
+      const target = req.params.semver ?? '';
+      const tenant_id = req.tenant!.tenant_id;
+      if (!isSemver(target)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `bad semver: ${target}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const rule = ewsRuleStore.get(tenant_id, id);
+      if (!rule) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `rule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const targetVersion = ewsRuleVersionsStore.getVersion(tenant_id, id, target);
+      if (!targetVersion) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_version',
+              message: `version ${target} not found for rule ${id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      // 4-eyes guard: a rule with a pending approval is mid-flight; revert
+      // would corrupt the maker-checker ledger. Withdraw the pending
+      // submission first via the existing approvals API, then revert.
+      const pending = ewsRuleVersionsStore.pendingApproval(tenant_id, id);
+      if (pending) {
+        return res.status(409).json(
+          wrapError(
+            {
+              code: 'EWS_409_pending_approval',
+              message: `rule ${id} has a pending approval (${pending.approval_id}); withdraw it first`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      const userReason =
+        typeof w.reason === 'string' && w.reason.trim().length > 0
+          ? w.reason.trim().slice(0, 500)
+          : null;
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const latest = ewsRuleVersionsStore.latestSemver(tenant_id, id);
+      const newSemver = bumpSemver(latest ?? targetVersion.semver, 'patch');
+      let snapshot;
+      try {
+        snapshot = ewsRuleVersionsStore.recordVersion({
+          tenant_id,
+          rule: targetVersion.snapshot,
+          semver: newSemver,
+          created_by: actor,
+          reason:
+            userReason ??
+            `Reverted to v${target} by ${actor}`,
+          now: now(),
+        });
+      } catch (e) {
+        return res.status(500).json(
+          wrapError(
+            {
+              code: 'EWS_500',
+              message: e instanceof Error ? e.message : 'recordVersion failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+      // Audit fan-out — fire-and-forget through the same pool the cases
+      // exporter uses (T6 §3.1.8).
+      if (deps.reportAuditPool) {
+        const auditPayload = {
+          rule_id: id,
+          reverted_to_semver: target,
+          new_semver: newSemver,
+          new_version_id: snapshot.version_id,
+          reason: snapshot.reason,
+        };
+        void (async () => {
+          try {
+            await deps.reportAuditPool.query(
+              `INSERT INTO app_admin.admin_audit_log
+                 (tenant_id, entity_type, entity_id, action, actor_id,
+                  actor_role, after_state, request_id, ip_address, user_agent)
+               VALUES ($1, 'ews_rule_version', $2, 'revert', $3, $4, $5::jsonb,
+                       $6, $7::inet, $8)`,
+              [
+                tenant_id,
+                snapshot.version_id,
+                actor,
+                (req.headers['x-apex-role'] as string | undefined) ?? 'admin',
+                JSON.stringify(auditPayload),
+                (req.headers['x-request-id'] as string | undefined) ?? null,
+                (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
+                  req.ip ??
+                  null,
+                req.headers['user-agent'] as string | undefined,
+              ],
+            );
+          } catch {
+            // never block on audit — failures are recovered via app_admin
+            // backfill jobs in production.
+          }
+        })();
+      }
+      return res.status(201).json(
+        wrapResponse(snapshot, ctx, { code: 'EWS_201', message: 'Reverted' }),
       );
     },
   );
