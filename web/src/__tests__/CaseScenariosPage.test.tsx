@@ -114,7 +114,7 @@ describe('CaseScenariosPage', () => {
     renderWithProviders(<CaseScenariosPage />);
     await screen.findByText(/KYC document expired/i);
     // KYC scenario is seeded as DRAFT
-    const activateBtn = await screen.findByTestId('cs-activate-sc-seed-kyc-p3-doc-expired');
+    const activateBtn = await screen.findByTestId('cs-activate-sc-seed-bank-kyc-p3-doc-expired');
     await userEvent.click(activateBtn);
     // Switch to ACTIVE pivot — KYC scenario should now appear there
     await userEvent.click(screen.getByTestId('cs-pivot-active'));
@@ -124,12 +124,12 @@ describe('CaseScenariosPage', () => {
   it('archive removes the row from default ALL pivot then restore brings it back as DRAFT', async () => {
     renderWithProviders(<CaseScenariosPage />);
     await screen.findByText(/KYC document expired/i);
-    const archiveBtn = await screen.findByTestId('cs-archive-sc-seed-kyc-p3-doc-expired');
+    const archiveBtn = await screen.findByTestId('cs-archive-sc-seed-bank-kyc-p3-doc-expired');
     await userEvent.click(archiveBtn);
     // Switch to ARCHIVED pivot to find it
     await userEvent.click(screen.getByTestId('cs-pivot-archived'));
     expect(await screen.findByText(/KYC document expired/i)).toBeInTheDocument();
-    const restoreBtn = await screen.findByTestId('cs-restore-sc-seed-kyc-p3-doc-expired');
+    const restoreBtn = await screen.findByTestId('cs-restore-sc-seed-bank-kyc-p3-doc-expired');
     await userEvent.click(restoreBtn);
     // Restored back to DRAFT — visible in DRAFT pivot
     await userEvent.click(screen.getByTestId('cs-pivot-draft'));
@@ -139,7 +139,7 @@ describe('CaseScenariosPage', () => {
   it('history modal lists one entry per mutation with action badge', async () => {
     renderWithProviders(<CaseScenariosPage />);
     await screen.findByText(/Fraud P1 sudden DPD spike/i);
-    await userEvent.click(screen.getByTestId('cs-history-sc-seed-fraud-p1-sudden-dpd'));
+    await userEvent.click(screen.getByTestId('cs-history-sc-seed-bank-fraud-p1-sudden-dpd'));
     const modal = await screen.findByTestId('case-scenario-history-modal');
     // The seed-time history append yields one "create" entry
     await waitFor(() => {

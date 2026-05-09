@@ -430,6 +430,7 @@ interface MswNotificationTemplateCreateInput {
 }
 
 function _mkTemplate(
+  tenant_id: string,
   name: string,
   channel: 'EMAIL' | 'SMS' | 'IN_APP',
   subject: string | null,
@@ -438,8 +439,8 @@ function _mkTemplate(
 ): MswNotificationTemplate {
   const now = new Date('2026-05-09T08:00:00.000Z').toISOString();
   return {
-    template_id: `tpl-seed-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
-    tenant_id: 'BANK_DEMO',
+    template_id: `tpl-seed-${tenant_id.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
+    tenant_id,
     name,
     channel,
     subject,
@@ -490,6 +491,7 @@ interface MswEscalationCreateInput {
 const ESC_ROLES = ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'];
 
 function _mkEsc(
+  tenant_id: string,
   name: string,
   case_category: string,
   priority: 'P1' | 'P2' | 'P3' | 'P4',
@@ -499,8 +501,8 @@ function _mkEsc(
 ): MswEscalationRule {
   const now = new Date('2026-05-09T08:00:00.000Z').toISOString();
   return {
-    escalation_id: `esc-seed-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
-    tenant_id: 'BANK_DEMO',
+    escalation_id: `esc-seed-${tenant_id.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
+    tenant_id,
     name,
     case_category,
     priority,
@@ -604,6 +606,7 @@ function _scenarioDiff(
 }
 
 function _appendScenarioHistory(
+  tenant_id: string,
   scenario_id: string,
   action: 'create' | 'update' | 'activate' | 'archive' | 'restore',
   before: MswCaseScenario | null,
@@ -614,7 +617,7 @@ function _appendScenarioHistory(
   mswCaseScenarioHistory.push({
     history_id: mswScenarioHistoryNextId++,
     scenario_id,
-    tenant_id: 'BANK_DEMO',
+    tenant_id,
     action,
     diff: _scenarioDiff(
       before as Record<string, unknown> | null,
@@ -629,15 +632,20 @@ function _appendScenarioHistory(
 /** FK validation against the live MSW template + escalation stores —
  *  matches the BFF resolver shape (returns null = ok, else error msg). */
 function _validateScenarioFKs(
+  tenant_id: string,
   escalation_id: string,
   template_id: string | null | undefined,
 ): string | null {
-  const esc = mswEscalationRules.find((r) => r.escalation_id === escalation_id);
-  if (!esc) return `escalation_id ${escalation_id} not found`;
+  const esc = mswEscalationRules.find(
+    (r) => r.escalation_id === escalation_id && r.tenant_id === tenant_id,
+  );
+  if (!esc) return `escalation_id ${escalation_id} not found in tenant ${tenant_id}`;
   if (esc.status !== 'ACTIVE') return `escalation_id ${escalation_id} is ${esc.status}; only ACTIVE rules can back a scenario`;
   if (template_id) {
-    const tpl = mswNotificationTemplates.find((r) => r.template_id === template_id);
-    if (!tpl) return `notification_template_id ${template_id} not found`;
+    const tpl = mswNotificationTemplates.find(
+      (r) => r.template_id === template_id && r.tenant_id === tenant_id,
+    );
+    if (!tpl) return `notification_template_id ${template_id} not found in tenant ${tenant_id}`;
     if (tpl.deleted_at !== null || tpl.status === 'ARCHIVED') {
       return `notification_template_id ${template_id} is archived/deleted`;
     }
@@ -646,11 +654,21 @@ function _validateScenarioFKs(
 }
 
 const mswEscalationRules: MswEscalationRule[] = [
-  _mkEsc('BANK Fraud P1 fast-escalate', 'fraud', 'P1', 15, 'supervisor', 60, 'risk_analyst', 240, 'admin'),
-  _mkEsc('BANK Credit P2 standard',     'credit_risk', 'P2', 60, 'supervisor', 240, 'risk_analyst'),
-  _mkEsc('BANK KYC P3 reminder',        'kyc', 'P3', 480, 'supervisor'),
-  _mkEsc('BANK Compliance P1 fast',     'compliance', 'P1', 30, 'risk_analyst', 120, 'admin'),
-  _mkEsc('BANK Default P3 fallback',    'default_fallback', 'P3', 1440, 'supervisor'),
+  // ── BANK_DEMO escalation rules (banking-flavoured) ──
+  _mkEsc('BANK_DEMO', 'BANK Fraud P1 fast-escalate', 'fraud', 'P1', 15, 'supervisor', 60, 'risk_analyst', 240, 'admin'),
+  _mkEsc('BANK_DEMO', 'BANK Credit P2 standard',     'credit_risk', 'P2', 60, 'supervisor', 240, 'risk_analyst'),
+  _mkEsc('BANK_DEMO', 'BANK KYC P3 reminder',        'kyc', 'P3', 480, 'supervisor'),
+  _mkEsc('BANK_DEMO', 'BANK Compliance P1 fast',     'compliance', 'P1', 30, 'risk_analyst', 120, 'admin'),
+  _mkEsc('BANK_DEMO', 'BANK Default P3 fallback',    'default_fallback', 'P3', 1440, 'supervisor'),
+  _mkEsc('BANK_DEMO', 'BANK AML P1 high-risk',       'aml', 'P1', 20, 'risk_analyst', 60, 'admin'),
+  _mkEsc('BANK_DEMO', 'BANK Operations P4 routine',  'operations', 'P4', 2880, 'supervisor'),
+  // ── BIL escalation rules (insurance-flavoured) ──
+  _mkEsc('BIL', 'BIL Lapse P1 agent-first',           'lapse', 'P1', 30, 'collection_officer', 180, 'supervisor', 720, 'admin'),
+  _mkEsc('BIL', 'BIL Claim Fraud P1',                 'fraud', 'P1', 20, 'risk_analyst', 90, 'supervisor', 360, 'admin'),
+  _mkEsc('BIL', 'BIL Compliance P2 IRDAI',            'compliance', 'P2', 180, 'supervisor', 720, 'risk_analyst'),
+  _mkEsc('BIL', 'BIL Underwriting P2 standard',       'underwriting', 'P2', 240, 'supervisor', 1440, 'risk_analyst'),
+  _mkEsc('BIL', 'BIL Claim Settlement P3 routine',    'claims', 'P3', 720, 'supervisor'),
+  _mkEsc('BIL', 'BIL Default P3 fallback',            'default_fallback', 'P3', 1440, 'supervisor'),
 ];
 
 function _validateEscChain(
@@ -672,35 +690,113 @@ function _validateEscChain(
 }
 
 const mswNotificationTemplates: MswNotificationTemplate[] = [
+  // ── BANK_DEMO templates (banking) ──
   _mkTemplate(
+    'BANK_DEMO',
     'Case Opened — RM email',
     'EMAIL',
     'New case {{case_number}} assigned to you',
     'Hi {{rm_name}},\n\nA new {{priority}} case ({{case_number}}) has been opened for {{customer_name}}.\nCategory: {{case_category}}\n\nPlease action within {{sla_target_days}} day(s).\n\n— ZorEWS',
   ),
   _mkTemplate(
+    'BANK_DEMO',
     'Case SLA breach warning — RM SMS',
     'SMS',
     null,
     'ZorEWS: Case {{case_number}} is at {{progress_pct}}% of SLA. Action ASAP.',
   ),
   _mkTemplate(
+    'BANK_DEMO',
     'Escalation L1 — Supervisor in-app',
     'IN_APP',
     'Case {{case_number}} escalated to you',
     'Case {{case_number}} ({{priority}} {{case_category}}) was not actioned within {{escalated_after_minutes}} minutes.',
   ),
   _mkTemplate(
+    'BANK_DEMO',
     'Customer KYC reminder — SMS',
     'SMS',
     null,
     'ZorEWS: Hi {{customer_name}}, please update your KYC by {{kyc_due_date}} to avoid service disruption.',
   ),
   _mkTemplate(
+    'BANK_DEMO',
     'Case Closed — RM email',
     'EMAIL',
     'Case {{case_number}} closed: {{resolution_category}}',
     'Hi {{rm_name}},\n\nCase {{case_number}} for {{customer_name}} has been closed.\nResolution: {{resolution_category}}\nNotes: {{resolution_notes}}',
+    'DRAFT',
+  ),
+  _mkTemplate(
+    'BANK_DEMO',
+    'Fraud alert — Customer SMS',
+    'SMS',
+    null,
+    'ZorEWS Alert: A {{txn_type}} of {{amount}} was attempted on your account. If this was not you, call {{support_phone}} immediately.',
+  ),
+  _mkTemplate(
+    'BANK_DEMO',
+    'Loan default warning — Customer email',
+    'EMAIL',
+    'Loan {{loan_id}} payment overdue',
+    'Dear {{customer_name}},\n\nYour loan ({{loan_id}}) payment of {{amount}} is overdue by {{days_overdue}} day(s).\nPay before {{cutoff_date | default: "30 days"}} to avoid further action.\n\n— ZorEWS Collections',
+  ),
+  _mkTemplate(
+    'BANK_DEMO',
+    'AML hit — Compliance team in-app',
+    'IN_APP',
+    'AML watchlist hit on customer {{customer_id}}',
+    'Customer {{customer_name}} ({{customer_id}}) matched against {{watchlist_name}} watchlist with confidence {{confidence_pct}}%. Review and disposition within 4 hours.',
+  ),
+  // ── BIL templates (insurance) ──
+  _mkTemplate(
+    'BIL',
+    'Claim case opened — Underwriter email',
+    'EMAIL',
+    'New {{priority}} claim case {{case_number}}',
+    'Hello {{uw_name}},\n\nA new {{priority}} claim case ({{case_number}}) has been opened for policy {{policy_number}}.\nCategory: {{case_category}}\nReason: {{trigger_reason}}\n\nPlease review and decision within {{sla_target_days}} day(s).\n\n— ZorEWS',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Lapse warning — Agent SMS',
+    'SMS',
+    null,
+    'ZorEWS: Policy {{policy_number}} approaches lapse. Contact {{customer_name}} on {{customer_phone}}.',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Claim approval — Customer email',
+    'EMAIL',
+    'Claim {{claim_number}} approved',
+    'Dear {{customer_name}},\n\nWe are pleased to inform you that your claim {{claim_number}} for policy {{policy_number}} has been approved.\nAmount payable: {{paid_amount_kes}} KES\nExpected credit: T+{{settlement_days | default: "2"}} working days.\n\nRegards,\nBIL Claims',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Premium reminder — Customer SMS',
+    'SMS',
+    null,
+    'BIL: Hi {{customer_name}}, your premium of {{premium_amount}} for policy {{policy_number}} is due on {{due_date}}. Pay via {{payment_link | default: "your usual channel"}}.',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Claim follow-up — Underwriter SMS',
+    'SMS',
+    null,
+    'ZorEWS: Claim {{claim_number}} pending docs since {{pending_since_days}}d. Contact UW desk.',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Escalation L3 — Admin in-app',
+    'IN_APP',
+    'Case {{case_number}} escalated to admin',
+    'Case {{case_number}} ({{priority}} {{case_category}}) reached escalation level 3 — admin attention required.',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Renewal reminder — Customer email',
+    'EMAIL',
+    'Policy {{policy_number}} renewal due in {{days_to_renewal}} days',
+    'Dear {{customer_name}},\n\nYour policy {{policy_number}} is up for renewal on {{renewal_date}}.\nNew premium: {{renewal_premium}}\nClick {{renewal_link | default: "the BIL portal"}} to renew.\n\nThank you for choosing BIL.',
     'DRAFT',
   ),
 ];
@@ -832,6 +928,21 @@ function readPersistedUsername(): string | null {
   }
 }
 
+/**
+ * Resolve the requesting tenant from the X-Tenant-ID request header.
+ * The SPA's http interceptor sends both X-Tenant-ID + x-tenant-id, and
+ * the proxy/MSW preserves header casing. Falls back to BANK_DEMO so
+ * tests + early-load requests (before localStorage hydrates) keep
+ * working with the seeded bank fixtures.
+ */
+function readTenantFromReq(request: Request): string {
+  return (
+    request.headers.get('X-Tenant-ID') ??
+    request.headers.get('x-tenant-id') ??
+    'BANK_DEMO'
+  );
+}
+
 function setLockedHandler(username: string, locked: boolean) {
   const callerRole = readPersistedRole();
   if (callerRole === null) return HttpResponse.json({ error: 'missing_token' }, { status: 401 });
@@ -941,61 +1052,184 @@ function illegal(c: CaseDetail, attempted: Transition) {
   );
 }
 
-// Seed 2 demo case scenarios. Placed after every fixture array so the
-// FK-validator helpers see them as resolvable on first access.
+// Seed demo case scenarios across both tenants. Placed after every
+// fixture array so the FK-validator helpers see them as resolvable on
+// first access.
 (function _seedScenarios() {
-  const fraudEsc = mswEscalationRules.find((r) => r.name === 'BANK Fraud P1 fast-escalate');
-  const kycEsc = mswEscalationRules.find((r) => r.name === 'BANK KYC P3 reminder');
-  const emailTpl = mswNotificationTemplates.find((r) => r.name === 'Case Opened — RM email');
-  const smsTpl = mswNotificationTemplates.find((r) => r.name === 'Customer KYC reminder — SMS');
-  if (!fraudEsc || !kycEsc) return;
   const seedTs = new Date('2026-05-09T08:30:00.000Z').toISOString();
-  const fraudScenario: MswCaseScenario = {
-    scenario_id: 'sc-seed-fraud-p1-sudden-dpd',
-    tenant_id: 'BANK_DEMO',
-    name: 'Fraud P1 sudden DPD spike',
-    case_category: 'fraud',
-    priority: 'P1',
-    trigger_indicator_id: 'FRD-001',
-    trigger_threshold: 0.85,
-    default_escalation_id: fraudEsc.escalation_id,
-    notification_template_id: emailTpl?.template_id ?? null,
-    checklist: [
-      { title: 'Verify recent transactions with customer', required: true },
-      { title: 'Freeze card if confirmed', required: true },
-      { title: 'File RBI fraud report (FMR-1)', required: true },
-    ],
-    status: 'ACTIVE',
-    created_by: 'system:seed',
-    updated_by: null,
-    created_at: seedTs,
-    updated_at: seedTs,
-    deleted_at: null,
-  };
-  const kycScenario: MswCaseScenario = {
-    scenario_id: 'sc-seed-kyc-p3-doc-expired',
-    tenant_id: 'BANK_DEMO',
-    name: 'KYC document expired (P3)',
-    case_category: 'kyc',
-    priority: 'P3',
-    trigger_indicator_id: 'KYC-001',
-    trigger_threshold: 1,
-    default_escalation_id: kycEsc.escalation_id,
-    notification_template_id: smsTpl?.template_id ?? null,
-    checklist: [
-      { title: 'SMS customer with KYC reminder', required: true },
-      { title: 'Block new account openings if expired > 90d', required: false },
-    ],
-    status: 'DRAFT',
-    created_by: 'system:seed',
-    updated_by: null,
-    created_at: seedTs,
-    updated_at: seedTs,
-    deleted_at: null,
-  };
-  mswCaseScenarios.push(fraudScenario, kycScenario);
-  _appendScenarioHistory(fraudScenario.scenario_id, 'create', null, fraudScenario, 'system:seed', seedTs);
-  _appendScenarioHistory(kycScenario.scenario_id, 'create', null, kycScenario, 'system:seed', seedTs);
+
+  // ── BANK_DEMO scenarios ──
+  const bankFraudEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'BANK Fraud P1 fast-escalate',
+  );
+  const bankKycEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'BANK KYC P3 reminder',
+  );
+  const bankCreditEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'BANK Credit P2 standard',
+  );
+  const bankEmailTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'Case Opened — RM email',
+  );
+  const bankKycTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'Customer KYC reminder — SMS',
+  );
+  const bankFraudTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'Fraud alert — Customer SMS',
+  );
+
+  if (bankFraudEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bank-fraud-p1-sudden-dpd',
+      tenant_id: 'BANK_DEMO',
+      name: 'Fraud P1 sudden DPD spike',
+      case_category: 'fraud',
+      priority: 'P1',
+      trigger_indicator_id: 'FRD-001',
+      trigger_threshold: 0.85,
+      default_escalation_id: bankFraudEsc.escalation_id,
+      notification_template_id: bankEmailTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Verify recent transactions with customer', required: true },
+        { title: 'Freeze card if confirmed', required: true },
+        { title: 'File RBI fraud report (FMR-1)', required: true },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BANK_DEMO', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+  if (bankKycEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bank-kyc-p3-doc-expired',
+      tenant_id: 'BANK_DEMO',
+      name: 'KYC document expired (P3)',
+      case_category: 'kyc',
+      priority: 'P3',
+      trigger_indicator_id: 'KYC-001',
+      trigger_threshold: 1,
+      default_escalation_id: bankKycEsc.escalation_id,
+      notification_template_id: bankKycTpl?.template_id ?? null,
+      checklist: [
+        { title: 'SMS customer with KYC reminder', required: true },
+        { title: 'Block new account openings if expired > 90d', required: false },
+      ],
+      status: 'DRAFT', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BANK_DEMO', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+  if (bankCreditEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bank-credit-p2-dpd-warning',
+      tenant_id: 'BANK_DEMO',
+      name: 'Credit P2 DPD trending up',
+      case_category: 'credit_risk',
+      priority: 'P2',
+      trigger_indicator_id: 'CR-DPD-30',
+      trigger_threshold: 30,
+      default_escalation_id: bankCreditEsc.escalation_id,
+      notification_template_id: bankFraudTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Pull last 6 months repayment history', required: true },
+        { title: 'Contact RM for next steps', required: true },
+        { title: 'Check collateral valuation', required: false },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BANK_DEMO', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+
+  // ── BIL scenarios ──
+  const bilLapseEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'BIL Lapse P1 agent-first',
+  );
+  const bilFraudEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'BIL Claim Fraud P1',
+  );
+  const bilUwEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'BIL Underwriting P2 standard',
+  );
+  const bilLapseTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'Lapse warning — Agent SMS',
+  );
+  const bilUwTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'Claim case opened — Underwriter email',
+  );
+  const bilFraudTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'Claim follow-up — Underwriter SMS',
+  );
+
+  if (bilLapseEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bil-lapse-p1-15d-overdue',
+      tenant_id: 'BIL',
+      name: 'Premium overdue 15+ days → lapse P1',
+      case_category: 'lapse',
+      priority: 'P1',
+      trigger_indicator_id: 'LAP-002',
+      trigger_threshold: 15,
+      default_escalation_id: bilLapseEsc.escalation_id,
+      notification_template_id: bilLapseTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Contact customer via SMS + call', required: true },
+        { title: 'Confirm payment intent + ETA', required: true },
+        { title: 'Offer grace-period extension if eligible', required: false },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BIL', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+  if (bilFraudEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bil-claim-fraud-p1',
+      tenant_id: 'BIL',
+      name: 'Claim suspicious pattern → fraud P1',
+      case_category: 'fraud',
+      priority: 'P1',
+      trigger_indicator_id: 'FRD-003',
+      trigger_threshold: 0.9,
+      default_escalation_id: bilFraudEsc.escalation_id,
+      notification_template_id: bilFraudTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Pull last 12 months claim history', required: true },
+        { title: 'Cross-check provider against AML watchlist', required: true },
+        { title: 'Hold payout until investigation completes', required: true },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BIL', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+  if (bilUwEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bil-uw-p2-pending-docs',
+      tenant_id: 'BIL',
+      name: 'Underwriting docs pending > 5d',
+      case_category: 'underwriting',
+      priority: 'P2',
+      trigger_indicator_id: 'UW-PEND-5D',
+      trigger_threshold: 5,
+      default_escalation_id: bilUwEsc.escalation_id,
+      notification_template_id: bilUwTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Send doc reminder to customer', required: true },
+        { title: 'Notify originating agent', required: true },
+        { title: 'Auto-decline at 14d if no response', required: false },
+      ],
+      status: 'DRAFT', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BIL', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
 })();
 
 export const handlers = [
@@ -3139,13 +3373,14 @@ export const handlers = [
   // ── Notification Templates admin (T6 M14.16/M14.19) ────────────────
 
   http.get('/v1/admin/notification-templates', ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const url = new URL(request.url);
     const channel = url.searchParams.get('channel');
     const status = url.searchParams.get('status');
     const includeDeleted = url.searchParams.get('include_deleted') === 'true';
     const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
     const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
-    let rows = mswNotificationTemplates.slice();
+    let rows = mswNotificationTemplates.filter((r) => r.tenant_id === tenant);
     if (!includeDeleted) rows = rows.filter((r) => r.deleted_at === null);
     if (channel) rows = rows.filter((r) => r.channel === channel);
     if (status) {
@@ -3164,8 +3399,11 @@ export const handlers = [
     );
   }),
 
-  http.get('/v1/admin/notification-templates/:id', ({ params }) => {
-    const r = mswNotificationTemplates.find((x) => x.template_id === params.id);
+  http.get('/v1/admin/notification-templates/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const r = mswNotificationTemplates.find(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
     if (!r) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
@@ -3176,6 +3414,7 @@ export const handlers = [
   }),
 
   http.post('/v1/admin/notification-templates', async ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const body = (await request.json()) as MswNotificationTemplateCreateInput;
     if (typeof body.name !== 'string' || body.name.trim().length === 0) {
       return HttpResponse.json(
@@ -3210,6 +3449,7 @@ export const handlers = [
     const locale = body.locale ?? 'en-IN';
     const dup = mswNotificationTemplates.find(
       (r) =>
+        r.tenant_id === tenant &&
         r.deleted_at === null &&
         r.name.toLowerCase() === body.name.trim().toLowerCase() &&
         r.locale === locale,
@@ -3228,7 +3468,7 @@ export const handlers = [
     const now = new Date().toISOString();
     const row: MswNotificationTemplate = {
       template_id: `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      tenant_id: 'BANK_DEMO',
+      tenant_id: tenant,
       name: body.name.trim(),
       channel: body.channel,
       subject: body.channel === 'SMS' ? null : (body.subject as string).trim(),
@@ -3246,7 +3486,10 @@ export const handlers = [
   }),
 
   http.patch('/v1/admin/notification-templates/:id', async ({ params, request }) => {
-    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+    const tenant = readTenantFromReq(request);
+    const idx = mswNotificationTemplates.findIndex(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
@@ -3295,8 +3538,11 @@ export const handlers = [
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.post('/v1/admin/notification-templates/:id/activate', ({ params }) => {
-    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+  http.post('/v1/admin/notification-templates/:id/activate', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswNotificationTemplates.findIndex(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
@@ -3318,8 +3564,11 @@ export const handlers = [
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.delete('/v1/admin/notification-templates/:id', ({ params }) => {
-    const idx = mswNotificationTemplates.findIndex((x) => x.template_id === params.id);
+  http.delete('/v1/admin/notification-templates/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswNotificationTemplates.findIndex(
+      (x) => x.template_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `template ${params.id} not found`, 'LOW'),
@@ -3345,6 +3594,7 @@ export const handlers = [
 
   // /resolve declared BEFORE /:id so the literal doesn't get shadowed.
   http.get('/v1/admin/escalation-matrix/resolve', ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const url = new URL(request.url);
     const cat = url.searchParams.get('case_category');
     const prio = url.searchParams.get('priority');
@@ -3355,19 +3605,20 @@ export const handlers = [
       );
     }
     const matches = mswEscalationRules
-      .filter((r) => r.status === 'ACTIVE' && r.case_category === cat && r.priority === prio)
+      .filter((r) => r.tenant_id === tenant && r.status === 'ACTIVE' && r.case_category === cat && r.priority === prio)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     return HttpResponse.json(envelope({ rule: matches[0] ?? null }));
   }),
 
   http.get('/v1/admin/escalation-matrix', ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const url = new URL(request.url);
     const cat = url.searchParams.get('case_category');
     const prio = url.searchParams.get('priority');
     const status = url.searchParams.get('status');
     const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
     const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
-    let rows = mswEscalationRules.slice();
+    let rows = mswEscalationRules.filter((r) => r.tenant_id === tenant);
     if (cat) rows = rows.filter((r) => r.case_category === cat);
     if (prio) rows = rows.filter((r) => r.priority === prio);
     if (status) {
@@ -3386,8 +3637,11 @@ export const handlers = [
     );
   }),
 
-  http.get('/v1/admin/escalation-matrix/:id', ({ params }) => {
-    const r = mswEscalationRules.find((x) => x.escalation_id === params.id);
+  http.get('/v1/admin/escalation-matrix/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const r = mswEscalationRules.find(
+      (x) => x.escalation_id === params.id && x.tenant_id === tenant,
+    );
     if (!r) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'),
@@ -3398,6 +3652,7 @@ export const handlers = [
   }),
 
   http.post('/v1/admin/escalation-matrix', async ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const body = (await request.json()) as MswEscalationCreateInput;
     if (typeof body.name !== 'string' || body.name.trim().length === 0) {
       return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'), { status: 400 });
@@ -3420,7 +3675,7 @@ export const handlers = [
       return HttpResponse.json(envelopeError('EWS_400_invalid_input', chainErr, 'MEDIUM'), { status: 400 });
     }
     const dup = mswEscalationRules.find(
-      (r) => r.name.toLowerCase() === body.name.trim().toLowerCase(),
+      (r) => r.tenant_id === tenant && r.name.toLowerCase() === body.name.trim().toLowerCase(),
     );
     if (dup) {
       return HttpResponse.json(
@@ -3432,7 +3687,7 @@ export const handlers = [
     const now = new Date().toISOString();
     const row: MswEscalationRule = {
       escalation_id: `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      tenant_id: 'BANK_DEMO',
+      tenant_id: tenant,
       name: body.name.trim(),
       case_category: body.case_category,
       priority: body.priority,
@@ -3453,7 +3708,10 @@ export const handlers = [
   }),
 
   http.patch('/v1/admin/escalation-matrix/:id', async ({ params, request }) => {
-    const idx = mswEscalationRules.findIndex((x) => x.escalation_id === params.id);
+    const tenant = readTenantFromReq(request);
+    const idx = mswEscalationRules.findIndex(
+      (x) => x.escalation_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3494,8 +3752,11 @@ export const handlers = [
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.delete('/v1/admin/escalation-matrix/:id', ({ params }) => {
-    const idx = mswEscalationRules.findIndex((x) => x.escalation_id === params.id);
+  http.delete('/v1/admin/escalation-matrix/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswEscalationRules.findIndex(
+      (x) => x.escalation_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `escalation rule ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3512,9 +3773,12 @@ export const handlers = [
 
   // /:id/history declared BEFORE /:id so the literal /history doesn't get
   // mistaken for an id segment.
-  http.get('/v1/admin/case-scenarios/:id/history', ({ params }) => {
+  http.get('/v1/admin/case-scenarios/:id/history', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
     const id = String(params.id);
-    const sc = mswCaseScenarios.find((x) => x.scenario_id === id);
+    const sc = mswCaseScenarios.find(
+      (x) => x.scenario_id === id && x.tenant_id === tenant,
+    );
     if (!sc) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `scenario ${id} not found`, 'LOW'),
@@ -3522,7 +3786,7 @@ export const handlers = [
       );
     }
     const items = mswCaseScenarioHistory
-      .filter((r) => r.scenario_id === id)
+      .filter((r) => r.scenario_id === id && r.tenant_id === tenant)
       .sort((a, b) => b.history_id - a.history_id);
     return HttpResponse.json(
       envelope({ items, total: items.length, page: 1, page_size: 100 }),
@@ -3530,6 +3794,7 @@ export const handlers = [
   }),
 
   http.get('/v1/admin/case-scenarios', ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const url = new URL(request.url);
     const status = url.searchParams.get('status');
     const cat = url.searchParams.get('case_category');
@@ -3538,7 +3803,7 @@ export const handlers = [
     const includeDeleted = url.searchParams.get('include_deleted') === 'true';
     const page = Math.max(1, Number(url.searchParams.get('page') ?? 1));
     const pageSize = Math.min(200, Math.max(1, Number(url.searchParams.get('page_size') ?? 100)));
-    let rows = mswCaseScenarios.slice();
+    let rows = mswCaseScenarios.filter((r) => r.tenant_id === tenant);
     if (!includeDeleted) rows = rows.filter((r) => r.deleted_at === null);
     if (cat) rows = rows.filter((r) => r.case_category === cat);
     if (prio) rows = rows.filter((r) => r.priority === prio);
@@ -3559,8 +3824,11 @@ export const handlers = [
     );
   }),
 
-  http.get('/v1/admin/case-scenarios/:id', ({ params }) => {
-    const r = mswCaseScenarios.find((x) => x.scenario_id === params.id);
+  http.get('/v1/admin/case-scenarios/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const r = mswCaseScenarios.find(
+      (x) => x.scenario_id === params.id && x.tenant_id === tenant,
+    );
     if (!r) {
       return HttpResponse.json(
         envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'),
@@ -3571,11 +3839,12 @@ export const handlers = [
   }),
 
   http.post('/v1/admin/case-scenarios', async ({ request }) => {
+    const tenant = readTenantFromReq(request);
     const body = (await request.json()) as MswCaseScenarioCreateInput;
     if (typeof body.name !== 'string' || body.name.trim().length === 0) {
       return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'), { status: 400 });
     }
-    const fkErr = _validateScenarioFKs(body.default_escalation_id, body.notification_template_id ?? null);
+    const fkErr = _validateScenarioFKs(tenant, body.default_escalation_id, body.notification_template_id ?? null);
     if (fkErr) {
       return HttpResponse.json(envelopeError('EWS_400_invalid_fk', fkErr, 'MEDIUM'), { status: 400 });
     }
@@ -3589,7 +3858,10 @@ export const handlers = [
       );
     }
     const dup = mswCaseScenarios.find(
-      (r) => r.deleted_at === null && r.name.toLowerCase() === body.name.trim().toLowerCase(),
+      (r) =>
+        r.tenant_id === tenant &&
+        r.deleted_at === null &&
+        r.name.toLowerCase() === body.name.trim().toLowerCase(),
     );
     if (dup) {
       return HttpResponse.json(
@@ -3601,7 +3873,7 @@ export const handlers = [
     const now = new Date().toISOString();
     const row: MswCaseScenario = {
       scenario_id: `sc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      tenant_id: 'BANK_DEMO',
+      tenant_id: tenant,
       name: body.name.trim(),
       case_category: body.case_category,
       priority: body.priority,
@@ -3618,12 +3890,15 @@ export const handlers = [
       deleted_at: null,
     };
     mswCaseScenarios.push(row);
-    _appendScenarioHistory(row.scenario_id, 'create', null, row, actor, now);
+    _appendScenarioHistory(tenant, row.scenario_id, 'create', null, row, actor, now);
     return HttpResponse.json(envelope(row, 'EWS_201_created', 'Created'), { status: 201 });
   }),
 
   http.patch('/v1/admin/case-scenarios/:id', async ({ params, request }) => {
-    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+    const tenant = readTenantFromReq(request);
+    const idx = mswCaseScenarios.findIndex(
+      (x) => x.scenario_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3642,6 +3917,7 @@ export const handlers = [
     }
     if (patch.default_escalation_id || patch.notification_template_id !== undefined) {
       const fkErr = _validateScenarioFKs(
+        tenant,
         patch.default_escalation_id ?? old.default_escalation_id,
         patch.notification_template_id !== undefined ? patch.notification_template_id : old.notification_template_id,
       );
@@ -3668,12 +3944,15 @@ export const handlers = [
       updated_at: now,
     };
     mswCaseScenarios[idx] = updated;
-    _appendScenarioHistory(updated.scenario_id, 'update', old, updated, actor, now);
+    _appendScenarioHistory(tenant, updated.scenario_id, 'update', old, updated, actor, now);
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.post('/v1/admin/case-scenarios/:id/activate', ({ params }) => {
-    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+  http.post('/v1/admin/case-scenarios/:id/activate', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswCaseScenarios.findIndex(
+      (x) => x.scenario_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3686,12 +3965,15 @@ export const handlers = [
     const now = new Date().toISOString();
     const updated: MswCaseScenario = { ...old, status: 'ACTIVE', updated_by: actor, updated_at: now };
     mswCaseScenarios[idx] = updated;
-    _appendScenarioHistory(updated.scenario_id, 'activate', old, updated, actor, now);
+    _appendScenarioHistory(tenant, updated.scenario_id, 'activate', old, updated, actor, now);
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.post('/v1/admin/case-scenarios/:id/restore', ({ params }) => {
-    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+  http.post('/v1/admin/case-scenarios/:id/restore', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswCaseScenarios.findIndex(
+      (x) => x.scenario_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3700,7 +3982,11 @@ export const handlers = [
       return HttpResponse.json(envelopeError('EWS_409_invalid_state', 'scenario is not archived', 'MEDIUM'), { status: 409 });
     }
     const dup = mswCaseScenarios.find(
-      (r) => r.scenario_id !== old.scenario_id && r.deleted_at === null && r.name.toLowerCase() === old.name.toLowerCase(),
+      (r) =>
+        r.tenant_id === tenant &&
+        r.scenario_id !== old.scenario_id &&
+        r.deleted_at === null &&
+        r.name.toLowerCase() === old.name.toLowerCase(),
     );
     if (dup) {
       return HttpResponse.json(
@@ -3722,12 +4008,15 @@ export const handlers = [
       updated_at: now,
     };
     mswCaseScenarios[idx] = updated;
-    _appendScenarioHistory(updated.scenario_id, 'restore', old, updated, actor, now);
+    _appendScenarioHistory(tenant, updated.scenario_id, 'restore', old, updated, actor, now);
     return HttpResponse.json(envelope(updated));
   }),
 
-  http.delete('/v1/admin/case-scenarios/:id', ({ params }) => {
-    const idx = mswCaseScenarios.findIndex((x) => x.scenario_id === params.id);
+  http.delete('/v1/admin/case-scenarios/:id', ({ params, request }) => {
+    const tenant = readTenantFromReq(request);
+    const idx = mswCaseScenarios.findIndex(
+      (x) => x.scenario_id === params.id && x.tenant_id === tenant,
+    );
     if (idx < 0) {
       return HttpResponse.json(envelopeError('EWS_404_not_found', `scenario ${params.id} not found`, 'LOW'), { status: 404 });
     }
@@ -3743,7 +4032,7 @@ export const handlers = [
       updated_at: now,
     };
     mswCaseScenarios[idx] = updated;
-    _appendScenarioHistory(updated.scenario_id, 'archive', old, updated, actor, now);
+    _appendScenarioHistory(tenant, updated.scenario_id, 'archive', old, updated, actor, now);
     return HttpResponse.json(envelope(updated));
   }),
 

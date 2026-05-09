@@ -112,7 +112,7 @@ describe('NotificationTemplatesPage', () => {
     const draftRow = await screen.findByText(/Case Closed — RM email/i);
     expect(draftRow).toBeInTheDocument();
     // Find the Activate button for the seeded DRAFT row
-    const activateBtn = await screen.findByTestId(/^tpl-activate-tpl-seed-case-closed-rm-em/);
+    const activateBtn = await screen.findByTestId(/^tpl-activate-tpl-seed-bank_demo-case-closed-rm-em/);
     await userEvent.click(activateBtn);
     // After activate the DRAFT pivot should be empty (or at least no longer have this row)
     await waitFor(() => {
@@ -127,7 +127,7 @@ describe('NotificationTemplatesPage', () => {
     await userEvent.click(screen.getByTestId('tpl-pivot-active'));
     const row = await screen.findByText(/Case Opened — RM email/i);
     expect(row).toBeInTheDocument();
-    const archiveBtn = await screen.findByTestId(/^tpl-archive-tpl-seed-case-opened/);
+    const archiveBtn = await screen.findByTestId(/^tpl-archive-tpl-seed-bank_demo-case-opened/);
     await userEvent.click(archiveBtn);
     await waitFor(() => {
       // Same name should disappear from ACTIVE pivot

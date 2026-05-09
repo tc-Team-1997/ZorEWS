@@ -116,7 +116,7 @@ describe('EscalationMatrixPage', () => {
   it('archive removes the row from the ACTIVE pivot + reveals it in ARCHIVED', async () => {
     renderWithProviders(<EscalationMatrixPage />);
     await screen.findByText(/BANK KYC P3 reminder/i);
-    const archiveBtn = await screen.findByTestId(/^esc-archive-esc-seed-bank-kyc-p3-reminder/);
+    const archiveBtn = await screen.findByTestId(/^esc-archive-esc-seed-bank_demo-bank-kyc-p3-reminde/);
     await userEvent.click(archiveBtn);
     await waitFor(() => {
       expect(screen.queryByText(/BANK KYC P3 reminder/i)).not.toBeInTheDocument();
