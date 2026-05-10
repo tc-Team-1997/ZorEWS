@@ -8,6 +8,7 @@ import {
   __resetMswEwsRuleVersions,
   __resetMswDispatchLog,
   __resetMswNotificationTemplates,
+  __resetMswEscalationRules,
 } from '@/mocks/handlers';
 import { useAuth } from '@/store/auth';
 // Side-effect import: initializes i18next with EN + HI bundles. Pulled in
@@ -47,6 +48,7 @@ afterEach(() => {
   __resetMswEwsRuleVersions();
   __resetMswDispatchLog();
   __resetMswNotificationTemplates();
+  __resetMswEscalationRules();
   useAuth.setState({ status: 'idle', user: null, token: null });
 });
 afterAll(() => server.close());

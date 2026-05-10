@@ -145,6 +145,32 @@ describe('EscalationMatrixPage', () => {
     expect(l1Input.value).toBe('15');
   });
 
+  // M14.30 — Test resolver panel
+  it('resolver returns the matching rule chain for (fraud, P1)', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    // Defaults: category=fraud, priority=P1 → matches the seeded fast-escalate rule
+    await userEvent.click(screen.getByTestId('esc-resolver-run'));
+    const match = await screen.findByTestId('esc-resolver-match');
+    expect(within(match).getByText(/BANK Fraud P1 fast-escalate/i)).toBeInTheDocument();
+    // L1/L2/L3 chain rendered (15m supervisor → 1h risk_analyst → 4h admin)
+    expect(within(match).getByText(/L1:/)).toBeInTheDocument();
+    expect(within(match).getByText(/L2:/)).toBeInTheDocument();
+    expect(within(match).getByText(/L3:/)).toBeInTheDocument();
+  });
+
+  it('resolver surfaces a no-match warning for an uncovered (category, priority)', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    const catInput = screen.getByTestId('esc-resolver-category');
+    await userEvent.clear(catInput);
+    await userEvent.type(catInput, 'no-such-category');
+    await userEvent.click(screen.getByTestId('esc-resolver-run'));
+    expect(await screen.findByTestId('esc-resolver-no-match')).toHaveTextContent(
+      /No active rule for/,
+    );
+  });
+
   it('duplicate submit clears the modal + lands the new rule in ACTIVE pivot', async () => {
     renderWithProviders(<EscalationMatrixPage />);
     await screen.findByText(/BANK Fraud P1 fast-escalate/i);

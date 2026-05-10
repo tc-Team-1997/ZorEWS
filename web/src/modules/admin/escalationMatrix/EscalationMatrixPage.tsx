@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownNarrowWide, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownNarrowWide, Copy, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import {
   api,
   type EscalationMatrixRuleRow,
@@ -44,6 +44,13 @@ export function EscalationMatrixPage() {
   // level timings + roles. Identity fields stay blank so the operator
   // must clear the (case_category, priority) + name uniqueness checks.
   const [duplicating, setDuplicating] = useState<EscalationMatrixRuleRow | null>(null);
+  // M14.30 — Test resolver: type a (case_category, priority) and see
+  // which rule the BFF would dispatch on. Surfaces the same lookup the
+  // case_create_pipeline uses, so ops can validate coverage without
+  // firing a real case.
+  const [resolverCategory, setResolverCategory] = useState('fraud');
+  const [resolverPriority, setResolverPriority] = useState<EscalationPriority>('P1');
+  const [resolverResult, setResolverResult] = useState<EscalationMatrixRuleRow | null | undefined>(undefined);
 
   const list = useQuery({
     queryKey: ['escalation-matrix', statusFilter, priorityFilter],
@@ -60,6 +67,11 @@ export function EscalationMatrixPage() {
   const create = useMutation({
     mutationFn: api.escalationMatrixCreate,
     onSuccess: () => { setCreating(false); setDuplicating(null); refresh(); },
+  });
+  const resolve = useMutation({
+    mutationFn: ({ category, priority }: { category: string; priority: EscalationPriority }) =>
+      api.escalationMatrixResolve(category, priority),
+    onSuccess: (data) => setResolverResult(data.rule),
   });
   const update = useMutation({
     mutationFn: (input: { id: string; patch: Parameters<typeof api.escalationMatrixUpdate>[1] }) =>
@@ -223,6 +235,89 @@ export function EscalationMatrixPage() {
             </div>
           </button>
         ))}
+      </div>
+
+      {/* ── M14.30 Test resolver — preview which rule fires for a (category, priority) ── */}
+      <div
+        className="mb-4 rounded-md border border-slate-200 bg-white p-3"
+        data-testid="esc-resolver-panel"
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Test resolver</h3>
+          <span className="text-2xs text-muted">
+            Preview the rule that fires for a (case_category, priority) pair
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={resolverCategory}
+            onChange={(e) => setResolverCategory(e.target.value)}
+            placeholder="case_category"
+            className="w-48 text-sm"
+            data-testid="esc-resolver-category"
+          />
+          <select
+            value={resolverPriority}
+            onChange={(e) => setResolverPriority(e.target.value as EscalationPriority)}
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+            data-testid="esc-resolver-priority"
+          >
+            {(['P1', 'P2', 'P3', 'P4'] as const).map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            onClick={() =>
+              resolve.mutate({
+                category: resolverCategory.trim(),
+                priority: resolverPriority,
+              })
+            }
+            disabled={resolve.isPending || !resolverCategory.trim()}
+            data-testid="esc-resolver-run"
+          >
+            <Search className="mr-1 h-3 w-3" /> Resolve
+          </Button>
+        </div>
+        {resolverResult === undefined && (
+          <p className="mt-2 text-2xs text-muted" data-testid="esc-resolver-empty">
+            No lookup yet — click Resolve to see which rule covers this pair.
+          </p>
+        )}
+        {resolverResult === null && (
+          <p className="mt-2 text-2xs text-rose-700" data-testid="esc-resolver-no-match">
+            No active rule for ({resolverCategory.trim() || '—'}, {resolverPriority}) — open
+            cases on this combo will not escalate. Add a rule to close the gap.
+          </p>
+        )}
+        {resolverResult && (
+          <div
+            className="mt-2 flex flex-col gap-0.5 text-2xs"
+            data-testid="esc-resolver-match"
+          >
+            <span>
+              <span className="font-semibold">{resolverResult.name}</span>
+              {' · '}
+              <span className="font-mono text-muted">{resolverResult.escalation_id.slice(0, 24)}…</span>
+            </span>
+            <span>
+              <span className="text-muted">L1:</span> {fmtMin(resolverResult.level_1_after_minutes)} → {resolverResult.level_1_role}
+              {resolverResult.level_2_after_minutes !== null && (
+                <>
+                  {' · '}
+                  <span className="text-muted">L2:</span> {fmtMin(resolverResult.level_2_after_minutes)} → {resolverResult.level_2_role}
+                </>
+              )}
+              {resolverResult.level_3_after_minutes !== null && (
+                <>
+                  {' · '}
+                  <span className="text-muted">L3:</span> {fmtMin(resolverResult.level_3_after_minutes)} → {resolverResult.level_3_role}
+                </>
+              )}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

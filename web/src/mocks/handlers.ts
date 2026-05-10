@@ -932,6 +932,19 @@ const mswEscalationRules: MswEscalationRule[] = [
   _mkEsc('BIL', 'BIL Default P3 fallback',            'default_fallback', 'P3', 1440, 'supervisor'),
 ];
 
+// Deep snapshot of the seeded escalation rules so the array can be
+// restored between tests without re-running _mkEsc (which captures
+// timestamps). Mirrors the pattern used for notification templates.
+const _seedEscalationRulesSnapshot: MswEscalationRule[] =
+  mswEscalationRules.map((r) => ({ ...r }));
+
+export function __resetMswEscalationRules(): void {
+  mswEscalationRules.length = 0;
+  for (const seed of _seedEscalationRulesSnapshot) {
+    mswEscalationRules.push({ ...seed });
+  }
+}
+
 function _validateEscChain(
   l1m: number,
   l2m: number | null, l2r: string | null,
