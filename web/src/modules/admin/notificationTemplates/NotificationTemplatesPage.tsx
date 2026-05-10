@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Copy, Eye, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
+import { CheckCircle2, Copy, Eye, History, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   api,
   type NotificationChannel,
@@ -187,6 +188,19 @@ export function NotificationTemplatesPage() {
             >
               <Eye className="w-3 h-3" /> Preview
             </button>
+          )}
+          {r.deleted_at === null && (
+            <>
+              <span className="text-2xs text-muted">·</span>
+              <Link
+                to={`/admin/notification-templates/dispatches?template_id=${encodeURIComponent(r.template_id)}`}
+                className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1"
+                data-testid={`tpl-dispatches-${r.template_id}`}
+                title="View every dispatch fired from this template"
+              >
+                <History className="w-3 h-3" /> Dispatches
+              </Link>
+            </>
           )}
           {r.deleted_at === null && r.status !== 'ARCHIVED' && (
             <>

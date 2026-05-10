@@ -162,4 +162,41 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
     await userEvent.type(refInput, REF);
     expect(screen.getByTestId('disp-reference-clear')).toBeInTheDocument();
   });
+
+  // M14.29 — template_id deep-link from templates page → dispatches log
+  it('templates page renders a Dispatches link with the row template_id in the href', async () => {
+    renderWithProviders(<NotificationTemplatesPage />);
+    await screen.findByText(/Case Opened — RM email/i);
+    const link = await screen.findByTestId(
+      /^tpl-dispatches-tpl-seed-bank_demo-case-opened/,
+    );
+    const href = link.getAttribute('href') ?? '';
+    expect(href).toContain('/admin/notification-templates/dispatches');
+    expect(href).toContain('template_id=tpl-seed-bank_demo-case-opened');
+  });
+
+  it('dispatches page reads ?template_id= from the URL and surfaces a clearable chip', async () => {
+    // Fire a dispatch with a known template_id (the seeded BANK_DEMO
+    // "Case Opened — RM email") so there's a row to filter on.
+    const tplPage = renderWithProviders(<NotificationTemplatesPage />);
+    await screen.findByText(/Case Opened — RM email/i);
+    await userEvent.click(
+      await screen.findByTestId(/^tpl-testfire-tpl-seed-bank_demo-case-opened/),
+    );
+    const fireModal = await screen.findByTestId('notification-template-test-fire-modal');
+    await userEvent.type(within(fireModal).getByTestId('testfire-recipient'), 'rm@bank.com');
+    await userEvent.click(within(fireModal).getByTestId('testfire-send'));
+    await within(fireModal).findByTestId('testfire-dispatch-confirm');
+    tplPage.unmount();
+
+    // Render the dispatches page with the template_id pre-set in the URL
+    const TPL_ID = 'tpl-seed-bank_demo-case-opened-rm-email';
+    renderWithProviders(<NotificationDispatchesPage />, {
+      route: `/admin/notification-templates/dispatches?template_id=${TPL_ID}`,
+    });
+    // Filter chip shows the truncated id
+    expect(await screen.findByTestId('disp-template-chip')).toBeInTheDocument();
+    // Clear button is wired
+    expect(screen.getByTestId('disp-template-clear')).toBeInTheDocument();
+  });
 });

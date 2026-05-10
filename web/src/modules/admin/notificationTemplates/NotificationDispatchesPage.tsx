@@ -45,6 +45,10 @@ export function NotificationDispatchesPage() {
   const [referenceFilter, setReferenceFilter] = useState(
     () => searchParams.get('reference') ?? '',
   );
+  // M14.29 — template_id is URL-bound so the templates page can
+  // deep-link here with ?template_id=<id>. Read-only chip in the UI;
+  // operator clears it via the chip's × button to drop the filter.
+  const templateIdFilter = searchParams.get('template_id') ?? '';
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   // Reference filter is also URL-bound so the case-detail page can
@@ -58,13 +62,26 @@ export function NotificationDispatchesPage() {
     setSearchParams(params, { replace: true });
   };
 
+  const clearTemplateFilter = () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('template_id');
+    setSearchParams(params, { replace: true });
+  };
+
   const list = useQuery({
-    queryKey: ['notification-dispatches', statusFilter, triggerFilter, referenceFilter],
+    queryKey: [
+      'notification-dispatches',
+      statusFilter,
+      triggerFilter,
+      referenceFilter,
+      templateIdFilter,
+    ],
     queryFn: () =>
       api.notificationDispatchesList({
         status: statusFilter === 'ALL' ? undefined : statusFilter,
         trigger: triggerFilter === 'ALL' ? undefined : triggerFilter,
         reference: referenceFilter.trim() || undefined,
+        template_id: templateIdFilter || undefined,
         page_size: 200,
       }),
   });
@@ -225,6 +242,24 @@ export function NotificationDispatchesPage() {
           >
             <FilterX className="h-3 w-3" /> Clear
           </button>
+        )}
+        {templateIdFilter && (
+          <span
+            className="inline-flex items-center gap-1 rounded border border-blue-300 bg-blue-50 px-2 py-1 text-2xs text-blue-800"
+            data-testid="disp-template-chip"
+          >
+            <span className="text-2xs">Template:</span>
+            <span className="font-mono">{templateIdFilter.slice(0, 18)}…</span>
+            <button
+              type="button"
+              onClick={clearTemplateFilter}
+              className="ml-1 text-blue-700 hover:text-blue-900"
+              aria-label="Clear template filter"
+              data-testid="disp-template-clear"
+            >
+              <FilterX className="h-3 w-3" />
+            </button>
+          </span>
         )}
         <div className="flex gap-1">
           {(['ALL', 'admin_test_fire', 'case_create_pipeline', 'escalation_worker'] as const).map(
