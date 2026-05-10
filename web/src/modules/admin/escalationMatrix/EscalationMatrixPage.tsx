@@ -255,7 +255,21 @@ export function EscalationMatrixPage() {
               <span className="text-2xs text-muted">·</span>
               <button
                 type="button"
-                onClick={() => archive.mutate(r.escalation_id)}
+                onClick={() => {
+                  // M14.35 — guard archive when scenarios depend on this rule.
+                  // The BFF doesn't refuse archive-with-dependents today, so
+                  // surface a confirm prompt with the dependency count.
+                  const usage = usageByEscalationId.get(r.escalation_id) ?? 0;
+                  if (usage > 0) {
+                    const ok = window.confirm(
+                      `This rule is referenced by ${usage} active scenario${usage === 1 ? '' : 's'}. ` +
+                      `Archiving will leave them without escalation routing — open cases on this rule will not escalate. ` +
+                      `Archive anyway?`,
+                    );
+                    if (!ok) return;
+                  }
+                  archive.mutate(r.escalation_id);
+                }}
                 className="text-2xs text-rose-600 hover:underline inline-flex items-center gap-1"
                 disabled={archive.isPending}
                 data-testid={`esc-archive-${r.escalation_id}`}

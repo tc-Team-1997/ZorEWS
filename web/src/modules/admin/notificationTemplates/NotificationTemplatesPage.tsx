@@ -297,7 +297,21 @@ export function NotificationTemplatesPage() {
               <span className="text-2xs text-muted">·</span>
               <button
                 type="button"
-                onClick={() => archive.mutate(r.template_id)}
+                onClick={() => {
+                  // M14.35 — guard archive when scenarios depend on this template.
+                  // The BFF doesn't refuse archive-with-dependents today, so surface
+                  // a confirm prompt with the dependency count.
+                  const usage = usageByTemplateId.get(r.template_id) ?? 0;
+                  if (usage > 0) {
+                    const ok = window.confirm(
+                      `This template is referenced by ${usage} active scenario${usage === 1 ? '' : 's'}. ` +
+                      `Archiving will leave their notifications without a template — dispatches will fall back to a missing-template state. ` +
+                      `Archive anyway?`,
+                    );
+                    if (!ok) return;
+                  }
+                  archive.mutate(r.template_id);
+                }}
                 className="text-2xs text-rose-600 hover:underline inline-flex items-center gap-1"
                 disabled={archive.isPending}
                 data-testid={`tpl-archive-${r.template_id}`}

@@ -123,19 +123,49 @@ describe('NotificationTemplatesPage', () => {
   });
 
   it('archive removes the row from the default ACTIVE pivot', async () => {
-    renderWithProviders(<NotificationTemplatesPage />);
-    await userEvent.click(screen.getByTestId('tpl-pivot-active'));
-    const row = await screen.findByText(/Case Opened — RM email/i);
-    expect(row).toBeInTheDocument();
-    const archiveBtn = await screen.findByTestId(/^tpl-archive-tpl-seed-bank_demo-case-opened/);
-    await userEvent.click(archiveBtn);
-    await waitFor(() => {
-      // Same name should disappear from ACTIVE pivot
-      expect(screen.queryByText(/Case Opened — RM email/i)).not.toBeInTheDocument();
-    });
-    // ARCHIVED pivot reveals it again
-    await userEvent.click(screen.getByTestId('tpl-pivot-archived'));
-    expect(await screen.findByText(/Case Opened — RM email/i)).toBeInTheDocument();
+    // Case Opened — RM email is referenced by the seeded Fraud P1 scenario,
+    // so M14.35 surfaces a confirm prompt — accept it to proceed.
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      renderWithProviders(<NotificationTemplatesPage />);
+      await userEvent.click(screen.getByTestId('tpl-pivot-active'));
+      const row = await screen.findByText(/Case Opened — RM email/i);
+      expect(row).toBeInTheDocument();
+      const archiveBtn = await screen.findByTestId(/^tpl-archive-tpl-seed-bank_demo-case-opened/);
+      await userEvent.click(archiveBtn);
+      await waitFor(() => {
+        // Same name should disappear from ACTIVE pivot
+        expect(screen.queryByText(/Case Opened — RM email/i)).not.toBeInTheDocument();
+      });
+      // ARCHIVED pivot reveals it again
+      await userEvent.click(screen.getByTestId('tpl-pivot-archived'));
+      expect(await screen.findByText(/Case Opened — RM email/i)).toBeInTheDocument();
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
+
+  // M14.35 — archive confirm guard when a template has dependents
+  it('archive shows a confirm prompt when scenarios depend on the template; cancel keeps it', async () => {
+    const origConfirm = window.confirm;
+    let confirmMessage = '';
+    window.confirm = (msg?: string) => {
+      confirmMessage = msg ?? '';
+      return false; // cancel
+    };
+    try {
+      renderWithProviders(<NotificationTemplatesPage />);
+      await userEvent.click(screen.getByTestId('tpl-pivot-active'));
+      await screen.findByText(/Case Opened — RM email/i);
+      const archiveBtn = await screen.findByTestId(/^tpl-archive-tpl-seed-bank_demo-case-opened/);
+      await userEvent.click(archiveBtn);
+      // Cancelled → row remains in ACTIVE pivot
+      expect(screen.getByText(/Case Opened — RM email/i)).toBeInTheDocument();
+      expect(confirmMessage).toMatch(/referenced by \d+ active scenario/);
+    } finally {
+      window.confirm = origConfirm;
+    }
   });
 
   // M14.34 — Used-by scenarios usage hint per template

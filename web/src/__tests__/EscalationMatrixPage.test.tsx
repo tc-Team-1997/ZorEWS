@@ -114,15 +114,44 @@ describe('EscalationMatrixPage', () => {
   });
 
   it('archive removes the row from the ACTIVE pivot + reveals it in ARCHIVED', async () => {
-    renderWithProviders(<EscalationMatrixPage />);
-    await screen.findByText(/BANK KYC P3 reminder/i);
-    const archiveBtn = await screen.findByTestId(/^esc-archive-esc-seed-bank_demo-bank-kyc-p3-reminde/);
-    await userEvent.click(archiveBtn);
-    await waitFor(() => {
-      expect(screen.queryByText(/BANK KYC P3 reminder/i)).not.toBeInTheDocument();
-    });
-    await userEvent.click(screen.getByTestId('esc-pivot-archived'));
-    expect(await screen.findByText(/BANK KYC P3 reminder/i)).toBeInTheDocument();
+    // BANK KYC P3 is referenced by the seeded sc-seed-bank-kyc-p3-doc-expired
+    // scenario, so M14.35 surfaces a confirm prompt — accept it to proceed.
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      renderWithProviders(<EscalationMatrixPage />);
+      await screen.findByText(/BANK KYC P3 reminder/i);
+      const archiveBtn = await screen.findByTestId(/^esc-archive-esc-seed-bank_demo-bank-kyc-p3-reminde/);
+      await userEvent.click(archiveBtn);
+      await waitFor(() => {
+        expect(screen.queryByText(/BANK KYC P3 reminder/i)).not.toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('esc-pivot-archived'));
+      expect(await screen.findByText(/BANK KYC P3 reminder/i)).toBeInTheDocument();
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
+
+  // M14.35 — archive confirm guard when a rule has dependents
+  it('archive shows a confirm prompt when scenarios depend on the rule; cancel keeps it', async () => {
+    const origConfirm = window.confirm;
+    let confirmMessage = '';
+    window.confirm = (msg?: string) => {
+      confirmMessage = msg ?? '';
+      return false; // cancel
+    };
+    try {
+      renderWithProviders(<EscalationMatrixPage />);
+      await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+      const archiveBtn = await screen.findByTestId(/^esc-archive-esc-seed-bank_demo-bank-fraud-p1-fast/);
+      await userEvent.click(archiveBtn);
+      // Cancelled → row remains in ACTIVE pivot
+      expect(screen.getByText(/BANK Fraud P1 fast-escalate/i)).toBeInTheDocument();
+      expect(confirmMessage).toMatch(/referenced by \d+ active scenario/);
+    } finally {
+      window.confirm = origConfirm;
+    }
   });
 
   // M14.33 — Used-by scenarios count per rule
