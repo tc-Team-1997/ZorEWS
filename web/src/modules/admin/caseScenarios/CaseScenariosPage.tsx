@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
   CheckCircle2,
   Copy,
+  ExternalLink,
   History,
   Pencil,
   Plus,
@@ -64,6 +66,25 @@ export function CaseScenariosPage() {
       }),
   });
 
+  // M14.31 — lightweight join: load the templates + escalation rules
+  // lists once so we can resolve `notification_template_id` +
+  // `default_escalation_id` to their human names in the row links.
+  const templatesQuery = useQuery({
+    queryKey: ['notification-templates', 'all-for-scenarios-page'],
+    queryFn: () => api.notificationTemplatesList({ page_size: 200 }),
+  });
+  const matrixQuery = useQuery({
+    queryKey: ['escalation-matrix', 'all-for-scenarios-page'],
+    queryFn: () => api.escalationMatrixList({ page_size: 200 }),
+  });
+  const refLookup = useMemo(() => {
+    const tplById = new Map<string, string>();
+    for (const t of templatesQuery.data?.items ?? []) tplById.set(t.template_id, t.name);
+    const escById = new Map<string, string>();
+    for (const e of matrixQuery.data?.items ?? []) escById.set(e.escalation_id, e.name);
+    return { tplById, escById };
+  }, [templatesQuery.data, matrixQuery.data]);
+
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['case-scenarios'] });
 
   const create = useMutation({
@@ -123,15 +144,50 @@ export function CaseScenariosPage() {
     {
       key: 'name',
       header: 'Scenario',
-      render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{r.name}</span>
-          <span className="text-2xs text-muted">
-            {r.case_category} ·{' '}
-            <Badge tone={PRIORITY_TONE[r.priority]} className="text-2xs">{r.priority}</Badge>
-          </span>
-        </div>
-      ),
+      render: (r) => {
+        const tplName = r.notification_template_id
+          ? refLookup.tplById.get(r.notification_template_id) ?? null
+          : null;
+        const escName = refLookup.escById.get(r.default_escalation_id) ?? null;
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium">{r.name}</span>
+            <span className="text-2xs text-muted">
+              {r.case_category} ·{' '}
+              <Badge tone={PRIORITY_TONE[r.priority]} className="text-2xs">{r.priority}</Badge>
+            </span>
+            <div className="mt-0.5 flex flex-col gap-0.5 text-2xs">
+              <Link
+                to={`/admin/escalation-matrix?focus=${encodeURIComponent(r.default_escalation_id)}`}
+                className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                data-testid={`cs-ref-escalation-${r.scenario_id}`}
+                title={r.default_escalation_id}
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+                <span className="truncate">esc · {escName ?? r.default_escalation_id.slice(0, 24) + '…'}</span>
+              </Link>
+              {r.notification_template_id ? (
+                <Link
+                  to={`/admin/notification-templates/dispatches?template_id=${encodeURIComponent(r.notification_template_id)}`}
+                  className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                  data-testid={`cs-ref-template-${r.scenario_id}`}
+                  title={r.notification_template_id}
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  <span className="truncate">tpl · {tplName ?? r.notification_template_id.slice(0, 24) + '…'}</span>
+                </Link>
+              ) : (
+                <span
+                  className="text-muted italic"
+                  data-testid={`cs-ref-template-empty-${r.scenario_id}`}
+                >
+                  no notification template
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      },
       width: 280,
     },
     {

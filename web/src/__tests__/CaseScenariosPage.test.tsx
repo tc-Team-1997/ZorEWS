@@ -149,6 +149,24 @@ describe('CaseScenariosPage', () => {
     expect(within(modal).getByText(/system:seed/)).toBeInTheDocument();
   });
 
+  // M14.31 — cross-links to escalation rule + notification template
+  it('renders cross-links to the linked escalation rule + template per row', async () => {
+    renderWithProviders(<CaseScenariosPage />);
+    await screen.findByText(/Fraud P1 sudden DPD spike/i);
+    const escLink = await screen.findByTestId(
+      'cs-ref-escalation-sc-seed-bank-fraud-p1-sudden-dpd',
+    );
+    expect(escLink.getAttribute('href')).toMatch(
+      /^\/admin\/escalation-matrix\?focus=esc-seed-bank_demo-bank-fraud-p1-fast/,
+    );
+    const tplLink = await screen.findByTestId(
+      'cs-ref-template-sc-seed-bank-fraud-p1-sudden-dpd',
+    );
+    expect(tplLink.getAttribute('href')).toMatch(
+      /^\/admin\/notification-templates\/dispatches\?template_id=tpl-seed-bank_demo-case-opened-rm-email/,
+    );
+  });
+
   // M14.27 — Duplicate
   it('duplicate clones a scenario as a new DRAFT with " (copy)" suffix', async () => {
     renderWithProviders(<CaseScenariosPage />);
