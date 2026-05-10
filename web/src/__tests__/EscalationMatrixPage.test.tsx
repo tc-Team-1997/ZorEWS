@@ -125,6 +125,26 @@ describe('EscalationMatrixPage', () => {
     expect(await screen.findByText(/BANK KYC P3 reminder/i)).toBeInTheDocument();
   });
 
+  // M14.32 — ?focus=<escalation_id> deep-link from Case Scenarios
+  it('honors ?focus=<id> by highlighting the matched row + broadening pivot to ALL', async () => {
+    const FOCUS_ID = 'esc-seed-bank_demo-bank-fraud-p1-fast-escal';
+    renderWithProviders(<EscalationMatrixPage />, {
+      route: `/admin/escalation-matrix?focus=${FOCUS_ID}`,
+    });
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    // Pivot should auto-broaden to ALL so an archived rule could still appear
+    await waitFor(() => {
+      const allBtn = screen.getByTestId('esc-pivot-all');
+      expect(allBtn.className).toContain('border-blue-400');
+    });
+    // The matched row carries the focus marker
+    const focusedRow = await waitFor(() =>
+      document.querySelector('[data-focus-row="true"]'),
+    );
+    expect(focusedRow).not.toBeNull();
+    expect(focusedRow?.getAttribute('data-row-id')).toBe(FOCUS_ID);
+  });
+
   // M14.28 — Duplicate (clone-with-prefill via the create-modal)
   it('duplicate opens the create modal pre-filled with the source rule timings', async () => {
     renderWithProviders(<EscalationMatrixPage />);

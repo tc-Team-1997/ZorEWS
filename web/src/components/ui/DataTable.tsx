@@ -14,11 +14,19 @@ export function DataTable<T extends { id: number | string }>({
   data,
   onRowClick,
   empty = 'No rows',
+  focusRowId,
 }: {
   columns: Column<T>[];
   data: readonly T[];
   onRowClick?: (row: T) => void;
   empty?: string;
+  /**
+   * When set, the matching row gets `data-focus-row="true"` + a 2s
+   * yellow flash so callers can `?focus=<id>` deep-link into a row.
+   * The caller is responsible for scrollIntoView (typical pattern:
+   * useEffect → document.querySelector('[data-focus-row]')).
+   */
+  focusRowId?: number | string | null;
 }) {
   return (
     <div className="overflow-hidden rounded-card border border-divider bg-surface">
@@ -49,14 +57,19 @@ export function DataTable<T extends { id: number | string }>({
               </td>
             </tr>
           ) : (
-            data.map((row, i) => (
+            data.map((row, i) => {
+              const isFocus = focusRowId !== undefined && focusRowId !== null && row.id === focusRowId;
+              return (
               <tr
                 key={row.id}
+                data-row-id={row.id}
+                {...(isFocus ? { 'data-focus-row': 'true' } : {})}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={cn(
                   'border-t border-divider',
                   i % 2 === 1 && 'bg-page',
                   onRowClick && 'cursor-pointer hover:bg-brand-skyLight/60',
+                  isFocus && 'bg-amber-100 ring-1 ring-amber-300',
                 )}
               >
                 {columns.map((col) => (
@@ -72,7 +85,8 @@ export function DataTable<T extends { id: number | string }>({
                   </td>
                 ))}
               </tr>
-            ))
+              );
+            })
           )}
         </tbody>
       </table>

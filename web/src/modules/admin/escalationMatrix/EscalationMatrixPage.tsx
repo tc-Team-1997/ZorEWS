@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowDownNarrowWide, Copy, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import {
   api,
@@ -35,6 +36,10 @@ type PriorityFilter = EscalationPriority | 'ALL';
 
 export function EscalationMatrixPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  // M14.32 — `?focus=<escalation_id>` scrolls + flash-highlights the
+  // matching row. Set by the M14.31 cross-link from Case Scenarios.
+  const focusRowId = searchParams.get('focus');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ACTIVE');
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL');
@@ -61,6 +66,28 @@ export function EscalationMatrixPage() {
         page_size: 200,
       }),
   });
+
+  // M14.32 — when navigated with ?focus=<id>, broaden the pivot to
+  // ALL on first render so an archived rule still appears + can be
+  // highlighted. Runs once per focusRowId — switching pivot manually
+  // afterwards is honoured because the dependency array is the id.
+  useEffect(() => {
+    if (focusRowId) setStatusFilter('ALL');
+  }, [focusRowId]);
+
+  // After the page renders the data, scroll the focused row into view.
+  // Defers via requestAnimationFrame so the DOM has the row mounted by
+  // the time we look it up.
+  useEffect(() => {
+    if (!focusRowId || list.isLoading) return;
+    const handle = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-focus-row="true"]');
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focusRowId, list.isLoading, list.data]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['escalation-matrix'] });
 
@@ -361,6 +388,7 @@ export function EscalationMatrixPage() {
         <DataTable
           columns={columns}
           data={filtered.map((r) => ({ ...r, id: r.escalation_id }))}
+          focusRowId={focusRowId}
         />
       )}
 
