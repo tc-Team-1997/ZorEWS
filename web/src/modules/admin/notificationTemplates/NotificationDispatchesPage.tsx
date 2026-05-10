@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, FilterX, Mail, MessageSquare, Smartphone } from 'lucide-react';
 import {
   api,
@@ -136,7 +136,14 @@ export function NotificationDispatchesPage() {
         const Icon = CHANNEL_ICON[r.channel];
         return (
           <div className="flex flex-col">
-            <span className="font-medium">{r.template_name}</span>
+            <Link
+              to={`/admin/notification-templates?focus=${encodeURIComponent(r.template_id)}`}
+              className="font-medium text-blue-700 hover:underline"
+              data-testid={`disp-tpl-link-${r.dispatch_id}`}
+              title="Open this template on the Notification Templates page"
+            >
+              {r.template_name}
+            </Link>
             <span className="text-2xs text-muted">
               <Icon className="mr-0.5 inline h-3 w-3" /> {r.channel}
               {' · '}

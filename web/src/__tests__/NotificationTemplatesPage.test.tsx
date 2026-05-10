@@ -168,6 +168,26 @@ describe('NotificationTemplatesPage', () => {
     }
   });
 
+  // M14.36 — ?focus=<template_id> deep-link from Dispatches log
+  it('honors ?focus=<id> by highlighting the matched row + broadening pivot to ALL', async () => {
+    const FOCUS_ID = 'tpl-seed-bank_demo-case-opened-rm-email';
+    renderWithProviders(<NotificationTemplatesPage />, {
+      route: `/admin/notification-templates?focus=${FOCUS_ID}`,
+    });
+    await screen.findByText(/Case Opened — RM email/i);
+    // Pivot auto-broadens to ALL
+    await waitFor(() => {
+      const allBtn = screen.getByTestId('tpl-pivot-all');
+      expect(allBtn.className).toContain('border-blue-400');
+    });
+    // Matching row carries the focus marker
+    const focused = await waitFor(() =>
+      document.querySelector('[data-focus-row="true"]'),
+    );
+    expect(focused).not.toBeNull();
+    expect(focused?.getAttribute('data-row-id')).toBe(FOCUS_ID);
+  });
+
   // M14.34 — Used-by scenarios usage hint per template
   it('shows "Used by N scenarios" for the Case Opened email referenced by Fraud P1 scenario', async () => {
     renderWithProviders(<NotificationTemplatesPage />);

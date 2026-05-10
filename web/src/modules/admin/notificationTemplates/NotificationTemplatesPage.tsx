@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Copy, Eye, History, Mail, MessageSquare, Pencil, Plus, Send, Smartphone, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   api,
   type NotificationChannel,
@@ -44,6 +44,10 @@ type ChannelFilter = NotificationChannel | 'ALL';
 
 export function NotificationTemplatesPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  // M14.36 — `?focus=<template_id>` scrolls + flash-highlights the
+  // matching row. Wired by the Dispatches log Template-cell back-link.
+  const focusRowId = searchParams.get('focus');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('ALL');
@@ -62,6 +66,25 @@ export function NotificationTemplatesPage() {
         page_size: 200,
       }),
   });
+
+  // M14.36 — when navigated with ?focus=<id>, broaden status pivot to
+  // ALL on first render so an archived template still surfaces + can
+  // be highlighted. Same pattern as M14.32 on the matrix page.
+  useEffect(() => {
+    if (focusRowId) setStatusFilter('ALL');
+  }, [focusRowId]);
+
+  // After the data settles, scroll the focused row into view smoothly.
+  useEffect(() => {
+    if (!focusRowId || list.isLoading) return;
+    const handle = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-focus-row="true"]');
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focusRowId, list.isLoading, list.data]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
 
@@ -406,6 +429,7 @@ export function NotificationTemplatesPage() {
         <DataTable
           columns={columns}
           data={filtered.map((r) => ({ ...r, id: r.template_id }))}
+          focusRowId={focusRowId}
         />
       )}
 

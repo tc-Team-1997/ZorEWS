@@ -175,6 +175,26 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
     expect(href).toContain('template_id=tpl-seed-bank_demo-case-opened');
   });
 
+  // M14.36 — Dispatches log → Templates page back-link
+  it('Template cell on a dispatch row links back to /admin/notification-templates?focus=<id>', async () => {
+    // Fire a dispatch so there's a row to inspect
+    const tplPage = renderWithProviders(<NotificationTemplatesPage />);
+    await screen.findByText(/Case Opened — RM email/i);
+    await userEvent.click(
+      await screen.findByTestId(/^tpl-testfire-tpl-seed-bank_demo-case-opened/),
+    );
+    const fireModal = await screen.findByTestId('notification-template-test-fire-modal');
+    await userEvent.type(within(fireModal).getByTestId('testfire-recipient'), 'rm@bank.com');
+    await userEvent.click(within(fireModal).getByTestId('testfire-send'));
+    await within(fireModal).findByTestId('testfire-dispatch-confirm');
+    tplPage.unmount();
+
+    renderWithProviders(<NotificationDispatchesPage />);
+    const link = await screen.findByTestId(/^disp-tpl-link-/);
+    const href = link.getAttribute('href') ?? '';
+    expect(href).toContain('/admin/notification-templates?focus=tpl-seed-bank_demo-case-opened');
+  });
+
   it('dispatches page reads ?template_id= from the URL and surfaces a clearable chip', async () => {
     // Fire a dispatch with a known template_id (the seeded BANK_DEMO
     // "Case Opened — RM email") so there's a row to filter on.
