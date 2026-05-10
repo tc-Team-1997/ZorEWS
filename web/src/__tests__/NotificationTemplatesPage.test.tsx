@@ -138,6 +138,26 @@ describe('NotificationTemplatesPage', () => {
     expect(await screen.findByText(/Case Opened — RM email/i)).toBeInTheDocument();
   });
 
+  // M14.34 — Used-by scenarios usage hint per template
+  it('shows "Used by N scenarios" for the Case Opened email referenced by Fraud P1 scenario', async () => {
+    renderWithProviders(<NotificationTemplatesPage />);
+    await screen.findByText(/Case Opened — RM email/i);
+    const usage = await screen.findByTestId(
+      /^tpl-usage-tpl-seed-bank_demo-case-opened/,
+    );
+    expect(usage.textContent).toMatch(/Used by \d+ scenario/);
+  });
+
+  it('shows "Unused" for templates not referenced by any scenario', async () => {
+    renderWithProviders(<NotificationTemplatesPage />);
+    // Case SLA breach warning SMS — not bound to any seeded scenario
+    await screen.findByText(/Case SLA breach warning — RM SMS/i);
+    const usage = await screen.findByTestId(
+      /^tpl-usage-tpl-seed-bank_demo-case-sla-breach/,
+    );
+    expect(usage.textContent).toMatch(/Unused/);
+  });
+
   // M14.26 — Duplicate
   it('duplicate clones a row as a new DRAFT with " (copy)" suffix', async () => {
     renderWithProviders(<NotificationTemplatesPage />);

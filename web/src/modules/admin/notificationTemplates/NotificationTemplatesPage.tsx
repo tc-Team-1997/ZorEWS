@@ -116,6 +116,25 @@ export function NotificationTemplatesPage() {
     );
   }, [list.data?.items, search]);
 
+  // M14.34 — load all case scenarios once so we can show a "Used by
+  // N scenarios" hint per template (mirrors the M14.33 hint on the
+  // Escalation Matrix page). Surfaces dependents before archiving.
+  const scenariosForUsage = useQuery({
+    queryKey: ['case-scenarios', 'all-for-template-usage'],
+    queryFn: () => api.caseScenariosList({ include_deleted: true, page_size: 200 }),
+  });
+  const usageByTemplateId = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const sc of scenariosForUsage.data?.items ?? []) {
+      if (sc.deleted_at !== null || sc.notification_template_id == null) continue;
+      out.set(
+        sc.notification_template_id,
+        (out.get(sc.notification_template_id) ?? 0) + 1,
+      );
+    }
+    return out;
+  }, [scenariosForUsage.data]);
+
   const counts = useMemo(() => {
     const items = list.data?.items ?? [];
     return {
@@ -143,15 +162,31 @@ export function NotificationTemplatesPage() {
     {
       key: 'name',
       header: 'Name',
-      render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{r.name}</span>
-          <span className="text-2xs text-muted">
-            <span className="font-mono">{r.locale}</span>
-            {r.subject && <span> · {truncate(r.subject, 60)}</span>}
-          </span>
-        </div>
-      ),
+      render: (r) => {
+        const usage = usageByTemplateId.get(r.template_id) ?? 0;
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium">{r.name}</span>
+            <span className="text-2xs text-muted">
+              <span className="font-mono">{r.locale}</span>
+              {r.subject && <span> · {truncate(r.subject, 60)}</span>}
+            </span>
+            <span
+              className={`mt-0.5 text-2xs ${usage > 0 ? 'text-blue-700' : 'text-muted italic'}`}
+              data-testid={`tpl-usage-${r.template_id}`}
+              title={
+                usage > 0
+                  ? 'Active scenarios that reference this template. Archiving will leave their notifications without a template.'
+                  : 'No active scenarios reference this template yet.'
+              }
+            >
+              {usage > 0
+                ? `Used by ${usage} scenario${usage === 1 ? '' : 's'}`
+                : 'Unused'}
+            </span>
+          </div>
+        );
+      },
     },
     {
       key: 'status',
