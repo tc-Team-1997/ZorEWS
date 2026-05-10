@@ -6,7 +6,7 @@
 //   - Archive removes from default ACTIVE pivot
 
 import { describe, expect, it, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EscalationMatrixPage } from '@/modules/admin/escalationMatrix/EscalationMatrixPage';
 import { renderWithProviders } from './utils';
@@ -123,5 +123,44 @@ describe('EscalationMatrixPage', () => {
     });
     await userEvent.click(screen.getByTestId('esc-pivot-archived'));
     expect(await screen.findByText(/BANK KYC P3 reminder/i)).toBeInTheDocument();
+  });
+
+  // M14.28 — Duplicate (clone-with-prefill via the create-modal)
+  it('duplicate opens the create modal pre-filled with the source rule timings', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    const dupBtn = await screen.findByTestId(/^esc-duplicate-esc-seed-bank_demo-bank-fraud-p1-fast/);
+    await userEvent.click(dupBtn);
+
+    const modal = await screen.findByTestId('escalation-matrix-modal');
+    // Heading + hint surface the duplicate intent
+    expect(within(modal).getByText(/Duplicate escalation rule/i)).toBeInTheDocument();
+    expect(within(modal).getByTestId('esc-duplicate-hint')).toHaveTextContent(
+      /Pick a fresh name/,
+    );
+    // Identity fields are blank (must be filled by operator)
+    expect(within(modal).getByTestId('esc-name')).toHaveValue('');
+    // Level-1 minutes pre-fill matches the source rule (15 minutes)
+    const l1Input = within(modal).getByTestId('esc-l1-minutes') as HTMLInputElement;
+    expect(l1Input.value).toBe('15');
+  });
+
+  it('duplicate submit clears the modal + lands the new rule in ACTIVE pivot', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    const dupBtn = await screen.findByTestId(/^esc-duplicate-esc-seed-bank_demo-bank-fraud-p1-fast/);
+    await userEvent.click(dupBtn);
+    await screen.findByTestId('escalation-matrix-modal');
+
+    // Provide a fresh name + flip priority to P2 to clear the
+    // (case_category, priority) uniqueness guard server-side
+    await userEvent.type(screen.getByTestId('esc-name'), 'Cloned fraud P2 rule');
+    await userEvent.selectOptions(screen.getByTestId('esc-priority'), 'P2');
+    await userEvent.click(screen.getByTestId('esc-save'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('escalation-matrix-modal')).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText(/Cloned fraud P2 rule/i)).toBeInTheDocument();
   });
 });

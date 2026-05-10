@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownNarrowWide, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   api,
   type EscalationMatrixRuleRow,
@@ -40,6 +40,10 @@ export function EscalationMatrixPage() {
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL');
   const [editing, setEditing] = useState<EscalationMatrixRuleRow | null>(null);
   const [creating, setCreating] = useState(false);
+  // M14.28 — clone-as-new flow: prefill the create modal with this row's
+  // level timings + roles. Identity fields stay blank so the operator
+  // must clear the (case_category, priority) + name uniqueness checks.
+  const [duplicating, setDuplicating] = useState<EscalationMatrixRuleRow | null>(null);
 
   const list = useQuery({
     queryKey: ['escalation-matrix', statusFilter, priorityFilter],
@@ -55,7 +59,7 @@ export function EscalationMatrixPage() {
 
   const create = useMutation({
     mutationFn: api.escalationMatrixCreate,
-    onSuccess: () => { setCreating(false); refresh(); },
+    onSuccess: () => { setCreating(false); setDuplicating(null); refresh(); },
   });
   const update = useMutation({
     mutationFn: (input: { id: string; patch: Parameters<typeof api.escalationMatrixUpdate>[1] }) =>
@@ -163,6 +167,16 @@ export function EscalationMatrixPage() {
               <span className="text-2xs text-muted">·</span>
               <button
                 type="button"
+                onClick={() => setDuplicating(r)}
+                className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1"
+                data-testid={`esc-duplicate-${r.escalation_id}`}
+                title="Open the create form pre-filled with this rule's timings + roles"
+              >
+                <Copy className="w-3 h-3" /> Duplicate
+              </button>
+              <span className="text-2xs text-muted">·</span>
+              <button
+                type="button"
                 onClick={() => archive.mutate(r.escalation_id)}
                 className="text-2xs text-rose-600 hover:underline inline-flex items-center gap-1"
                 disabled={archive.isPending}
@@ -260,6 +274,17 @@ export function EscalationMatrixPage() {
           mode="create"
           existing={list.data?.items ?? []}
           onClose={() => setCreating(false)}
+          onSubmit={(input) => create.mutate(input)}
+          isPending={create.isPending}
+          error={create.error}
+        />
+      )}
+      {duplicating && (
+        <EscalationMatrixFormModal
+          mode="create"
+          existing={list.data?.items ?? []}
+          prefill={duplicating}
+          onClose={() => setDuplicating(null)}
           onSubmit={(input) => create.mutate(input)}
           isPending={create.isPending}
           error={create.error}

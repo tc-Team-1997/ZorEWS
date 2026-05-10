@@ -20,6 +20,13 @@ const PRIORITIES: EscalationPriority[] = ['P1', 'P2', 'P3', 'P4'];
 interface PropsCreate {
   mode: 'create';
   existing: ReadonlyArray<EscalationMatrixRuleRow>;
+  /**
+   * When set, the form pre-fills from this row's level/role timing.
+   * Name + (case_category, priority) deliberately do NOT pre-fill —
+   * the BFF unique-constraints on (case_category, priority) per tenant
+   * + name uniqueness force the operator to pick fresh values.
+   */
+  prefill?: EscalationMatrixRuleRow;
   onClose: () => void;
   onSubmit: (input: EscalationMatrixCreateInput) => void;
   isPending: boolean;
@@ -37,11 +44,25 @@ type Props = PropsCreate | PropsEdit;
 
 export function EscalationMatrixFormModal(props: Props) {
   const isEdit = props.mode === 'edit';
-  const initial = isEdit ? props.row : null;
+  const isDuplicate = props.mode === 'create' && !!props.prefill;
+  // Source row for default values: edit → the row being edited; create+prefill
+  // → the row being duplicated; create → null (defaults).
+  const initial = isEdit
+    ? props.row
+    : props.mode === 'create'
+      ? props.prefill ?? null
+      : null;
 
-  const [name, setName] = useState(initial?.name ?? '');
-  const [category, setCategory] = useState(initial?.case_category ?? 'fraud');
-  const [priority, setPriority] = useState<EscalationPriority>(initial?.priority ?? 'P1');
+  // For duplicate, pre-fill the level timings + roles but NOT the
+  // identity fields (name + category + priority) — the operator has
+  // to pick fresh values to clear the BFF uniqueness checks.
+  const [name, setName] = useState(isEdit ? (initial?.name ?? '') : '');
+  const [category, setCategory] = useState(
+    isEdit ? (initial?.case_category ?? 'fraud') : 'fraud',
+  );
+  const [priority, setPriority] = useState<EscalationPriority>(
+    isEdit ? (initial?.priority ?? 'P1') : 'P1',
+  );
   const [l1m, setL1m] = useState(String(initial?.level_1_after_minutes ?? 60));
   const [l1r, setL1r] = useState<EscalationRole>(initial?.level_1_role ?? 'supervisor');
   const [l2on, setL2on] = useState(initial?.level_2_after_minutes !== null && initial?.level_2_after_minutes !== undefined);
@@ -131,10 +152,16 @@ export function EscalationMatrixFormModal(props: Props) {
   const errMsg =
     props.error instanceof Error ? props.error.message : props.error ? String(props.error) : null;
 
+  const heading = isEdit
+    ? 'Edit escalation rule'
+    : isDuplicate
+      ? 'Duplicate escalation rule'
+      : 'New escalation rule';
+
   return (
     <div
       role="dialog"
-      aria-label={isEdit ? 'Edit escalation rule' : 'Create escalation rule'}
+      aria-label={heading}
       data-testid="escalation-matrix-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={props.onClose}
@@ -145,7 +172,7 @@ export function EscalationMatrixFormModal(props: Props) {
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <h3 className="text-base font-semibold">
-            {isEdit ? 'Edit escalation rule' : 'New escalation rule'}
+            {heading}
           </h3>
           <button
             type="button"
@@ -158,6 +185,16 @@ export function EscalationMatrixFormModal(props: Props) {
         </div>
 
         <div className="space-y-3 p-4 text-sm">
+          {isDuplicate && (
+            <p
+              className="rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-2xs text-blue-800"
+              data-testid="esc-duplicate-hint"
+            >
+              Pick a fresh name + (case category, priority) — the matrix is
+              keyed on (case_category, priority) per tenant. Level timings + roles
+              are pre-filled from the source rule.
+            </p>
+          )}
           <label className="block">
             <span className="mb-1 block text-2xs font-semibold uppercase text-slate-500">Name</span>
             <input
