@@ -125,6 +125,29 @@ describe('EscalationMatrixPage', () => {
     expect(await screen.findByText(/BANK KYC P3 reminder/i)).toBeInTheDocument();
   });
 
+  // M14.33 — Used-by scenarios count per rule
+  it('shows "Used by N scenarios" for rules referenced by case scenarios', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    // Wait for the rule rows to render
+    await screen.findByText(/BANK Fraud P1 fast-escalate/i);
+    // The seeded fast-escalate rule is the default escalation for the
+    // seeded "Fraud P1 sudden DPD spike" scenario → should show usage>=1
+    const usage = await screen.findByTestId(
+      /^esc-usage-esc-seed-bank_demo-bank-fraud-p1-fast/,
+    );
+    expect(usage.textContent).toMatch(/Used by \d+ scenario/);
+  });
+
+  it('shows "Unused" for rules with no scenario references', async () => {
+    renderWithProviders(<EscalationMatrixPage />);
+    // BANK Operations P4 routine rule has no seeded scenario depending on it
+    await screen.findByText(/BANK Operations P4 routine/i);
+    const usage = await screen.findByTestId(
+      /^esc-usage-esc-seed-bank_demo-bank-operations-p4-rou/,
+    );
+    expect(usage.textContent).toMatch(/Unused/);
+  });
+
   // M14.32 — ?focus=<escalation_id> deep-link from Case Scenarios
   it('honors ?focus=<id> by highlighting the matched row + broadening pivot to ALL', async () => {
     const FOCUS_ID = 'esc-seed-bank_demo-bank-fraud-p1-fast-escal';

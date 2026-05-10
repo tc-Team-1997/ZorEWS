@@ -122,6 +122,29 @@ export function EscalationMatrixPage() {
     );
   }, [list.data?.items, search]);
 
+  // M14.33 — load all case scenarios once so we can show a "Used by N
+  // scenarios" count per rule. Surfaces dependencies before archiving
+  // a rule (the BFF doesn't 409 on archive-with-dependents today, so
+  // ops need to see this themselves).
+  const scenariosForUsage = useQuery({
+    queryKey: ['case-scenarios', 'all-for-matrix-usage'],
+    queryFn: () =>
+      api.caseScenariosList({ include_deleted: true, page_size: 200 }),
+  });
+  const usageByEscalationId = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const sc of scenariosForUsage.data?.items ?? []) {
+      // Only count non-deleted scenarios — soft-deleted ones aren't a
+      // live dependency.
+      if (sc.deleted_at !== null) continue;
+      out.set(
+        sc.default_escalation_id,
+        (out.get(sc.default_escalation_id) ?? 0) + 1,
+      );
+    }
+    return out;
+  }, [scenariosForUsage.data]);
+
   const counts = useMemo(() => {
     const items = list.data?.items ?? [];
     return {
@@ -135,15 +158,31 @@ export function EscalationMatrixPage() {
     {
       key: 'name',
       header: 'Rule',
-      render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{r.name}</span>
-          <span className="text-2xs text-muted">
-            {r.case_category} ·{' '}
-            <Badge tone={PRIORITY_TONE[r.priority]} className="text-2xs">{r.priority}</Badge>
-          </span>
-        </div>
-      ),
+      render: (r) => {
+        const usage = usageByEscalationId.get(r.escalation_id) ?? 0;
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium">{r.name}</span>
+            <span className="text-2xs text-muted">
+              {r.case_category} ·{' '}
+              <Badge tone={PRIORITY_TONE[r.priority]} className="text-2xs">{r.priority}</Badge>
+            </span>
+            <span
+              className={`mt-0.5 text-2xs ${usage > 0 ? 'text-blue-700' : 'text-muted italic'}`}
+              data-testid={`esc-usage-${r.escalation_id}`}
+              title={
+                usage > 0
+                  ? 'Active scenarios that reference this rule. Archiving will leave them without escalation routing.'
+                  : 'No active scenarios reference this rule yet.'
+              }
+            >
+              {usage > 0
+                ? `Used by ${usage} scenario${usage === 1 ? '' : 's'}`
+                : 'Unused'}
+            </span>
+          </div>
+        );
+      },
       width: 280,
     },
     {
