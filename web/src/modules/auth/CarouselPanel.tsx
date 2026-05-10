@@ -15,22 +15,22 @@ interface Slide {
 const SLIDES: readonly Slide[] = [
   {
     icon: AlertTriangle,
-    title: 'Spot risk before delinquency.',
+    title: 'Spot Risk Before Delinquency.',
     body: 'Indicator + rule engines flag distress 30–60 days before DPD — across financial, behavioural, transaction, and credit signals.',
   },
   {
     icon: Brain,
-    title: 'AI-driven PD scoring.',
+    title: 'AI-Driven PD Scoring.',
     body: 'Gradient-boosted probability-of-default with SHAP reason codes. Champion/challenger registry and drift monitoring built in.',
   },
   {
     icon: WorkflowIcon,
-    title: 'Connected Collection workflow.',
+    title: 'Connected Collection Workflow.',
     body: 'Smart-prioritised alerts auto-route into a single case ID across EWS and Collection — full action log, GPS-aware mobile.',
   },
   {
     icon: ShieldCheck,
-    title: 'Banking-grade compliance.',
+    title: 'Banking-Grade Compliance.',
     body: 'Kenya DPA 2019 + ISO 27001 control mapping, hash-chain audit on S3 Object Lock, multi-region DR posture.',
   },
 ] as const;
