@@ -1196,7 +1196,7 @@ mswDispatchLog.push(
   // ── BANK_DEMO — escalation_worker trigger (fired automatically) ──
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'tpl-seed-bank_demo-escalation-l1-supervisor',
     'Escalation L1 — Supervisor in-app',
     'IN_APP',
     'role:supervisor',
@@ -1210,7 +1210,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'tpl-seed-bank_demo-escalation-l1-supervisor',
     'Escalation L1 — Supervisor in-app',
     'IN_APP',
     'role:supervisor',
@@ -1224,7 +1224,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-case-sla-breach-warnin',
+    'tpl-seed-bank_demo-case-sla-breach-warning-',
     'Case SLA breach warning — RM SMS',
     'SMS',
     '+91-98765-43210',
@@ -1268,7 +1268,7 @@ mswDispatchLog.push(
   // ── BANK_DEMO — admin_test_fire (alice tests templates manually) ──
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-fraud-suspicion-aler',
+    'tpl-seed-bank_demo-fraud-suspicion-alert-ri',
     'Fraud suspicion alert — Risk team email',
     'EMAIL',
     'risk-team@bankdemo.test',
@@ -1281,7 +1281,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-aml-watchlist-hit-r',
+    'tpl-seed-bank_demo-aml-watchlist-hit-risk-t',
     'AML watchlist hit — Risk team in-app',
     'IN_APP',
     'role:risk_analyst',
@@ -1295,7 +1295,7 @@ mswDispatchLog.push(
   // ── BANK_DEMO — failed dispatch (SMS gateway rejected) ──
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-case-sla-breach-warnin',
+    'tpl-seed-bank_demo-case-sla-breach-warning-',
     'Case SLA breach warning — RM SMS',
     'SMS',
     '+91-INVALID',
@@ -1311,7 +1311,7 @@ mswDispatchLog.push(
   // ── BANK_DEMO — preview (no real send, ops just rendered to check) ──
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-customer-kyc-reminder',
+    'tpl-seed-bank_demo-customer-kyc-reminder-sm',
     'Customer KYC reminder — SMS',
     'SMS',
     '+91-PREVIEW',
@@ -1369,7 +1369,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-follow-up-underw',
+    'tpl-seed-bil-claim-follow-up-underwri',
     'Claim follow-up — Underwriter SMS',
     'SMS',
     '+975-17-555-310',
@@ -1384,7 +1384,7 @@ mswDispatchLog.push(
   // ── BIL — case_create_pipeline ──
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-case-opened-und',
+    'tpl-seed-bil-claim-case-opened-underw',
     'Claim case opened — Underwriter email',
     'EMAIL',
     'uw1@bil.test',
@@ -1398,7 +1398,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-case-opened-und',
+    'tpl-seed-bil-claim-case-opened-underw',
     'Claim case opened — Underwriter email',
     'EMAIL',
     'uw2@bil.test',
@@ -1413,7 +1413,7 @@ mswDispatchLog.push(
   // ── BIL — admin_test_fire ──
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-approval-customer',
+    'tpl-seed-bil-claim-approval-customer-',
     'Claim approval — Customer email',
     'EMAIL',
     'customer-test@bil.test',
@@ -1426,7 +1426,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-premium-reminder-customer',
+    'tpl-seed-bil-premium-reminder-custome',
     'Premium reminder — Customer SMS',
     'SMS',
     '+975-17-PREVIEW',
@@ -1443,7 +1443,7 @@ mswDispatchLog.push(
   // ── BIL — failed (provider outage) ──
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-premium-reminder-customer',
+    'tpl-seed-bil-premium-reminder-custome',
     'Premium reminder — Customer SMS',
     'SMS',
     '+975-17-555-999',
@@ -1458,7 +1458,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-follow-up-underw',
+    'tpl-seed-bil-claim-follow-up-underwri',
     'Claim follow-up — Underwriter SMS',
     'SMS',
     '+975-17-INVALID',
@@ -1488,7 +1488,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'tpl-seed-bank_demo-escalation-l1-supervisor',
     'Escalation L1 — Supervisor in-app',
     'IN_APP',
     'role:supervisor',
@@ -1516,7 +1516,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BANK_DEMO',
-    'tpl-seed-bank_demo-aml-watchlist-hit-r',
+    'tpl-seed-bank_demo-aml-watchlist-hit-risk-t',
     'AML watchlist hit — Risk team in-app',
     'IN_APP',
     'role:risk_analyst',
@@ -1530,7 +1530,7 @@ mswDispatchLog.push(
   ),
   _mkDispatch(
     'BIL',
-    'tpl-seed-bil-claim-approval-customer',
+    'tpl-seed-bil-claim-approval-customer-',
     'Claim approval — Customer email',
     'EMAIL',
     'dorji@customer.test',
