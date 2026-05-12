@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, CheckCircle2, Info, AlertTriangle, XCircle } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Bell, CheckCircle2, Info, AlertTriangle, XCircle, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { api } from '@/lib/api';
 import { useNotifications, type Notification, type NotificationLevel } from './useNotifications';
 
 const ICON: Record<NotificationLevel, typeof Info> = {
@@ -22,6 +24,23 @@ export function NotificationBell() {
   const { notifications, unread, connected, markAllRead } = useNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  // Fetch every active case scenario so the bell can surface "what's
+  // currently running" alongside live SSE events. The SSE stream only
+  // emits on changes (alert.created, case.assigned, etc.) so the bell
+  // would otherwise look empty on a fresh login. Refetch every 60s —
+  // the active set changes rarely.
+  const activeScenarios = useQuery({
+    queryKey: ['notification-bell', 'active-scenarios'],
+    queryFn: () => api.caseScenariosList({ status: 'ACTIVE', page_size: 200 }),
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  const activeRows = activeScenarios.data?.items ?? [];
+  const activeCount = activeRows.length;
+  // Bell badge counts SSE-unread + the active-scenarios baseline so a
+  // freshly-loaded SPA shows a non-zero count when scenarios are armed.
+  const badgeCount = unread + activeCount;
 
   // Click-outside to close.
   useEffect(() => {
@@ -45,17 +64,24 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={toggle}
-        aria-label={`Notifications (${unread} unread)`}
+        aria-label={`Notifications (${unread} unread, ${activeCount} active scenarios)`}
         data-testid="notification-bell"
         className="relative inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-divider/60 transition-colors"
       >
         <Bell size={16} className="text-ink-sub" strokeWidth={1.75} />
-        {unread > 0 && (
+        {badgeCount > 0 && (
           <span
             data-testid="notification-unread-badge"
             className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center"
+            title={
+              unread > 0 && activeCount > 0
+                ? `${unread} unread · ${activeCount} active scenarios`
+                : unread > 0
+                  ? `${unread} unread`
+                  : `${activeCount} active scenarios`
+            }
           >
-            {unread > 9 ? '9+' : unread}
+            {badgeCount > 9 ? '9+' : badgeCount}
           </span>
         )}
         <span
@@ -84,9 +110,79 @@ export function NotificationBell() {
               )}
             </p>
           </div>
+
+          {/* Active scenarios — always visible so the dropdown isn't empty
+              on a fresh login. Count + first-10 entries; "View all" jumps
+              to the Case Scenarios admin page. */}
+          <div
+            className="border-b border-divider px-4 py-3"
+            data-testid="notification-active-scenarios"
+          >
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Currently running scenarios
+              </p>
+              <span
+                className="rounded-full bg-action/10 px-2 py-[1px] text-[11px] font-semibold text-action"
+                data-testid="notification-active-scenarios-count"
+              >
+                {activeScenarios.isLoading ? '…' : activeCount}
+              </span>
+            </div>
+            {activeScenarios.isLoading ? (
+              <p className="text-[11px] text-muted">Loading…</p>
+            ) : activeScenarios.isError ? (
+              <p
+                className="text-[11px] text-danger"
+                role="alert"
+                data-testid="notification-active-scenarios-error"
+              >
+                Could not load active scenarios.
+              </p>
+            ) : activeCount === 0 ? (
+              <p
+                className="text-[11px] text-muted italic"
+                data-testid="notification-active-scenarios-empty"
+              >
+                No scenarios in ACTIVE state. Activate a scenario from the
+                Case Scenarios admin page.
+              </p>
+            ) : (
+              <>
+                <ul className="space-y-1" data-testid="notification-active-scenarios-list">
+                  {activeRows.slice(0, 10).map((sc) => (
+                    <li key={sc.scenario_id}>
+                      <Link
+                        to={`/admin/case-scenarios?focus=${encodeURIComponent(sc.scenario_id)}`}
+                        onClick={() => setOpen(false)}
+                        className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-divider/40 transition-colors"
+                        data-testid={`notification-active-scenario-${sc.scenario_id}`}
+                      >
+                        <Zap size={12} className="shrink-0 text-action" strokeWidth={2} />
+                        <span className="flex-1 truncate text-[12px] text-ink">{sc.name}</span>
+                        <span className="text-[10px] font-mono text-muted">
+                          {sc.case_category} · {sc.priority}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {activeCount > 10 && (
+                  <Link
+                    to="/admin/case-scenarios?status=ACTIVE"
+                    onClick={() => setOpen(false)}
+                    className="mt-2 block text-center text-[11px] text-action hover:underline"
+                  >
+                    View all {activeCount} active scenarios →
+                  </Link>
+                )}
+              </>
+            )}
+          </div>
+
           {notifications.length === 0 ? (
             <p className="px-4 py-6 text-center text-[12px] text-muted">
-              No notifications yet. Run a scenario or wait for an SLA breach.
+              No live notifications yet. Run a scenario or wait for an SLA breach.
             </p>
           ) : (
             <ul className="divide-y divide-divider">
