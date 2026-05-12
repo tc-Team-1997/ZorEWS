@@ -18,6 +18,8 @@ import { initReactI18next } from 'react-i18next';
 export const SUPPORTED_LANGS = [
   { code: 'en', label: 'English' },
   { code: 'hi', label: 'हिन्दी' },
+  { code: 'dz', label: 'རྫོང་ཁ' },
+  { code: 'ne', label: 'नेपाली' },
 ] as const;
 
 export type LangCode = (typeof SUPPORTED_LANGS)[number]['code'];
@@ -295,13 +297,297 @@ const hi: typeof en = {
   },
 };
 
+// Dzongkha (Bhutanese) — machine draft. Covers the same surface as
+// the English bundle. Domain terms (EWS, PD, SHAP, CAPTCHA, SLA,
+// IFRS) and brand/product names stay in Latin script — that mirrors
+// real Bhutanese banking UI convention. A native reviewer should
+// pass over this before the BIL deployment goes live.
+const dz: typeof en = {
+  common: {
+    sign_in: 'ནང་འཛུལ་',
+    sign_out: 'ཕྱིར་འཐོན་',
+    username: 'སྤྱོད་མིང་',
+    password: 'གསང་ཡིག་',
+    email: 'གློག་འཕྲིན་',
+    refresh: 'ཡང་བསྐྱར་',
+    save: 'ཉར་ཚགས་',
+    cancel: 'ཕྱིར་འཐེན་',
+    continue: 'མུ་མཐུད་',
+    download: 'ཕབ་ལེན་',
+    loading: 'མངོན་འདྲེན་འབད་དོ…',
+    language: 'སྐད་ཡིག་',
+  },
+  nav: {
+    dashboard: 'གདོང་ཁྲམ་',
+    alerts: 'དྲན་སྐུལ་',
+    customers: 'ཞབས་ཏོག་སྤྱོད་མི་',
+    rules: 'ཁྲིམས་ལུགས་',
+    ews_rules: 'EWS ཁྲིམས་ལུགས་བཟོ་མཁན་',
+    cases: 'གནད་དོན་ (རྙིང་པ)',
+    cms_cases: 'གནད་དོན་འཛིན་སྐྱོང་',
+    scenario: 'གནས་སྟངས་',
+    reports: 'སྙན་ཞུ་',
+    analytics: 'དབྱེ་ཞིབ་',
+    my_sessions: 'ང་གི་ལས་དུས་',
+    my_activity: 'ང་གི་བྱ་སྤྱོད་',
+    users: 'སྤྱོད་མི་',
+    integrations: 'མཉམ་སྦྱོར་',
+    audit_log: 'ཞིབ་དཔྱད་ཐོ་',
+    admin_activity: 'བདག་སྐྱོང་བྱ་སྤྱོད་',
+    webhooks: 'Webhooks',
+    tenants: 'གནས་མི་',
+    service_clients: 'ཞབས་ཏོག་གི་ཡོངས་འབྲེལ་',
+    user_access_override: 'སྤྱོད་མིའི་འཛུལ་སྤྱོད་འགོ་ཁྲིད་',
+    sla_config: 'SLA བཀོད་སྒྲིག་',
+    notification_templates: 'བརྡ་སྦྱོར་གྱི་དཔེ་གཞི་',
+    notification_dispatches: 'བརྡ་སྦྱོར་གཏང་ཐོ་',
+    escalation_matrix: 'གོང་འཕེལ་སྤྲོས་པའི་མ་ཁུག་',
+    escalation_worker: 'གོང་འཕེལ་སྤྲོས་པའི་ལས་མི་',
+    case_scenarios: 'གནད་དོན་གནས་སྟངས་',
+    risk_operations: 'ཉེན་ཁའི་ལས་སྤྱོད་',
+    tenant: 'གནས་མི་',
+  },
+  login: {
+    heading: 'ནང་འཛུལ་',
+    subtitle: 'དབང་ཆ་ཡོད་པའི་ལས་མི་ཁོ་ནའི་དོན་ལུ་ ཉེན་ཁའི་ལས་སྤྱོད་',
+    forgot_password: 'གསང་ཡིག་བརྗེད་སོང་ངག?',
+    new_to_apex: 'ZorEWS ལུ་གསར་ཨིན་ནོ?',
+    create_account: 'རྩིས་ཐོ་གསར་བཟོ་',
+    invalid_credentials: 'ཁ་བྱང་ཆ་ཚན་ནུས་མེད་འདུག། ཡང་བསྐྱར་འབད་གནང་།',
+    locked_account: 'རྩིས་ཐོ་ལྡེ་མིག་བརྒྱབས་འདུག། ཁྱོད་ཀྱི་འཛིན་སྐྱོང་པ་ལུ་འབྲེལ་བ་འཐབ།',
+    generic_error: 'ནང་འཛུལ་མ་ཐུབ། ཡང་བསྐྱར་འབད་གནང་།',
+    network_unreachable:
+      'སར་ཝར་ལུ་འབྲེལ་བ་འཐབ་མ་ཚུགས། Dev སར་ཝར་འགྱིར་བཞིན་ཡོད་པ་སྦྱར་ནས་ ཤོག་ལེབ་ཡང་བསྐྱར་མངོན་འདྲེན་འབད་གནང་ (Cmd/Ctrl+Shift+R)།',
+    rate_limited: 'ནང་འཛུལ་འབད་ནིའི་ཚོད་མང་སོང་ངག། སྐར་ཆ་གཅིག་སྒུག་ནས་ཡང་བསྐྱར་འབད་གནང་།',
+    idle_signed_out:
+      'ལས་སྤྱོད་མེད་པར་སྡོད་པའི་དུས་ཀྱི་རྗེས་ལུ་ ཕྱིར་འཐོན་འགྱུར་ཡོད། ཡང་བསྐྱར་ནང་འཛུལ་འབད་གནང་།',
+    demo_accounts_label: 'གསལ་སྟོན་རྩིས་ཐོ་',
+    demo_passwords_in_seed: 'གསང་ཡིག་ཚུ་ auth-svc ས་བོན་ནང་ཡོད་',
+    captcha_required: 'མ་ཐུབ་པའི་ཚོད་མང་སོང་ངག — འོག་གི་ CAPTCHA སེལ་འཐུ་འབད་གནང་།',
+    captcha_failed: 'CAPTCHA ལན་ནོར་སོང་ངག་ ཡངན་ དུས་ཡོལ་སོང་ངག། འོག་གི་གསར་པ་འབད་གནང་།',
+    captcha_answer_label: 'ཁྱོད་ཀྱི་ལན་',
+    captcha_refresh: 'CAPTCHA ཡང་བསྐྱར་',
+  },
+  forgot: {
+    heading: 'གསང་ཡིག་ཡང་བསྐྱར་སྒྲིག་',
+    subtitle:
+      'ཁྱོད་ཀྱི་ ZorEWS སྤྱོད་མིང་ ཡངན་ གློག་འཕྲིན་ཁ་བྱང་འབྲི་གནང་ — སྐར་མ་ ༡༥ གི་རིང་ལུ་ ལན་གཅིག་ལས་ལག་ལེན་མི་འཐུབ་པའི་ ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་ཅིག་གསར་བཟོ་འབད་གི།',
+    identifier_label: 'སྤྱོད་མིང་ ཡངན་ གློག་འཕྲིན་',
+    send_link: 'ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་གཏང་',
+    back_to_signin: '← ནང་འཛུལ་ལུ་ལོག་',
+    remember_it: 'དྲན་སོང་ངག?',
+    inbox_heading: 'ཁྱོད་ཀྱི་ནང་ཡིག་ཁུག་ལུ་བལྟ་',
+    prototype_link_label: 'གསར་གཞི་ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་ (Dev ནང་ SMTP མེད་)',
+    copy_link: 'ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་འདྲ་བཤུས་',
+    expires_default: 'སྐར་མ་ ༡༥ གི་ནང་འཁོད་',
+    failure: 'ཡང་བསྐྱར་སྒྲིག་མ་ཐུབ། ཡང་བསྐྱར་འབད་གནང་།',
+  },
+  reset: {
+    heading: 'གསང་ཡིག་གསར་པ་འདེམས་',
+    subtitle: 'འབྲེལ་མཐུད་འདི་ལན་གཅིག་ལས་ལག་ལེན་མི་འཐུབ་ ལ་སྦྲགས་ གཏང་མ་གཏང་པའི་སྐར་མ་ ༡༥ གི་རྗེས་ལུ་དུས་ཡོལ་འགྱུར།',
+    new_password: 'གསང་ཡིག་གསར་པ་',
+    confirm_new_password: 'གསང་ཡིག་གསར་པ་ངེས་པར་འབད་',
+    submit: 'གསང་ཡིག་ཡང་བསྐྱར་སྒྲིག་',
+    success_heading: 'གསང་ཡིག་གསར་སྒྲིག་འགྱུར་སོང་',
+    continue_to_signin: 'ནང་འཛུལ་ལུ་མུ་མཐུད་',
+    expired:
+      'ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་འདི་ནུས་མེད་ ཡངན་ དུས་ཡོལ་སོང་ངག། གསང་ཡིག་བརྗེད་པའི་ཤོག་ལེབ་ལས་གསར་པ་ཞུ་གནང་།',
+    generic_error: 'ཡང་བསྐྱར་སྒྲིག་མ་ཐུབ། ཡང་བསྐྱར་འབད་གནང་།',
+    need_new_link: 'འབྲེལ་མཐུད་གསར་པ་དགོ?',
+    request_another: 'གཞན་ཞུ་',
+  },
+  first_login: {
+    welcome: 'ག་མོ་ལེགས་སོ།',
+    heading: 'ཁྱོད་ཀྱི་རྩིས་ཐོ་སྒྲིག་འགོ་བཙུགས་',
+    subtitle:
+      'མུ་མཐུད་མ་འགྱུར་གོང་ལུ་ གསང་ཡིག་གསར་པ་འདེམས་ནས་ གསར་གཞི་ཁ་ཚིག་ལུ་ལེན་གནང་། འདི་གི་ཤོག་ལེབ་འདི་ལོག་མ་མཐོང་།',
+    accept_terms:
+      'ང་གིས་ཤེས་ཡོད་ འདི་ནི་གསར་གཞི་ཁོར་ཡུག་ཅིག་ ཨིན་ལ་ ཟུར་སྦྱར་གནད་སྡུད་ཡོད། སྡེ་ཚན་ཡོངས་ཀྱི་གདོང་ཁྲམ་ དྲན་སྐུལ་ དང་ ཕྱིར་གཏང་ཚུ་གསང་བར་ངོས་བཟུང་འབད་གི།',
+    must_accept_terms: 'མུ་མཐུད་ནིའི་དོན་ལུ་ གསར་གཞི་ཁ་ཚིག་ལུ་ལེན་དགོ།',
+    submit: 'གསང་ཡིག་སྒྲིག་ ལ་སྦྲགས་ མུ་མཐུད་',
+    generic_error: 'ལན་ཐེངས་དང་པོའི་ནང་འཛུལ་མ་ཚུགས། ཡང་བསྐྱར་འབད་གནང་།',
+    password_reused: 'གསང་ཡིག་འདི་སྔོན་ལུ་ལག་ལེན་སོང་ཡོད — སོ་སོར་ཅིག་འདེམས་གནང་།',
+  },
+  idle: {
+    title: 'ཁྱོད་ཕྱིར་འཐོན་འགྱུར་འགྲོ་',
+    body: 'ཉེན་སྲུང་གི་དོན་ལུ་ སྐར་མ་ {{minutes}} གི་ལས་སྤྱོད་མེད་པའི་རྗེས་ལུ་ ཁྱོད་ཀྱི་ལས་དུས་མཇུག་སྒྲིལ་འགྱུར།',
+    countdown_prefix: 'ཕྱིར་འཐོན་',
+    countdown_suffix: 'སྐར་ཆའི་ནང་འཁོད།',
+    sign_out_now: 'ད་ལྟོ་ཕྱིར་འཐོན་',
+    stay_signed_in: 'ནང་འཛུལ་སྡོད་',
+  },
+  sessions: {
+    heading: 'ལས་སྤྱོད་བཞིན་པའི་ལས་དུས་',
+    subtitle:
+      'ད་ལྟོ་ཁྱོད་ཀྱི་ ZorEWS རྩིས་ཐོ་ལུ་ནང་འཛུལ་བཞིན་པའི་ཡོ་བྱད་ · ཁྱོད་ཀྱིས་ངོ་མི་ཤེས་པའི་གང་རུང་ཕྱིར་འཐེན་འབད་',
+    your_sessions: 'ཁྱོད་ཀྱི་ལས་དུས་',
+    sign_out_other: 'ཡོ་བྱད་གཞན་ལས་ཕྱིར་འཐོན་',
+    this_device: 'ཡོ་བྱད་འདི་',
+    sign_out_one: 'ཕྱིར་འཐོན་',
+    none_to_revoke: 'ཕྱིར་འཐོན་ནིའི་ལས་དུས་གཞན་མེད།',
+    signed_out_n: 'ལས་དུས་གཞན་ {{count}} ཕྱིར་འཐོན་འགྱུར་སོང་།',
+    signed_out_n_plural: 'ལས་དུས་གཞན་ {{count}} ཕྱིར་འཐོན་འགྱུར་སོང་།',
+    no_sessions: 'ལས་སྤྱོད་བཞིན་པའི་ལས་དུས་མ་ཐོབ།',
+    load_failure: 'ལས་དུས་མངོན་འདྲེན་མ་ཐུབ། ཡང་བསྐྱར་འབད་གནང་།',
+    last_active: 'མཐའ་མཇུག་ལས་སྤྱོད་',
+    signed_in: 'ནང་འཛུལ་སོང་',
+    just_now: 'ད་ལྟོ་',
+    explainer:
+      'ནང་འཛུལ་རེ་གིས་སར་ཝར་ངོས་ལུ་རྗེས་གཟུང་བཞིན་པའི་ལས་དུས་ཅིག་གསར་བཟོ་འབདཝ་ཨིན། ལས་དུས་ཅིག་ཕྱིར་འཐེན་འབདཝ་ད་ དེའི་ Refresh Token འདི་འཕྲལ་མར་ནུས་མེད་འགྱུར — ཡོ་བྱད་འདི་ཡང་བསྐྱར་ནང་འཛུལ་འབད་དགོ། ད་ལྟོ་ཡོད་པའི་ Access Token ཚུ་ སྐར་མ་ ༡༥ གི་རང་བཞིན་གྱི་དུས་ཡོལ་མ་སོང་བར་དུ་ནུས་པ་ཡོད, དེའི་རྗེས་ལུ་ལས་སྤྱོད་ཀྱི་ཞུ་བ་མཇུག་མི་སྒྲིལ།',
+  },
+};
+
+// Nepali — machine draft. Covers the same surface as the English
+// bundle. Domain terms (EWS, PD, SHAP, CAPTCHA, SLA, IFRS) and brand
+// names stay in Latin script. A native reviewer should pass over this
+// before going live.
+const ne: typeof en = {
+  common: {
+    sign_in: 'साइन इन गर्नुहोस्',
+    sign_out: 'साइन आउट',
+    username: 'प्रयोगकर्ता नाम',
+    password: 'पासवर्ड',
+    email: 'इमेल',
+    refresh: 'रिफ्रेस',
+    save: 'सुरक्षित गर्नुहोस्',
+    cancel: 'रद्द गर्नुहोस्',
+    continue: 'जारी राख्नुहोस्',
+    download: 'डाउनलोड',
+    loading: 'लोड हुँदै…',
+    language: 'भाषा',
+  },
+  nav: {
+    dashboard: 'ड्यासबोर्ड',
+    alerts: 'अलर्ट',
+    customers: 'ग्राहक',
+    rules: 'नियम',
+    ews_rules: 'EWS नियम निर्माता',
+    cases: 'केस (पुरानो)',
+    cms_cases: 'केस व्यवस्थापन',
+    scenario: 'परिदृश्य',
+    reports: 'रिपोर्ट',
+    analytics: 'विश्लेषण',
+    my_sessions: 'मेरो सत्रहरू',
+    my_activity: 'मेरो गतिविधि',
+    users: 'प्रयोगकर्ताहरू',
+    integrations: 'एकीकरण',
+    audit_log: 'अडिट लग',
+    admin_activity: 'एडमिन गतिविधि',
+    webhooks: 'Webhooks',
+    tenants: 'टेनेन्ट',
+    service_clients: 'सेवा क्लाइन्ट',
+    user_access_override: 'प्रयोगकर्ता पहुँच ओभरराइड',
+    sla_config: 'SLA कन्फिग',
+    notification_templates: 'सूचना टेम्प्लेट',
+    notification_dispatches: 'सूचना पठाएको लग',
+    escalation_matrix: 'एस्क्यालेसन म्याट्रिक्स',
+    escalation_worker: 'एस्क्यालेसन वर्कर',
+    case_scenarios: 'केस परिदृश्य',
+    risk_operations: 'जोखिम सञ्चालन',
+    tenant: 'टेनेन्ट',
+  },
+  login: {
+    heading: 'साइन इन गर्नुहोस्',
+    subtitle: 'अधिकृत कर्मचारीका लागि मात्र जोखिम सञ्चालन',
+    forgot_password: 'पासवर्ड बिर्सनुभयो?',
+    new_to_apex: 'ZorEWS मा नयाँ हुनुहुन्छ?',
+    create_account: 'खाता खोल्नुहोस्',
+    invalid_credentials: 'अमान्य प्रमाणपत्र। कृपया पुनः प्रयास गर्नुहोस्।',
+    locked_account: 'खाता बन्द छ। आफ्नो प्रशासकलाई सम्पर्क गर्नुहोस्।',
+    generic_error: 'साइन-इन असफल भयो। पुनः प्रयास गर्नुहोस्।',
+    network_unreachable:
+      'सर्भरमा पुग्न सकिएन। Dev सर्भर चलिरहेको छ कि छैन जाँच गर्नुहोस् र पृष्ठ रिलोड गर्नुहोस् (Cmd/Ctrl+Shift+R)।',
+    rate_limited: 'धेरै असफल साइन-इन प्रयासहरू। एक मिनेट पर्खेर पुनः प्रयास गर्नुहोस्।',
+    idle_signed_out:
+      'निष्क्रियताको अवधि पछि तपाईंलाई साइन आउट गरिएको छ। पुनः साइन इन गर्नुहोस्।',
+    demo_accounts_label: 'डेमो खाताहरू',
+    demo_passwords_in_seed: 'पासवर्डहरू auth-svc सिडमा छन्',
+    captcha_required: 'धेरै असफल प्रयासहरू — तलको CAPTCHA समाधान गर्नुहोस्।',
+    captcha_failed: 'CAPTCHA उत्तर गलत वा म्याद सकिएको थियो। तल नयाँ प्रयास गर्नुहोस्।',
+    captcha_answer_label: 'तपाईंको उत्तर',
+    captcha_refresh: 'CAPTCHA रिफ्रेस गर्नुहोस्',
+  },
+  forgot: {
+    heading: 'आफ्नो पासवर्ड रिसेट गर्नुहोस्',
+    subtitle:
+      'आफ्नो ZorEWS प्रयोगकर्ता नाम वा इमेल ठेगाना प्रविष्ट गर्नुहोस् — हामी १५ मिनेटसम्म मान्य एकल-प्रयोग रिसेट लिङ्क बनाउनेछौं।',
+    identifier_label: 'प्रयोगकर्ता नाम वा इमेल',
+    send_link: 'रिसेट लिङ्क पठाउनुहोस्',
+    back_to_signin: '← साइन इनमा फर्कनुहोस्',
+    remember_it: 'सम्झनुभयो?',
+    inbox_heading: 'आफ्नो इनबक्स जाँच्नुहोस्',
+    prototype_link_label: 'प्रोटोटाइप रिसेट लिङ्क (Dev मा SMTP छैन)',
+    copy_link: 'रिसेट लिङ्क प्रतिलिपि गर्नुहोस्',
+    expires_default: '१५ मिनेटमा',
+    failure: 'रिसेट अनुरोध असफल भयो। पुनः प्रयास गर्नुहोस्।',
+  },
+  reset: {
+    heading: 'नयाँ पासवर्ड छान्नुहोस्',
+    subtitle: 'यो लिङ्क एकल-प्रयोग हो र जारी गरिएको १५ मिनेट पछि म्याद सकिन्छ।',
+    new_password: 'नयाँ पासवर्ड',
+    confirm_new_password: 'नयाँ पासवर्ड पुष्टि गर्नुहोस्',
+    submit: 'पासवर्ड रिसेट गर्नुहोस्',
+    success_heading: 'पासवर्ड अपडेट भयो',
+    continue_to_signin: 'साइन इनमा जारी राख्नुहोस्',
+    expired:
+      'यो रिसेट लिङ्क अमान्य वा म्याद सकिएको छ। पासवर्ड बिर्सनुभयो पृष्ठबाट नयाँ अनुरोध गर्नुहोस्।',
+    generic_error: 'रिसेट असफल भयो। कृपया पुनः प्रयास गर्नुहोस्।',
+    need_new_link: 'नयाँ लिङ्क चाहिन्छ?',
+    request_another: 'अर्को अनुरोध गर्नुहोस्',
+  },
+  first_login: {
+    welcome: 'स्वागत छ,',
+    heading: 'आफ्नो खाता सेटअप गर्नुहोस्',
+    subtitle:
+      'जारी राख्नुअघि नयाँ पासवर्ड छान्नुहोस् र प्रोटोटाइप सर्तहरू स्वीकार गर्नुहोस्। तपाईंले यो स्क्रिन फेरि देख्नुहुने छैन।',
+    accept_terms:
+      'म बुझ्छु कि यो सिन्थेटिक डेटा भएको प्रोटोटाइप वातावरण हो। म सबै ड्यासबोर्ड, अलर्ट, र निर्यातहरूलाई गोप्य रूपमा व्यवहार गर्नेछु।',
+    must_accept_terms: 'जारी राख्न तपाईंले प्रोटोटाइप सर्तहरू स्वीकार गर्नुपर्छ।',
+    submit: 'पासवर्ड सेट गरेर जारी राख्नुहोस्',
+    generic_error: 'पहिलो पटक साइन-इन पूरा गर्न सकिएन। पुनः प्रयास गर्नुहोस्।',
+    password_reused: 'यो पासवर्ड पहिले प्रयोग गरिएको छ — अर्को छान्नुहोस्।',
+  },
+  idle: {
+    title: 'तपाईंलाई चाँडै साइन आउट गरिनेछ',
+    body: 'सुरक्षाका लागि, {{minutes}} मिनेटको निष्क्रियता पछि तपाईंको सत्र समाप्त हुन्छ।',
+    countdown_prefix: 'साइन आउट हुँदै',
+    countdown_suffix: 'सेकेन्डमा।',
+    sign_out_now: 'अहिले नै साइन आउट गर्नुहोस्',
+    stay_signed_in: 'साइन इन रहनुहोस्',
+  },
+  sessions: {
+    heading: 'सक्रिय सत्रहरू',
+    subtitle:
+      'हाल तपाईंको ZorEWS खातामा साइन इन भएका डिभाइसहरू · नचिनेका कुनै पनि रद्द गर्नुहोस्',
+    your_sessions: 'तपाईंका सत्रहरू',
+    sign_out_other: 'अन्य डिभाइसहरूबाट साइन आउट गर्नुहोस्',
+    this_device: 'यो डिभाइस',
+    sign_out_one: 'साइन आउट',
+    none_to_revoke: 'साइन आउट गर्न अन्य सत्रहरू छैनन्।',
+    signed_out_n: '{{count}} अन्य सत्रबाट साइन आउट गरियो।',
+    signed_out_n_plural: '{{count}} अन्य सत्रहरूबाट साइन आउट गरियो।',
+    no_sessions: 'सक्रिय सत्र भेटिएन।',
+    load_failure: 'सत्रहरू लोड हुन सकेन। रिफ्रेस गर्ने प्रयास गर्नुहोस्।',
+    last_active: 'अन्तिम सक्रिय',
+    signed_in: 'साइन इन भयो',
+    just_now: 'अहिले',
+    explainer:
+      'हरेक साइन-इनले सर्भर-साइडमा ट्र्याक हुने सत्र बनाउँछ। सत्र रद्द गर्दा यसको रिफ्रेस टोकन तुरुन्तै अमान्य हुन्छ — त्यो डिभाइसले फेरि साइन इन गर्नुपर्नेछ। हालका एक्सेस टोकनहरू तिनको प्राकृतिक १५-मिनेटको म्याद सकिएसम्म मान्य रहन्छन्, जसपछि अर्को अनुरोध असफल हुनेछ।',
+  },
+};
+
 const STORAGE_KEY = 'apex.ews.lang';
 
 void i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources: { en: { translation: en }, hi: { translation: hi } },
+    resources: {
+      en: { translation: en },
+      hi: { translation: hi },
+      dz: { translation: dz },
+      ne: { translation: ne },
+    },
     fallbackLng: 'en',
     supportedLngs: SUPPORTED_LANGS.map((l) => l.code),
     interpolation: { escapeValue: false }, // React already escapes
