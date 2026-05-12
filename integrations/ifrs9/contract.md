@@ -8,9 +8,9 @@
 
 Bidirectional integration with the bank's IFRS 9 staging engine:
 
-- **Inbound to APEX EWS:** stage migration signals (Stage 1 → 2 → 3) and ECL
+- **Inbound to ZorEWS:** stage migration signals (Stage 1 → 2 → 3) and ECL
   inputs per loan.
-- **Outbound from APEX EWS:** PD overrides + behavioural indicators that may
+- **Outbound from ZorEWS:** PD overrides + behavioural indicators that may
   influence stage assignment in the next monthly run.
 
 ## Transport
@@ -48,7 +48,7 @@ No Kafka. IFRS 9 cycle is monthly; real-time events do not apply.
 
 ## Outbound payload
 
-`POST /ifrs9/inputs` — APEX EWS publishes a per-customer feature pack the IFRS
+`POST /ifrs9/inputs` — ZorEWS publishes a per-customer feature pack the IFRS
 9 engine reads at month-end:
 
 ```json

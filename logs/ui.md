@@ -18,12 +18,12 @@
 
 **Project root**
 - `package.json` — Vite 5, React 18, RHF + zod, zustand, lucide-react, recharts, axios, @tanstack/react-query, msw, vitest + @testing-library; build script is `tsc --noEmit && vite build`.
-- `tailwind.config.ts` — tokens copied verbatim from `.dms-reference/dms-tailwind.config.ts`; header rewritten to "APEX EWS — tokens mirrored from DMS for consistent banking UI".
+- `tailwind.config.ts` — tokens copied verbatim from `.dms-reference/dms-tailwind.config.ts`; header rewritten to "ZorEWS — tokens mirrored from DMS for consistent banking UI".
 - `postcss.config.js` — tailwind + autoprefixer.
 - `vite.config.ts` — path alias `@` → `src`, host enabled.
 - `vitest.config.ts` — jsdom env, globals, setup file at `src/__tests__/setup.ts`.
 - `tsconfig.json` — strict, bundler resolution, vitest globals types, `@/*` paths.
-- `index.html` — title "APEX EWS", Inter + JetBrains Mono via Google Fonts.
+- `index.html` — title "ZorEWS", Inter + JetBrains Mono via Google Fonts.
 - `public/favicon.svg` — token-coloured navy/blue shield mark.
 - `.gitignore`.
 
@@ -67,7 +67,7 @@
 
 ### Visual / UX description (Login)
 
-- **Left half (lg+)** — `bg-brand-navy` panel, animated `auth-grid` dot pattern at 10% opacity, two large blurred blobs (`brand-blue/35` top-right, `brand-sky/25` bottom-left) drifting on a 12s/14s loop. Top-left brand mark (blue square + ShieldCheck + "APEX EWS"). Centre — 4 rotating slides with 3D perspective rotateY(-14°→0°→10°) + blur fade transition over 900 ms; each slide has icon tile (white/10 backdrop), 26px title, 13px body. Bottom — 4 progress dots: inactive 1.5px circles, active 40px pill that fills white over the 5.2s slide interval (`auth-dot-fill` keyframes). Click-to-jump.
+- **Left half (lg+)** — `bg-brand-navy` panel, animated `auth-grid` dot pattern at 10% opacity, two large blurred blobs (`brand-blue/35` top-right, `brand-sky/25` bottom-left) drifting on a 12s/14s loop. Top-left brand mark (blue square + ShieldCheck + "ZorEWS"). Centre — 4 rotating slides with 3D perspective rotateY(-14°→0°→10°) + blur fade transition over 900 ms; each slide has icon tile (white/10 backdrop), 26px title, 13px body. Bottom — 4 progress dots: inactive 1.5px circles, active 40px pill that fills white over the 5.2s slide interval (`auth-dot-fill` keyframes). Click-to-jump.
 - **Right half** — white surface, top 46% has a faint navy radial grid masked into a vertical fade. Centred form (max 360px): blue rounded-xl shield icon, "Sign in" / "Risk operations for authorised staff only", username + password Inputs, primary Button full-width, divider, demo-accounts hint in muted JetBrains Mono.
 
 ### Key decisions

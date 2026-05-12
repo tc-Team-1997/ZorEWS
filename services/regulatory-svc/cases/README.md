@@ -1,6 +1,6 @@
 # regulatory-svc/cases
 
-Case management for the APEX EWS. Implements **T3.5** (case state machine + assignment + action log) and the prototype hand-off to Collection (consumes `apex.case.events`).
+Case management for the ZorEWS. Implements **T3.5** (case state machine + assignment + action log) and the prototype hand-off to Collection (consumes `apex.case.events`).
 
 ## Lifecycle (FR-CASE-1)
 

@@ -1,6 +1,6 @@
 # auth-svc
 
-JWT + TOTP MFA service for APEX EWS (T1.12 / FR-INT-4).
+JWT + TOTP MFA service for ZorEWS (T1.12 / FR-INT-4).
 
 ## Stack choice — Node.js + TypeScript (Fastify)
 

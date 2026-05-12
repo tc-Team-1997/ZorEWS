@@ -1,4 +1,4 @@
-# APEX EWS — Requirements
+# ZorEWS — Requirements
 
 > Derived from `APEX_EWS_Roadmap.pdf` (v1.0, April 2026). Scope below is the **prototype monorepo** the agent loop will build, not the literal 24-month tendered banking platform. Production deployment, regulator sign-off, real CBS/AML integration and ISO 27001 audit are out of scope here.
 

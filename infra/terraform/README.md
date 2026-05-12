@@ -1,4 +1,4 @@
-# APEX EWS — Terraform
+# ZorEWS — Terraform
 
 Layered IaC. Apply order is strictly numerical. Each layer publishes outputs that the next layer consumes via `terraform_remote_state` (or `data` lookups in production via SSM).
 

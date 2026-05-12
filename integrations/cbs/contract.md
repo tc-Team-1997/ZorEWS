@@ -40,7 +40,7 @@ OpenAPI: `integrations/cbs/openapi.yaml`. Backfills + control-plane only; not th
 
 ## Security
 
-- mTLS over PrivateLink between bank VPC and APEX EWS VPC. No public route.
+- mTLS over PrivateLink between bank VPC and ZorEWS VPC. No public route.
 - OAuth 2.0 client-credentials with rotating client secret in AWS Secrets Manager (CMK `alias/apex-ews-secret`).
 - PII redaction: customer name, ID number, mobile MSISDN are **not** transmitted in event payload — only stable opaque `customer_id` (UUID v4 minted in CBS). PII required by UI is fetched per-request via REST with row-level audit trail.
 - Field-level encryption for any free-text notes (ChaCha20-Poly1305 wrapped by `alias/apex-ews-aurora`).

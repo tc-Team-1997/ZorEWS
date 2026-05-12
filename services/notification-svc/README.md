@@ -1,6 +1,6 @@
 # notification-svc
 
-Email + SMS fan-out for the APEX EWS alert pipeline (T1.11).
+Email + SMS fan-out for the ZorEWS alert pipeline (T1.11).
 
 Subscribes (logically) to `apex.regulatory.events`. Routes each alert by
 severity through one or more adapters, with credential-driven fallback to a
@@ -66,7 +66,7 @@ required variable is missing the adapter quietly degrades to logging.
 * `src/templates/email.ts` — minimal HTML email with DMS navy header and a
   property table (id / severity / customer / rule / pd / risk-level).
   `${alert.summary}` is mapped to `alert.reason_summary` from agent-alert.
-* `src/templates/sms.ts` — `[APEX EWS][<SEV>] <reason> id:<short>` truncated
+* `src/templates/sms.ts` — `[ZorEWS][<SEV>] <reason> id:<short>` truncated
   hard at 160 chars (single SMS segment).
 
 ## Run

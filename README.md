@@ -1,4 +1,4 @@
-# APEX EWS
+# ZorEWS
 
 **Last updated:** 2026-05-05
 

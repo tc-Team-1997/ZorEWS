@@ -1,4 +1,4 @@
-# APEX EWS — Backend Database Schema
+# ZorEWS — Backend Database Schema
 
 **Last updated:** 2026-05-03 (post 10k-scale-up + app schemas)
 **Database:** PostgreSQL 16 (local: `apex-ews-pg` on `:55432`; production: Aurora PostgreSQL 16 Multi-AZ via `infra/terraform/30-data`)

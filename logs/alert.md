@@ -45,7 +45,7 @@ TypeScript + Node + Express to match the rest of the regulatory lane (`services/
 - `src/adapters/ses.ts` — SESAdapter using `SESv2Client` (lazy require so tests don't need the SDK). `makeEmailAdapter(env)` returns `LoggingAdapter` if `AWS_REGION` is unset.
 - `src/adapters/africas_talking.ts` — REST POST to `api.africastalking.com/version1/messaging`, `apiKey` header, urlencoded body, parses `SMSMessageData.Recipients[0].status`. `makeSmsAdapter(env)` returns LoggingAdapter unless both `AT_API_KEY` and `AT_USERNAME` are present. SMS body truncated to 160 chars.
 - `src/templates/email.ts` — minimal HTML email with DMS-navy header (`#0D2B6A`) + property table; substitutes `${alert.summary}` (= reason_summary).
-- `src/templates/sms.ts` — `[APEX EWS][<SEV>] <reason> id:<short>`, hard 160-char cap.
+- `src/templates/sms.ts` — `[ZorEWS][<SEV>] <reason> id:<short>`, hard 160-char cap.
 - `src/router.ts` — `channelsFor(severity)` returns the channels list per FR-ALERT-4: CRITICAL → [sms,email]; HIGH/MEDIUM → [email]; LOW → []. `fanout()` calls each adapter with a templated message.
 - `src/subscriber.ts` — `AlertSubscriber.onAlert(alert, target)` is the per-event callback the future kafkajs consumer will invoke.
 - `src/server.ts` — Express factory; `POST /notify`, `POST /events` (alias), `GET /healthz` (returns chosen adapter names).

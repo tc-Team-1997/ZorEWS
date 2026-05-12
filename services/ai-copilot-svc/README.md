@@ -1,6 +1,6 @@
 # ai-copilot-svc
 
-FastAPI service for the APEX EWS PD (Probability of Default) model.
+FastAPI service for the ZorEWS PD (Probability of Default) model.
 
 ## Endpoints
 

@@ -1,4 +1,4 @@
-# APEX EWS — Bootstrap & Verify
+# ZorEWS — Bootstrap & Verify
 
 > Run these commands in a normal macOS/Linux terminal (the agent sandbox couldn't execute them). Order matters — later steps depend on earlier outputs. Stop at the first failure and check `logs/<agent>.md` for that agent.
 

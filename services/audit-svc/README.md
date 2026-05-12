@@ -1,6 +1,6 @@
 # audit-svc
 
-Immutable audit-log service for APEX EWS (T1.13 / NFR-AUDIT).
+Immutable audit-log service for ZorEWS (T1.13 / NFR-AUDIT).
 
 ## Stack choice — Python + FastAPI
 

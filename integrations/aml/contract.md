@@ -19,7 +19,7 @@ REST webhooks both directions + a shared correlation_id.
 
 ## Inbound webhook
 
-`POST /aml/inbound` — AML system → APEX EWS.
+`POST /aml/inbound` — AML system → ZorEWS.
 
 ```json
 {
@@ -34,7 +34,7 @@ REST webhooks both directions + a shared correlation_id.
 
 ## Outbound webhook
 
-`POST /aml/outbound` — APEX EWS → AML.
+`POST /aml/outbound` — ZorEWS → AML.
 
 ```json
 {

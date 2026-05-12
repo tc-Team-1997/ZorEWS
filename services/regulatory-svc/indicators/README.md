@@ -1,6 +1,6 @@
 # regulatory-svc / indicators
 
-Indicator engine for APEX EWS. Owns the catalog (read-only here, seeded by
+Indicator engine for ZorEWS. Owns the catalog (read-only here, seeded by
 agent-rule), the compute functions for every catalog id, and the HTTP
 service that materialises indicator values for a (customer, snapshot)
 pair.

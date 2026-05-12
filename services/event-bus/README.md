@@ -4,7 +4,7 @@ Pluggable Producer/Consumer over local NDJSON, Kafka (kafkajs / MSK / Redpanda),
 
 ## Why
 
-The APEX EWS prototype emits events from several services — `regulatory-svc/alerts`, `regulatory-svc/cases`, `regulatory-svc/indicators`, BFF — and historically each had its own ad-hoc `OutboxProducer` writing NDJSON to disk. This package consolidates that:
+The ZorEWS prototype emits events from several services — `regulatory-svc/alerts`, `regulatory-svc/cases`, `regulatory-svc/indicators`, BFF — and historically each had its own ad-hoc `OutboxProducer` writing NDJSON to disk. This package consolidates that:
 
 - One `Producer` interface; three transports — InMemory, Outbox (file), Kafka (kafkajs)
 - One `Consumer` interface; one transport (Kafka). The Outbox file is read-back via `OutboxProducer.readAll(topic)` for tests/replays.

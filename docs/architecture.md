@@ -1,4 +1,4 @@
-# APEX EWS — Target Architecture
+# ZorEWS — Target Architecture
 
 > Phase 0 deliverable T0.4. Reference architecture for the prototype monorepo. The diagram below tracks the IaC + service skeleton this agent has shipped.
 
@@ -15,7 +15,7 @@ flowchart LR
     IFRS[IFRS 9 Engine]
   end
 
-  subgraph "APEX EWS — af-south-1"
+  subgraph "ZorEWS — af-south-1"
     direction TB
     subgraph "Edge"
       CF[CloudFront + WAF]

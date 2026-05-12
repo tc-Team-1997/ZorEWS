@@ -1,4 +1,4 @@
-# APEX EWS — Agent Roster
+# ZorEWS — Agent Roster
 
 > The build is run by an **Orchestrator** plus **8 module agents**. Agents only edit files inside their owned paths and append to their own log. The Orchestrator alone edits `TASKS.md` + `STATUS.md`.
 

@@ -1,4 +1,4 @@
-# APEX EWS — BAC-A Manual Gap Analysis
+# ZorEWS — BAC-A Manual Gap Analysis
 
 **Source:** `BAC A - EWS User Manual_v1.0` (CareEdge Risk Solutions, Jan 2023, 56 pages)
 **Generated:** 2026-05-03

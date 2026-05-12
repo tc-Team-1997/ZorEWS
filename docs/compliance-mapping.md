@@ -1,4 +1,4 @@
-# APEX EWS — Compliance Control Mapping
+# ZorEWS — Compliance Control Mapping
 
 > Phase 0 deliverable T0.5. Maps Kenya **Data Protection Act 2019 (DPA 2019)** and **ISO/IEC 27001:2022** Annex A controls onto the artefacts shipped in this monorepo.
 

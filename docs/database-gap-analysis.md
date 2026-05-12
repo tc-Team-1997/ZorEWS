@@ -1,4 +1,4 @@
-# APEX EWS — Database Gap Analysis
+# ZorEWS — Database Gap Analysis
 
 **Original generated:** 2026-05-03
 **Last updated:** 2026-05-03 (T4.13–T4.18 all live; **all 5 original gaps closed**; final cleanup of dead state dirs + Gap 4 clarification done)

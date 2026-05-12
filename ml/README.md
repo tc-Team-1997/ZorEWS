@@ -1,4 +1,4 @@
-# `ml/` — APEX EWS AI Risk Scoring (agent-ai)
+# `ml/` — ZorEWS AI Risk Scoring (agent-ai)
 
 End-to-end Probability-of-Default model + serving + drift monitoring.
 

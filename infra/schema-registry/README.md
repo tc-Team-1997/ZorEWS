@@ -1,6 +1,6 @@
 # Schema registry
 
-JSON Schema (Draft 2020-12) for the five APEX EWS Kafka topics. Compatibility
+JSON Schema (Draft 2020-12) for the five ZorEWS Kafka topics. Compatibility
 mode = **BACKWARD** (per FR-INT-3); a new `version` is required on any change
 that removes/renames a required field — CI rejects breaking changes.
 

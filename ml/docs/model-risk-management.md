@@ -1,4 +1,4 @@
-# Model Risk Management — APEX EWS PD Model v0.1.0
+# Model Risk Management — ZorEWS PD Model v0.1.0
 
 > **Live numbers source of truth:** `ml/models/pd/v0.1.0/metrics.json`. The
 > figures embedded below are taken from the first reproducible training run on

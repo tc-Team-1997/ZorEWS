@@ -1,6 +1,6 @@
-# APEX EWS — Source-System Inventory
+# ZorEWS — Source-System Inventory
 
-> Phase 0 deliverable T0.3. Lists every upstream system APEX EWS reads from or writes to, the data classes involved, expected volumes, and the contract draft + owner.
+> Phase 0 deliverable T0.3. Lists every upstream system ZorEWS reads from or writes to, the data classes involved, expected volumes, and the contract draft + owner.
 
 | # | System | Owner | Direction | Protocol | Frequency | Volume (peak) | Data classes | Contract |
 |---|--------|-------|-----------|----------|-----------|---------------|--------------|----------|

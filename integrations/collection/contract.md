@@ -6,7 +6,7 @@
 
 ## Scope
 
-Auto-routing of high-severity APEX EWS cases into the bank's existing
+Auto-routing of high-severity ZorEWS cases into the bank's existing
 collection workflow + status callbacks for closed-loop outcomes.
 
 ## Transport

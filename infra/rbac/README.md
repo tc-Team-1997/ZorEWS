@@ -1,6 +1,6 @@
 # RBAC matrix + quarterly access review
 
-Implements **T3.9**. The matrix in `matrix.json` is the source of truth for which role can perform which operation in APEX EWS.
+Implements **T3.9**. The matrix in `matrix.json` is the source of truth for which role can perform which operation in ZorEWS.
 
 ## Roles
 
