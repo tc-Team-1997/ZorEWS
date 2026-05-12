@@ -134,7 +134,7 @@ describe('EscalationWorkerPage (M14.25c)', () => {
     expect(await screen.findByTestId('esc-worker-recent-dispatches')).toBeInTheDocument();
     expect(screen.getByTestId('esc-worker-recent-fulllog')).toHaveAttribute(
       'href',
-      '/admin/notification-templates/dispatches?trigger=escalation_worker',
+      '/admin/notification-dispatches?trigger=escalation_worker',
     );
     // The mock dispatch log is pre-seeded with sample escalation_worker
     // entries (mocks/handlers.ts seedSampleDispatches), so the recent

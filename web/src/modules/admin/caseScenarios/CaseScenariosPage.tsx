@@ -168,7 +168,7 @@ export function CaseScenariosPage() {
               </Link>
               {r.notification_template_id ? (
                 <Link
-                  to={`/admin/notification-templates/dispatches?template_id=${encodeURIComponent(r.notification_template_id)}`}
+                  to={`/admin/notification-dispatches?template_id=${encodeURIComponent(r.notification_template_id)}`}
                   className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
                   data-testid={`cs-ref-template-${r.scenario_id}`}
                   title={r.notification_template_id}

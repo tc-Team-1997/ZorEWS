@@ -1,7 +1,6 @@
 // Audit log of every notification dispatch (T6 M14.24b). Lives at
-// /admin/notification-templates/dispatches. The row pivot
-// (?reference=...) drives the SPA story "show me everything we sent
-// for case c-001".
+// /admin/notification-dispatches. The row pivot (?reference=...)
+// drives the SPA story "show me everything we sent for case c-001".
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';

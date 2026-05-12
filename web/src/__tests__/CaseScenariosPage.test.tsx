@@ -163,7 +163,7 @@ describe('CaseScenariosPage', () => {
       'cs-ref-template-sc-seed-bank-fraud-p1-sudden-dpd',
     );
     expect(tplLink.getAttribute('href')).toMatch(
-      /^\/admin\/notification-templates\/dispatches\?template_id=tpl-seed-bank_demo-case-opened-rm-email/,
+      /^\/admin\/notification-dispatches\?template_id=tpl-seed-bank_demo-case-opened-rm-email/,
     );
   });
 

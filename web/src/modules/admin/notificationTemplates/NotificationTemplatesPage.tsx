@@ -251,7 +251,7 @@ export function NotificationTemplatesPage() {
             <>
               <span className="text-2xs text-muted">·</span>
               <Link
-                to={`/admin/notification-templates/dispatches?template_id=${encodeURIComponent(r.template_id)}`}
+                to={`/admin/notification-dispatches?template_id=${encodeURIComponent(r.template_id)}`}
                 className="text-2xs text-slate-700 hover:underline inline-flex items-center gap-1"
                 data-testid={`tpl-dispatches-${r.template_id}`}
                 title="View every dispatch fired from this template"

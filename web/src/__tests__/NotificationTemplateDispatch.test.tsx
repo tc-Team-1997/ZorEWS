@@ -171,7 +171,7 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
       /^tpl-dispatches-tpl-seed-bank_demo-case-opened/,
     );
     const href = link.getAttribute('href') ?? '';
-    expect(href).toContain('/admin/notification-templates/dispatches');
+    expect(href).toContain('/admin/notification-dispatches');
     expect(href).toContain('template_id=tpl-seed-bank_demo-case-opened');
   });
 
@@ -221,7 +221,7 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
     // Render the dispatches page with the template_id pre-set in the URL
     const TPL_ID = 'tpl-seed-bank_demo-case-opened-rm-email';
     renderWithProviders(<NotificationDispatchesPage />, {
-      route: `/admin/notification-templates/dispatches?template_id=${TPL_ID}`,
+      route: `/admin/notification-dispatches?template_id=${TPL_ID}`,
     });
     // Filter chip shows the truncated id
     expect(await screen.findByTestId('disp-template-chip')).toBeInTheDocument();

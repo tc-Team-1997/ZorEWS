@@ -540,7 +540,7 @@ export function EscalationWorkerPage() {
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold">Recent escalation dispatches</h3>
           <Link
-            to="/admin/notification-templates/dispatches?trigger=escalation_worker"
+            to="/admin/notification-dispatches?trigger=escalation_worker"
             className="text-2xs text-blue-600 hover:underline"
             data-testid="esc-worker-recent-fulllog"
           >
