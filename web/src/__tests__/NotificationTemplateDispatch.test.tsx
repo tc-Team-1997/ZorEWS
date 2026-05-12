@@ -190,9 +190,18 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
     tplPage.unmount();
 
     renderWithProviders(<NotificationDispatchesPage />);
-    const link = await screen.findByTestId(/^disp-tpl-link-/);
-    const href = link.getAttribute('href') ?? '';
-    expect(href).toContain('/admin/notification-templates?focus=tpl-seed-bank_demo-case-opened');
+    // Multiple dispatches now exist (seeded sample data + the row we
+    // just fired). Each has its own back-link; we only care that at
+    // least one links to the Case Opened template.
+    const links = await screen.findAllByTestId(/^disp-tpl-link-/);
+    const hrefs = links.map((l) => l.getAttribute('href') ?? '');
+    expect(
+      hrefs.some((h) =>
+        h.startsWith(
+          '/admin/notification-templates?focus=tpl-seed-bank_demo-case-opened',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('dispatches page reads ?template_id= from the URL and surfaces a clearable chip', async () => {

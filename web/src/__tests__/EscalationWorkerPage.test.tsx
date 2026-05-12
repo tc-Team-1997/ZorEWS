@@ -129,23 +129,33 @@ describe('EscalationWorkerPage (M14.25c)', () => {
   });
 
   // M14.25e — Recent dispatches panel
-  it('renders the recent-dispatches panel + full-log link; empty state before any tick', async () => {
+  it('renders the recent-dispatches panel + full-log link', async () => {
     renderWithProviders(<EscalationWorkerPage />);
     expect(await screen.findByTestId('esc-worker-recent-dispatches')).toBeInTheDocument();
     expect(screen.getByTestId('esc-worker-recent-fulllog')).toHaveAttribute(
       'href',
       '/admin/notification-templates/dispatches?trigger=escalation_worker',
     );
-    expect(await screen.findByTestId('esc-worker-recent-empty')).toBeInTheDocument();
+    // The mock dispatch log is pre-seeded with sample escalation_worker
+    // entries (mocks/handlers.ts seedSampleDispatches), so the recent
+    // list renders out-of-the-box rather than the empty state. The
+    // empty branch is exercised when the seed snapshot is cleared,
+    // which the "no dispatches" branch elsewhere covers indirectly.
+    expect(await screen.findByTestId('esc-worker-recent-list')).toBeInTheDocument();
   });
 
-  it('recent-dispatches list populates after a tick (invalidated immediately)', async () => {
+  it('recent-dispatches list invalidates after a tick (no 5s wait)', async () => {
     renderWithProviders(<EscalationWorkerPage />);
-    await screen.findByTestId('esc-worker-recent-empty');
+    await screen.findByTestId('esc-worker-recent-list');
+    const before = screen.getAllByTestId(/^esc-worker-recent-row-/).length;
     await userEvent.click(screen.getByTestId('esc-worker-tick'));
-    // Tick onSuccess invalidates the recent-dispatches query, so the
-    // list should land within the testing-library default 1s — no need
-    // to wait for the 5s refetch tick.
-    expect(await screen.findByTestId('esc-worker-recent-list')).toBeInTheDocument();
+    // After the tick the seeded fraud P1 scenario fires two new
+    // escalation dispatches → the list grows. Invalidate is immediate
+    // so this resolves well within the default 1s testing-library
+    // timeout, no 5s refetch wait needed.
+    await waitFor(() => {
+      const after = screen.getAllByTestId(/^esc-worker-recent-row-/).length;
+      expect(after).toBeGreaterThan(before);
+    });
   });
 });

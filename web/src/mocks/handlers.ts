@@ -451,8 +451,16 @@ interface MswDispatchEntry {
 
 const mswDispatchLog: MswDispatchEntry[] = [];
 
+// Snapshot taken AFTER seedSampleDispatches() runs at the bottom of
+// this module so __resetMswDispatchLog() restores realistic demo data
+// between tests rather than dropping back to an empty list.
+let _seedDispatchSnapshot: MswDispatchEntry[] = [];
+
 export function __resetMswDispatchLog(): void {
   mswDispatchLog.length = 0;
+  for (const seed of _seedDispatchSnapshot) {
+    mswDispatchLog.push({ ...seed, missing_vars: [...seed.missing_vars] });
+  }
 }
 
 interface MswRenderResult {
@@ -930,6 +938,12 @@ const mswEscalationRules: MswEscalationRule[] = [
   _mkEsc('BIL', 'BIL Underwriting P2 standard',       'underwriting', 'P2', 240, 'supervisor', 1440, 'risk_analyst'),
   _mkEsc('BIL', 'BIL Claim Settlement P3 routine',    'claims', 'P3', 720, 'supervisor'),
   _mkEsc('BIL', 'BIL Default P3 fallback',            'default_fallback', 'P3', 1440, 'supervisor'),
+  // ── Additional sample rules so the matrix renders varied coverage ──
+  _mkEsc('BANK_DEMO', 'BANK Recovery P2 standard',    'recovery', 'P2', 120, 'collection_officer', 480, 'supervisor', 1440, 'admin'),
+  _mkEsc('BANK_DEMO', 'BANK Repayment P3 reminder',   'repayment', 'P3', 360, 'collection_officer', 1440, 'supervisor'),
+  _mkEsc('BANK_DEMO', 'BANK Field-Visit P2 standard', 'field_visit', 'P2', 240, 'field_officer', 720, 'supervisor'),
+  _mkEsc('BIL', 'BIL Surrender P2 escalation',        'surrender', 'P2', 180, 'supervisor', 720, 'risk_analyst', 1440, 'admin'),
+  _mkEsc('BIL', 'BIL Renewal P3 reminder',            'renewal', 'P3', 720, 'collection_officer', 1440, 'supervisor'),
 ];
 
 // Deep snapshot of the seeded escalation rules so the array can be
@@ -1073,6 +1087,50 @@ const mswNotificationTemplates: MswNotificationTemplate[] = [
     'Dear {{customer_name}},\n\nYour policy {{policy_number}} is up for renewal on {{renewal_date}}.\nNew premium: {{renewal_premium}}\nClick {{renewal_link | default: "the BIL portal"}} to renew.\n\nThank you for choosing BIL.',
     'DRAFT',
   ),
+  // ── Additional sample templates so the page renders varied content ──
+  _mkTemplate(
+    'BANK_DEMO',
+    'Loan disbursement — Customer email',
+    'EMAIL',
+    'Loan {{loan_id}} disbursement confirmed',
+    'Hi {{customer_name}},\n\nYour loan {{loan_id}} for {{amount}} has been disbursed to account {{account_number}}.\nFirst EMI date: {{emi_start_date}}.\n\n— ZorEWS',
+  ),
+  _mkTemplate(
+    'BANK_DEMO',
+    'Repayment overdue — Customer SMS',
+    'SMS',
+    null,
+    'Bank: Hi {{customer_name}}, EMI of {{amount}} for loan {{loan_id}} is overdue. Pay by {{due_date}} to avoid late fee.',
+  ),
+  _mkTemplate(
+    'BANK_DEMO',
+    'Compliance review — Audit team email',
+    'EMAIL',
+    'Compliance review pending — Case {{case_id}}',
+    'Audit Team,\n\nCase {{case_id}} for customer {{customer_name}} requires compliance review.\nFlag: {{flag_reason}}\nDue: {{review_deadline}}.\n\n— ZorEWS',
+    'DRAFT',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Surrender request — Underwriter in-app',
+    'IN_APP',
+    'Surrender request received — Policy {{policy_number}}',
+    '{{customer_name}} submitted a surrender request for policy {{policy_number}}.\nSurrender value: {{surrender_value}}\nReason: {{surrender_reason}}.',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Investigation summary — Risk team email',
+    'EMAIL',
+    'Investigation summary — Case {{case_number}}',
+    'Risk Team,\n\nInvestigation on case {{case_number}} (policy {{policy_number}}) is complete.\nOutcome: {{outcome}}\nNext step: {{next_step}}.\n\n— ZorEWS Investigations',
+  ),
+  _mkTemplate(
+    'BIL',
+    'Settlement delayed — Customer SMS',
+    'SMS',
+    null,
+    'BIL: Hi {{customer_name}}, claim {{claim_number}} settlement is delayed by {{delay_days}} days due to {{delay_reason}}. We apologise for the inconvenience.',
+  ),
 ];
 
 // Deep snapshot of the seeded templates so __resetMswNotificationTemplates()
@@ -1089,6 +1147,409 @@ export function __resetMswNotificationTemplates(): void {
     mswNotificationTemplates.push({ ...seed });
   }
 }
+
+// ── Sample dispatch log seed ────────────────────────────────────────
+// Populated immediately below so the Notification Dispatches admin
+// page renders meaningful data the moment vite dev boots. Without
+// this seed the page reads "No dispatches" until ops manually fires
+// a test-fire — bad first impression for demos.
+function _mkDispatch(
+  tenant_id: string,
+  template_id: string,
+  template_name: string,
+  channel: 'EMAIL' | 'SMS' | 'IN_APP',
+  recipient: string,
+  trigger: 'admin_test_fire' | 'case_create_pipeline' | 'escalation_worker',
+  reference: string | null,
+  rendered_subject: string | null,
+  rendered_body: string,
+  status: 'sent' | 'preview' | 'failed',
+  hoursAgo: number,
+  performed_by = 'alice.admin',
+  status_reason: string | null = null,
+  missing_vars: string[] = [],
+): MswDispatchEntry {
+  const ts = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+  return {
+    dispatch_id: `disp-seed-${tenant_id.toLowerCase()}-${template_id.slice(-12)}-${Math.round(hoursAgo * 10)}`,
+    tenant_id,
+    template_id,
+    template_name,
+    channel,
+    recipient,
+    trigger,
+    reference,
+    rendered_subject,
+    rendered_body,
+    missing_vars,
+    status,
+    status_reason,
+    performed_by,
+    performed_at: ts,
+  };
+}
+
+// 25 dispatches spread across both tenants, 3 statuses, 3 triggers.
+// hoursAgo values stagger so newest-first ordering shows recent
+// activity at the top.
+mswDispatchLog.push(
+  // ── BANK_DEMO — escalation_worker trigger (fired automatically) ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'Escalation L1 — Supervisor in-app',
+    'IN_APP',
+    'role:supervisor',
+    'escalation_worker',
+    'case:c-001:lvl:1',
+    'Case c-001 escalated to you',
+    'Case c-001 (P1 fraud) was not actioned within 15 minutes.',
+    'sent',
+    0.5,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'Escalation L1 — Supervisor in-app',
+    'IN_APP',
+    'role:supervisor',
+    'escalation_worker',
+    'case:c-014:lvl:1',
+    'Case c-014 escalated to you',
+    'Case c-014 (P2 credit_risk) was not actioned within 60 minutes.',
+    'sent',
+    1.2,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-sla-breach-warnin',
+    'Case SLA breach warning — RM SMS',
+    'SMS',
+    '+91-98765-43210',
+    'escalation_worker',
+    'case:c-007:lvl:1',
+    null,
+    'ZorEWS: Case CMS-007 is at 75% of SLA. Action ASAP.',
+    'sent',
+    2.0,
+    'system:escalation-worker',
+  ),
+  // ── BANK_DEMO — case_create_pipeline (fires on every new case) ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-opened-rm-email',
+    'Case Opened — RM email',
+    'EMAIL',
+    'ravi.rm@bankdemo.test',
+    'case_create_pipeline',
+    'case:c-023',
+    'New case CMS-023 assigned to you',
+    'Hi Ravi,\n\nA new P1 case (CMS-023) has been opened for ABC Traders Pvt Ltd.\nCategory: fraud\n\nPlease action within 1 day(s).\n\n— ZorEWS',
+    'sent',
+    3.5,
+    'system:case-pipeline',
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-opened-rm-email',
+    'Case Opened — RM email',
+    'EMAIL',
+    'sneha.rm@bankdemo.test',
+    'case_create_pipeline',
+    'case:c-024',
+    'New case CMS-024 assigned to you',
+    'Hi Sneha,\n\nA new P2 case (CMS-024) has been opened for Mehta Industries.\nCategory: credit_risk\n\nPlease action within 3 day(s).\n\n— ZorEWS',
+    'sent',
+    4.8,
+    'system:case-pipeline',
+  ),
+  // ── BANK_DEMO — admin_test_fire (alice tests templates manually) ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-fraud-suspicion-aler',
+    'Fraud suspicion alert — Risk team email',
+    'EMAIL',
+    'risk-team@bankdemo.test',
+    'admin_test_fire',
+    null,
+    'Suspected fraud on customer C-1024',
+    'Customer C-1024 matched against PEP_GLOBAL watchlist with confidence 92%. Review and disposition within 4 hours.',
+    'sent',
+    6.0,
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-aml-watchlist-hit-r',
+    'AML watchlist hit — Risk team in-app',
+    'IN_APP',
+    'role:risk_analyst',
+    'admin_test_fire',
+    null,
+    'PEP match: TEST_VENDOR_PTE',
+    'Customer TEST_VENDOR_PTE (CUST-9001) matched against PEP_INDIA watchlist with confidence 88%. Review and disposition within 4 hours.',
+    'sent',
+    8.5,
+  ),
+  // ── BANK_DEMO — failed dispatch (SMS gateway rejected) ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-sla-breach-warnin',
+    'Case SLA breach warning — RM SMS',
+    'SMS',
+    '+91-INVALID',
+    'escalation_worker',
+    'case:c-019:lvl:2',
+    null,
+    'ZorEWS: Case CMS-019 is at 95% of SLA. Action ASAP.',
+    'failed',
+    10.0,
+    'system:escalation-worker',
+    'SMS gateway rejected: invalid phone number format',
+  ),
+  // ── BANK_DEMO — preview (no real send, ops just rendered to check) ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-customer-kyc-reminder',
+    'Customer KYC reminder — SMS',
+    'SMS',
+    '+91-PREVIEW',
+    'admin_test_fire',
+    null,
+    null,
+    'ZorEWS: Hi {{customer_name}}, your KYC documents expire on 2026-06-15. Please update at any branch.',
+    'preview',
+    12.3,
+    'alice.admin',
+    null,
+    ['customer_name'],
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-opened-rm-email',
+    'Case Opened — RM email',
+    'EMAIL',
+    'rm-test@bankdemo.test',
+    'admin_test_fire',
+    null,
+    'New case TEST-001 assigned to you',
+    'Hi RM,\n\nA new P3 case (TEST-001) has been opened for TEST_CUSTOMER.\nCategory: kyc\n\nPlease action within 7 day(s).\n\n— ZorEWS',
+    'sent',
+    15.0,
+  ),
+  // ── BIL — escalation_worker (insurance escalations) ──
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-lapse-warning-agent-sms',
+    'Lapse warning — Agent SMS',
+    'SMS',
+    '+975-17-555-101',
+    'escalation_worker',
+    'case:p-BIL-004:lvl:1',
+    null,
+    'ZorEWS: Policy POL-BIL-9001 approaches lapse. Contact Tashi Wangmo on +975-17-200-101.',
+    'sent',
+    0.8,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-lapse-warning-agent-sms',
+    'Lapse warning — Agent SMS',
+    'SMS',
+    '+975-17-555-203',
+    'escalation_worker',
+    'case:p-BIL-011:lvl:2',
+    null,
+    'ZorEWS: Policy POL-BIL-9015 approaches lapse. Contact Karma Dorji on +975-17-300-415.',
+    'sent',
+    2.7,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-follow-up-underw',
+    'Claim follow-up — Underwriter SMS',
+    'SMS',
+    '+975-17-555-310',
+    'escalation_worker',
+    'case:c-BIL-022:lvl:1',
+    null,
+    'ZorEWS: Claim CLM-BIL-2014 awaiting UW decision >12h. Open in console.',
+    'sent',
+    4.1,
+    'system:escalation-worker',
+  ),
+  // ── BIL — case_create_pipeline ──
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-case-opened-und',
+    'Claim case opened — Underwriter email',
+    'EMAIL',
+    'uw1@bil.test',
+    'case_create_pipeline',
+    'case:c-BIL-030',
+    'New P1 claim case CLM-BIL-2030',
+    'Hello Sonam Choden,\n\nA new P1 claim case (CLM-BIL-2030) has been opened for policy POL-BIL-9042.\nCategory: fraud\nReason: third-party investigation flagged irregular hospital invoice\n\nPlease review and decision within 1 day(s).\n\n— ZorEWS',
+    'sent',
+    1.8,
+    'system:case-pipeline',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-case-opened-und',
+    'Claim case opened — Underwriter email',
+    'EMAIL',
+    'uw2@bil.test',
+    'case_create_pipeline',
+    'case:c-BIL-031',
+    'New P3 claim case CLM-BIL-2031',
+    'Hello Dechen Pelden,\n\nA new P3 claim case (CLM-BIL-2031) has been opened for policy POL-BIL-9055.\nCategory: claims\nReason: routine motor claim under USD 500\n\nPlease review and decision within 7 day(s).\n\n— ZorEWS',
+    'sent',
+    5.4,
+    'system:case-pipeline',
+  ),
+  // ── BIL — admin_test_fire ──
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-approval-customer',
+    'Claim approval — Customer email',
+    'EMAIL',
+    'customer-test@bil.test',
+    'admin_test_fire',
+    null,
+    'Claim CLM-BIL-TEST approved',
+    'Dear Test Customer,\n\nWe are pleased to inform you that your claim CLM-BIL-TEST for policy POL-BIL-TEST has been approved.\nAmount payable: 125000 KES\nExpected credit: T+2 working days.\n\nRegards,\nBIL Claims',
+    'sent',
+    7.2,
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-premium-reminder-customer',
+    'Premium reminder — Customer SMS',
+    'SMS',
+    '+975-17-PREVIEW',
+    'admin_test_fire',
+    null,
+    null,
+    'BIL: Hi {{customer_name}}, your premium of {{premium_amount}} for policy POL-BIL-9001 is due on 2026-05-25. Pay via BIL portal.',
+    'preview',
+    9.0,
+    'fiona.field',
+    null,
+    ['customer_name', 'premium_amount'],
+  ),
+  // ── BIL — failed (provider outage) ──
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-premium-reminder-customer',
+    'Premium reminder — Customer SMS',
+    'SMS',
+    '+975-17-555-999',
+    'case_create_pipeline',
+    'case:p-BIL-099',
+    null,
+    'BIL: Hi Dorji Tshering, your premium of 45000 for policy POL-BIL-9099 is due on 2026-05-30. Pay via BIL portal.',
+    'failed',
+    11.5,
+    'system:case-pipeline',
+    'SMS provider returned 503 (gateway temporarily unavailable)',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-follow-up-underw',
+    'Claim follow-up — Underwriter SMS',
+    'SMS',
+    '+975-17-INVALID',
+    'escalation_worker',
+    'case:c-BIL-018:lvl:3',
+    null,
+    'ZorEWS: Claim CLM-BIL-2018 awaiting UW decision >12h. Open in console.',
+    'failed',
+    14.0,
+    'system:escalation-worker',
+    'SMS gateway rejected: number formatted incorrectly',
+  ),
+  // ── Older entries (>1 day ago) to fill the timeline ──
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-case-opened-rm-email',
+    'Case Opened — RM email',
+    'EMAIL',
+    'ravi.rm@bankdemo.test',
+    'case_create_pipeline',
+    'case:c-016',
+    'New case CMS-016 assigned to you',
+    'Hi Ravi,\n\nA new P2 case (CMS-016) has been opened for Sharma Holdings.\nCategory: credit_risk\n\nPlease action within 3 day(s).\n\n— ZorEWS',
+    'sent',
+    26.5,
+    'system:case-pipeline',
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-escalation-l1-supervis',
+    'Escalation L1 — Supervisor in-app',
+    'IN_APP',
+    'role:supervisor',
+    'escalation_worker',
+    'case:c-016:lvl:1',
+    'Case c-016 escalated to you',
+    'Case c-016 (P2 credit_risk) was not actioned within 60 minutes.',
+    'sent',
+    25.2,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-lapse-warning-agent-sms',
+    'Lapse warning — Agent SMS',
+    'SMS',
+    '+975-17-555-088',
+    'escalation_worker',
+    'case:p-BIL-008:lvl:1',
+    null,
+    'ZorEWS: Policy POL-BIL-9008 approaches lapse. Contact Pema Lhamo on +975-17-200-088.',
+    'sent',
+    27.8,
+    'system:escalation-worker',
+  ),
+  _mkDispatch(
+    'BANK_DEMO',
+    'tpl-seed-bank_demo-aml-watchlist-hit-r',
+    'AML watchlist hit — Risk team in-app',
+    'IN_APP',
+    'role:risk_analyst',
+    'case_create_pipeline',
+    'case:c-aml-005',
+    'OFAC match: GLOBAL_VENDOR_LTD',
+    'Customer GLOBAL_VENDOR_LTD (CUST-7755) matched against OFAC_SDN watchlist with confidence 95%. Review and disposition within 4 hours.',
+    'sent',
+    29.0,
+    'system:case-pipeline',
+  ),
+  _mkDispatch(
+    'BIL',
+    'tpl-seed-bil-claim-approval-customer',
+    'Claim approval — Customer email',
+    'EMAIL',
+    'dorji@customer.test',
+    'admin_test_fire',
+    null,
+    'Claim CLM-BIL-1998 approved',
+    'Dear Dorji Tshering,\n\nWe are pleased to inform you that your claim CLM-BIL-1998 for policy POL-BIL-8722 has been approved.\nAmount payable: 80000 KES\nExpected credit: T+2 working days.\n\nRegards,\nBIL Claims',
+    'sent',
+    32.5,
+    'sue.super',
+  ),
+);
+
+// Freeze the seed-state snapshot so __resetMswDispatchLog() restores
+// these rows between tests instead of leaving the page empty.
+_seedDispatchSnapshot = mswDispatchLog.map((d) => ({
+  ...d,
+  missing_vars: [...d.missing_vars],
+}));
 
 const mswSlaConfigs: MswSlaConfig[] = [
   _mkSla('credit_risk', 'P1', null, 1.0,  'Critical credit incident'),
@@ -1514,6 +1975,120 @@ function illegal(c: CaseDetail, attempted: Transition) {
         { title: 'Auto-decline at 14d if no response', required: false },
       ],
       status: 'DRAFT', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BIL', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+
+  // ── Additional sample scenarios using the new escalation rules ──
+  const bankRecoveryEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'BANK Recovery P2 standard',
+  );
+  const bankRepaymentEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'BANK Repayment P3 reminder',
+  );
+  const bilSurrenderEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'BIL Surrender P2 escalation',
+  );
+  const bilRenewalEsc = mswEscalationRules.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'BIL Renewal P3 reminder',
+  );
+  const bankRepaymentTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BANK_DEMO' && r.name === 'Repayment overdue — Customer SMS',
+  );
+  const bilRenewalTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'Renewal reminder — Customer email',
+  );
+  const bilSurrenderTpl = mswNotificationTemplates.find(
+    (r) => r.tenant_id === 'BIL' && r.name === 'Surrender request — Underwriter in-app',
+  );
+
+  if (bankRecoveryEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bank-recovery-p2-90dpd',
+      tenant_id: 'BANK_DEMO',
+      name: 'Recovery P2 — 90+ DPD allocation',
+      case_category: 'recovery',
+      priority: 'P2',
+      trigger_indicator_id: 'COLL-DPD90',
+      trigger_threshold: 90,
+      default_escalation_id: bankRecoveryEsc.escalation_id,
+      notification_template_id: bankRepaymentTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Allocate to recovery agent within 24h', required: true },
+        { title: 'Issue legal-notice draft', required: true },
+        { title: 'Document settlement-offer terms', required: false },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BANK_DEMO', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+
+  if (bankRepaymentEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bank-repayment-p3-30dpd',
+      tenant_id: 'BANK_DEMO',
+      name: 'Repayment P3 — 30 DPD reminder',
+      case_category: 'repayment',
+      priority: 'P3',
+      trigger_indicator_id: 'COLL-DPD30',
+      trigger_threshold: 30,
+      default_escalation_id: bankRepaymentEsc.escalation_id,
+      notification_template_id: bankRepaymentTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Send SMS reminder', required: true },
+        { title: 'Schedule 7-day follow-up', required: true },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BANK_DEMO', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+
+  if (bilSurrenderEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bil-surrender-p2-request',
+      tenant_id: 'BIL',
+      name: 'Surrender P2 — Customer-initiated',
+      case_category: 'surrender',
+      priority: 'P2',
+      trigger_indicator_id: 'BIL-SUR-REQ',
+      trigger_threshold: 1,
+      default_escalation_id: bilSurrenderEsc.escalation_id,
+      notification_template_id: bilSurrenderTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Acknowledge request within 24h', required: true },
+        { title: 'Compute surrender value', required: true },
+        { title: 'Schedule customer call for retention offer', required: false },
+        { title: 'Notify originating agent', required: true },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
+      created_at: seedTs, updated_at: seedTs, deleted_at: null,
+    };
+    mswCaseScenarios.push(r);
+    _appendScenarioHistory('BIL', r.scenario_id, 'create', null, r, 'system:seed', seedTs);
+  }
+
+  if (bilRenewalEsc) {
+    const r: MswCaseScenario = {
+      scenario_id: 'sc-seed-bil-renewal-p3-30d',
+      tenant_id: 'BIL',
+      name: 'Renewal P3 — 30 days before due',
+      case_category: 'renewal',
+      priority: 'P3',
+      trigger_indicator_id: 'BIL-RNW-30D',
+      trigger_threshold: 30,
+      default_escalation_id: bilRenewalEsc.escalation_id,
+      notification_template_id: bilRenewalTpl?.template_id ?? null,
+      checklist: [
+        { title: 'Email customer with renewal premium', required: true },
+        { title: 'Assign to retention agent', required: false },
+      ],
+      status: 'ACTIVE', created_by: 'system:seed', updated_by: null,
       created_at: seedTs, updated_at: seedTs, deleted_at: null,
     };
     mswCaseScenarios.push(r);
