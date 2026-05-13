@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-05 (T6 M6.3 — Scoring weight presets shipped — 6 named bundles (conservative/balanced/aggressive × banking/insurance) with sparse multiplier maps; new `POST /v1/scoring/risk/by-preset` clamps effective weight to [0,1] honouring M6.1's range; per-indicator catalog-vs-effective transparency breakdown)
+**Last updated:** 2026-05-14 (T6 M8.6 — Alert auto-routing analytics shipped — pure `aggregateRoutingAnalytics(records, now)` + `InMemoryRoutingLedger` (FIFO 200/tenant) hooked into `/v1/alerts/ingest` + manual `/v1/alerts/:id/ack`; new route `GET /v1/alerts/routing/analytics?window=N` rolls up class/channel mix, ack_rate (excludes monitor_only), time-to-ack p50/p95 via M3.5 linear-interpolation percentiles, SLA-breach count (acked-late + still-open past SLA), escalation-due count)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

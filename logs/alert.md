@@ -101,3 +101,29 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 - ✅ `apex.rule.firings.v1.json` added; `apex.regulatory.events.v1.json` untouched; v2 added BACKWARD.
 - ✅ No hardcoded credentials — env-only; absent env → LoggingAdapter fallback.
 - ⏳ `npm test` would pass (test suite written; `npm install` blocked — see Blockers).
+
+## 2026-05-14 — T6 M8.6 — Alert auto-routing analytics
+
+### Tasks ticked
+- T6 sub-phase M8.6 — auto-routing analytics. T6 sub-phase tally 100 → 101.
+
+### Files touched
+- `services/bff/src/alert_routing_analytics.ts` (new) — `RoutedAlertRecord` + `RoutingAnalytics` types; pure `aggregateRoutingAnalytics(records, now)`; `InMemoryRoutingLedger` (FIFO 200/tenant) with `record` / `markAcked` / `list(tenant, window)`; constants `ROUTING_ANALYTICS_DEFAULT_WINDOW = 50` / `ROUTING_ANALYTICS_MAX_WINDOW = 200`; `defaultRoutingLedger` singleton.
+- `services/bff/__tests__/alert_routing_analytics.test.ts` (new) — 20 jest tests: 14 unit (empty input, class+channel mix, ack_rate excludes monitor_only, time-to-ack percentiles, SLA-breach acked-late, SLA-breach still-open, escalation-due, ledger FIFO + newest-first + markAcked + tenant isolation, constants) + 6 route (200 empty, 200 with records, 400 window=0, 400 window>max, 403 wrong role, cross-tenant isolation).
+- `services/bff/src/server.ts` — import the new module; expose `routingLedger?: RoutingLedger` on `AppDeps` with `defaultRoutingLedger` fallback; in `/v1/alerts/ingest` snapshot `alertRoutingEngine.getRule(tenant, baseResult.bil_class)` into `routingLedger.record({...})` after the M10.8 quiet-hours pass; in manual `/v1/alerts/:alert_id/ack` call `routingLedger.markAcked(tenant, alert_id, out.acked_at)` after the M8.3 ack store transitions; new route `GET /v1/alerts/routing/analytics?window=N` (`audit:read`, tenant-isolated, mirror of M3.5 envelope shape).
+
+### Decisions
+- **Per-record snapshot vs. on-read lookup.** Snapshot the routing decision at ingest time so later tenant override edits don't retroactively change history. Mirrors how M3.5 + M7.5 keep their ledger entries frozen.
+- **Why `getRule(class)` not `route(severity)`.** The M8.5 ingest pipeline already has the resolved `bil_class` on `baseResult.bil_class`; calling `route()` would re-classify the same severity. `getRule(tenant, class)` is cheaper and skips the round-trip.
+- **SLA breach = acked-after-SLA OR still-open past SLA.** Captures the unacked-and-overdue case which is the signal SREs actually want. Requires `now` as an input to the aggregator.
+- **`ack_rate` denominator excludes monitor_only (green).** Green is monitor-only by design; folding it into the rate would bias the metric downward.
+- **FIFO cap 200/tenant.** Matches the M14.10 field-visit ledger + M7.5 performance ledger posture; "rollout-monitoring band" not long-tail BI.
+- **No SPA wiring this commit.** M3.5 / M7.5 also shipped as BFF-only sub-phases; SPA integration follows in its own commit per the agreed cadence.
+
+### Hand-offs
+- **agent-ui** — when the routing-analytics strip lands on AlertListPage (future sub-phase), pull from `GET /v1/alerts/routing/analytics`; the envelope shape is `{ window: number, analytics: RoutingAnalytics }`.
+
+### Verification
+- `npx jest __tests__/alert_routing_analytics.test.ts` — 20/20 pass.
+- `npx jest` (full BFF suite) — 4076 pass / 58 skipped / 4134 total (was 3155/9/3164 in STATUS.md — incremental growth since 2026-05-07, all green).
+- `npx tsc --noEmit` — clean.

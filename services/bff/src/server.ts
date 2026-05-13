@@ -398,6 +398,13 @@ import {
   type AlertAckStore,
 } from './alert_ack';
 import {
+  ROUTING_ANALYTICS_DEFAULT_WINDOW,
+  ROUTING_ANALYTICS_MAX_WINDOW,
+  aggregateRoutingAnalytics,
+  defaultRoutingLedger,
+  type RoutingLedger,
+} from './alert_routing_analytics';
+import {
   AutoAckError,
   defaultAutoAckRuleStore,
   evaluateAutoAck,
@@ -704,6 +711,11 @@ export interface AppDeps {
    * to the module-level InMemoryAlertAckStore.
    */
   alertAckStore?: AlertAckStore;
+  /**
+   * Override for tests — alert routing ledger (T6 M8.6). Captures each
+   * /v1/alerts/ingest call's routing snapshot for analytics roll-up.
+   */
+  routingLedger?: RoutingLedger;
   /**
    * Override for tests — alert auto-ack rule store (T6 M8.4).
    */
@@ -1061,6 +1073,7 @@ export function makeApp(deps: AppDeps = {}) {
   const pushTransport = deps.pushTransport ?? defaultPushTransport;
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
+  const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
   const notificationWebhookStore = deps.notificationWebhookStore ?? defaultNotificationWebhookStore;
   const notificationPreferenceStore =
@@ -2081,6 +2094,9 @@ export function makeApp(deps: AppDeps = {}) {
           wrapper.notes as string | null | undefined,
           now(),
         );
+        if (out.acked_at) {
+          routingLedger.markAcked(req.tenant!.tenant_id, alert_id, out.acked_at);
+        }
         webhookDispatcher.dispatch(
           'alert.updated',
           {
@@ -2228,6 +2244,41 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/alerts/routing/analytics?window=N (T6 M8.6) — aggregate
+   *  routing performance over the recent window: class mix, channel
+   *  mix, ack rate, time-to-ack percentiles, SLA breach count, escalation
+   *  due count. Pulls from the routing ledger populated at /v1/alerts/ingest. */
+  app.get(
+    '/v1/alerts/routing/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const analytics = aggregateRoutingAnalytics(records, now());
+      return res.json(wrapResponse({ window, analytics }, ctx));
     },
   );
 
@@ -2396,6 +2447,23 @@ export function makeApp(deps: AppDeps = {}) {
         const finalAckState = quiet_hours_mute.applied
           ? quiet_hours_mute.ack_state
           : baseResult.ack_state;
+        // T6 M8.6 — snapshot the routing decision for analytics roll-up.
+        const { rule: routingRule } = alertRoutingEngine.getRule(
+          req.tenant!.tenant_id,
+          baseResult.bil_class,
+        );
+        routingLedger.record({
+          alert_id: baseResult.alert_id,
+          tenant_id: req.tenant!.tenant_id,
+          created_at: baseResult.ingested_at,
+          severity_in: baseResult.bil_class,
+          class: baseResult.bil_class,
+          channels: routingRule.channels,
+          sla_hours: routingRule.sla_hours,
+          escalate_after_hours: routingRule.escalate_after_hours,
+          monitor_only: routingRule.monitor_only,
+          acked_at: finalAckState.acked_at,
+        });
         return res.json(
           wrapResponse({ ...baseResult, ack_state: finalAckState, quiet_hours_mute }, ctx),
         );
