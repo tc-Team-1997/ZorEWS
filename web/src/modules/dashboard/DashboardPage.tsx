@@ -96,11 +96,19 @@ export function DashboardPage() {
   const { data } = useQuery({
     queryKey: ['dashboard.summary'],
     queryFn: api.dashboardSummary,
+    // Page subtitle promises "refreshed every 60 seconds". Without
+    // this interval react-query only refetches on focus / mount, so
+    // the metric cards + bar chart could go stale across a long
+    // session. Background refetch is off — no point polling a tab
+    // the operator isn't looking at.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
   const sla = useQuery({
     queryKey: ['cases.sla-summary'],
     queryFn: api.slaSummary,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   useChatContext({ page: 'dashboard' });
 
