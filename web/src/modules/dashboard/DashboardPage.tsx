@@ -238,10 +238,11 @@ export function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Alerts by severity">
+        <Panel title="Active alerts by severity">
           <p className="caption mb-1" data-testid="alerts-bar-drill-hint">
-            Click a bar — or the buttons below — to drill into top rules,
-            top customers, age distribution, and assignment status.
+            Currently open across the portfolio — click a bar or the
+            buttons below to drill into top rules, top customers, age
+            distribution, assignment status, and top indicators.
           </p>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
