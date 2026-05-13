@@ -103,4 +103,27 @@ describe('DashboardPage', () => {
     expect(screen.queryByTestId('severity-drilldown')).not.toBeInTheDocument();
     expect(screen.queryByTestId('trend-drilldown')).not.toBeInTheDocument();
   });
+
+  // Trend drill via URL — the line chart's activeDot click is hard to
+  // fire in jsdom, but the URL-bound state makes the drill testable.
+  it('boots with the trend drill open when ?drill=week:<N> is in the URL', async () => {
+    // Default range is 30d → trendSlice has ~5 weeks. Index 2 is safe.
+    renderWithProviders(<DashboardPage />, { route: '/?drill=week:2' });
+    const drill = await screen.findByTestId('trend-drilldown');
+    // All 4 trend-drill angles render
+    expect(within(drill).getByTestId('trend-drilldown-severity')).toBeInTheDocument();
+    expect(within(drill).getByTestId('trend-drilldown-rules')).toBeInTheDocument();
+    expect(within(drill).getByTestId('trend-drilldown-customers')).toBeInTheDocument();
+    expect(within(drill).getByTestId('trend-drilldown-indicators')).toBeInTheDocument();
+    // Subtitle names the week + a "Week of …" prefix
+    await waitFor(() => {
+      expect(screen.getByTestId('trend-drilldown-subtitle').textContent).toMatch(/Week of/);
+    });
+  });
+
+  it('ignores out-of-range ?drill=week:<N> against the current time slice', async () => {
+    renderWithProviders(<DashboardPage />, { route: '/?drill=week:999' });
+    await screen.findByTestId('alerts-bar-drill-hint');
+    expect(screen.queryByTestId('trend-drilldown')).not.toBeInTheDocument();
+  });
 });
