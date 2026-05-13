@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 import { renderWithProviders } from './utils';
 
@@ -27,5 +28,53 @@ describe('DashboardPage', () => {
 
     const overdue = await screen.findByTestId('breached-cases-list');
     expect(within(overdue).getAllByText(/min overdue/i).length).toBeGreaterThan(0);
+  });
+
+  // Drill-down — clicking a severity bar opens the 4-angle breakdown
+  it('opens the severity drill-down with 4 non-repetitive angles', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DashboardPage />);
+    // Wait for the chart to mount before interacting
+    await screen.findByTestId('alerts-bar-drill-hint');
+    const criticalCell = await screen.findByTestId('alerts-bar-cell-critical');
+    await user.click(criticalCell);
+    const drill = await screen.findByTestId('severity-drilldown');
+    // All four panels render — each panel = a distinct angle
+    expect(within(drill).getByTestId('severity-drilldown-rules')).toBeInTheDocument();
+    expect(within(drill).getByTestId('severity-drilldown-customers')).toBeInTheDocument();
+    expect(within(drill).getByTestId('severity-drilldown-age')).toBeInTheDocument();
+    expect(within(drill).getByTestId('severity-drilldown-assignee')).toBeInTheDocument();
+    // Subtitle names the severity + a count
+    expect(screen.getByTestId('severity-drilldown-subtitle').textContent).toMatch(
+      /critical/i,
+    );
+  });
+
+  it('closes the drill-down via the Close button', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DashboardPage />);
+    await screen.findByTestId('alerts-bar-drill-hint');
+    await user.click(await screen.findByTestId('alerts-bar-cell-high'));
+    await screen.findByTestId('severity-drilldown');
+    await user.click(screen.getByTestId('severity-drilldown-close'));
+    expect(screen.queryByTestId('severity-drilldown')).not.toBeInTheDocument();
+  });
+
+  it('clicking a different severity bar swaps the drill-down', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DashboardPage />);
+    await screen.findByTestId('alerts-bar-drill-hint');
+    await user.click(await screen.findByTestId('alerts-bar-cell-critical'));
+    await waitFor(() => {
+      expect(screen.getByTestId('severity-drilldown-subtitle').textContent).toMatch(
+        /critical/i,
+      );
+    });
+    await user.click(await screen.findByTestId('alerts-bar-cell-medium'));
+    await waitFor(() => {
+      expect(screen.getByTestId('severity-drilldown-subtitle').textContent).toMatch(
+        /medium/i,
+      );
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -13,7 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import { AlertTriangle } from 'lucide-react';
-import { api, type SlaSummary } from '@/lib/api';
+import { api, type Severity, type SlaSummary } from '@/lib/api';
 import {
   DEFAULT_RANGE,
   isTimeRangeKey,
@@ -28,6 +29,10 @@ import { color } from '@/styles/tokens';
 import { useChatContext } from '@/components/copilot/useChatContext';
 import { SLABreachMatrix } from '@/components/dashboard/SLABreachMatrix';
 import { LiveActivityFeed } from '@/components/dashboard/LiveActivityFeed';
+import {
+  SeverityDrilldown,
+  TrendWeekDrilldown,
+} from '@/components/dashboard/AlertDrilldown';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -77,6 +82,24 @@ export function DashboardPage() {
   useChatContext({ page: 'dashboard' });
 
   const trendSlice = data ? sliceForRange(data.risk_trend, range) : [];
+
+  // Drill-down state — only one open at a time. Clicking a bar/point
+  // opens the matching drill; clicking it again closes; clicking the
+  // other chart swaps the open drill.
+  const [drillSeverity, setDrillSeverity] = useState<Severity | null>(null);
+  const [drillWeekIndex, setDrillWeekIndex] = useState<number | null>(null);
+  const onBarClick = (sev: Severity) => {
+    setDrillWeekIndex(null);
+    setDrillSeverity((prev) => (prev === sev ? null : sev));
+  };
+  const onTrendClick = (idx: number) => {
+    setDrillSeverity(null);
+    setDrillWeekIndex((prev) => (prev === idx ? null : idx));
+  };
+  const closeDrill = () => {
+    setDrillSeverity(null);
+    setDrillWeekIndex(null);
+  };
 
   return (
     <div>
@@ -143,6 +166,13 @@ export function DashboardPage() {
           className="lg:col-span-2"
           action={<TimeRangeSelector value={range} onChange={setRange} testId="pd-trend-range" />}
         >
+          <p
+            className="caption mb-1"
+            data-testid="pd-trend-drill-hint"
+          >
+            Click any point to drill into that week's severity mix, top
+            firing rules, and most-affected customers.
+          </p>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendSlice}>
@@ -162,7 +192,19 @@ export function DashboardPage() {
                   dataKey="pd"
                   stroke={color.blue}
                   strokeWidth={2}
-                  dot={{ r: 3, fill: color.blue }}
+                  dot={{ r: 3, fill: color.blue, cursor: 'pointer' }}
+                  activeDot={{
+                    r: 5,
+                    fill: color.blue,
+                    cursor: 'pointer',
+                    onClick: (_e, payload) => {
+                      // recharts hands us the activePayload index via the
+                      // payload arg shape; fall back to clicking the dot
+                      // index directly via the data slice.
+                      const idx = (payload as { index?: number } | undefined)?.index;
+                      if (typeof idx === 'number') onTrendClick(idx);
+                    },
+                  }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -170,9 +212,22 @@ export function DashboardPage() {
         </Panel>
 
         <Panel title="Alerts by severity">
-          <div className="h-64">
+          <p className="caption mb-1" data-testid="alerts-bar-drill-hint">
+            Click a bar — or the buttons below — to drill into top rules,
+            top customers, age distribution, and assignment status.
+          </p>
+          <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data?.alerts_by_severity ?? []}>
+              <BarChart
+                data={data?.alerts_by_severity ?? []}
+                onClick={(state) => {
+                  // recharts passes the active item's payload here when a
+                  // bar is hit; read the severity off it.
+                  const sev = (state as { activePayload?: { payload?: { severity?: Severity } }[] })
+                    ?.activePayload?.[0]?.payload?.severity;
+                  if (sev) onBarClick(sev);
+                }}
+              >
                 <CartesianGrid stroke={color.divider} strokeDasharray="3 3" />
                 <XAxis dataKey="severity" stroke={color.muted} fontSize={11} />
                 <YAxis stroke={color.muted} fontSize={11} />
@@ -183,7 +238,7 @@ export function DashboardPage() {
                     fontSize: 12,
                   }}
                 />
-                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                <Bar dataKey="count" radius={[3, 3, 0, 0]} cursor="pointer">
                   {(data?.alerts_by_severity ?? []).map((row) => (
                     <Cell key={row.severity} fill={SEVERITY_FILL[row.severity] ?? color.blue} />
                   ))}
@@ -191,8 +246,46 @@ export function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          {/* Keyboard-accessible drill triggers — the bars themselves can
+              also be clicked, but screen-reader + tab-nav users get
+              proper buttons here. */}
+          <div className="mt-2 flex flex-wrap gap-1">
+            {(data?.alerts_by_severity ?? []).map((row) => (
+              <button
+                key={row.severity}
+                type="button"
+                onClick={() => onBarClick(row.severity)}
+                aria-pressed={drillSeverity === row.severity}
+                className={`rounded-full px-2 py-0.5 text-2xs font-medium capitalize transition-colors ${
+                  drillSeverity === row.severity
+                    ? 'bg-action text-white'
+                    : 'bg-page text-ink-sub hover:bg-divider/60'
+                }`}
+                data-testid={`alerts-bar-cell-${row.severity}`}
+              >
+                {row.severity} · {row.count}
+              </button>
+            ))}
+          </div>
         </Panel>
       </div>
+
+      {/* ── Drill-down panel — only one open at a time ── */}
+      {drillSeverity && (
+        <div className="mt-4">
+          <SeverityDrilldown severity={drillSeverity} onClose={closeDrill} />
+        </div>
+      )}
+      {drillWeekIndex !== null && trendSlice[drillWeekIndex] && (
+        <div className="mt-4">
+          <TrendWeekDrilldown
+            week={trendSlice[drillWeekIndex].week}
+            pd={trendSlice[drillWeekIndex].pd}
+            prevPd={drillWeekIndex > 0 ? trendSlice[drillWeekIndex - 1].pd : null}
+            onClose={closeDrill}
+          />
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
