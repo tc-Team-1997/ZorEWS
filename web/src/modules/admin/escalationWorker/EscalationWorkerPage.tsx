@@ -27,6 +27,7 @@ import {
   type NotificationDispatchStatus,
 } from '@/lib/api';
 import { Link } from 'react-router-dom';
+import { parseCaseId } from '@/modules/admin/notificationTemplates/NotificationDispatchesPage';
 import { useAuth } from '@/store/auth';
 import {
   Badge,
@@ -589,9 +590,29 @@ export function EscalationWorkerPage() {
                   <span className="w-40 shrink-0 truncate text-muted" title={r.recipient}>
                     {r.recipient}
                   </span>
-                  <span className="flex-1 truncate font-mono text-muted" title={r.reference ?? ''}>
-                    {r.reference ?? '—'}
-                  </span>
+                  {(() => {
+                    const refCaseId = parseCaseId(r.reference);
+                    if (refCaseId) {
+                      return (
+                        <Link
+                          to={`/cms/cases/${encodeURIComponent(refCaseId)}`}
+                          className="flex-1 truncate font-mono text-blue-700 hover:underline"
+                          title={`Open ${refCaseId}`}
+                          data-testid={`esc-worker-recent-ref-link-${r.dispatch_id}`}
+                        >
+                          {r.reference}
+                        </Link>
+                      );
+                    }
+                    return (
+                      <span
+                        className="flex-1 truncate font-mono text-muted"
+                        title={r.reference ?? ''}
+                      >
+                        {r.reference ?? '—'}
+                      </span>
+                    );
+                  })()}
                   <Badge tone={DISPATCH_STATUS_TONE[r.status]} className="text-2xs uppercase">
                     {r.status}
                   </Badge>

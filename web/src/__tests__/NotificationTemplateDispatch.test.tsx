@@ -175,6 +175,22 @@ describe('NotificationDispatchesPage (M14.24b)', () => {
     expect(href).toContain('template_id=tpl-seed-bank_demo-case-opened');
   });
 
+  // Reference → case detail back-link
+  it('renders dispatch references starting with case: as case-detail links', async () => {
+    // The seeded dispatch log has rows with references like
+    // `case:c-001:lvl:1` — those should be wrapped as Links to
+    // /cms/cases/c-001 so ops can jump from a dispatch row to the
+    // case it was fired for.
+    renderWithProviders(<NotificationDispatchesPage />);
+    const links = await screen.findAllByTestId(/^disp-ref-link-/);
+    expect(links.length).toBeGreaterThan(0);
+    const hrefs = links.map((l) => l.getAttribute('href') ?? '');
+    expect(hrefs.every((h) => h.startsWith('/cms/cases/'))).toBe(true);
+    // The visible label still includes the level suffix (lvl:1 etc.)
+    // so ops can see the escalation level without expanding the row.
+    expect(links.some((l) => /:lvl:\d+/.test(l.textContent ?? ''))).toBe(true);
+  });
+
   // M14.36 — Dispatches log → Templates page back-link
   it('Template cell on a dispatch row links back to /admin/notification-templates?focus=<id>', async () => {
     // Fire a dispatch so there's a row to inspect

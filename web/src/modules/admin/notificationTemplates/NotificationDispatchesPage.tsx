@@ -161,11 +161,29 @@ export function NotificationDispatchesPage() {
     {
       key: 'reference',
       header: 'Reference',
-      render: (r) => (
-        <span className="font-mono text-2xs">
-          {r.reference ?? <em className="text-muted not-italic">—</em>}
-        </span>
-      ),
+      render: (r) => {
+        if (!r.reference) {
+          return <em className="text-muted not-italic text-2xs">—</em>;
+        }
+        // Reference format `case:<id>[:lvl:<n>]` → deep-link to the
+        // case detail page. The level suffix (if any) stays in the
+        // visible label so ops can still see which escalation level
+        // fired without expanding the row.
+        const caseId = parseCaseId(r.reference);
+        if (caseId) {
+          return (
+            <Link
+              to={`/cms/cases/${encodeURIComponent(caseId)}`}
+              className="font-mono text-2xs text-blue-700 hover:underline"
+              title={`Open ${caseId} in the case detail page`}
+              data-testid={`disp-ref-link-${r.dispatch_id}`}
+            >
+              {r.reference}
+            </Link>
+          );
+        }
+        return <span className="font-mono text-2xs">{r.reference}</span>;
+      },
       width: 160,
     },
     {
@@ -340,4 +358,19 @@ export function NotificationDispatchesPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Parses a dispatch reference string of the form `case:<id>` or
+ * `case:<id>:lvl:<n>` and returns the case id. Anything else returns
+ * null so the caller can fall back to plain-text rendering.
+ *
+ * Exported for the EscalationWorkerPage recent-dispatches strip,
+ * which renders the same field in a tighter layout.
+ */
+export function parseCaseId(reference: string | null | undefined): string | null {
+  if (!reference) return null;
+  const parts = reference.split(':');
+  if (parts[0] !== 'case' || !parts[1] || !parts[1].trim()) return null;
+  return parts[1].trim();
 }
