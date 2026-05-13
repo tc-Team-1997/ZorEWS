@@ -578,9 +578,14 @@ export function EscalationWorkerPage() {
                   <span className="w-32 shrink-0 font-mono text-muted">
                     {new Date(r.performed_at).toLocaleTimeString()}
                   </span>
-                  <span className="w-40 shrink-0 truncate font-medium" title={r.template_name}>
+                  <Link
+                    to={`/admin/notification-templates?focus=${encodeURIComponent(r.template_id)}`}
+                    className="w-40 shrink-0 truncate font-medium text-blue-700 hover:underline"
+                    title={`Open ${r.template_name} on the Notification Templates page`}
+                    data-testid={`esc-worker-recent-tpl-link-${r.dispatch_id}`}
+                  >
                     <Icon className="mr-0.5 inline h-3 w-3" /> {r.template_name}
-                  </span>
+                  </Link>
                   <span className="w-40 shrink-0 truncate text-muted" title={r.recipient}>
                     {r.recipient}
                   </span>
