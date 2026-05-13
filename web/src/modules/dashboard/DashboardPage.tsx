@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -58,6 +57,30 @@ const RANGE_LABEL: Record<TimeRangeKey, string> = {
   all: 'all weeks',
 };
 
+const SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'high', 'medium', 'low']);
+
+// `?drill=severity:critical` opens the severity drill-down on boot;
+// `?drill=week:3` opens the trend drill-down for trendSlice[3]; absent
+// or malformed → no drill. URL-bound so operators can share a link and
+// have the dashboard render with the same drill already expanded.
+function parseDrillParam(
+  raw: string | null,
+  trendLen: number,
+): { kind: 'severity'; severity: Severity } | { kind: 'week'; index: number } | null {
+  if (!raw) return null;
+  const [kind, val] = raw.split(':');
+  if (kind === 'severity' && val && SEVERITIES.has(val as Severity)) {
+    return { kind: 'severity', severity: val as Severity };
+  }
+  if (kind === 'week' && val) {
+    const idx = Number(val);
+    if (Number.isInteger(idx) && idx >= 0 && idx < trendLen) {
+      return { kind: 'week', index: idx };
+    }
+  }
+  return null;
+}
+
 export function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rangeParam = searchParams.get('range');
@@ -83,23 +106,27 @@ export function DashboardPage() {
 
   const trendSlice = data ? sliceForRange(data.risk_trend, range) : [];
 
-  // Drill-down state — only one open at a time. Clicking a bar/point
-  // opens the matching drill; clicking it again closes; clicking the
-  // other chart swaps the open drill.
-  const [drillSeverity, setDrillSeverity] = useState<Severity | null>(null);
-  const [drillWeekIndex, setDrillWeekIndex] = useState<number | null>(null);
+  // Drill-down state lives in the URL (?drill=severity:critical | week:N)
+  // so links are shareable + the drill survives a page refresh. Only one
+  // drill can be open at a time — clicking a bar/point sets the param,
+  // clicking the same target again clears it.
+  const drill = parseDrillParam(searchParams.get('drill'), trendSlice.length);
+  const drillSeverity = drill?.kind === 'severity' ? drill.severity : null;
+  const drillWeekIndex = drill?.kind === 'week' ? drill.index : null;
+
+  const setDrillParam = (next: string | null) => {
+    const sp = new URLSearchParams(searchParams);
+    if (next) sp.set('drill', next);
+    else sp.delete('drill');
+    setSearchParams(sp, { replace: true });
+  };
   const onBarClick = (sev: Severity) => {
-    setDrillWeekIndex(null);
-    setDrillSeverity((prev) => (prev === sev ? null : sev));
+    setDrillParam(drillSeverity === sev ? null : `severity:${sev}`);
   };
   const onTrendClick = (idx: number) => {
-    setDrillSeverity(null);
-    setDrillWeekIndex((prev) => (prev === idx ? null : idx));
+    setDrillParam(drillWeekIndex === idx ? null : `week:${idx}`);
   };
-  const closeDrill = () => {
-    setDrillSeverity(null);
-    setDrillWeekIndex(null);
-  };
+  const closeDrill = () => setDrillParam(null);
 
   return (
     <div>

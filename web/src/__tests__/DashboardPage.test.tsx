@@ -78,4 +78,27 @@ describe('DashboardPage', () => {
       );
     });
   });
+
+  // URL-bound drill state — boot with ?drill=severity:critical and the
+  // drill is already open on first render. Shareable + refresh-stable.
+  it('boots with the severity drill open when ?drill=severity:<sev> is in the URL', async () => {
+    renderWithProviders(<DashboardPage />, { route: '/?drill=severity:high' });
+    const drill = await screen.findByTestId('severity-drilldown');
+    expect(within(drill).getByTestId('severity-drilldown-rules')).toBeInTheDocument();
+    // Subtitle starts as "Loading…" while the alerts query resolves;
+    // wait for it to flip to the settled "high" text.
+    await waitFor(() => {
+      expect(screen.getByTestId('severity-drilldown-subtitle').textContent).toMatch(/high/i);
+    });
+    // Chip button for `high` shows pressed state
+    const highBtn = screen.getByTestId('alerts-bar-cell-high');
+    expect(highBtn.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('ignores ?drill=<malformed> and renders without a drill', async () => {
+    renderWithProviders(<DashboardPage />, { route: '/?drill=garbage:value' });
+    await screen.findByTestId('alerts-bar-drill-hint');
+    expect(screen.queryByTestId('severity-drilldown')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('trend-drilldown')).not.toBeInTheDocument();
+  });
 });
