@@ -252,7 +252,7 @@ export function SeverityDrilldown({ severity, onClose }: SeverityDrilldownProps)
             key: 'unassigned',
             label: (
               <Link
-                to={`/alerts?severity=${severity}&unassigned=true`}
+                to={`/alerts?severity=${severity}&assignee=unassigned`}
                 className="text-action hover:underline"
               >
                 Unassigned (queue triage)

@@ -53,6 +53,17 @@ export function AlertListPage() {
         ? null
         : assigneeParam;
 
+  // Rule-id filter — wired by dashboard drill-down links + the
+  // /alerts?rule_id=… deep-link surface. Applied client-side after the
+  // API fetch since /api/alerts doesn't accept rule_id today; the
+  // visible chip below lets ops clear it.
+  const ruleIdFilter = searchParams.get('rule_id');
+  const clearRuleId = () => {
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('rule_id');
+    setSearchParams(sp, { replace: true });
+  };
+
   // Sort + dedup are URL-synced too so a deep-linked queue layout
   // survives bookmarks + browser-back. Defaults: sort=criticality (the
   // value-add of Task 6), dedup=true (most useful starting view).
@@ -226,6 +237,23 @@ export function AlertListPage() {
       />
 
       <Panel className="mb-4">
+        {ruleIdFilter && (
+          <div className="mb-3 flex items-center gap-2" data-testid="alerts-rule-filter-chip">
+            <span className="text-xs text-ink-sub">Rule filter</span>
+            <span className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+              <span className="font-mono">{ruleIdFilter}</span>
+              <button
+                type="button"
+                onClick={clearRuleId}
+                aria-label={`Clear rule filter ${ruleIdFilter}`}
+                className="ml-1 text-blue-700 hover:text-blue-900"
+                data-testid="alerts-rule-filter-clear"
+              >
+                ×
+              </button>
+            </span>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-ink-sub mr-2">Severity</span>
           <FilterChip active={severity === null} onClick={() => setSeverity(null)}>
@@ -303,7 +331,11 @@ export function AlertListPage() {
 
       <DataTable
         columns={columns}
-        data={data?.items ?? []}
+        data={
+          ruleIdFilter
+            ? (data?.items ?? []).filter((r) => r.rule.id === ruleIdFilter)
+            : (data?.items ?? [])
+        }
         empty={isLoading ? 'Loading alerts…' : 'No alerts match the filters'}
         onRowClick={(row) => navigate(`/customers/${row.customer.id}`)}
       />

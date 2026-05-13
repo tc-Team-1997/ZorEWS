@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { renderWithProviders } from './utils';
@@ -164,6 +164,37 @@ describe('AlertListPage — live alert stream (T2.12)', () => {
     await user.click(screen.getByTestId('alerts-live-refresh'));
     await waitFor(() => {
       expect(screen.queryByTestId('alerts-live-banner')).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe('AlertListPage — rule_id URL filter', () => {
+  it('honors ?rule_id=<id> and renders a clearable chip', async () => {
+    renderWithProviders(<AlertListPage />, { route: '/alerts?rule_id=r-22' });
+    const chip = await screen.findByTestId('alerts-rule-filter-chip');
+    expect(within(chip).getByText('r-22')).toBeInTheDocument();
+    // Clear button exists
+    expect(screen.getByTestId('alerts-rule-filter-clear')).toBeInTheDocument();
+    // Filter applied — only alerts with rule.id === 'r-22' render. The
+    // mock data has exactly one alert (`a-001`) for r-22 ("Salary
+    // inflow stopped 60d").
+    await waitFor(() => {
+      expect(screen.getByText(/Salary inflow stopped 60d/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/DPD ≥ 30 \+ utilisation > 95%/i)).not.toBeInTheDocument();
+  });
+
+  it('clearing the rule chip removes the filter', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />, { route: '/alerts?rule_id=r-22' });
+    await screen.findByTestId('alerts-rule-filter-chip');
+    await user.click(screen.getByTestId('alerts-rule-filter-clear'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('alerts-rule-filter-chip')).not.toBeInTheDocument();
+    });
+    // Other-rule alerts now visible again
+    await waitFor(() => {
+      expect(screen.getAllByText(/DPD ≥ 30 \+ utilisation > 95%/i).length).toBeGreaterThan(0);
     });
   });
 });
