@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { api } from '@/lib/api';
 import {
   cmsApi,
   PRIORITY_TONE,
@@ -77,6 +78,20 @@ export function CmsCaseDetailPage() {
   const notesQ = useQuery({
     queryKey: ['cms-case-notes', id],
     queryFn: () => cmsApi.notes.list(id),
+    enabled: !!id,
+  });
+  // Dispatches fired for this case. Reference convention is
+  // `case:<id>[:lvl:N]` — the list endpoint accepts an exact reference
+  // match, so this only finds the bare `case:<id>` entries. The
+  // ":lvl:N" rows from escalations are still discoverable via the
+  // full Dispatches log (linked via "View all" below).
+  const dispatchesQ = useQuery({
+    queryKey: ['cms-case-dispatches', id],
+    queryFn: () =>
+      api.notificationDispatchesList({
+        reference: `case:${id}`,
+        page_size: 50,
+      }),
     enabled: !!id,
   });
   const attachmentsQ = useQuery({
@@ -263,11 +278,79 @@ export function CmsCaseDetailPage() {
           ) : null}
 
           {tab === 'Related' ? (
-            <Panel title="Related">
-              <div className="text-sm text-slate-500">
-                Related cases / linked entities — surfaces the alert_id link, customer history,
-                and similar past closures. Coming in CMS-6.
-              </div>
+            <Panel title={`Notifications fired for ${id}`}>
+              {dispatchesQ.isLoading ? (
+                <p className="py-4 text-center text-sm text-slate-500">
+                  Loading dispatches…
+                </p>
+              ) : dispatchesQ.isError ? (
+                <p
+                  className="py-4 text-center text-sm text-rose-700"
+                  role="alert"
+                  data-testid="related-dispatches-error"
+                >
+                  Failed to load dispatches.
+                </p>
+              ) : (dispatchesQ.data?.items ?? []).length === 0 ? (
+                <p
+                  className="py-4 text-center text-sm text-slate-500"
+                  data-testid="related-dispatches-empty"
+                >
+                  No notifications have been fired for this case yet. The
+                  case_create pipeline + escalation worker write here as
+                  they fan out.
+                </p>
+              ) : (
+                <>
+                  <ul
+                    className="divide-y divide-slate-100"
+                    data-testid="related-dispatches-list"
+                  >
+                    {(dispatchesQ.data?.items ?? []).slice(0, 20).map((d) => (
+                      <li
+                        key={d.dispatch_id}
+                        className="flex flex-wrap items-center gap-3 py-2 text-2xs"
+                      >
+                        <span className="w-32 shrink-0 font-mono text-slate-500">
+                          {new Date(d.performed_at).toLocaleString()}
+                        </span>
+                        <Link
+                          to={`/admin/notification-templates?focus=${encodeURIComponent(d.template_id)}`}
+                          className="w-56 shrink-0 truncate font-medium text-blue-700 hover:underline"
+                          title={d.template_name}
+                        >
+                          {d.template_name}
+                        </Link>
+                        <span className="w-20 shrink-0 font-mono text-slate-500">
+                          {d.channel}
+                        </span>
+                        <span className="flex-1 truncate text-slate-600" title={d.recipient}>
+                          {d.recipient}
+                        </span>
+                        <Badge
+                          tone={
+                            d.status === 'sent'
+                              ? 'success'
+                              : d.status === 'failed'
+                                ? 'danger'
+                                : 'neutral'
+                          }
+                          className="text-2xs uppercase"
+                        >
+                          {d.status}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    to={`/admin/notification-dispatches?reference=${encodeURIComponent(`case:${id}`)}`}
+                    className="mt-3 inline-block text-2xs text-blue-700 hover:underline"
+                    data-testid="related-dispatches-viewall"
+                  >
+                    View full log (including escalation levels) →
+                  </Link>
+                </>
+              )}
             </Panel>
           ) : null}
         </div>

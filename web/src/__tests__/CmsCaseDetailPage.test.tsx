@@ -3,7 +3,7 @@
 // CMS-5 — detail page smoke tests.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -120,6 +120,76 @@ describe('CmsCaseDetailPage', () => {
   it('shows SLA badge', async () => {
     wrap('/cms/cases/cs-1');
     await waitFor(() => screen.getByText(/SLA 50%/));
+  });
+
+  it('Related tab renders dispatches fired for this case', async () => {
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases/cs-1')
+        return Promise.resolve({ data: { body: DETAIL } });
+      if (url === '/v1/cms/cases/cs-1/notes')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-1/attachments')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-1/history')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/admin/notification-templates/dispatches') {
+        // api.notificationDispatchesList does `.then((r) => r.data)`
+        // directly (no body unwrap), so the mock returns the dispatch
+        // shape at r.data — not r.data.body.
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                dispatch_id: 'd-1',
+                tenant_id: 'BANK_DEMO',
+                template_id: 'tpl-seed-bank_demo-case-opened-rm-email',
+                template_name: 'Case Opened — RM email',
+                channel: 'EMAIL',
+                recipient: 'rm@bank.test',
+                trigger: 'case_create_pipeline',
+                reference: 'case:cs-1',
+                rendered_subject: 'New case CMS-001',
+                rendered_body: 'Hi RM, …',
+                missing_vars: [],
+                status: 'sent',
+                status_reason: null,
+                performed_by: 'system:case-pipeline',
+                performed_at: new Date().toISOString(),
+              },
+            ],
+            total: 1,
+            page: 1,
+            page_size: 50,
+          },
+        });
+      }
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+    wrap('/cms/cases/cs-1?tab=Related');
+    const list = await screen.findByTestId('related-dispatches-list');
+    expect(within(list).getByText(/Case Opened — RM email/)).toBeInTheDocument();
+    // "View full log" deep-links to /admin/notification-dispatches with the
+    // reference filter pre-applied
+    expect(screen.getByTestId('related-dispatches-viewall').getAttribute('href'))
+      .toMatch(/^\/admin\/notification-dispatches\?reference=case%3Acs-1/);
+  });
+
+  it('Related tab shows the empty state when no dispatches exist', async () => {
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases/cs-1')
+        return Promise.resolve({ data: { body: DETAIL } });
+      if (url === '/v1/cms/cases/cs-1/notes')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-1/attachments')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-1/history')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/admin/notification-templates/dispatches')
+        return Promise.resolve({ data: { items: [], total: 0, page: 1, page_size: 50 } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+    wrap('/cms/cases/cs-1?tab=Related');
+    expect(await screen.findByTestId('related-dispatches-empty')).toBeInTheDocument();
   });
 });
 
