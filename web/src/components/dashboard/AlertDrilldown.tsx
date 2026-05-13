@@ -75,7 +75,10 @@ function DrilldownShell({ title, subtitle, onClose, testId, children }: Drilldow
       }
     >
       <p className="caption mb-3" data-testid={`${testId}-subtitle`}>{subtitle}</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid={testId}>
+      <div
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"
+        data-testid={testId}
+      >
         {children}
       </div>
     </Panel>
@@ -162,12 +165,27 @@ export function SeverityDrilldown({ severity, onClose }: SeverityDrilldownProps)
     const assigned = items.filter((a) => a.assignee && a.assignee.trim()).length;
     return { assigned, unassigned: items.length - assigned, total: items.length };
   }, [items]);
+  // Top indicators — a 5th lens distinct from rules, customers, age,
+  // assignee. Each alert can fire >1 indicator (e.g. "DPD_30 + SAL_STOP")
+  // so the totals here exceed items.length; the ratio shown is share of
+  // alerts in which the indicator appeared, not share of indicators.
+  const byIndicator = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of items) {
+      for (const ind of a.indicators ?? []) {
+        counts[ind] = (counts[ind] ?? 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .map(([id, count]) => ({ id, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [items]);
 
   const subtitle = q.isLoading
     ? 'Loading…'
     : items.length === 0
       ? `No ${severity} alerts in the current view.`
-      : `Breaking down ${items.length} ${severity} alert${items.length === 1 ? '' : 's'} into 4 angles — each panel answers a different question so nothing repeats.`;
+      : `Breaking down ${items.length} ${severity} alert${items.length === 1 ? '' : 's'} into 5 angles — each panel answers a different question so nothing repeats.`;
 
   return (
     <DrilldownShell
@@ -244,6 +262,16 @@ export function SeverityDrilldown({ severity, onClose }: SeverityDrilldownProps)
           },
         ]}
       />
+      <MiniList
+        title="Top indicators firing"
+        testId="severity-drilldown-indicators"
+        empty="No indicators captured on these alerts."
+        rows={byIndicator.slice(0, 5).map((r) => ({
+          key: r.id,
+          label: <span className="font-mono text-2xs">{r.id}</span>,
+          metric: `${r.count}× · ${pctOf(r.count, items.length)} of alerts`,
+        }))}
+      />
     </DrilldownShell>
   );
 }
@@ -295,6 +323,20 @@ export function TrendWeekDrilldown({
     () => groupCount(items, (a) => a.customer.id, (a) => a.customer.name),
     [items],
   );
+  // Top indicators firing in this week — a 4th lens distinct from
+  // severity, rules, customers. Each alert can fire >1 indicator so
+  // the percentages here are share-of-alerts, not share-of-indicators.
+  const byIndicator = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of items) {
+      for (const ind of a.indicators ?? []) {
+        counts[ind] = (counts[ind] ?? 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .map(([id, count]) => ({ id, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [items]);
 
   const delta = prevPd == null ? null : pd - prevPd;
   const deltaPct = prevPd == null || prevPd === 0 ? null : ((pd - prevPd) / prevPd) * 100;
@@ -311,7 +353,7 @@ export function TrendWeekDrilldown({
                   : ''
               }`
             : ''
-        }. ${items.length} alert${items.length === 1 ? '' : 's'} fired — 3 angles below.`;
+        }. ${items.length} alert${items.length === 1 ? '' : 's'} fired — 4 angles below.`;
 
   return (
     <DrilldownShell
@@ -368,6 +410,16 @@ export function TrendWeekDrilldown({
             </Link>
           ),
           metric: `${r.count} alert${r.count === 1 ? '' : 's'}`,
+        }))}
+      />
+      <MiniList
+        title="Top indicators firing"
+        testId="trend-drilldown-indicators"
+        empty="No indicators captured on these alerts."
+        rows={byIndicator.slice(0, 5).map((r) => ({
+          key: r.id,
+          label: <span className="font-mono text-2xs">{r.id}</span>,
+          metric: `${r.count}× · ${pctOf(r.count, items.length)} of alerts`,
         }))}
       />
     </DrilldownShell>

@@ -30,8 +30,8 @@ describe('DashboardPage', () => {
     expect(within(overdue).getAllByText(/min overdue/i).length).toBeGreaterThan(0);
   });
 
-  // Drill-down — clicking a severity bar opens the 4-angle breakdown
-  it('opens the severity drill-down with 4 non-repetitive angles', async () => {
+  // Drill-down — clicking a severity bar opens the 5-angle breakdown
+  it('opens the severity drill-down with 5 non-repetitive angles', async () => {
     const user = userEvent.setup();
     renderWithProviders(<DashboardPage />);
     // Wait for the chart to mount before interacting
@@ -39,11 +39,12 @@ describe('DashboardPage', () => {
     const criticalCell = await screen.findByTestId('alerts-bar-cell-critical');
     await user.click(criticalCell);
     const drill = await screen.findByTestId('severity-drilldown');
-    // All four panels render — each panel = a distinct angle
+    // All five panels render — each panel = a distinct angle
     expect(within(drill).getByTestId('severity-drilldown-rules')).toBeInTheDocument();
     expect(within(drill).getByTestId('severity-drilldown-customers')).toBeInTheDocument();
     expect(within(drill).getByTestId('severity-drilldown-age')).toBeInTheDocument();
     expect(within(drill).getByTestId('severity-drilldown-assignee')).toBeInTheDocument();
+    expect(within(drill).getByTestId('severity-drilldown-indicators')).toBeInTheDocument();
     // Subtitle names the severity + a count
     expect(screen.getByTestId('severity-drilldown-subtitle').textContent).toMatch(
       /critical/i,
