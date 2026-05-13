@@ -60,3 +60,6 @@ web/snapshot-*.csv
 # ML artefacts you don't want to commit accidentally (keep checked-in copies under ml/models/)
 *.joblib
 !ml/models/**/*.joblib
+
+# Claude Code — personal local settings (permission allowlists, etc.)
+.claude/settings.local.json
