@@ -24,7 +24,10 @@ export function IntegrationsPage() {
   const query = useQuery({
     queryKey: ['integrations.health'],
     queryFn: api.integrationsHealth,
+    // 15s probe interval matches the subtitle promise; gated on tab
+    // visibility so we don't keep pinging upstreams from a hidden tab.
     refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
   useChatContext({ page: 'unknown' });
 
