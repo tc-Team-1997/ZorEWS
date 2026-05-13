@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   CheckCircle2,
   Copy,
@@ -48,6 +48,10 @@ type PriorityFilter = CaseScenarioPriority | 'ALL';
 
 export function CaseScenariosPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  // `?focus=<scenario_id>` scrolls + flash-highlights the matching row.
+  // Wired by the M14.34 NotificationBell active-scenarios links.
+  const focusRowId = searchParams.get('focus');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL');
@@ -65,6 +69,25 @@ export function CaseScenariosPage() {
         page_size: 200,
       }),
   });
+
+  // When navigated with ?focus=<id>, broaden the status pivot to ALL on
+  // first render so an archived scenario still surfaces and can be
+  // highlighted. Same pattern as M14.32 (matrix) / M14.36 (templates).
+  useEffect(() => {
+    if (focusRowId) setStatusFilter('ALL');
+  }, [focusRowId]);
+
+  // After the list settles, scroll the focused row into view smoothly.
+  useEffect(() => {
+    if (!focusRowId || list.isLoading) return;
+    const handle = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-focus-row="true"]');
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focusRowId, list.isLoading, list.data]);
 
   // M14.31 — lightweight join: load the templates + escalation rules
   // lists once so we can resolve `notification_template_id` +
@@ -408,6 +431,7 @@ export function CaseScenariosPage() {
         <DataTable
           columns={columns}
           data={filtered.map((r) => ({ ...r, id: r.scenario_id }))}
+          focusRowId={focusRowId}
         />
       )}
 

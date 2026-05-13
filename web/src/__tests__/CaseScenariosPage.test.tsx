@@ -149,6 +149,26 @@ describe('CaseScenariosPage', () => {
     expect(within(modal).getByText(/system:seed/)).toBeInTheDocument();
   });
 
+  // ?focus=<id> deep-link from the NotificationBell active-scenarios list
+  it('honors ?focus=<id> by highlighting the matched row + broadening pivot to ALL', async () => {
+    const FOCUS_ID = 'sc-seed-bank-fraud-p1-sudden-dpd';
+    renderWithProviders(<CaseScenariosPage />, {
+      route: `/admin/case-scenarios?focus=${FOCUS_ID}`,
+    });
+    await screen.findByText(/Fraud P1 sudden DPD spike/i);
+    // Pivot auto-broadens to ALL so archived scenarios still surface
+    await waitFor(() => {
+      const allBtn = screen.getByTestId('cs-pivot-all');
+      expect(allBtn.className).toContain('border-blue-400');
+    });
+    // Matching row carries the focus marker
+    const focused = await waitFor(() =>
+      document.querySelector('[data-focus-row="true"]'),
+    );
+    expect(focused).not.toBeNull();
+    expect(focused?.getAttribute('data-row-id')).toBe(FOCUS_ID);
+  });
+
   // M14.31 — cross-links to escalation rule + notification template
   it('renders cross-links to the linked escalation rule + template per row', async () => {
     renderWithProviders(<CaseScenariosPage />);
