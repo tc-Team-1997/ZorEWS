@@ -530,3 +530,36 @@
 
 ### Sub-phase tally
 - T6 tally **148 → 149**.
+
+## 2026-05-14 — T6 M2.8 — Tenant onboarding ETA projection
+
+**Goal.** Operational time projection over the M2.2 onboarding state. Static per-step minute estimates + sum the pending ones = remaining_minutes + projected_completion_at. Companion to M2.6 readiness (structural verdict) — this is the temporal one.
+
+### Files
+
+- **NEW** `services/bff/src/tenant_onboarding_eta.ts` — pure `projectOnboardingEta(state, now)` with a `MINUTES_BY_STEP` constant (hand-calibrated per-step efforts). Sums completed/skipped/pending minutes; computes percent_done_by_effort (completed/total); emits projected_completion_at as `now + pending_minutes * 60_000`. remaining_required_minutes is the load-bearing metric for "real" completion ETA (excludes optional steps).
+- **NEW** `services/bff/__tests__/tenant_onboarding_eta.test.ts` — 9 tests (5 pure + 4 route): untouched tenant, fully completed (projected_completion_at=null), partial state, skipped vs pending semantics, projected_completion_at arithmetic, untouched/completed/403/cross-tenant routes.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/tenants/me/onboarding/eta` (audit:read) alongside the M2.6 readiness + M2.7 skip-history routes.
+
+### Design notes
+
+- Effort estimates are HAND-CALIBRATED static numbers, not historical averages. Justifications:
+  - tenant_provisioned: 5min — automated DB row provision
+  - channels_configured: 10min — picker + defaults accept
+  - vertical_set: 5min — single dropdown
+  - config_baseline: 30min — the M13 13-key walkthrough
+  - email_channel: 15min — SES creds + verification
+  - alert_routing: 20min — tweak 4 M8 rules
+  - audit_active: 10min — WORM bucket confirm
+  - operator_invited: 15min — invite + first login (optional)
+  - Total: 110 platform minutes.
+- A future enhancement would replace the static table with a historical average from a "onboarding completions" ledger. Not in scope.
+- `projected_completion_at` is null when pending_minutes=0 — onboarding is done. Distinct from "now" because a completed onboarding has no ETA to project, it has a past completion timestamp.
+- `remaining_required_minutes` excludes optional steps so the SPA can render two complementary metrics: "you have 95min of total work left, of which 80min are required to finish".
+
+### Verification
+- `npx jest __tests__/tenant_onboarding_eta.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **154 → 155**.

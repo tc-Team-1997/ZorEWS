@@ -10572,6 +10572,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/me/onboarding/eta (T6 M2.8) — operational time
+   *  projection: per-step minute estimates → remaining_minutes +
+   *  projected_completion_at. Lets the SPA show "this tenant has
+   *  ~85 minutes of setup work left". Mounted alongside M2.6/M2.7
+   *  onboarding sub-routes. */
+  app.get(
+    '/v1/tenants/me/onboarding/eta',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const { projectOnboardingEta } = require('./tenant_onboarding_eta') as
+        typeof import('./tenant_onboarding_eta');
+      const out = projectOnboardingEta(state, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding/skip-history (T6 M2.7) — focused
    *  view of just the caller's tenant skipped onboarding steps with
    *  captured reasons. Companion to M2.6 readiness: that gives a
