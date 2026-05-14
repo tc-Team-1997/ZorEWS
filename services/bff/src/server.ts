@@ -8118,6 +8118,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/:dashboard_id/lint (T6 M11.10) —
+   *  pure lint pass over a saved layout. Returns LintReport with
+   *  errors/warnings/info counts + per-issue details. `passes` flag
+   *  is true iff errors_count===0; the SPA gates a "deploy" button
+   *  on this. Mounted BEFORE the catch-all `/:dashboard_id` so the
+   *  literal "/lint" segment isn't captured. */
+  app.get(
+    '/v1/dashboards/custom/:dashboard_id/lint',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.dashboard_id ?? '';
+      const dashboard = customDashboardStore.get(req.tenant!.tenant_id, id);
+      if (!dashboard) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_dashboard', message: `dashboard ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const { lintDashboardLayout } = require('./custom_dashboard_lint') as
+        typeof import('./custom_dashboard_lint');
+      const report = lintDashboardLayout(dashboard);
+      return res.json(wrapResponse(report, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/:dashboard_id — single. */
   app.get(
     '/v1/dashboards/custom/:dashboard_id',

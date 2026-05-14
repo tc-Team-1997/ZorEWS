@@ -152,3 +152,28 @@
 - `npx jest __tests__/custom_dashboard_bundle.test.ts` — 23/23 pass.
 - `npx jest` (full BFF suite) — 4147 pass / 58 skipped / 4205 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M11.10 — Custom dashboard layout linting
+
+### Tasks ticked
+- T6 sub-phase M11.10 — custom dashboard layout linting. T6 sub-phase tally 116 → 117.
+
+### Files touched
+- `services/bff/src/custom_dashboard_lint.ts` (new) — pure `lintDashboardLayout(dashboard)` returns `LintReport {dashboard_id, total_widgets, errors_count, warnings_count, info_count, passes, issues[]}`. 5 issue types across 3 severities. ERROR: `unknown_widget_type` (defensive vs the M11.7 save guard for layouts that arrived via M11.9 import or cross-tenant clone that may have side-stepped save validation), `overlapping_widgets` (reuses `detectOverlaps` from custom_dashboards). WARNING: `widget_extends_beyond_max_rows` (extent past `MAX_REASONABLE_ROWS=50`), `unrecognized_config_key` (key in `widget.config` not in the catalog's `config_keys` whitelist for that widget_type; skipped when widget_type itself is already unknown to avoid double-erroring). INFO: `empty_grid_region` (vertical gap > `EMPTY_REGION_ROWS=5` between consecutive widget extents, sorted by top-row). `passes` is `errors_count===0` — SPA gates a "deploy" affordance on it; warnings + info are informational and don't fail the check.
+- `services/bff/__tests__/custom_dashboard_lint.test.ts` (new) — 18 jest tests: 2 empty/clean baselines + 1 unknown_widget_type error + 1 overlapping_widgets error + 2 tall-widget warning (past + boundary) + 2 unrecognized_config_key (warning + skip-when-already-errored) + 3 empty_grid_region (gap surfaces, small gap doesn't, multiple gaps independent) + 2 passes vs counts (warnings/info don't gate passes, errors do) + 5 route (200 happy, 404 unknown dashboard, 403 wrong role, cross-tenant invisibility, M11.7 GET /:id regression).
+- `services/bff/src/server.ts` — `GET /v1/dashboards/custom/:dashboard_id/lint` mounted BEFORE the catch-all `/:dashboard_id` so the literal `/lint` segment isn't captured as a dashboard id. `audit:read` RBAC matches the rest of M11.7. 404 maps `unknown_dashboard`; cross-tenant invisibility is automatic since the store is tenant-keyed.
+
+### Decisions
+- **Defensive ERROR checks even though M11.7 catches them at save.** Layouts can arrive via M11.9 bundle import or a future cross-tenant clone path — those paths can side-step save validation depending on import wiring evolution. Lint runs a fresh check at GET time.
+- **`unrecognized_config_key` skipped when widget_type is unknown.** Avoids double-erroring an already-broken widget. Tested explicitly.
+- **`empty_grid_region` is INFO, not WARNING.** Wasted space is usually intentional (visual breathing room). Surface it for review but don't gate deploys.
+- **Errors-only gate on `passes`.** Warnings + info are informational. Tested explicitly so the contract is locked.
+- **No new store.** Pure function over an existing CustomDashboard object loaded via the existing store.
+
+### Hand-offs
+- **agent-ui** — render a "Lint" button on the custom dashboard edit page → `GET /v1/dashboards/custom/:id/lint` → render the issues list grouped by severity with the `passes` headline. Gate the "Deploy" / "Make active" affordance on `passes===true`.
+
+### Verification
+- `npx jest __tests__/custom_dashboard_lint.test.ts` — 18/18 pass.
+- `npx jest` (full BFF suite) — 4343 pass / 58 skipped / 4401 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
