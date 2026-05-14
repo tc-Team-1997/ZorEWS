@@ -573,6 +573,7 @@ import {
   type AuditTrailStore,
 } from './audit_trail';
 import { introspectAuditCatalog } from './audit_action_catalog';
+import { analyseTemplateCloneHistory } from './template_clone_analysis';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -15498,6 +15499,39 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/rules/templates/:template_id/clones-in-tenant (T6 M5.13)
+   *  — back-reference query: for this library template, list every
+   *  custom template in the calling tenant that was cloned from it
+   *  (per the M5.9/M5.10 `cloned_from` audit metadata). Companion
+   *  to M5.7 (per-custom audit history): that asks "show me the
+   *  trail for THIS custom template"; this asks "show me every
+   *  custom template traced back to THIS library template" —
+   *  opposite direction across the same audit data. Mounted
+   *  BEFORE `/:id` so the literal `/clones-in-tenant` segment
+   *  isn't captured. 404 EWS_404_unknown_template when the library
+   *  id doesn't exist. */
+  app.get(
+    '/v1/rules/templates/:template_id/clones-in-tenant',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const tpl = getRuleTemplate(id);
+      if (!tpl) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_template', message: `unknown template: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const out = analyseTemplateCloneHistory(page.items, id);
+      return res.json(wrapResponse(out, ctx));
     },
   );
 

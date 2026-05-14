@@ -100,3 +100,27 @@ Picked TS+Express over Python+FastAPI because:
 - `npx jest __tests__/rule_templates_custom.test.ts` — 60/60 (pre-existing tests unaffected by the interface extension).
 - `npx jest` (full BFF suite) — 4183 pass / 58 skipped / 4241 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M5.13 — Library template clone-from back-reference
+
+**Goal.** Back-reference query: given a library template id, surface every custom template in the calling tenant that was cloned from it. Companion to M5.7 (per-custom audit history) but opposite direction — both walk the same audit data.
+
+### Files
+
+- **NEW** `services/bff/src/template_clone_analysis.ts` — pure `analyseTemplateCloneHistory(events, library_template_id)`. Filters strictly to `action='rule.create' + resource_type='rule' + metadata.cloned_from === library_template_id` so unrelated events drop. Sorts clones newest-first by `cloned_at` with `custom_template_id` asc tie-break. Absent optional metadata (name/vertical/category) surfaces as null.
+- **NEW** `services/bff/__tests__/template_clone_analysis.test.ts` — 10 tests across 5 pure + 5 route describe blocks: empty, filter combinations (wrong source, wrong action, wrong resource_type, no metadata), ordering by ts desc with id tie-break, null optional metadata, 404 unknown_template, zero-clones envelope, end-to-end clone→back-reference, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — imported `analyseTemplateCloneHistory`; mounted `GET /v1/rules/templates/:template_id/clones-in-tenant` (rules:list) right above the catch-all `/v1/rules/templates/:id` so the literal `/clones-in-tenant` suffix wins.
+
+### Design notes
+
+- Per-tenant scope: `auditTrailStore` is per-tenant, so this answers "which of MY custom templates trace back to this library template?" — not the cross-tenant "how many tenants have cloned this?" question (would need a platform-wide store).
+- M5.9 and M5.10 both write `rule.create` audit events carrying `cloned_from` metadata; the pure analyser doesn't care which route emitted the event, so bulk-cloned templates show up in the back-reference identically to single-cloned ones.
+- 404 path uses `getRuleTemplate(id)` which is the same library-template registry M5.9 validates against — keeps the semantics aligned.
+- The Map-of-Set / catalog enrichment shape used in M15.6 is NOT used here: this is a single-axis filter (one source template, all clones), so a flat list with newest-first sort is the right shape.
+
+### Verification
+- `npx jest __tests__/template_clone_analysis.test.ts` — 10/10 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **130 → 131**.
