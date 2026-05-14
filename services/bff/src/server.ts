@@ -15003,6 +15003,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/schema/type-matrix (T6 M3.11) — 2D pivot
+   *  per-connector × per-FieldType counts plus required/optional
+   *  split + dominant_type per row + by_type marginal totals +
+   *  connectors_without_type[t] inversion. Useful for SPA "schema
+   *  audit" stacked-bar charts. Mounted BEFORE catch-all
+   *  `/v1/ingestion/connectors/:id/schema` so the literal segment
+   *  wins. */
+  app.get(
+    '/v1/ingestion/schema/type-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorSchemaTypeMatrix } = require('./connector_schema_type_matrix') as
+        typeof import('./connector_schema_type_matrix');
+      const out = buildConnectorSchemaTypeMatrix();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/connectors/:id/schema — full field schema. */
   app.get(
     '/v1/ingestion/connectors/:id/schema',

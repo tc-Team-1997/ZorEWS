@@ -767,3 +767,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Companion to M12.7 (upcoming runs) + M12.8 (conflicts) — same store, cadence axis instead of time axis.
 - 19 new jest tests (13 pure + 6 route). Clean full-suite run: 5168 pass / 58 skipped / 5226 total (no flakes).
 - T6 sub-phase tally 175 → 176.
+
+## 2026-05-15 — T6 M3.11 Connector schema field type-coverage matrix
+
+- Pure `buildConnectorSchemaTypeMatrix()` at `services/bff/src/connector_schema_type_matrix.ts` is the 2D pivot over the M3.2 connector schema catalog.
+- Per-connector row `{connector_id, version, total_fields, required_count, optional_count, by_type (7-key Record<FieldType,number>), dominant_type}`. Every FieldType key always present (zero when absent).
+- Envelope: `{total_connectors, total_fields, total_required, total_optional, by_type_totals, connectors[] sorted desc, connectors_without_type (inversion per type)}`.
+- New route `GET /v1/ingestion/schema/type-matrix` (audit:read; platform-static; mounted before `/v1/ingestion/connectors/:id/schema`).
+- Mirror of M16.17 (scenario coverage) but for connectors × types.
+- 17 new jest tests (13 pure + 4 route). Full BFF suite 5185 effective (2 pre-existing flakes).
+- T6 sub-phase tally 176 → 177.
