@@ -315,3 +315,26 @@
 - `npx jest __tests__/scoring_preset_diff.test.ts` — 17/17 pass.
 - `npx jest` (full BFF suite) — 4162 pass / 58 skipped / 4222 total. Intermittent cross-suite singleton flakiness in `adapter_sla_dashboard` / `case_maker_checker` — both pass when run alone or together (136/136); pre-existing pattern unrelated to M6.9.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M16.12 — Scenario bulk delete
+
+### Tasks ticked
+- T6 sub-phase M16.12 — scenario bulk delete. T6 sub-phase tally 107 → 108.
+
+### Files touched
+- `services/bff/src/server.ts` — new route `POST /v1/scenarios/library/custom/bulk-delete` mirroring the M16.9 bulk-clone shape: validates `preset_ids[]` (non-empty, cap 10), iterates and `customPresetStore.get` → `delete` each, captures previous-state metadata for the audit event before delete. Per-row outcomes: `deleted[] {preset_id, name}` / `skipped[] {preset_id, reason}` where reasons are `invalid_id` (non-string / empty) or `unknown_preset` (not in tenant's store, covers cross-tenant). Best-effort `scenario.delete` audit event per successful delete with `bulk:true` marker and the same `{previous_name, previous_severity, bulk:true}` metadata shape M16.9 uses. Mounted BEFORE `DELETE /:preset_id` so the literal "bulk-delete" segment isn't captured as a preset_id by the wildcard.
+- `services/bff/__tests__/scenario_bulk_delete.test.ts` (new) — 10 jest tests: 3 validation (empty / over-cap / 403 wrong role), 3 happy paths (all-valid / mixed valid+unknown / non-string-ids→invalid_id), 2 audit (event written per success with bulk:true / no event for skipped rows), 1 tenant isolation (cross-tenant id surfaces as unknown_preset; foreign preset stays intact), 1 route ordering (bulk-delete segment routes correctly, not captured by `:preset_id`).
+
+### Decisions
+- **Mirror M16.9 exactly.** Same `{preset_ids[]}` body, same cap 10, same per-row outcome shape, same audit event shape with `bulk:true`. SPA can reuse the existing bulk-clone result viewer with no shape changes.
+- **Cross-tenant → unknown_preset, not error.** A cross-tenant id is indistinguishable from a non-existent id from the caller's perspective; treating it as a per-row skip rather than a global error keeps partial-success behavior consistent.
+- **Capture metadata BEFORE delete.** Same as the single-delete route. The audit event's `previous_name` + `previous_severity` are unrecoverable post-delete.
+- **`customers:read_risk_profile` RBAC.** Matches the existing M16.x route convention.
+
+### Hand-offs
+- **agent-ui** — multi-select rows on `/scenarios/custom` → `POST .../bulk-delete` → render per-row result strip (reuse the M16.9 bulk-clone outcome viewer; deleted entries show with strike-through, skipped rows show their reason inline).
+
+### Verification
+- `npx jest __tests__/scenario_bulk_delete.test.ts` — 10/10 pass.
+- `npx jest` (full BFF suite) — 4192 pass / 58 skipped / 4251 total. Intermittent cross-suite singleton flakiness in `analytics_risk_trend` (passes 9/9 when run alone); pre-existing pattern unrelated to M16.12.
+- `npx tsc --noEmit` — clean.

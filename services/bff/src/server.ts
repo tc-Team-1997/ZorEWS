@@ -4728,6 +4728,104 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scenarios/library/custom/bulk-delete (T6 M16.12) — delete
+   *  up to 10 custom presets in one call. Per-row outcomes so a partial
+   *  success (some ids unknown / cross-tenant) surfaces each row's
+   *  result. Writes a `scenario.delete` audit event per successful delete.
+   *  MUST be declared BEFORE `/:preset_id` so the literal segment isn't
+   *  captured as a preset_id. */
+  app.post(
+    '/v1/scenarios/library/custom/bulk-delete',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const deleted_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { preset_ids?: unknown };
+      if (!Array.isArray(wrapper.preset_ids) || wrapper.preset_ids.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'preset_ids[] must be non-empty', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (wrapper.preset_ids.length > 10) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'preset_ids[] exceeds cap of 10', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const tenantId = req.tenant!.tenant_id;
+      const deleted: Array<{ preset_id: string; name: string }> = [];
+      const skipped: Array<{ preset_id: string; reason: string }> = [];
+
+      for (const pid of wrapper.preset_ids) {
+        if (typeof pid !== 'string' || !pid.trim()) {
+          skipped.push({ preset_id: String(pid), reason: 'invalid_id' });
+          continue;
+        }
+        const previous = customPresetStore.get(tenantId, pid);
+        if (!previous) {
+          skipped.push({ preset_id: pid, reason: 'unknown_preset' });
+          continue;
+        }
+        const removed = customPresetStore.delete(tenantId, pid);
+        if (!removed) {
+          // Defensive — `get` returned truthy so `delete` should succeed,
+          // but covers a race where another caller deleted between calls.
+          skipped.push({ preset_id: pid, reason: 'unknown_preset' });
+          continue;
+        }
+        deleted.push({ preset_id: pid, name: previous.name });
+        // Best-effort audit per successful delete (mirrors the
+        // single-delete route's audit shape with bulk:true marker).
+        try {
+          auditTrailStore.record(
+            tenantId,
+            {
+              actor_username: deleted_by,
+              actor_role: 'admin',
+              action: 'scenario.delete',
+              resource_type: 'scenario',
+              resource_id: pid,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_name: previous.name,
+                previous_severity: previous.severity,
+                bulk: true,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            total: wrapper.preset_ids.length,
+            deleted_count: deleted.length,
+            skipped_count: skipped.length,
+            deleted,
+            skipped,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
   /** DELETE /v1/scenarios/library/custom/:preset_id — remove custom preset. */
   app.delete(
     '/v1/scenarios/library/custom/:preset_id',
