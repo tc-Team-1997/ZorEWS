@@ -9744,6 +9744,58 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scoring/what-if body { vertical, items } (T6 M6.14) —
+   *  fan one indicator input set across every M6.3 library preset
+   *  of the given vertical. Per-preset: score + category + delta_vs_balanced.
+   *  Envelope adds peak_preset + lowest_preset + spread. Answers
+   *  "what would my score be under each scoring profile?" — extends
+   *  M6.7 (2-preset compare) to the full library. */
+  app.post(
+    '/v1/scoring/what-if',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const { buildScoreWhatIf } = require('./scoring_what_if') as
+          typeof import('./scoring_what_if');
+        const { DEFAULT_BASE_LOOKUP } = require('./scoring_sensitivity') as
+          typeof import('./scoring_sensitivity');
+        const { WeightPresetError, IndicatorLookupError } = require('./scoring_presets') as
+          typeof import('./scoring_presets');
+        try {
+          const out = buildScoreWhatIf(
+            (inner ?? {}) as Parameters<typeof buildScoreWhatIf>[0],
+            DEFAULT_BASE_LOOKUP,
+            now(),
+          );
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof WeightPresetError) {
+            const code = e.code === 'unknown_preset' ? 404 : 400;
+            return res.status(code).json(
+              wrapError({ code: `EWS_${code}_${e.code}`, message: e.message, severity: code === 404 ? 'LOW' : 'MEDIUM' }, ctx),
+            );
+          }
+          if (e instanceof IndicatorLookupError) {
+            const code = e.code === 'unknown_indicator' ? 404 : 400;
+            return res.status(code).json(
+              wrapError({ code: `EWS_${code}_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** POST /v1/scoring/sensitivity body { preset_id, items, perturbation? }
    *  (T6 M6.13) — perturb each indicator value by ±perturbation
    *  (default 0.05) and compute score swing. Surfaces which

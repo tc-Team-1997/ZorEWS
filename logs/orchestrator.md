@@ -810,3 +810,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/indicators/thresholds/drift` (audit:read).
 - 16 new jest tests. Full BFF suite 5237 effective (2 pre-existing flakes).
 - T6 sub-phase tally 179 → 180. **180 sub-phases milestone crossed.**
+
+## 2026-05-15 — T6 M6.14 Score what-if across library presets
+
+- Pure `buildScoreWhatIf({vertical, items}, baseLookup, now)` at `services/bff/src/scoring_what_if.ts` fans one indicator input set across every M6.3 library preset of the given vertical.
+- Composes M6.3 `scoreByPreset` under the hood per preset.
+- Per-preset: `{preset_id, name, mode, vertical, score, category, delta_vs_balanced}`.
+- Envelope: `{vertical, items_count, total_presets_considered, presets[] sorted desc, peak_preset, lowest_preset, spread}`.
+- Strict vertical filter — banking presets never resolve insurance indicators (cross-vertical guard from M6.3 stays in effect).
+- Extends M6.7 (2-preset compare) to the FULL library.
+- New route `POST /v1/scoring/what-if` (customers:read_risk_profile; envelope-aware).
+- 21 new jest tests. Clean full-suite run: 5258 pass / 58 skipped / 5316 total (no flakes).
+- T6 sub-phase tally 180 → 181.
