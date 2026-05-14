@@ -635,3 +635,29 @@
 
 ### Sub-phase tally
 - T6 tally **160 → 161**.
+
+## 2026-05-14 — T6 M2.9 — Tenant onboarding overview (composite)
+
+**Goal.** Single round-trip for the SPA's onboarding dashboard, composing the M2.6 readiness + M2.7 skip-history + M2.8 ETA views.
+
+### Files
+
+- **NEW** `services/bff/src/tenant_onboarding_overview.ts` — pure `composeOnboardingOverview(state, now)`. Delegates to the three existing pure functions (computeOnboardingReadiness, listOnboardingSkips, projectOnboardingEta). No new logic.
+- **NEW** `services/bff/__tests__/tenant_onboarding_overview.test.ts` — 7 tests (3 pure + 4 route): untouched zero state, partial progress with all 3 sub-views reflecting, fully-done invariant, admin happy, 403, cross-tenant, M2.6 regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/tenants/me/onboarding/overview` (audit:read) above the M2.8 /eta route.
+
+### Design notes
+
+- Pure composition: M2.9 doesn't introduce new business logic; it just collapses 3 network calls into 1. Justification: the SPA's onboarding dashboard already rendered all 3 views simultaneously and the latency budget was 3×.
+- Three sub-views answer complementary questions: readiness = "are you ready?" (structural verdict); skip_history = "what did you skip and why?" (audit trail); eta = "how much time remaining?" (temporal projection). Together they answer the full onboarding state.
+- audit:read RBAC matches the underlying routes — consistent permission posture.
+
+### 5000 jest crossed
+This is the BFF jest suite crossing 5000 passing tests this session. Started at ~4500 (155 sub-phases ago).
+
+### Verification
+- `npx jest __tests__/tenant_onboarding_overview.test.ts` — 7/7 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **165 → 166**.

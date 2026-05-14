@@ -10899,6 +10899,24 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/me/onboarding/overview (T6 M2.9) — composite
+   *  payload combining M2.6 readiness + M2.7 skip-history + M2.8
+   *  ETA in one round-trip. Saves the SPA's onboarding dashboard
+   *  3 separate calls on every refresh. */
+  app.get(
+    '/v1/tenants/me/onboarding/overview',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const { composeOnboardingOverview } = require('./tenant_onboarding_overview') as
+        typeof import('./tenant_onboarding_overview');
+      const out = composeOnboardingOverview(state, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding/eta (T6 M2.8) — operational time
    *  projection: per-step minute estimates → remaining_minutes +
    *  projected_completion_at. Lets the SPA show "this tenant has
