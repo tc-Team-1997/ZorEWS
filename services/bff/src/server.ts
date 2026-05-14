@@ -13924,6 +13924,75 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/:schedule_id/preview?n=10&from=ISO
+   *  (T6 M12.6) — project the next N firings of a saved schedule by
+   *  iterating M12.2 computeNextRun. n bounded [1, 50], default 10.
+   *  from defaults to now(). audit:read RBAC. Mounted BEFORE the
+   *  catch-all `/:schedule_id` so the literal /preview segment isn't
+   *  captured as a schedule_id. */
+  app.get(
+    '/v1/reports/schedules/:schedule_id/preview',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.schedule_id ?? '';
+      const entry = reportScheduleStore.get(req.tenant!.tenant_id, id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_schedule', message: `schedule ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const {
+        previewScheduleEntryRuns,
+        PREVIEW_DEFAULT_N,
+        PREVIEW_MAX_N,
+        SchedulePreviewError,
+      } = require('./report_schedule_preview') as
+        typeof import('./report_schedule_preview');
+      const nRaw = req.query.n as string | undefined;
+      const n = nRaw === undefined ? PREVIEW_DEFAULT_N : Number(nRaw);
+      if (!Number.isInteger(n) || n < 1 || n > PREVIEW_MAX_N) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `n must be an integer in 1..${PREVIEW_MAX_N}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const fromRaw = req.query.from as string | undefined;
+      let from = now();
+      if (typeof fromRaw === 'string' && fromRaw.trim()) {
+        const d = new Date(fromRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'from must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        from = d;
+      }
+      try {
+        const runs = previewScheduleEntryRuns(entry, from, n);
+        return res.json(
+          wrapResponse({ schedule_id: id, n, from: from.toISOString(), runs }, ctx),
+        );
+      } catch (e) {
+        if (e instanceof SchedulePreviewError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/reports/schedules/:schedule_id — single schedule. */
   app.get(
     '/v1/reports/schedules/:schedule_id',

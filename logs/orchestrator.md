@@ -338,3 +338,28 @@
 - `npx jest __tests__/scenario_bulk_delete.test.ts` — 10/10 pass.
 - `npx jest` (full BFF suite) — 4192 pass / 58 skipped / 4251 total. Intermittent cross-suite singleton flakiness in `analytics_risk_trend` (passes 9/9 when run alone); pre-existing pattern unrelated to M16.12.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M12.6 — Recurring report schedule next-N-runs preview
+
+### Tasks ticked
+- T6 sub-phase M12.6 — schedule next-N-runs preview. T6 sub-phase tally 117 → 118.
+
+### Files touched
+- `services/bff/src/report_schedule_preview.ts` (new) — pure `previewScheduleRuns({cadence, day_of_week, day_of_month, hour_utc, tz}, from, n)` iterates M12.2 `computeNextRun` to project the next N firings. Each step advances the `after` anchor by 1ms so consecutive returns are strictly increasing (computeNextRun's contract is "next strictly-future"). Returns `Array<{run_no: number, fire_at: ISO}>` 1-based. n bounded [1, 50] via `SchedulePreviewError('invalid_input', …)`. `PREVIEW_DEFAULT_N=10`, `PREVIEW_MAX_N=50` exported. Convenience adapter `previewScheduleEntryRuns(entry, from, n)` accepts a `ReportScheduleEntry` directly.
+- `services/bff/__tests__/report_schedule_preview.test.ts` (new) — 19 jest tests: 10 pure (daily, weekly fires on configured day_of_week, monthly with year roll, quarterly spaced 3-months, last_day_of_month handling Feb 28/29 across 2027 non-leap + 2028 leap, strict-monotonic invariant, n bounds throw on 0 / > MAX / non-integer, returns N rows exactly, Asia/Kolkata IST→UTC tz handling) + 9 route (default n=10, ?n=3, ?n=0 → 400, ?n > 50 → 400, ?from=ISO honored with daily-hour edge, ?from=invalid → 400, unknown_schedule → 404, 403 wrong role, cross-tenant invisibility).
+- `services/bff/src/server.ts` — `GET /v1/reports/schedules/:schedule_id/preview?n=10&from=ISO` mounted BEFORE the catch-all `/:schedule_id` so the literal `/preview` segment isn't captured as a schedule_id. `audit:read` RBAC matches the other M12 schedule routes. Validates `?n` is int in [1, 50]; validates `?from` via `Number.isFinite(new Date(s).getTime())` → 400 on bad input. Default `from = now()`.
+
+### Decisions
+- **Advance anchor by 1ms each iteration.** computeNextRun's contract is "next STRICTLY-future" — passing the same anchor twice would return the same fire. Advancing by 1ms (less than any meaningful schedule resolution) guarantees forward motion without skipping legitimate fires.
+- **n capped at 50.** A month-and-change of daily firings or a year of weekly firings. Deeper projection doesn't help the SPA timeline view and would waste payload.
+- **Both pure `previewScheduleRuns` and adapter `previewScheduleEntryRuns` exported.** Pure variant takes a tight 5-field arg; adapter takes a `ReportScheduleEntry` — keeps unit tests focused while letting the route hand a full entry across.
+- **First fire follows computeNextRun's "today if hour > now" semantics.** Confirmed by the test where `?from=2026-12-25T00:00` with `hour_utc=8` daily returns `2026-12-25T08:00` as run_no=1 (same day, strictly future) — not `2026-12-26T08:00`.
+- **No new store, no audit event.** Pure forward simulation against the existing schedule definition.
+
+### Hand-offs
+- **agent-ui** — schedule detail page can render a 10-run timeline strip: `GET /v1/reports/schedules/:id/preview` → list of upcoming fires with relative-time labels ("in 2 hours", "tomorrow at 08:00"). Editing a schedule (PATCH) → re-preview to show the operator how their change propagates.
+
+### Verification
+- `npx jest __tests__/report_schedule_preview.test.ts` — 19/19 pass.
+- `npx jest` (full BFF suite) — 4360 pass / 58 skipped / 4420 total. Intermittent cross-suite singleton flakiness in `case_maker_checker` / `scenario_bulk` (both pass when run together in isolation, 81/81); pre-existing pattern unrelated to M12.6.
+- `npx tsc --noEmit` — clean.
