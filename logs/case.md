@@ -173,3 +173,28 @@
 
 ### Sub-phase tally
 - T6 tally **161 → 162**.
+
+## 2026-05-14 — T6 M9.11 — Investigation age-bucket distribution
+
+**Goal.** Histogram investigations by age into 5 canonical operational buckets so the SPA can render an aging-pyramid bar chart for triage. Each bucket carries drill-through samples (top 3 oldest in that bucket) so ops can click straight from the chart into the worst cases.
+
+### Files
+
+- **NEW** `services/bff/src/investigation_age_buckets.ts` — pure `bucketInvestigationsByAge(investigations, now)`. Static BUCKET_DEFS array defines the 5 canonical buckets + their hour bounds. For each investigation, age_hours = (now - opened_at) / 3600s; bucketFor() classifies; per-bucket candidates accumulated, sorted by age desc, top 3 retained as samples.
+- **NEW** `services/bff/__tests__/investigation_age_buckets.test.ts` — 17 tests (13 pure + 4 route): empty, each of 5 buckets via single-placement tests, boundary exact-hour invariants (24/72/720), top-3 sample selection from 5 candidates, canonical bucket order + bounds + labels, sample tie-break, admin happy, populated, 403, cross-tenant.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/investigations/age-distribution` (audit:read) BEFORE the `/:id` catch-all so the literal `/age-distribution` wins.
+
+### Design notes
+
+- 5 buckets reflect the operational reality of BIL claim-fraud investigations: < 24h is the active triage window; 1-3d is the standard investigation pace; 3-7d is "getting stuck"; 7-30d is "needs escalation"; 30d+ is "this is a crisis case". Bucket labels match this narrative.
+- Boundary `<`/`<=`: each bucket is `[min_hours, max_hours)` so the boundaries are unambiguous. age=24h falls into `1_to_3d`, not `under_24h`.
+- The 30d+ bucket has `max_hours: null` to signal "open-ended"; SPA can render this as ">30 days" without trying to fetch an upper bound.
+- Sample = top-3 oldest within bucket for drill-through. Cap 3 because the SPA panel size; can be widened later if needed.
+- Closed investigations included since they're still relevant to the question "how old were our cases when they closed?" (longitudinal). SPA can filter by status downstream if it wants.
+
+### Verification
+- `npx jest __tests__/investigation_age_buckets.test.ts` — 17/17 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **162 → 163**.

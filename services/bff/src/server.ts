@@ -8280,6 +8280,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/age-distribution (T6 M9.11) — histogram
+   *  of open + closed investigations by age bucket (< 24h / 1-3d /
+   *  3-7d / 7-30d / 30d+). Per-bucket includes up to 3 oldest as
+   *  drill-through samples. Mounted BEFORE /:id catch-all so the
+   *  literal /age-distribution segment wins. */
+  app.get(
+    '/v1/investigations/age-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = caseInvestigationStore.list(
+        req.tenant!.tenant_id,
+        { page_size: 100000 },
+      ).items;
+      const { bucketInvestigationsByAge } = require('./investigation_age_buckets') as
+        typeof import('./investigation_age_buckets');
+      const out = bucketInvestigationsByAge(items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/notes/search?q=&limit= (T6 M9.10) —
    *  cross-investigation substring search over the notes thread.
    *  Returns per-match {note_id, investigation_id, case_id, ts,
