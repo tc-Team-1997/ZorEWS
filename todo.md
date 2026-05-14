@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M8.6 — Alert auto-routing analytics shipped — pure `aggregateRoutingAnalytics(records, now)` + `InMemoryRoutingLedger` (FIFO 200/tenant) hooked into `/v1/alerts/ingest` + manual `/v1/alerts/:id/ack`; new route `GET /v1/alerts/routing/analytics?window=N` rolls up class/channel mix, ack_rate (excludes monitor_only), time-to-ack p50/p95 via M3.5 linear-interpolation percentiles, SLA-breach count (acked-late + still-open past SLA), escalation-due count)
+**Last updated:** 2026-05-14 (T6 M9.5 — Case SLA breach detection shipped — pure `detectCaseSlaBreaches(events, now, sla_by_state?)` reconstructs each case's state timeline from the M9.4 event journal; new route `GET /v1/cases/sla-breaches` returns worst-first breach list (capped 50) + per-state open/breached counts + breach_rate. Default SLA tiers mirror M9.1 InvestigationStatus. Previous: M8.6 alert auto-routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

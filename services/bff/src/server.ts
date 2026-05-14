@@ -146,6 +146,7 @@ import {
   defaultCaseEventStore,
   type CaseEventStore,
 } from './case_events';
+import { detectCaseSlaBreaches } from './case_sla_breach';
 import {
   DashboardError,
   WIDGET_CATALOG,
@@ -7485,6 +7486,26 @@ export function makeApp(deps: AppDeps = {}) {
       const case_id = req.params.case_id ?? '';
       const items = caseEventStore.forCase(req.tenant!.tenant_id, case_id);
       return res.json(wrapResponse({ case_id, items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/cases/sla-breaches (T6 M9.5) — reconstruct each case's
+   *  state timeline from the M9.4 event journal, compare time-in-state
+   *  against the per-state SLA, and surface cases past their window.
+   *  Worst-first list capped at 50 entries. */
+  app.get(
+    '/v1/cases/sla-breaches',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = caseEventStore.fetchSince(
+        req.tenant!.tenant_id,
+        0,
+        CASE_EVENT_MAX_LIMIT,
+      );
+      const summary = detectCaseSlaBreaches(page.items, now());
+      return res.json(wrapResponse({ summary }, ctx));
     },
   );
 
