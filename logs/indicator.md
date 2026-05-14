@@ -200,3 +200,27 @@ These compute fns return `value=null, breached=false` until agent-data extends t
 
 ### Sub-phase tally
 - T6 tally **140 → 141**.
+
+## 2026-05-14 — T6 M4.11 — Indicator usage / orphan detection
+
+**Goal.** Reverse cross-reference for the indicator catalog. M5.14 walks templates → supporting_indicators; M4.11 walks indicators → which templates reference me. Surfaces dead config (orphan indicators with no references AND no threshold are cleanup candidates).
+
+### Files
+
+- **NEW** `services/bff/src/indicator_usage_map.ts` — pure `mapIndicatorUsage(catalog, templates)`. Builds reverse-index by iterating templates × indicator-ids. Per-indicator emits referenced_by_templates[] sorted asc + reference_count + has_threshold (from M4.3 getThreshold lookup) + vertical_matches per template. Envelope adds orphaned_count, most_referenced top-5, by_vertical counts.
+- **NEW** `services/bff/__tests__/indicator_usage_map.test.ts` — 12 tests (9 pure + 3 route): empty templates → all orphaned, single reference, vertical mismatch, vertical=both accepts-either, multi-template + orphan invariant, top-5 sort order, by_vertical counts, references sorted by template_id, default-registries integration, admin happy, 403, platform-static.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/indicators/usage` (audit:read) right ABOVE `/v1/indicators/thresholds` so the literal `/usage` segment wins.
+
+### Design notes
+
+- M5.14 + M4.11 form a complete bi-directional reference graph: forward = "which indicators does this template need?" + reverse = "which templates reference this indicator?". Together they catch drift in either direction.
+- `vertical_matches` per template-reference: if a banking template references an insurance indicator (mismatch), the reference still surfaces (because the relationship exists) but the boolean flags the SPA can render it warning-yellow.
+- `has_threshold` flag distinguishes "orphan indicator with no consumer AND no threshold" (full dead config) from "orphan indicator with threshold but no rule" (used for ad-hoc breach checks). The former is the stronger cleanup candidate.
+- audit:read RBAC for consistency with M5.14 + the rest of the catalog introspection family.
+
+### Verification
+- `npx jest __tests__/indicator_usage_map.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **150 → 151**.

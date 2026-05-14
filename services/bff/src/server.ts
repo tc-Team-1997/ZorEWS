@@ -9615,6 +9615,27 @@ export function makeApp(deps: AppDeps = {}) {
   // catalog. Foundational primitive that turns an indicator value into
   // a breach class — the input the M8.1 alert classifier needs.
 
+  /** GET /v1/indicators/usage (T6 M4.11) — reverse cross-reference
+   *  for every indicator in the M6.2 catalog: which rule templates
+   *  (M5.1) reference it. Mirror of M5.14 (template → indicators)
+   *  but flipped. Includes orphan detection (indicators with zero
+   *  references), top-5 most-referenced, per-vertical breakdown,
+   *  and has_threshold flag (from M4.3). Platform-static. Mounted
+   *  BEFORE /v1/indicators/thresholds so the literal /usage segment
+   *  wins. */
+  app.get(
+    '/v1/indicators/usage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { mapIndicatorUsage } = require('./indicator_usage_map') as
+        typeof import('./indicator_usage_map');
+      const out = mapIndicatorUsage();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds?vertical=banking|insurance — list. */
   app.get(
     '/v1/indicators/thresholds',
