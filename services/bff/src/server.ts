@@ -13508,6 +13508,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/activity-heatmap?tz=Asia/Kolkata (T6 M15.7) — day-
+   *  of-week × hour-of-day heatmap of audit events. Mirror of M14.22
+   *  (field-visit heatmap) over the audit chain. ISO Mon=0..Sun=6 ×
+   *  hour 0..23. Default tz=UTC; 13-zone whitelist via isScheduleTz.
+   *  Returns {tz, total_events, by_dow_hour, by_dow, by_hour, peak}.
+   *  Useful for "when are ops most active on the platform?". */
+  app.get(
+    '/v1/audit/activity-heatmap',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tzRaw = (req.query.tz as string | undefined) ?? 'UTC';
+      const { isScheduleTz } = require('./report_schedules') as
+        typeof import('./report_schedules');
+      if (!isScheduleTz(tzRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `tz '${tzRaw}' is not in the supported list`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { bucketAuditByDowHour } = require('./audit_activity_heatmap') as
+        typeof import('./audit_activity_heatmap');
+      const out = bucketAuditByDowHour(page.items, tzRaw);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/catalog (T6 M15.6) — discoverable per-action catalog.
    *  For each distinct action emitted by this tenant, returns the
    *  observed_count, distinct resource_types, union of metadata keys,

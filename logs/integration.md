@@ -590,3 +590,26 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 
 ### Sub-phase tally
 - T6 tally **151 → 152**.
+
+## 2026-05-14 — T6 M15.7 — Audit activity day-of-week × hour heatmap
+
+**Goal.** Audit-domain mirror of M14.22 (field visit heatmap). 7 × 24 calendar grid answering "when are ops most active across the platform?". Same Intl.DateTimeFormat + 13-zone whitelist scheme; different event source.
+
+### Files
+
+- **NEW** `services/bff/src/audit_activity_heatmap.ts` — pure `bucketAuditByDowHour(events, tz)`. Same shape as M14.22 but the input event type is `AuditEvent` not `FieldVisit`. Defensive isScheduleTz check at the function level (tests can pass anything).
+- **NEW** `services/bff/__tests__/audit_activity_heatmap.test.ts` — 12 tests (6 pure + 6 route): empty matrix, single-event placement (Mon 14:00), marginal totals = total_events, DST-aware tz shift (LA + IST), peak tie-break, 20-vs-5 aggregation, empty route, populated route, ?tz=IST shifts wall-clock, 400 invalid tz, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/audit/activity-heatmap` (audit:read) right ABOVE the M15.6 catalog route to keep the audit cluster grouped.
+
+### Design notes
+
+- This is the second consumer of the 7×24 heatmap shape (after M14.22). Identical mechanics; could be lifted into a shared helper module later if a third consumer arrives. Two is the threshold below "premature abstraction" — keep duplicated for now.
+- Audit events tend to cluster heavily into business-hours weekdays (ops mostly works 9-5 Mon-Fri); the heatmap visualizes this and surfaces unusual after-hours activity (which is a security signal).
+- 100k page_size cap on the audit chain pull matches what M15.6 uses for the catalog route — enough for any realistic tenant.
+
+### Verification
+- `npx jest __tests__/audit_activity_heatmap.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **153 → 154**.
