@@ -152,3 +152,28 @@ These compute fns return `value=null, breached=false` until agent-data extends t
 - `npx jest __tests__/indicator_backtest_compare.test.ts` — 21/21 pass.
 - `npx jest` (full BFF suite) — 4213 pass / 58 skipped / 4272 total. Intermittent cross-suite singleton flakiness in `alert_auto_ack` (passes 45/45 alone); pre-existing pattern unrelated to M4.8.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M4.9 — Indicator threshold effective view
+
+### Tasks ticked
+- T6 sub-phase M4.9 — indicator threshold effective view. T6 sub-phase tally 125 → 126.
+
+### Files touched
+- `services/bff/src/indicator_threshold_effective.ts` (new) — pure `resolveEffectiveThresholds(store, tenant_id, vertical?)` walks every platform indicator (optionally filtered by vertical via `listThresholds({vertical})`), looks up the M4.4 tenant override via `store.getOverride`, and emits per-entry `{indicator_id, name, vertical, source: 'library_default'|'tenant_override', effective, library_default, override}` — keeping both levels visible side-by-side so the SPA can render "was X, now Y" without a second round-trip. Totals `{override_count, library_count, total}`. Sorted by `indicator_id` asc for deterministic output.
+- `services/bff/__tests__/indicator_threshold_effective.test.ts` (new) — 16 jest tests: 2 no-overrides (everything library_default + entries sorted by indicator_id asc), 3 override resolution (source flips, count split, deletion reverts), 3 vertical filter (banking, insurance, invalid throws), 1 tenant isolation, 7 route (200 happy with all library_default, override surface, ?vertical=banking narrow, ?vertical=invalid → 400, 403 wrong role, cross-tenant invisibility, M4.4 PUT regression).
+- `services/bff/src/server.ts` — new route `GET /v1/indicators/thresholds/effective?vertical=banking|insurance` mounted BEFORE the catch-all `/:indicator_id` so the literal `/effective` segment isn't captured. `audit:read` RBAC. Validates `?vertical` is one of `banking|insurance` → 400 otherwise. `vertical` undefined / empty string falls through as "no filter".
+
+### Decisions
+- **Mirror M10.10's resolution-chain shape.** Same `source` enum naming convention (`library_default` / `tenant_override` here; `platform_default` / `tenant_default` / `user_override` on M10.10). Both levels surface side-by-side so operators see "was → now" at a glance.
+- **Per-indicator entries always present.** Even when no override, the entry shows `source: 'library_default'` + `override: null` rather than just listing overrides. Lets the SPA render a complete-tenant view from a single call.
+- **Sorted by `indicator_id` asc.** Deterministic output matters for the SPA "compare two tenants" view; same ordering both sides simplifies the diff.
+- **Vertical filter via `listThresholds({vertical})`.** Reuses the existing M4.3 helper; route validates the enum value before delegating.
+- **No new store method.** The existing `getOverride` + `listThresholds` cover the read paths; no need to extend the interface.
+
+### Hand-offs
+- **agent-ui** — indicator config page can render a per-tenant "Effective thresholds" table: every indicator on one row, library defaults in greyed columns, overrides in highlighted columns, source badge ("default" vs "overridden"). Pair with M4.3 PUT to flip an override in-place. The `vertical` filter drives the existing tab UI.
+
+### Verification
+- `npx jest __tests__/indicator_threshold_effective.test.ts` — 16/16 pass.
+- `npx jest` (full BFF suite) — 4496 pass / 58 skipped / 4554 total, **zero failures**.
+- `npx tsc --noEmit` — clean.

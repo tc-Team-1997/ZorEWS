@@ -9266,6 +9266,43 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/effective?vertical=banking|insurance
+   *  (T6 M4.9) — every platform indicator's effective threshold for the
+   *  caller's tenant, with the resolution chain (library_default vs
+   *  tenant_override) showing which level wins per indicator + the
+   *  library_default kept visible side-by-side. `audit:read` RBAC.
+   *  Mounted BEFORE the catch-all `/:indicator_id` so the literal
+   *  `/effective` segment isn't captured. */
+  app.get(
+    '/v1/indicators/thresholds/effective',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const verticalRaw = req.query.vertical as string | undefined;
+      let vertical: ScoringVertical | undefined;
+      if (verticalRaw !== undefined && verticalRaw !== '') {
+        if (verticalRaw !== 'banking' && verticalRaw !== 'insurance') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'vertical must be banking|insurance', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        vertical = verticalRaw;
+      }
+      const { resolveEffectiveThresholds } = require('./indicator_threshold_effective') as
+        typeof import('./indicator_threshold_effective');
+      const out = resolveEffectiveThresholds(
+        thresholdOverrideStore,
+        req.tenant!.tenant_id,
+        vertical,
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/:indicator_id — single threshold
    *  resolved through tenant overrides (M4.4 wires getEffectiveThreshold). */
   app.get(
