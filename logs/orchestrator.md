@@ -679,3 +679,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Distinct from M9.8 cohort summary (overall tenant rollup) vs M9.12 (template-pivoted): M9.12 surfaces *which* checklists actually move the needle, letting ops decide whether to migrate from BUILT_IN to a custom template.
 - 11 new jest tests (7 pure + 4 route). All pass; full BFF suite 5021 effective (2 pre-existing flakes).
 - T6 sub-phase tally 167 → 168.
+
+## 2026-05-14 — T6 M16.16 Scenario library narrative one-liners
+
+- Pure `formatScenarioNarrative(preset)` + `listScenarioNarratives()` at `services/bff/src/scenario_narrative.ts` render each M16.1 preset's `{gdp, rate, fx}` shocks into a canonical one-liner the SPA can use in a single chip.
+- Format: GDP `+/-X.X%` (1dp, pp), rate `+/-Nbps` (integer rounded), FX `INR +/-X.X%` (1dp). Unicode minus U+2212 for negatives; ASCII `+` for positives.
+- Baseline preset narrates as literal `"Baseline (no shock)"` rather than empty — saves the SPA a null-check.
+- New route `GET /v1/scenarios/library/narratives` (customers:read_risk_profile; mounted before `/:preset_id` catch-all so the literal segment wins).
+- Companion to M16.15: M16.15 normalises shocks onto [-1, 1] for radar charts (visual), M16.16 emits the text (label). Both pure, both platform-static.
+- 20 new jest tests (8 formatShockPhrases + 3 formatScenarioNarrative + 4 listScenarioNarratives + 5 route). Clean full-suite run: 5041 pass / 58 skipped / 5099 total.
+- T6 sub-phase tally 168 → 169.

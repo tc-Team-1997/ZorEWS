@@ -5370,6 +5370,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/narratives (T6 M16.16) — canonical
+   *  human-readable one-liner per scenario preset. Combines the
+   *  three shock numbers into a single label like "GDP −4.0%,
+   *  rates +200bps, INR +8.5%". Saves the SPA from rendering 3
+   *  separate chips with their own format specs. Mounted BEFORE
+   *  `/:preset_id` so the literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/narratives',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listScenarioNarratives } = require('./scenario_narrative') as
+        typeof import('./scenario_narrative');
+      const out = listScenarioNarratives();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/:preset_id/clones-in-tenant (T6 M16.14)
    *  — back-reference query: for this library scenario preset, list
    *  every custom preset in the calling tenant that was cloned from
