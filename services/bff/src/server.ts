@@ -5603,6 +5603,26 @@ export function makeApp(deps: AppDeps = {}) {
   // records to an in-memory ledger; prod swaps to SES/SMTP. Templates are
   // rendered server-side so the SPA can preview before sending.
 
+  /** GET /v1/notifications/templates/catalog (T6 M10.11) — unified
+   *  template catalog across email + SMS + push. Per-template {channel,
+   *  template_id, description, required_vars}. Envelope adds total +
+   *  by_channel + distinct_required_vars (union for form-builder UX).
+   *  Lets the SPA's notification picker enumerate everything in one
+   *  round-trip + one consistent shape (vs 3 channel-specific routes
+   *  with 3 different shapes). Platform-static. */
+  app.get(
+    '/v1/notifications/templates/catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { introspectNotificationTemplateCatalog } = require('./notification_template_catalog') as
+        typeof import('./notification_template_catalog');
+      const out = introspectNotificationTemplateCatalog();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/email/templates — list canned BIL templates. */
   app.get(
     '/v1/notifications/email/templates',

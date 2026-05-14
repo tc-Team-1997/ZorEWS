@@ -228,3 +228,27 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 
 ### Sub-phase tally
 - T6 tally **141 → 142**.
+
+## 2026-05-14 — T6 M10.11 — Unified notification template catalog
+
+**Goal.** Single picker-friendly catalog across email + SMS + push templates. The SPA notification-picker currently has to call 3 channel-specific routes with 3 different per-channel-field shapes; M10.11 returns all 12 BIL canned templates in one consistent envelope.
+
+### Files
+
+- **NEW** `services/bff/src/notification_template_catalog.ts` — pure `introspectNotificationTemplateCatalog()`. Walks the three list functions (listEmailTemplates / listSmsTemplates / listPushTemplates), normalises to a minimal common shape `{channel, template_id, description, required_vars[]}`, computes `distinct_required_vars` as a union for the form-builder UX.
+- **NEW** `services/bff/__tests__/notification_template_catalog.test.ts` — 10 tests (6 pure + 4 route): total = sum of by_channel, per-channel registry match, sort order, every-entry-shape, defensive copy invariant (mutating returned required_vars doesn't pollute registry), distinct_required_vars union + sort + non-empty, admin happy, 403, platform-static, M10.1 regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/notifications/templates/catalog` (audit:read) right above `GET /v1/notifications/email/templates` so the unified entry sits visually alongside the channel-specific ones.
+
+### Design notes
+
+- Cross-channel field reconciliation: email TemplateDef has subject+body_text+body_html?, SMS has body+max_length, push has title+body+deep_link+badge_count. M10.11 surfaces only the common columns (template_id + description + required_vars) — the SPA fetches channel-specific fields via the existing per-channel routes when it needs to RENDER the template (preview/send), not when it needs to PICK one.
+- `required_vars` defensive copy: tested by mutating the returned array and asserting a subsequent introspect call produces the original. Catches future "let me just splice in production" mistakes that would corrupt the singleton TEMPLATES record.
+- `distinct_required_vars` is the union for the form-builder: "if I render a form with all these inputs, I can populate any template the user might pick". Sorted asc for stable rendering.
+- audit:read RBAC (admin tier) — template content includes BIL operational language (escalation directives, recipient roles) that we don't surface at lower tiers.
+
+### Verification
+- `npx jest __tests__/notification_template_catalog.test.ts` — 10/10 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **143 → 144**.
