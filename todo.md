@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M11.9 — Custom dashboard export/import bundle shipped — mirrors M5.11 shape; `exportDashboardBundle` deep-snapshots N dashboards stripped of identity, `importDashboardBundle` replays with per-row outcomes (created/skipped/error), `name_prefix` for same-tenant cloning, cap 10/bundle; routes `POST /v1/dashboards/custom/{export,import}`. Previous: M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
+**Last updated:** 2026-05-14 (T6 M6.9 — Weight preset definition diff shipped — pure `diffWeightPresets(from, to)` returns header changes + multiplier added/removed/changed (with delta) + unchanged_count; library + custom presets diffable; new route `GET /v1/scoring/presets/diff?from=&to=`. Previous: M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

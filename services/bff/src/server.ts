@@ -353,6 +353,7 @@ import {
   getEffectiveWeightPreset,
   type CustomWeightPresetStore,
 } from './scoring_presets_custom';
+import { diffWeightPresets } from './scoring_preset_diff';
 import {
   BacktestError as IndicatorBacktestError,
   runBacktest as runIndicatorBacktest,
@@ -8324,6 +8325,59 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.status(204).send();
+    },
+  );
+
+  /** GET /v1/scoring/presets/diff?from=<id>&to=<id> (T6 M6.9) —
+   *  structural diff between two presets (library OR custom).
+   *  Resolves each id via getEffectiveWeightPreset (library checked
+   *  first, then tenant custom). 404 on either side missing. MUST be
+   *  declared before /v1/scoring/presets/:id so "diff" isn't captured
+   *  as an id. */
+  app.get(
+    '/v1/scoring/presets/diff',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const fromRaw = req.query.from;
+      const toRaw = req.query.to;
+      if (typeof fromRaw !== 'string' || !fromRaw.trim() || typeof toRaw !== 'string' || !toRaw.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'from and to query params are required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const from = getEffectiveWeightPreset(
+        customWeightPresetStore,
+        req.tenant!.tenant_id,
+        fromRaw,
+      );
+      if (!from) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${fromRaw}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const to = getEffectiveWeightPreset(
+        customWeightPresetStore,
+        req.tenant!.tenant_id,
+        toRaw,
+      );
+      if (!to) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${toRaw}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const diff = diffWeightPresets(from, to);
+      return res.json(wrapResponse({ diff }, ctx));
     },
   );
 

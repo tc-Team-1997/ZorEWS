@@ -291,3 +291,27 @@
 - `npx jest __tests__/report_job_analytics.test.ts` — 15/15 pass.
 - `npx jest` (full BFF suite) — 4124 pass / 58 skipped / 4182 total, **zero failures** (no cross-suite flakiness on this run).
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M6.9 — Weight preset definition diff
+
+### Tasks ticked
+- T6 sub-phase M6.9 — weight preset definition diff. T6 sub-phase tally 105 → 106.
+
+### Files touched
+- `services/bff/src/scoring_preset_diff.ts` (new) — pure `diffWeightPresets(from, to)` returning `WeightPresetDiff`: `{from_id, to_id, identical, header: {name, description, vertical, mode} each as HeaderDiff<T>, multipliers: {added[], removed[], changed[] (with delta), unchanged_count}}`. Added/removed sorted asc by indicator_id; changed sorted by abs(delta) desc with alphabetical tie-break. Sparse-map semantics preserved (an indicator only in one side is `added`/`removed`, not "changed from implicit 1.0").
+- `services/bff/__tests__/scoring_preset_diff.test.ts` (new) — 17 jest tests: 10 unit (identical-presets edge, header-only change, added/removed/changed buckets, sort orders, sparse-map semantics, multi-header diff, real library preset diff) + 7 route (200 lib-vs-lib, 200 identical, 200 lib-vs-custom resolved via tenant store, 404 unknown_preset, 400 missing query param, 403 wrong role, 404 cross-tenant on custom preset).
+- `services/bff/src/server.ts` — import `diffWeightPresets`; new route `GET /v1/scoring/presets/diff?from=&to=` (`customers:read_risk_profile`; mounted BEFORE `/v1/scoring/presets/:id` so the literal "diff" segment isn't captured as an id). Both ids resolved via the existing `getEffectiveWeightPreset(store, tenant, id)` helper so library AND custom presets are diffable in any combination.
+
+### Decisions
+- **Sparse-map semantics.** An indicator present only in one side is `added` or `removed`, not "changed from 1.0 → x". The diff reflects what the operator actually typed, not the inferred default. Matches how the SPA author-tweak UX thinks about the data.
+- **Sort by abs(delta) desc.** Biggest changes first — that's what a risk officer scans for.
+- **Reuse `getEffectiveWeightPreset` for both ids.** Library + custom diffable in any direction (lib-lib, lib-custom, custom-custom, custom-lib).
+- **`customers:read_risk_profile` RBAC.** Matches the existing M6.x route convention.
+
+### Hand-offs
+- **agent-ui** — preset author UX can call `GET /v1/scoring/presets/diff?from=preset_banking_balanced&to=<draft_id>` while the operator is editing a custom preset; the response is the SPA's "compared with the platform default" panel. Envelope: `{ diff: WeightPresetDiff }`.
+
+### Verification
+- `npx jest __tests__/scoring_preset_diff.test.ts` — 17/17 pass.
+- `npx jest` (full BFF suite) — 4162 pass / 58 skipped / 4222 total. Intermittent cross-suite singleton flakiness in `adapter_sla_dashboard` / `case_maker_checker` — both pass when run alone or together (136/136); pre-existing pattern unrelated to M6.9.
+- `npx tsc --noEmit` — clean.
