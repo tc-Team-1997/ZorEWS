@@ -613,3 +613,31 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 
 ### Sub-phase tally
 - T6 tally **153 → 154**.
+
+## 2026-05-14 — T6 M14.23 — Adapter SLA target catalog
+
+**Goal.** Anchor the M14.9 fleet-health probe latencies against per-adapter expected SLA targets so the SPA can render green/amber/red SLA badges. Without this catalog, the probe response is unanchored — "is 250ms fast or slow?" has no answer.
+
+### Files
+
+- **NEW** `services/bff/src/adapter_sla_catalog.ts` — static `SLA_TABLE` keyed by `AdapterId` (8 entries) + `listAdapterSlaCatalog()` + `getAdapterSlaTargets(id)`. Hand-calibrated per-adapter latency/freshness/rate-limit/uptime targets with a `rationale` string so the operator can understand WHY each number is what it is.
+- **NEW** `services/bff/__tests__/adapter_sla_catalog.test.ts` — 11 tests (7 pure + 4 route): full catalog coverage, M14.9 fleet adapter coverage invariant, sort order, full-shape invariant, [0,1] uptime invariant, known-id lookup, bureau-slowest invariant, admin happy, 403, platform-static, M14.9 regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/integrations/adapters/sla-catalog` (audit:read) right ABOVE the M14.9 `/adapters/health` route to keep the M14.9 cluster grouped.
+
+### Design notes
+
+- Calibration anchors:
+  - AML 500ms p95 — sanctions screening is on the alert hot path
+  - Bureau 1500ms p95 — external bureau API + per-call cost
+  - Insurance + DMS sub-second — interactive UX
+  - IFRS9 1200ms — daily refresh + heavier ECL recompute
+- Rate-limit per-minute reflects what the adapter is provisioned for, not a hard wall — consumers should throttle locally.
+- Per-adapter `rationale` strings are documentation-as-data — ops can read them in the API response without consulting source.
+- Platform-static today; per-tenant overrides would be a follow-up if BIL ops asks for tenant-specific tighter / looser SLAs.
+
+### Verification
+- `npx jest __tests__/adapter_sla_catalog.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **159 → 160**.

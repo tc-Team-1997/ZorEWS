@@ -12584,6 +12584,24 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/sla-catalog (T6 M14.23) — per-
+   *  adapter expected SLA targets (latency p95, freshness, rate
+   *  limit, uptime SLA). Lets the SPA render green/amber/red SLA
+   *  badges on top of the M14.9 probe latencies. Platform-static
+   *  hand-calibrated metadata. */
+  app.get(
+    '/v1/integrations/adapters/sla-catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listAdapterSlaCatalog } = require('./adapter_sla_catalog') as
+        typeof import('./adapter_sla_catalog');
+      const out = listAdapterSlaCatalog();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/health — probe all 8 in parallel. */
   app.get(
     '/v1/integrations/adapters/health',
