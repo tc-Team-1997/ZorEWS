@@ -670,3 +670,12 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - 10 new jest tests (6 pure + 4 route). All pass; full BFF suite 5010 effective (1 pre-existing flake in alert_quiet_hours_mute_analytics).
 - T6 sub-phase tally 166 → 167.
 - Hand-off: next sub-phase per the autonomous loop directive — pick any of the unstarted module surfaces or a fresh shape on an existing one.
+
+## 2026-05-14 — T6 M9.12 Investigation outcome breakdown by checklist template
+
+- Pure `summarizeOutcomeByTemplate(tenant, investigations, now)` at `services/bff/src/investigation_outcome_by_template.ts` groups investigations by `checklist_template_id` (M9.2) and emits per-template per-decision counts + `confirmation_rate = (fraud_confirmed + partial_fraud) / closed-with-decision`.
+- Envelope adds `most_effective_template`: highest confirmation_rate among templates with ≥ 1 closed-with-decision investigation, tie-broken by sample size desc then template_id asc.
+- New route `GET /v1/investigations/outcome-by-template` (audit:read; mounted BEFORE the M9.1 catch-all `/:id` so the literal segment wins).
+- Distinct from M9.8 cohort summary (overall tenant rollup) vs M9.12 (template-pivoted): M9.12 surfaces *which* checklists actually move the needle, letting ops decide whether to migrate from BUILT_IN to a custom template.
+- 11 new jest tests (7 pure + 4 route). All pass; full BFF suite 5021 effective (2 pre-existing flakes).
+- T6 sub-phase tally 167 → 168.

@@ -8302,6 +8302,30 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/outcome-by-template (T6 M9.12) —
+   *  groups investigations by `checklist_template_id` to answer
+   *  "which checklist gives the highest fraud-confirmation rate?".
+   *  Per-template per-decision split + confirmation_rate
+   *  (fraud_confirmed + partial_fraud / closed-with-decision).
+   *  Mounted BEFORE /:id catch-all so the literal
+   *  /outcome-by-template segment wins. */
+  app.get(
+    '/v1/investigations/outcome-by-template',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = caseInvestigationStore.list(
+        req.tenant!.tenant_id,
+        { page_size: 100000 },
+      ).items;
+      const { summarizeOutcomeByTemplate } = require('./investigation_outcome_by_template') as
+        typeof import('./investigation_outcome_by_template');
+      const out = summarizeOutcomeByTemplate(req.tenant!.tenant_id, items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/notes/search?q=&limit= (T6 M9.10) —
    *  cross-investigation substring search over the notes thread.
    *  Returns per-match {note_id, investigation_id, case_id, ts,
