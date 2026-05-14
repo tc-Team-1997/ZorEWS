@@ -5389,6 +5389,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/coverage-matrix (T6 M16.17) — 2D
+   *  rollup over the M16.1 library showing per-(category,
+   *  regulator) coverage counts. Cells with `count < expected_min`
+   *  surface as `is_gap=true` (e.g. regulatory × IRDAI must have
+   *  ≥ 1 preset). Envelope: cells[] (always 12), gaps[] sorted by
+   *  shortfall desc, most_populated_cell, by_category, by_regulator.
+   *  Lets ops spot stress-test coverage gaps. Mounted BEFORE
+   *  `/:preset_id` so the literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/coverage-matrix',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioCoverageMatrix } = require('./scenario_coverage_matrix') as
+        typeof import('./scenario_coverage_matrix');
+      const out = buildScenarioCoverageMatrix();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/:preset_id/clones-in-tenant (T6 M16.14)
    *  — back-reference query: for this library scenario preset, list
    *  every custom preset in the calling tenant that was cloned from

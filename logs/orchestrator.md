@@ -700,3 +700,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Mirror of M4.11 (indicator → templates reverse map) but for actions.
 - 16 new jest tests (12 pure + 4 route). Full BFF suite 5057 effective (1 pre-existing flake).
 - T6 sub-phase tally 169 → 170.
+
+## 2026-05-14 — T6 M16.17 Scenario library category × regulator coverage matrix
+
+- Pure `buildScenarioCoverageMatrix()` at `services/bff/src/scenario_coverage_matrix.ts` rolls up the M16.1 library into a 4 × 3 = 12-cell matrix showing per-(category × regulator) coverage.
+- Per-cell: `{category, regulator, count, preset_ids[], expected_min, is_gap}`. expected_min is hand-calibrated (regulatory.RBI ≥ 2, regulatory.IRDAI ≥ 1, etc.); is_gap surfaces when count < expected_min.
+- Envelope: `gaps[]` sorted by shortfall desc + tie-break, `most_populated_cell`, marginal totals via `by_category` + `by_regulator`.
+- All 12 cells always present in declared order (category major: baseline → business → regulatory → black_swan; regulator minor: RBI → IRDAI → INTERNAL).
+- New route `GET /v1/scenarios/library/coverage-matrix` (customers:read_risk_profile; mounted before catch-all `/:preset_id`).
+- Surfaces stress-test inventory gaps. Mirror of M5.14 (template indicator coverage) but for 2D matrix shape.
+- 19 new jest tests (14 pure + 5 route). Full BFF suite 5076 effective (1 pre-existing flake).
+- T6 sub-phase tally 170 → 171.
