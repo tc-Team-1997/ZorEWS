@@ -493,3 +493,27 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/field_visit_geo_clustering.test.ts` — 19/19 pass.
 - `npx jest` (full BFF suite) — 4443 pass / 58 skipped / 4501 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M15.6 — Audit action catalog introspection
+
+**Goal.** Give SPA a discoverable per-action catalog over the audit trail — for each distinct `action` string emitted by the tenant, surface metadata keys union, resource_types touched, and recency. Lets the filter dropdown be data-driven instead of hardcoded.
+
+### Files
+
+- **NEW** `services/bff/src/audit_action_catalog.ts` — pure `introspectAuditCatalog(events: readonly AuditEvent[]): AuditActionCatalog`. Groups by `action`, accumulates per-action: count, Set of resource_types, Set of metadata keys (Object.keys union across events), latest event timestamp + actor (max ts wins). Materialises sorted arrays (asc) + sorts entries by `observed_count` desc with action-string asc tie-break.
+- **NEW** `services/bff/__tests__/audit_action_catalog.test.ts` — 12 tests across 7 describe blocks: empty, grouping, sort order, metadata_keys union, distinct_resource_types, recency, GET route happy path + 403 + cross-tenant + M15.1 regression.
+- **EDIT** `services/bff/src/server.ts` — imported `introspectAuditCatalog`; mounted `GET /v1/audit/catalog` (audit:read) right after `GET /v1/audit/integrity/sample` so it sits with the other audit-listing peers. Pulls full chain via `auditTrailStore.list(tenant, {page_size: 100000})`.
+
+### Design notes
+
+- Distinct from M15.1's existing `listActions(tenant)` — that returns just distinct verbs. This emits a *catalog* keyed on action with metadata-key fanout + resource_type set + recency anchor.
+- Metadata-key union is what makes this load-bearing for the SPA: when filtering by `config.update`, the UI now knows which metadata chips to offer ("previous_value", "new_value", "key") because they're statically derivable from observed events.
+- Sort: count desc, alpha tie-break — most-used actions float to the top of the dropdown so common filters surface first.
+- No tampering with `auditTrailStore`; pure consumer over the listed page. Page size 100k is generous; per-tenant cap on the in-memory store keeps this bounded.
+
+### Verification
+- `npx jest __tests__/audit_action_catalog.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **129 → 130**.

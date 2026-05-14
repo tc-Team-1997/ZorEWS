@@ -572,6 +572,7 @@ import {
   type AuditSeverity,
   type AuditTrailStore,
 } from './audit_trail';
+import { introspectAuditCatalog } from './audit_action_catalog';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -12924,6 +12925,23 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       const out = auditTrailStore.verifyChainSample(req.tenant!.tenant_id, window, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/audit/catalog (T6 M15.6) — discoverable per-action catalog.
+   *  For each distinct action emitted by this tenant, returns the
+   *  observed_count, distinct resource_types, union of metadata keys,
+   *  and latest event timestamp + actor. Lets the SPA build a
+   *  data-driven filter dropdown instead of hardcoding the action list. */
+  app.get(
+    '/v1/audit/catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const out = introspectAuditCatalog(page.items);
       return res.json(wrapResponse(out, ctx));
     },
   );
