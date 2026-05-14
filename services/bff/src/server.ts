@@ -9502,6 +9502,64 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scoring/sensitivity body { preset_id, items, perturbation? }
+   *  (T6 M6.13) — perturb each indicator value by ±perturbation
+   *  (default 0.05) and compute score swing. Surfaces which
+   *  indicator the final score is most sensitive to (partial-
+   *  derivative attribution). Returns per-row score_up / score_down
+   *  / symmetric_delta + most_sensitive_indicator. */
+  app.post(
+    '/v1/scoring/sensitivity',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const { analyseScoreSensitivity, DEFAULT_BASE_LOOKUP, SensitivityError } = require('./scoring_sensitivity') as
+          typeof import('./scoring_sensitivity');
+        const { WeightPresetError, IndicatorLookupError } = require('./scoring_presets') as
+          typeof import('./scoring_presets');
+        try {
+          const out = analyseScoreSensitivity(
+            (inner ?? {}) as Parameters<typeof analyseScoreSensitivity>[0],
+            DEFAULT_BASE_LOOKUP,
+          );
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof SensitivityError) {
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          if (e instanceof WeightPresetError) {
+            if (e.code === 'unknown_preset') {
+              return res.status(404).json(
+                wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+              );
+            }
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          if (e instanceof IndicatorLookupError) {
+            const code = e.code === 'unknown_indicator' ? 404 : 400;
+            return res.status(code).json(
+              wrapError({ code: `EWS_${code}_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** POST /v1/scoring/risk/by-preset body { preset_id, items } — score using
    *  the preset's multipliers on top of catalog defaults. */
   app.post(

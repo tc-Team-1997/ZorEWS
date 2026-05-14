@@ -610,3 +610,28 @@
 
 ### Sub-phase tally
 - T6 tally **157 → 158**.
+
+## 2026-05-14 — T6 M6.13 — Score sensitivity analysis
+
+**Goal.** Partial-derivative attribution over the M6.5 scoreByPreset primitive. Lets ops answer "which indicator moves my score the most?" by perturbing each indicator value ±0.05 and comparing score swings.
+
+### Files
+
+- **NEW** `services/bff/src/scoring_sensitivity.ts` — pure `analyseScoreSensitivity(input, baseLookup)`. Calls scoreByPreset N+1 times (base + 2×N for up/down per indicator). Symmetric finite-difference around the base point. Clamps perturbed values to [0,1] for value bounds. Default perturbation 0.05; valid range (0, 0.5].
+- **NEW** `services/bff/__tests__/scoring_sensitivity.test.ts` — 14 tests (9 pure + 5 route): single-indicator happy, heavier-weight-more-sensitive invariant, symmetric_delta arithmetic, value=0/value=1 clamping, sort order, validation, empty-items bubble, admin happy, 400 × 2 + 404 + 403.
+- **EDIT** `services/bff/src/server.ts` — mounted `POST /v1/scoring/sensitivity` (customers:read_risk_profile) right above `/scoring/risk/by-preset` so it sits with the scoring family. Routes SensitivityError → 400, WeightPresetError.unknown_preset → 404, IndicatorLookupError.unknown_indicator → 404.
+
+### Design notes
+
+- Symmetric difference (`up - down`) is more accurate than one-sided (`up - base`) because it cancels the second-order term in the Taylor expansion. For non-linear scoring (which Σ(W×V) isn't, but the clamp can be), this matters.
+- Clamping perturbed values to [0,1]: if base_value=0.98 and perturbation=0.05, the "up" candidate is clamped at 1.0. Score still computed; the row's `score_up` reflects the clamped reality. SPA can detect this by comparing `base_value + perturbation > 1` itself.
+- Empty items[]: rather than catch + return empty rows[], we let M6.1's ScoringInputError bubble. Sensitivity on zero inputs is genuinely meaningless and 400 is the right contract.
+- Sort tiebreak (indicator_id asc) keeps rendering stable.
+- Re-uses scoreByPreset rather than inlining the math — single source of truth for the scoring formula.
+
+### Verification
+- `npx jest __tests__/scoring_sensitivity.test.ts` — 14/14 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **160 → 161**.
