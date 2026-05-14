@@ -15713,6 +15713,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/cadence-stats (T6 M12.9) — cadence-
+   *  pivoted rollup over the M12.2 schedule store. Per-cadence:
+   *  total_count, enabled/disabled split, next_run_within_24h_count,
+   *  next_run_within_7d_count, earliest_next_run_at. Envelope adds
+   *  aggregate totals + most_common_cadence + unused_cadences[].
+   *  Mounted BEFORE /:schedule_id so the literal /cadence-stats
+   *  segment wins. */
+  app.get(
+    '/v1/reports/schedules/cadence-stats',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScheduleCadenceStats } = require('./report_schedule_cadence_stats') as
+        typeof import('./report_schedule_cadence_stats');
+      const out = buildScheduleCadenceStats(reportScheduleStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/schedules/conflicts?window=15&n=10&from=ISO
    *  (T6 M12.8) — finds pairs of DIFFERENT schedules whose fire_at
    *  falls within `window` minutes of each other. Useful for ops to

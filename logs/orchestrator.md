@@ -756,3 +756,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/admin/config/override-rate` (audit:read).
 - 14 new jest tests. Full BFF suite 5149 effective (1 pre-existing flake).
 - T6 sub-phase tally 174 → 175.
+
+## 2026-05-15 — T6 M12.9 Report schedule cadence statistics
+
+- Pure `buildScheduleCadenceStats(store, tenant, now)` at `services/bff/src/report_schedule_cadence_stats.ts` is the cadence-pivoted rollup over the M12.2 schedule store.
+- Per-cadence: `{cadence, total_count, enabled_count, disabled_count, next_run_within_24h_count, next_run_within_7d_count, earliest_next_run_at}`. Disabled schedules excluded from window counts + earliest_next_run_at.
+- Every declared cadence emitted in VALID_CADENCES canonical order, even when zero schedules use it.
+- Envelope: `{total_schedules, total_enabled, total_disabled, cadences[], most_common_cadence, unused_cadences[]}`.
+- New route `GET /v1/reports/schedules/cadence-stats` (audit:read; mounted before `/:schedule_id`).
+- Companion to M12.7 (upcoming runs) + M12.8 (conflicts) — same store, cadence axis instead of time axis.
+- 19 new jest tests (13 pure + 6 route). Clean full-suite run: 5168 pass / 58 skipped / 5226 total (no flakes).
+- T6 sub-phase tally 175 → 176.
