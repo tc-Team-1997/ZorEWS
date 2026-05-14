@@ -10917,6 +10917,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/me/onboarding/actors (T6 M2.10) — actor-perspective
+   *  view: each user who touched a step grouped with their completed +
+   *  skipped step lists. Lets the BIL ops lead see "who did what" when
+   *  distributed teams share onboarding work. Mounted alongside M2.9
+   *  overview, BEFORE the catch-all readiness wildcard. */
+  app.get(
+    '/v1/tenants/me/onboarding/actors',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const { summarizeOnboardingActors } = require('./tenant_onboarding_actors') as
+        typeof import('./tenant_onboarding_actors');
+      const out = summarizeOnboardingActors(state);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding/eta (T6 M2.8) — operational time
    *  projection: per-step minute estimates → remaining_minutes +
    *  projected_completion_at. Lets the SPA show "this tenant has

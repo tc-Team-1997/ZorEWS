@@ -661,3 +661,12 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 
 ### Sub-phase tally
 - T6 tally **165 → 166**.
+
+## 2026-05-14 — T6 M2.10 Tenant onboarding actor summary
+
+- Pure `summarizeOnboardingActors(state)` at `services/bff/src/tenant_onboarding_actors.ts` groups every non-pending step in the M2.2 state by `completed_by` and emits per-actor rows with completed_count + skipped_count + step lists (sorted by step.order asc). Envelope counts: total_actors / total_completed / total_skipped. Actors sorted by total_actions desc with username asc tie-break.
+- New route `GET /v1/tenants/me/onboarding/actors` (audit:read; mounted alongside M2.9 overview).
+- Distinct from M2.7 skip-history (step-perspective) vs M2.10 (actor-perspective): M2.7 answers "what was skipped and why", M2.10 answers "who did what". Both are valid drill-downs from the M2.9 composite.
+- 10 new jest tests (6 pure + 4 route). All pass; full BFF suite 5010 effective (1 pre-existing flake in alert_quiet_hours_mute_analytics).
+- T6 sub-phase tally 166 → 167.
+- Hand-off: next sub-phase per the autonomous loop directive — pick any of the unstarted module surfaces or a fresh shape on an existing one.
