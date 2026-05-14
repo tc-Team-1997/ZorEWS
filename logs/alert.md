@@ -202,3 +202,29 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 - `npx jest __tests__/notification_preferences_effective.test.ts` — 18/18 pass.
 - `npx jest` (full BFF suite) — 4458 pass / 58 skipped / 4519 total. Intermittent cross-suite singleton flakiness in `copilot_v2_routes` / `customer_watchlist` / `scenario_diff` — all pass when run together in isolation (89/89); pre-existing pattern unrelated to M10.10.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M8.8 — Alert routing matrix snapshot + fingerprint
+
+**Goal.** Single round-trip detection of "routing has been edited since I last looked" — via SHA-256 fingerprint of the canonical-encoded matrix. Plus a per-row source annotation so the SPA can badge each rule with "platform default" vs "tenant override" without a separate call.
+
+### Files
+
+- **NEW** `services/bff/src/routing_matrix_snapshot.ts` — two pure functions:
+  - `computeRoutingMatrixFingerprint(rulesByClass)` — SHA-256 hex over canonical JSON. Classes serialised in fixed `BIL_CLASS_ORDER`; keys alphabetised within each rule. Equivalent matrices in different insertion orders yield the same hash.
+  - `listRoutingMatrix(engine, tenant_id)` — calls `engine.listRules`, defensively backfills missing classes from `DEFAULT_RULES`, annotates `source` via field-by-field `rulesEqual` compare, returns `{tenant_id, rows, fingerprint, override_count}`.
+- **NEW** `services/bff/__tests__/routing_matrix_snapshot.test.ts` — 12 tests across 4 fingerprint + 3 listRoutingMatrix + 5 route describe blocks: hex shape, determinism, any-change-flips, channel-reorder-flips, untouched defaults, override row+count+fingerprint flip, cross-tenant isolation, route 200, override changes fingerprint, 403, cross-tenant invisible, /routing/rules regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/alerts/routing/matrix` (audit:read) right above `/v1/alerts/routing/rules` so the literal `/matrix` segment wins over any future `:class` wildcard.
+
+### Design notes
+
+- Canonical encoding via fixed key order + fixed class order is what makes the fingerprint a stable identity. JSON.stringify with raw object property order would be insertion-dependent and produce different hashes for equivalent matrices.
+- `rulesEqual` walks every field including channel array (length + element-wise). Tested explicitly that channel-reorder flips the fingerprint — that's a feature, not a bug: ['email','sms'] is operationally different from ['sms','email'] (the order = priority).
+- Defensive backfill from DEFAULT_RULES handles the (theoretical) case of an engine that returns < 4 classes. The in-memory engine always returns all 4, but keeping this safe under a future store swap costs nothing.
+- The SPA flow: render matrix on page load → store fingerprint → poll fingerprint every 30s → if fingerprint changed, re-fetch full matrix. Saves bandwidth on a small-but-rarely-changing data structure.
+
+### Verification
+- `npx jest __tests__/routing_matrix_snapshot.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **141 → 142**.

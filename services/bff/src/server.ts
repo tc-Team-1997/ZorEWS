@@ -1979,6 +1979,27 @@ export function makeApp(deps: AppDeps = {}) {
   // Rules are admin-managed (audit:read); the decide endpoint is
   // analyst-level (alerts:list) since it's a read.
 
+  /** GET /v1/alerts/routing/matrix (T6 M8.8) — full 4-class routing
+   *  matrix snapshot for the tenant + SHA-256 fingerprint of the
+   *  canonical encoding. Lets the SPA detect "routing has been
+   *  edited since I last viewed" in one round-trip rather than
+   *  diffing field-by-field. Per-row source annotation
+   *  ('platform_default'|'tenant_override') so the SPA can badge
+   *  each row without a separate resolution-chain call. Mounted
+   *  BEFORE /:class catch-alls. */
+  app.get(
+    '/v1/alerts/routing/matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listRoutingMatrix } = require('./routing_matrix_snapshot') as
+        typeof import('./routing_matrix_snapshot');
+      const snapshot = listRoutingMatrix(alertRoutingEngine, req.tenant!.tenant_id);
+      return res.json(wrapResponse(snapshot, ctx));
+    },
+  );
+
   /** GET /v1/alerts/routing/rules — effective rules (defaults + overrides). */
   app.get(
     '/v1/alerts/routing/rules',
