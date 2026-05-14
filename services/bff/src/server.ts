@@ -8193,6 +8193,54 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/step-backlog (T6 M9.9) — fleet-wide
+   *  per-step backlog. For each step_id seen across the cohort
+   *  emits {step_id, name, pending_count, completed_count,
+   *  cases_with_step, open_pending_count}. Sorted by
+   *  open_pending_count desc — biggest bottleneck first. Lets ops
+   *  spot "most cases get stuck at the interview_claimant step".
+   *  Mounted BEFORE /:id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/investigations/step-backlog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = caseInvestigationStore.list(req.tenant!.tenant_id, { page_size: 100000 }).items;
+      const { listInvestigationStepBacklog } = require('./investigation_step_progress') as
+        typeof import('./investigation_step_progress');
+      const out = listInvestigationStepBacklog(items);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/investigations/:id/step-progress (T6 M9.9) — per-case
+   *  step progress card: counts + completion rate + oldest pending +
+   *  newest-first recent completions (cap 5). Mounted BEFORE the
+   *  catch-all /:id GET so the literal /step-progress segment wins. */
+  app.get(
+    '/v1/investigations/:id/step-progress',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const inv = caseInvestigationStore.get(req.tenant!.tenant_id, id);
+      if (!inv) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_investigation', message: `unknown investigation: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const { summariseInvestigationSteps } = require('./investigation_step_progress') as
+        typeof import('./investigation_step_progress');
+      const out = summariseInvestigationSteps(inv);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/summary (T6 M9.8) — executive cohort
    *  rollup over ALL investigations in the tenant. Returns per-status
    *  counts (every state key emitted), per-decision counts for closed

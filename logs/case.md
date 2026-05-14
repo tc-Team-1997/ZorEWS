@@ -122,3 +122,29 @@
 
 ### Sub-phase tally
 - T6 tally **144 → 145**.
+
+## 2026-05-14 — T6 M9.9 — Investigation step progress
+
+**Goal.** Per-case step progress card + fleet-wide step backlog view. Distinct from M9.8 (cohort-level investigation counts) — this is step granularity. Lets ops answer "this case is 6 of 8 steps done" + "most cases get stuck at the interview_claimant step".
+
+### Files
+
+- **NEW** `services/bff/src/investigation_step_progress.ts` — two pure surfaces:
+  - `summariseInvestigationSteps(inv)` per-case progress card with oldest_pending_step (first step in array order still pending) and recent_completions (newest-first cap 5).
+  - `listInvestigationStepBacklog(invs)` fleet-wide per-step backlog with `open_pending_count` excluding closed-case pendings (since closed-case pendings aren't actionable bottlenecks).
+- **NEW** `services/bff/__tests__/investigation_step_progress.test.ts` — 15 tests (8 pure + 7 route) covering empty steps, all-pending oldest_pending = first step, mixed completion = first-incomplete-step is oldest_pending, all-complete oldest_pending=null, recent_completions sort + cap of 5, backlog empty, backlog aggregation, closed-case-pending excluded from open_pending_count, backlog sort invariant, route happy + 404 + 403.
+- **EDIT** `services/bff/src/server.ts` — mounted both new routes BEFORE the catch-all `/v1/investigations/:id` (right above the existing M9.8 `/v1/investigations/summary`) so the literal `/step-backlog` and `/:id/step-progress` segments win.
+
+### Design notes
+
+- `oldest_pending_step` uses array-order (= step order) for "oldest" semantics. Investigation steps are deliberately ordered in `defaultSteps()` (verify_identity → … → final_recommendation per BIL §17), so first-pending-in-order = the natural "next step ops should tackle".
+- `open_pending_count` is the load-bearing field for the backlog view. Counting pending steps on closed cases would pollute the bottleneck signal (a closed case isn't waiting on anything). Tested explicitly.
+- Sort by `open_pending_count` desc surfaces the actual operational bottleneck. Tie-break by step_id asc keeps the order stable for SPA rendering.
+- audit:read RBAC matches the M9.8 cohort-summary RBAC since this is exec-tier aggregate data.
+
+### Verification
+- `npx jest __tests__/investigation_step_progress.test.ts` — 15/15 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **149 → 150**. **First session to reach 150!**
