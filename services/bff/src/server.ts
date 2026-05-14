@@ -11904,6 +11904,36 @@ export function makeApp(deps: AppDeps = {}) {
    * category filter narrows the list. Each entry includes
    * `is_default` so the SPA can highlight overridden values.
    */
+  /** GET /v1/admin/config/summary.txt (T6 M13.9) — printable plain-text
+   *  summary of every config key with effective value + override
+   *  metadata. Mirrors M15.4 (audit evidence) + M7.6 (model
+   *  performance) style. text/plain + Content-Disposition for browser
+   *  print-to-PDF. Mounted BEFORE GET /v1/admin/config so the literal
+   *  /summary.txt suffix isn't lost in the catch-all. */
+  app.get(
+    '/v1/admin/config/summary.txt',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const generated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const entries = configStore.list(req.tenant!.tenant_id);
+      const { renderConfigSummary } = require('./admin_config_summary') as
+        typeof import('./admin_config_summary');
+      const text = renderConfigSummary(req.tenant!.tenant_id, entries, {
+        generated_at: now().toISOString(),
+        generated_by,
+      });
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.set(
+        'Content-Disposition',
+        `inline; filename="${req.tenant!.tenant_id}.admin-config.summary.txt"`,
+      );
+      void ctx;
+      return res.status(200).send(text);
+    },
+  );
+
   app.get(
     '/v1/admin/config',
     requireTenantMw,

@@ -445,6 +445,30 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest` (full BFF suite) — 4401 pass / 58 skipped / 4461 total. Intermittent cross-suite singleton flakiness in `customer_breach_scan` / `rules` — both pass when run alone or together (79/79); pre-existing pattern unrelated to M2.6.
 - `npx tsc --noEmit` — clean.
 
+## 2026-05-14 — T6 M13.9 — Admin config printable summary export
+
+### Tasks ticked
+- T6 sub-phase M13.9 — admin config printable summary. T6 sub-phase tally 128 → 129.
+
+### Files touched
+- `services/bff/src/admin_config_summary.ts` (new) — pure `renderConfigSummary(tenant_id, entries, ctx)` returns plain-text mirroring M15.4 + M7.6 fixed-width monospace style. Header section (tenant, generated_at, generated_by, total/override/default counts) + per-category sections (alerts/notifications/reporting/scoring/features). Each key renders 3 lines: header (`key padded type padded (override)|(default)`), `value: <fmt>`, and on overrides `set: <ts> by <actor>`. Keys sorted alphabetically within each category. Value formatting: booleans `true`/`false`, numbers raw, strings as-is, empty strings `""`, nulls `—`.
+- `services/bff/__tests__/admin_config_summary.test.ts` (new) — 11 jest tests: 1 empty shell, 4 populated (all-default + override-with-metadata + category headers + alpha sort within category), 1 value formatting, 5 route (empty 200 text/plain + Content-Disposition, after-override surface, 403 wrong role, cross-tenant invisibility, M13.1 /v1/admin/config JSON regression).
+- `services/bff/src/server.ts` — new route `GET /v1/admin/config/summary.txt` mounted BEFORE the catch-all `GET /v1/admin/config` so the literal `.txt` suffix routes correctly. Returns `text/plain; charset=utf-8` with `Content-Disposition: inline; filename="<tenant>.admin-config.summary.txt"`. `audit:read` RBAC matches the rest of M13.
+
+### Decisions
+- **Mirror M15.4 + M7.6 text-export style.** Same RULE / SUB_RULE separators, same `pad()` formatting, same `text/plain` + `Content-Disposition: inline` posture. SPA reuses the same print-to-PDF flow for audit + model + admin-config summaries.
+- **Per-category sections, alphabetical within.** Mirrors the SPA's existing config-by-category nav.
+- **Override metadata only on overrides.** Default keys just show the value; overrides additionally render `set: <ts> by <actor>` so auditors see who flipped what.
+- **`(default)` / `(override)` tag per key.** Single visual cue per key whether it's tenant-overridden or platform-default.
+
+### Hand-offs
+- **agent-ui** — admin config page can add a "Print summary" button → opens `/v1/admin/config/summary.txt` in a new tab → browser print preview. Pair with M13.5 diff for compare-against-other-tenant.
+
+### Verification
+- `npx jest __tests__/admin_config_summary.test.ts` — 11/11 pass.
+- `npx jest` (full BFF suite) — 4537 pass / 58 skipped / 4595 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
+
 ## 2026-05-14 — T6 M14.21 — Field visit geo-clustering
 
 ### Tasks ticked
