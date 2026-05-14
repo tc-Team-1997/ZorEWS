@@ -148,3 +148,28 @@
 
 ### Sub-phase tally
 - T6 tally **149 → 150**. **First session to reach 150!**
+
+## 2026-05-14 — T6 M9.10 — Cross-investigation note search
+
+**Goal.** Full-text search over the M9.1 notes thread across every investigation in the tenant. Lets investigators ask "did we ever document this in any case?" without grepping per-case.
+
+### Files
+
+- **NEW** `services/bff/src/investigation_note_search.ts` — pure `searchInvestigationNotes(bundles, query, limit)`. Case-insensitive substring matching via toLowerCase() on both query + body. Snippet builder centres a 200-char window on the first match with `…` padding when the body is truncated.
+- **NEW** `services/bff/__tests__/investigation_note_search.test.ts` — 21 tests (15 pure + 6 route) covering empty, no-match, single match, case-insensitive, multi-occurrence count, sort order, cross-investigation, limit cap (unclamped total + clamped list), snippet ellipsis, validation rejections, route variants.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/investigations/notes/search` (audit:read) BEFORE the catch-all `/:id` so the literal `/notes/search` segment wins. Route walks `caseInvestigationStore.list(tenant)` + `listNotes(inv)` per investigation to build the bundle list.
+
+### Design notes
+
+- Snippet building: 200-char window centred on first match, with `…` prepended when the window starts past index 0 and appended when it ends before body end. Caps total snippet at 202 chars (window + 2 ellipses).
+- `match_count_in_note` counts every occurrence, not just the first — useful for "this note mentions 'fraud' 5 times" weighting in the SPA.
+- Sort newest-first by `ts` for relevance ordering. SPA's "show me what I most-recently wrote about X" use case.
+- Total/limit split: `total_matches` is the unclamped count (so the SPA can show "showing 50 of 127 matches"), `matches[]` is clamped.
+- Query length 2..200: 1-char queries match too much noise; 200+ chars is operator-error territory.
+
+### Verification
+- `npx jest __tests__/investigation_note_search.test.ts` — 21/21 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **161 → 162**.

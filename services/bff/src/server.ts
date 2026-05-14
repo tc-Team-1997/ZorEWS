@@ -8280,6 +8280,49 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/notes/search?q=&limit= (T6 M9.10) —
+   *  cross-investigation substring search over the notes thread.
+   *  Returns per-match {note_id, investigation_id, case_id, ts,
+   *  author, snippet, match_count_in_note}. Newest-first; cap 200.
+   *  q must be 2..200 chars (after trim). Mounted BEFORE /:id
+   *  catch-all so the literal /notes/search wins. */
+  app.get(
+    '/v1/investigations/notes/search',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query.q as string | undefined;
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw === undefined ? 50 : Number(limitRaw);
+      try {
+        const items = caseInvestigationStore.list(
+          req.tenant!.tenant_id,
+          { page_size: 100000 },
+        ).items;
+        const bundles = items.map((inv) => ({
+          investigation: inv,
+          notes: caseInvestigationStore.listNotes(req.tenant!.tenant_id, inv.investigation_id),
+        }));
+        const { searchInvestigationNotes, NoteSearchError } = require('./investigation_note_search') as
+          typeof import('./investigation_note_search');
+        try {
+          const out = searchInvestigationNotes(bundles, q ?? '', limit);
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof NoteSearchError) {
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/investigations/step-backlog (T6 M9.9) — fleet-wide
    *  per-step backlog. For each step_id seen across the cohort
    *  emits {step_id, name, pending_count, completed_count,
