@@ -9657,6 +9657,63 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/tenants/:tenant_id/onboarding/steps/:step_id/skip (T6 M2.5)
+   *  body { reason }. Forces status=skipped and captures the regulatory/
+   *  compliance reason on the StepProgress for audit + reviewer trail.
+   *  Validates reason length [5..500] after whitespace collapse.
+   *  MUST be declared BEFORE the catch-all .../steps/:step_id so the
+   *  literal "/skip" segment isn't swallowed as a step_id. */
+  app.post(
+    '/v1/tenants/:tenant_id/onboarding/steps/:step_id/skip',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      const step_id = req.params.step_id ?? '';
+      const actor_username = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { reason?: unknown };
+      try {
+        const state = onboardingStore.skipStepWithReason(
+          target,
+          step_id,
+          actor_username,
+          wrapper.reason,
+          now(),
+        );
+        return res.json(wrapResponse(state, ctx));
+      } catch (e) {
+        if (e instanceof OnboardingError) {
+          if (e.code === 'unknown_step') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_step', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'skip step failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   /** POST /v1/tenants/:tenant_id/onboarding/steps/:step_id body { status, notes? }. */
   app.post(
     '/v1/tenants/:tenant_id/onboarding/steps/:step_id',

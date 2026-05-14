@@ -345,3 +345,29 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/audit_chain_sample.test.ts` — 18/18 pass.
 - `npx jest` (full BFF suite) — 4232 pass / 58 skipped / 4290 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M2.5 — Onboarding step skip-with-reason capture
+
+### Tasks ticked
+- T6 sub-phase M2.5 — onboarding skip-with-reason capture. T6 sub-phase tally 113 → 114.
+
+### Files touched
+- `services/bff/src/tenant_onboarding.ts` — added `skip_reason: string | null` field to `StepProgress` (default null on `pendingStep`). New exported constants `SKIP_REASON_MIN = 5` / `SKIP_REASON_MAX = 500`. New private `normaliseSkipReason(input)` collapses whitespace + validates length, throws `skip_reason_required` / `skip_reason_too_short` / `skip_reason_too_long` `OnboardingError` codes. Extended `OnboardingStore` interface with `skipStepWithReason(tenant, step, actor, reason, now)`. `InMemoryOnboardingStore` impl forces status=skipped, completed_at=null, completed_by=actor.trim(), notes=null, skip_reason=cleanReason. Existing `markStep` updated to set `skip_reason: null` on every write (legacy skipped path stays compatible — skip_reason just remains null).
+- `services/bff/__tests__/tenant_onboarding_skip.test.ts` (new) — 19 jest tests: 3 happy path (captures reason, whitespace collapse, counts move pending→skipped), 5 validation (missing/empty/whitespace, too short, too long, unknown step, missing actor), 3 backwards-compat (legacy markStep skipped stays null, skipStepWithReason → markStep completed clears reason, pendingStep default), 1 tenant isolation, 7 route (200 happy, 400 each of the 3 reason errors, 404 unknown_step, 403 wrong role, M2.2 markStep route still works).
+- `services/bff/src/server.ts` — `POST /v1/tenants/:tenant_id/onboarding/steps/:step_id/skip` mounted BEFORE the catch-all `.../steps/:step_id` so the literal `/skip` segment isn't captured as a step_id. `audit:read` RBAC matches M2.2. 404 mapped for `unknown_step`; 400 for the three `skip_reason_*` codes; 500 fallback.
+
+### Decisions
+- **New explicit `/skip` route, not extending markStep.** Two reasons: (1) backwards-compatibility — 46 pre-existing onboarding tests pass unchanged because `markStep(..., 'skipped', ...)` still works without a reason. (2) The new route's body shape `{reason}` is simpler than the markStep `{status, notes}` shape; the SPA's skip-confirmation dialog gets a focused endpoint.
+- **`skip_reason` is a distinct field from `notes`.** Notes is generic free-form text; skip_reason is the structured compliance justification. Auditors filter on it; SPA renders it inline. Keeps the audit semantics clean.
+- **5-char floor.** Catches `'a'`, `'no'`, `'tbd'` — entries that wouldn't survive a regulator review. Tunable via the exported constant.
+- **500-char ceiling.** Same shape as the M16.4 description cap; long enough for a sentence-or-three justification, short enough to render in a card.
+- **markStep clears skip_reason back to null on `completed`.** A step that was skipped-with-reason and then later completed shouldn't carry stale skip_reason text — the audit trail of WHEN it was skipped lives in the audit log, not on the live state.
+
+### Hand-offs
+- **agent-ui** — onboarding wizard "Skip" button → dialog that REQUIRES a reason input (5..500 chars) → `POST .../skip` → render the inline skip_reason badge on the now-skipped step. Legacy skipped-without-reason steps from before M2.5 show "(reason not captured — pre-M2.5)" inline.
+
+### Verification
+- `npx jest __tests__/tenant_onboarding_skip.test.ts` — 19/19 pass.
+- `npx jest __tests__/tenant_onboarding.test.ts` — 46/46 (pre-existing tests unaffected by the field addition).
+- `npx jest` (full BFF suite) — 4300 pass / 58 skipped / 4358 total, **zero failures**.
+- `npx tsc --noEmit` — clean.

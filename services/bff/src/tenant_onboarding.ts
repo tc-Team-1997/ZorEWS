@@ -67,6 +67,11 @@ export interface StepProgress {
   completed_at: string | null;
   completed_by: string | null;
   notes: string | null;
+  /** T6 M2.5 — required compliance reason when the step was skipped
+   *  via `skipStepWithReason` (the new explicit skip path). null when
+   *  the step is in any other status, OR when it was skipped via the
+   *  legacy `markStep(..., 'skipped', ...)` path (backwards-compatible). */
+  skip_reason: string | null;
 }
 
 export interface OnboardingState {
@@ -173,6 +178,12 @@ export function getOnboardingStepDef(id: string): OnboardingStepDef | null {
 
 const NOTES_CAP = 1000;
 
+/** T6 M2.5 — bounds on the required skip_reason. Short floor catches
+ *  empty-string / single-character entries that wouldn't survive a
+ *  regulator review; long ceiling matches the notes cap shape. */
+export const SKIP_REASON_MIN = 5;
+export const SKIP_REASON_MAX = 500;
+
 function checkActor(actor_username: unknown): asserts actor_username is string {
   if (typeof actor_username !== 'string' || !actor_username.trim()) {
     throw new OnboardingError('invalid_input', 'actor_username is required');
@@ -191,6 +202,28 @@ function normaliseNotes(input: unknown): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+/** T6 M2.5 — validate + collapse whitespace on a skip reason. Required
+ *  by `skipStepWithReason`; throws on missing/short/long. */
+function normaliseSkipReason(input: unknown): string {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw new OnboardingError('skip_reason_required', 'skip_reason is required');
+  }
+  const collapsed = input.replace(/\s+/g, ' ').trim();
+  if (collapsed.length < SKIP_REASON_MIN) {
+    throw new OnboardingError(
+      'skip_reason_too_short',
+      `skip_reason ≥ ${SKIP_REASON_MIN} chars`,
+    );
+  }
+  if (collapsed.length > SKIP_REASON_MAX) {
+    throw new OnboardingError(
+      'skip_reason_too_long',
+      `skip_reason ≤ ${SKIP_REASON_MAX} chars`,
+    );
+  }
+  return collapsed;
+}
+
 // ─── State assembly ───────────────────────────────────────────────────
 
 function pendingStep(id: OnboardingStepId): StepProgress {
@@ -200,6 +233,7 @@ function pendingStep(id: OnboardingStepId): StepProgress {
     completed_at: null,
     completed_by: null,
     notes: null,
+    skip_reason: null,
   };
 }
 
@@ -250,6 +284,18 @@ export interface OnboardingStore {
     status: string,
     actor_username: string,
     notes: unknown,
+    now: Date,
+  ): OnboardingState;
+  /** T6 M2.5 — explicit skip path that REQUIRES a skip_reason. Stores
+   *  the reason on the StepProgress for audit + regulator review.
+   *  Forces status='skipped'; rejects empty / short / long reasons.
+   *  The legacy markStep(..., 'skipped', ...) path stays available
+   *  but doesn't capture a reason (skip_reason stays null). */
+  skipStepWithReason(
+    tenant_id: string,
+    step_id: string,
+    actor_username: string,
+    reason: unknown,
     now: Date,
   ): OnboardingState;
   reset(tenant_id: string, actor_username: string, now: Date): OnboardingState;
@@ -306,6 +352,38 @@ export class InMemoryOnboardingStore implements OnboardingStore {
       completed_at: status === 'completed' ? ts : null,
       completed_by: status === 'completed' || status === 'skipped' ? actor_username.trim() : null,
       notes: cleanNotes,
+      // Legacy path doesn't capture a structured reason — left null for
+      // backwards-compat. Use `skipStepWithReason` when a reason is required.
+      skip_reason: null,
+    });
+    this.lastUpdated.set(tenant_id, ts);
+    return this.get(tenant_id);
+  }
+
+  skipStepWithReason(
+    tenant_id: string,
+    step_id: string,
+    actor_username: string,
+    reason: unknown,
+    now: Date,
+  ): OnboardingState {
+    if (!tenant_id || typeof tenant_id !== 'string') {
+      throw new OnboardingError('invalid_input', 'tenant_id required');
+    }
+    if (!isOnboardingStepId(step_id)) {
+      throw new OnboardingError('unknown_step', `unknown onboarding step: ${step_id}`);
+    }
+    checkActor(actor_username);
+    const cleanReason = normaliseSkipReason(reason);
+    const ts = now.toISOString();
+    const bucket = this.bucket(tenant_id);
+    bucket.set(step_id, {
+      step_id,
+      status: 'skipped',
+      completed_at: null,
+      completed_by: actor_username.trim(),
+      notes: null,
+      skip_reason: cleanReason,
     });
     this.lastUpdated.set(tenant_id, ts);
     return this.get(tenant_id);
