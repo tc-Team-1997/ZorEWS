@@ -578,6 +578,7 @@ import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
 import { listInvestigationStateGraph } from './investigation_state_graph';
 import { indexConnectorSchemaFields } from './connector_schema_field_index';
 import { analyseDashboardWidgetUsage } from './dashboard_widget_usage';
+import { listOnboardingSkips } from './onboarding_skip_history';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -10245,6 +10246,25 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const state = onboardingStore.get(req.tenant!.tenant_id);
       return res.json(wrapResponse(state, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/me/onboarding/skip-history (T6 M2.7) — focused
+   *  view of just the caller's tenant skipped onboarding steps with
+   *  captured reasons. Companion to M2.6 readiness: that gives a
+   *  single number + blockers; this is the auditable "why was each
+   *  step skipped?" report. Separates M2.5 explicit-reason skips
+   *  from legacy markStep('skipped') skips so compliance can spot
+   *  steps lacking the new audit trail. Sorted by step.order asc. */
+  app.get(
+    '/v1/tenants/me/onboarding/skip-history',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const out = listOnboardingSkips(state);
+      return res.json(wrapResponse(out, ctx));
     },
   );
 

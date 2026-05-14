@@ -435,3 +435,26 @@
 
 ### Sub-phase tally
 - T6 tally **132 → 133**.
+
+## 2026-05-14 — T6 M2.7 — Onboarding skip-reason history
+
+**Goal.** Focused audit view over the M2.5 skip-reason capture: just the skipped steps with their reasons + actor + step.order, the auditable "why was each step skipped?" companion to M2.6 readiness. Distinguishes M2.5 explicit-reason skips from legacy `markStep('skipped')` skips so compliance can spot the audit-trail gap.
+
+### Files
+
+- **NEW** `services/bff/src/onboarding_skip_history.ts` — pure `listOnboardingSkips(state)`. Filters `state.steps` to `status==='skipped'`, joins against `ONBOARDING_STEPS` for name + required + order, sorts by step.order asc, and surfaces `total_skipped`, `total_skipped_with_reason` (skip_reason not null), `total_skipped_legacy` (skip_reason null), and `state_last_updated_at`.
+- **NEW** `services/bff/__tests__/onboarding_skip_history.test.ts` — 9 tests (5 pure + 4 route): empty envelope, M2.5 explicit-reason capture, legacy markStep null-reason, filter (completed/pending steps drop), step.order asc sort with 3 reverse-order skips, mixed-bucket counting, route happy path, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — imported `listOnboardingSkips`; mounted `GET /v1/tenants/me/onboarding/skip-history` (audit:read) right before `/v1/tenants/me/onboarding/readiness` to keep onboarding routes grouped.
+
+### Design notes
+
+- Per-record shape carries `actor` (preserves `completed_by` from the step progress entry) but NOT `last_updated_at` — `skipStepWithReason` sets `completed_at: null` on explicit skips, so the field would have been confusingly null for the very path it was meant to time-stamp. Tenant-level `state_last_updated_at` at the envelope level handles the "how recent is this report?" use case.
+- Distinguishing M2.5-explicit vs legacy null-reason skips at the count level surfaces a compliance signal the SPA can act on (banner: "3 skips without reasons — re-skip via the M2.5 flow to capture the audit context").
+- M2.5 `skipStepWithReason` accepts ANY step (required or optional); the regulatory use case is precisely "skip a required step with a documented reason." Tests exercise required-step skips on purpose.
+
+### Verification
+- `npx jest __tests__/onboarding_skip_history.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **136 → 137**.
