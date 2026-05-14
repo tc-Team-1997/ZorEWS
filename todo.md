@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M16.12 — Scenario bulk delete shipped — `POST /v1/scenarios/library/custom/bulk-delete` mirrors the M16.9 bulk-clone shape with per-row outcomes (deleted[]/skipped[] with `unknown_preset`/`invalid_id` reasons), `scenario.delete` audit event per success with `bulk:true` marker, cross-tenant isolation. Previous: M5.12 rule template versions, M6.9 preset diff, M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
+**Last updated:** 2026-05-14 (T6 M4.8 — Indicator backtest result comparison shipped — pure `compareBacktestResults(a, b)` returns signed deltas for fires/precision/recall/F1/mean_value, per-cell confusion_delta, per-day fires_delta over the overlapping window, and same_indicator/same_segment warning bools; new route `POST /v1/indicators/backtest/compare`. Previous: M16.12 scenario bulk delete, M5.12 rule template versions, M6.9 preset diff, M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

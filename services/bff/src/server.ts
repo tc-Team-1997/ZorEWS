@@ -355,6 +355,10 @@ import {
 } from './scoring_presets_custom';
 import { diffWeightPresets } from './scoring_preset_diff';
 import {
+  BacktestCompareError,
+  compareFromUnknown as compareBacktestFromUnknown,
+} from './indicator_backtest_compare';
+import {
   BacktestError as IndicatorBacktestError,
   runBacktest as runIndicatorBacktest,
   type BacktestInput as IndicatorBacktestInput,
@@ -9366,6 +9370,39 @@ export function makeApp(deps: AppDeps = {}) {
             env,
           ),
         );
+      }
+    },
+  );
+
+  /** POST /v1/indicators/backtest/compare (T6 M4.8) — structural diff
+   *  between two BacktestResult objects. Caller runs both backtests
+   *  via /v1/indicators/backtest and passes the resolved results in
+   *  body `{a, b}`. Returns `{diff: BacktestCompareResult}` with
+   *  fires/precision/recall/F1/mean_value deltas, per-cell confusion
+   *  delta, per-day fires delta on the overlapping window, and
+   *  same_indicator / same_segment warning bools. Pure-function; no
+   *  per-tenant state involved. */
+  app.post(
+    '/v1/indicators/backtest/compare',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const diff = compareBacktestFromUnknown(inner);
+        return res.json(wrapResponse({ diff }, env));
+      } catch (e) {
+        if (e instanceof BacktestCompareError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, env),
+          );
+        }
+        throw e;
       }
     },
   );

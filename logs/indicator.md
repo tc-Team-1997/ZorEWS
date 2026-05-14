@@ -128,3 +128,27 @@ These compute fns return `value=null, breached=false` until agent-data extends t
 - ✅ dbt model `indicator_values` written; **parses** unverified (sandbox).
 - ✅ schema.yml validates by inspection — single new model, columns + tests use only built-in dbt + dbt_utils tests, no overlapping model names.
 - ✅ Jest tests assert: registry-completeness (3), per-indicator positive + negative across 4 families (64 cases), batch endpoint behaviour (7).
+
+## 2026-05-14 — T6 M4.8 — Indicator backtest result comparison
+
+### Tasks ticked
+- T6 sub-phase M4.8 — backtest result comparison. T6 sub-phase tally 108 → 109.
+
+### Files touched
+- `services/bff/src/indicator_backtest_compare.ts` (new) — pure `compareBacktestResults(a, b)` returns `BacktestCompareResult` with `identical`, `same_indicator`, `same_segment`, signed `fires_delta` + `precision_delta` + `recall_delta` + `f1_delta` + `mean_value_delta`, per-cell `confusion_delta` (TP/FP/FN/TN), `per_day_fires_delta[]` aligned over overlapping days, and `a_only_days[]` / `b_only_days[]` for the symmetric difference of day sets. Direction convention: every delta is b - a (positive = candidate stronger than baseline). Also exports `compareFromUnknown(input)` as the route-level entry point that validates the two BacktestResult shapes (presence of indicator_id / confusion / metrics / daily) before delegating to the pure comparator.
+- `services/bff/__tests__/indicator_backtest_compare.test.ts` (new) — 21 jest tests: 1 identical-pair, 4 fires/metrics/confusion/mean_value deltas, 3 per-day alignment (overlap → deltas; only-one-side → *_only_days; sort order), 2 warning bools (different indicator, different segment), 6 validation (non-object, missing a, missing b, missing indicator_id, missing confusion, well-formed delegates), 5 route (200 happy + envelope, mismatched indicators still 200 with warning bool, 400 bad shape, 403 wrong role, cross-tenant header still works since no per-tenant state).
+- `services/bff/src/server.ts` — import `BacktestCompareError` + `compareFromUnknown`; new route `POST /v1/indicators/backtest/compare` mounted right after the existing `/v1/indicators/backtest` route. `customers:read_risk_profile` RBAC. Pure compute — no `tenant_id` involved in the body or response.
+
+### Decisions
+- **Caller-supplies-both-results, not server-runs-both.** Keeps M4.8 a pure-function endpoint. Caller already ran the backtests via `/v1/indicators/backtest` to inspect each individually; passing the resolved results back is a tiny payload and avoids re-running the engine twice. Also lets analysts compare results from different timestamps.
+- **All deltas b - a.** Single direction convention; "positive = candidate improved on baseline" is the natural reading for the threshold-tuning use case.
+- **`same_indicator` / `same_segment` are bools, not errors.** Comparing two backtests of different indicators is a real (if rare) need ("would FIN-002 be a better gate than FIN-001 for this rule?"). Warning bool lets the SPA show a label without blocking the comparison.
+- **`per_day_fires_delta` over overlap only.** Days only on one side surface as `a_only_days` / `b_only_days` to keep the delta list interpretable. Don't fake a `delta` against an implicit zero — would mislead a reader.
+
+### Hand-offs
+- **agent-ui** — threshold-tuning workflow: SPA runs `/v1/indicators/backtest` twice with different threshold params, posts both results to `/v1/indicators/backtest/compare`, renders the delta panel (fires shift, precision/recall trade-off, per-day fires bar with delta colors). The `same_indicator: false` warning surfaces inline with a "comparing different indicators" badge.
+
+### Verification
+- `npx jest __tests__/indicator_backtest_compare.test.ts` — 21/21 pass.
+- `npx jest` (full BFF suite) — 4213 pass / 58 skipped / 4272 total. Intermittent cross-suite singleton flakiness in `alert_auto_ack` (passes 45/45 alone); pre-existing pattern unrelated to M4.8.
+- `npx tsc --noEmit` — clean.
