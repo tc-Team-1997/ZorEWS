@@ -5305,6 +5305,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/shock-vectors (T6 M16.15) — normalises
+   *  every library preset's GDP/rate/FX shocks onto [-1, 1] using the
+   *  library-wide MIN/MAX per axis. Returns raw + normalized per
+   *  preset plus the per-axis range envelope. Lets the SPA render
+   *  a unified radar chart comparing all presets without each axis
+   *  fighting on its own scale. Mounted BEFORE `/:preset_id` so the
+   *  literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/shock-vectors',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { normaliseScenarioShockVectors } = require('./scenario_shock_vectors') as
+        typeof import('./scenario_shock_vectors');
+      const out = normaliseScenarioShockVectors();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/:preset_id/clones-in-tenant (T6 M16.14)
    *  — back-reference query: for this library scenario preset, list
    *  every custom preset in the calling tenant that was cloned from

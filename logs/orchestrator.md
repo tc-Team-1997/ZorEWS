@@ -563,3 +563,27 @@
 
 ### Sub-phase tally
 - T6 tally **154 → 155**.
+
+## 2026-05-14 — T6 M16.15 — Scenario shock-vector radar transform
+
+**Goal.** Chart-data transform that normalises every M16.1 library preset's `{gdp, rate, fx}` shocks onto [-1, 1] using library-wide MIN/MAX per axis. Lets the SPA render a unified radar chart comparing all presets without each axis fighting on its own scale.
+
+### Files
+
+- **NEW** `services/bff/src/scenario_shock_vectors.ts` — pure `normaliseScenarioShockVectors(presets)`. Per-axis MIN/MAX computed across the preset set, then per-preset `value' = -1 + 2 * (value - min) / (max - min)`. Constant-axis edge case handled: when max=min on an axis, every preset's normalized value is 0 (no variation to plot).
+- **NEW** `services/bff/__tests__/scenario_shock_vectors.test.ts` — 11 tests (7 pure + 4 route): empty, single preset (all 0), three presets min/mid/max → -1/0/+1, monotonicity, constant-axis edge, sort order, default registry integration, admin happy, 403, platform-static, M16.1 regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/scenarios/library/shock-vectors` (customers:read_risk_profile) BEFORE the `/:preset_id` catch-all (specifically right above the M16.14 clones-in-tenant route) so the literal `/shock-vectors` wins.
+
+### Design notes
+
+- Why -1 to 1 (not 0 to 1): the BIL scenario library includes both shocks (negative GDP, positive rates) AND boons (positive GDP, lower rates would be a stimulus scenario). Centred on 0 gives the SPA a meaningful baseline tick — anything below the centre is a tightening shock, anything above is loosening.
+- Constant-axis edge case: if every preset shares the same gdp value (theoretical but possible), the gdp axis has zero variance and `normalize(val)` would divide by zero. Returning 0 across the board is the right semantic — there's no variation to display.
+- Min/max anchored on the supplied library: if the SPA later wants to compare a custom preset against the library radar, the route needs to accept a candidate preset and include it in the MIN/MAX computation. Not in scope today; static library-only.
+- Sort by preset_id asc for stable rendering — the SPA can layer the radars in the same order each time.
+
+### Verification
+- `npx jest __tests__/scenario_shock_vectors.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **155 → 156**.
