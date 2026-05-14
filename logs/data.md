@@ -197,3 +197,27 @@ pipeline-svc:
 - `npx jest __tests__/connector_schema_source_map.test.ts` — 13/13 pass.
 - `npx jest` (full BFF suite) — 4526 pass / 58 skipped / 4584 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M3.8 — Connector schema field cross-index
+
+**Goal.** Inverted index over every platform connector's fields. Answers "which connectors share a `customer_id` field, and do they all agree it's a string?" for the dataops integrity-audit dashboard. Orthogonal to M3.7 (per-connector source-map): that asks "where does THIS connector's `customer_id` field come from?"; this asks "which connectors define `customer_id` and what types do they use?"
+
+### Files
+
+- **NEW** `services/bff/src/connector_schema_field_index.ts` — pure `indexConnectorSchemaFields(connector_ids, getSchema)` walks the supplied id list, fetches each connector's M3.2 schema, and aggregates fields into a Map<field_name, {types: Set, connectors: Set}>. Materialises sorted arrays per entry + sorts entries by observed_count desc with field_name asc tie-break.
+- **NEW** `services/bff/__tests__/connector_schema_field_index.test.ts` — 9 tests across 5 pure + 3 route describe blocks: empty input, empty lookup, single connector enumeration, cross-connector shared field aggregation, sort order, type-drift surfacing, real-catalog spot-check via the actual `listSchemaConnectorIds` + `getConnectorSchema`, 403, platform-static-across-tenants invariant.
+- **EDIT** `services/bff/src/server.ts` — added `listSchemaConnectorIds` to the existing `connector_schema` import block; imported `indexConnectorSchemaFields`; mounted `GET /v1/ingestion/schema/field-index` (audit:read) right above `GET /v1/ingestion/connectors/:id/schema` so the literal `/schema/field-index` segment wins over the `:id` wildcard.
+
+### Design notes
+
+- Pattern-aligned with M15.6 (audit action catalog) — same Map-of-Set accumulator + materialise-then-sort pattern, but over connector schemas not audit events. Different domain, same shape.
+- `observed_types` array surfaces type drift explicitly. A single-entry array is the happy path; multi-entry is a red flag the SPA can render in warning yellow.
+- `observed_count === connector_ids.length` always — a field name appears at most once per schema (M3.2 contract). Surfaced explicitly as a separate field so the SPA can group by it without parsing array lengths.
+- Defensive `getSchema(id) === null` skip — the M3.2 catalog has full coverage today (every connector id maps to a schema), but this keeps the function safe under future re-orgs that might temporarily drop a schema entry.
+
+### Verification
+- `npx jest __tests__/connector_schema_field_index.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **134 → 135**.

@@ -576,6 +576,7 @@ import { introspectAuditCatalog } from './audit_action_catalog';
 import { analyseTemplateCloneHistory } from './template_clone_analysis';
 import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
 import { listInvestigationStateGraph } from './investigation_state_graph';
+import { indexConnectorSchemaFields } from './connector_schema_field_index';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -612,6 +613,7 @@ import {
 import {
   ConnectorSchemaError,
   getConnectorSchema,
+  listSchemaConnectorIds,
   validateRecord,
 } from './connector_schema';
 import {
@@ -13866,6 +13868,27 @@ export function makeApp(deps: AppDeps = {}) {
   // no store, no AppDeps slot. The ingestion UI uses these to render
   // a column-mapper preview before file upload + validate sample
   // rows server-side.
+
+  /** GET /v1/ingestion/schema/field-index (T6 M3.8) — inverted index
+   *  over every connector's fields. For each unique field_name across
+   *  the platform schema catalogue, returns the connector_ids that
+   *  carry it + the distinct observed types (multi-entry signals
+   *  type drift across connectors). Useful for the dataops integrity-
+   *  audit dashboard ("which connectors share a `customer_id` field
+   *  and do they all agree it's a string?"). Mounted BEFORE
+   *  `/v1/ingestion/connectors/:id/schema` so the literal
+   *  `/schema/field-index` segment isn't captured. */
+  app.get(
+    '/v1/ingestion/schema/field-index',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const ids = listSchemaConnectorIds();
+      const out = indexConnectorSchemaFields(ids, getConnectorSchema);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
 
   /** GET /v1/ingestion/connectors/:id/schema — full field schema. */
   app.get(
