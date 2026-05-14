@@ -12865,6 +12865,24 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations (T6 M14.24) — per-
+   *  adapter operation catalog (operation_id, method, path,
+   *  parameter contracts). Drives the SPA "API explorer" panel so
+   *  admins can see which queries each adapter supports without
+   *  browsing TypeScript types. Platform-static hand-curated. */
+  app.get(
+    '/v1/integrations/adapters/operations',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listAdapterOperationCatalog } = require('./adapter_operation_catalog') as
+        typeof import('./adapter_operation_catalog');
+      const out = listAdapterOperationCatalog();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/health — probe all 8 in parallel. */
   app.get(
     '/v1/integrations/adapters/health',

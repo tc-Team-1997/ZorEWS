@@ -722,3 +722,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Mirror of M5.15 / M4.11 reverse cross-reference shape.
 - 19 new jest tests (14 pure + 5 route). Full BFF suite 5095 effective (1 pre-existing flake).
 - T6 sub-phase tally 171 → 172.
+
+## 2026-05-14 — T6 M14.24 Adapter operation catalog
+
+- Hand-curated metadata catalog at `services/bff/src/adapter_operation_catalog.ts` — every M14 adapter (insurance/ifrs9/aml/dms/bureau/agent/finance/hr) with its operation list (operation_id, method, path, description, parameter contracts).
+- Per-parameter shape `{name, in, type, required, description, enum_values?}`.
+- Path-parameter invariant: every `:segment` in path → declared as `in=path` + `required=true` (validated in tests).
+- Defensive deep-copy of params + enum_values so SPA mutations don't pollute singleton.
+- Envelope: `{total_adapters, total_operations, adapters[], most_capable_adapter}`.
+- New route `GET /v1/integrations/adapters/operations` (audit:read; platform-static).
+- Distinct from M14.9 (fleet probe) and M14.23 (SLA targets) — this is the "what queries can I make?" lens.
+- 18 new jest tests. Full BFF suite 5113 effective (2 pre-existing flakes).
+- T6 sub-phase tally 172 → 173.
