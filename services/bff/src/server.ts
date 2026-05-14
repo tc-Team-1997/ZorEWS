@@ -9211,6 +9211,109 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scoring/presets/custom/bulk-clone-from-library (T6 M6.12)
+   *  body { source_preset_ids[], name_prefix? } — clone N library
+   *  weight presets in one call. Per-row outcomes (created[] + skipped[]).
+   *  Mirror of M5.10 (rule template bulk-clone). Cap 10 ids/call.
+   *  Mounted BEFORE the catch-all `/:preset_id` so the literal segment
+   *  wins. */
+  app.post(
+    '/v1/scoring/presets/custom/bulk-clone-from-library',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { source_preset_ids?: unknown; name_prefix?: unknown };
+      if (!Array.isArray(wrapper.source_preset_ids) || wrapper.source_preset_ids.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_preset_ids[] must be non-empty', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (wrapper.source_preset_ids.length > 10) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_preset_ids[] capped at 10 per call', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const namePrefixRaw = wrapper.name_prefix;
+      const namePrefix =
+        typeof namePrefixRaw === 'string' && namePrefixRaw.trim()
+          ? namePrefixRaw.trim()
+          : null;
+      const created: { source_preset_id: string; preset_id: string; name: string }[] = [];
+      const skipped: { source_preset_id: string; reason: string }[] = [];
+      const seenIds = new Set<string>();
+      for (const rawId of wrapper.source_preset_ids) {
+        if (typeof rawId !== 'string' || !rawId.trim()) {
+          skipped.push({
+            source_preset_id: String(rawId),
+            reason: 'invalid_id',
+          });
+          continue;
+        }
+        const sid = rawId.trim();
+        if (seenIds.has(sid)) {
+          skipped.push({ source_preset_id: sid, reason: 'duplicate_in_request' });
+          continue;
+        }
+        seenIds.add(sid);
+        const source = getWeightPreset(sid);
+        if (!source) {
+          skipped.push({ source_preset_id: sid, reason: 'unknown_preset' });
+          continue;
+        }
+        const name = namePrefix
+          ? `${namePrefix}${source.name}`
+          : `Copy of ${source.name}`;
+        try {
+          const preset = customWeightPresetStore.create(
+            req.tenant!.tenant_id,
+            {
+              name,
+              description: source.description,
+              vertical: source.vertical,
+              mode: source.mode,
+              weight_multipliers: { ...source.weight_multipliers },
+            },
+            created_by,
+            now(),
+          );
+          created.push({ source_preset_id: sid, preset_id: preset.id, name: preset.name });
+        } catch (e) {
+          if (e instanceof CustomWeightPresetError) {
+            skipped.push({ source_preset_id: sid, reason: e.code });
+          } else {
+            throw e;
+          }
+        }
+      }
+      return res.status(201).json(
+        wrapResponse(
+          {
+            total_requested: wrapper.source_preset_ids.length,
+            created_count: created.length,
+            skipped_count: skipped.length,
+            created,
+            skipped,
+          },
+          ctx,
+          { code: 'EWS_201', message: 'Bulk-clone processed' },
+        ),
+      );
+    },
+  );
+
   /** DELETE /v1/scoring/presets/custom/:preset_id — remove custom preset. */
   app.delete(
     '/v1/scoring/presets/custom/:preset_id',

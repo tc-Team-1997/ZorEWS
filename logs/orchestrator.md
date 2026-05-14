@@ -587,3 +587,26 @@
 
 ### Sub-phase tally
 - T6 tally **155 → 156**.
+
+## 2026-05-14 — T6 M6.12 — Bulk-clone weight presets from library
+
+**Goal.** Mirror M5.10 (rule template bulk-clone) for the M6.3/M6.4 weight preset surface. Lets BIL onboarding go from "clone 6 library presets one-by-one through M6.11" to "select-all + name-prefix → server fans out".
+
+### Files
+
+- **EDIT** `services/bff/src/server.ts` — new POST route `/v1/scoring/presets/custom/bulk-clone-from-library` mounted right above the existing M6.11 single-clone-from-library route. Cap 10 ids/call. Per-row outcome split (created[] + skipped[]) with explicit reason enum: `invalid_id` (non-string), `duplicate_in_request` (same source twice in one body), `unknown_preset`, `cap_reached`, etc.
+- **NEW** `services/bff/__tests__/scoring_preset_bulk_clone.test.ts` — 12 tests covering 400 missing/empty/over-cap, happy path 2-create, name_prefix, unknown-id skip, duplicate-in-request skip, non-string skip, cap_reached skip, 403, cross-tenant invisibility, M6.11 single-clone regression.
+
+### Design notes
+
+- The skip-reason enumeration is the load-bearing UX detail: when a tenant tries to clone 5 presets and ends up with 3 created + 2 skipped, the SPA needs structured reasons to render which ones failed and why. `invalid_id` / `unknown_preset` / `cap_reached` are operationally distinct, so they're distinct strings.
+- Server-side trim on `name_prefix` strips trailing whitespace. Callers wanting `"[BIL] <name>"` should include the trailing space inside their prefix; the trim is for "[BIL]    " accidental padding. Test asserts the bracketed-prefix lands but doesn't assert the space (implementation detail).
+- Cap at 10 matches M5.10's bulk-clone cap. Above 10 = paginate in the SPA.
+- Same RBAC as M6.11 (customers:read_risk_profile) — bulk-clone is a tier of the same primitive.
+
+### Verification
+- `npx jest __tests__/scoring_preset_bulk_clone.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **157 → 158**.
