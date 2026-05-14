@@ -8558,6 +8558,23 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/widgets/defaults (T6 M11.12) — per-widget
+   *  default config seed for the SPA's "Add widget" wizard. Returns
+   *  one entry per widget_type with a sensible default_config so the
+   *  form arrives pre-filled instead of empty. Platform-static. */
+  app.get(
+    '/v1/dashboards/widgets/defaults',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listWidgetDefaults } = require('./dashboard_widget_defaults') as
+        typeof import('./dashboard_widget_defaults');
+      const out = listWidgetDefaults();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/widgets/usage (T6 M11.11) — cross-cut over the
    *  tenant's saved dashboards. For each widget_type in WIDGET_CATALOG
    *  (every row always emitted, even at count=0) returns

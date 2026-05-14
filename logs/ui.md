@@ -201,3 +201,34 @@
 
 ### Sub-phase tally
 - T6 tally **135 → 136**.
+
+## 2026-05-14 — T6 M11.12 — Dashboard widget config defaults seed
+
+**Goal.** Pre-fill the SPA "Add widget" wizard with sensible default config so users don't start with a blank form and have to know which keys + values are reasonable.
+
+### Files
+
+- **NEW** `services/bff/src/dashboard_widget_defaults.ts` — `DEFAULT_CONFIG_BY_WIDGET` constant maps each WidgetType to a default config object. `getWidgetDefaultConfig(wt)` single-type lookup; `listWidgetDefaults()` enumerates the full catalog with defensive copies.
+- **NEW** `services/bff/__tests__/dashboard_widget_defaults.test.ts` — 11 tests (7 pure + 4 route): every-type-has-default invariant, key-subset-of-catalog invariant, sort order, defensive copy, admin happy, 403, platform-static, /widgets/catalog regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/dashboards/widgets/defaults` (audit:read) right above the M11.11 `/usage` route to keep the M11 cluster grouped.
+
+### Design notes
+
+- The key-subset-of-catalog invariant is critical: a default with a key NOT in `WIDGET_CATALOG.config_keys` would be silently rejected by the M11.7 save-validator. Tested explicitly.
+- Hand-calibrated values:
+  - `risk_score_histogram`: vertical=banking (most common), bucket_count=10 (decile), segment_filter=all
+  - `alerts_by_class`: since_hours=24 (yesterday → today)
+  - `open_cases`: status_filter=all_open, limit=20
+  - `connector_health`: show_paused=false (focus on active)
+  - `top_breaches`: vertical=banking, limit=10
+  - `audit_recent`: limit=25, severity_filter=all
+  - `tenant_kpi`: metric=open_alerts_total, comparison_window=7d
+- Defensive copy via `{...DEFAULT_CONFIG_BY_WIDGET[wt]}` ensures SPA mutations on the returned object don't corrupt the singleton.
+- audit:read RBAC matches the rest of the dashboards module (M11.11 usage, /widgets/catalog).
+
+### Verification
+- `npx jest __tests__/dashboard_widget_defaults.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **156 → 157**.
