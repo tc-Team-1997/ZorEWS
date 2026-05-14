@@ -152,3 +152,27 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 - `npx jest __tests__/alert_quiet_hours_mute_analytics.test.ts` — 15/15 pass.
 - `npx jest` (full BFF suite) — 4247 pass / 58 skipped / 4305 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M8.7 — Alert routing decision preview
+
+### Tasks ticked
+- T6 sub-phase M8.7 — alert routing decision preview. T6 sub-phase tally 118 → 119.
+
+### Files touched
+- `services/bff/src/alert_routing_preview.ts` (new) — pure `previewAlertRouting(engine, tenant_id, severity, at)` decorates the existing `AlertRoutingEngine.route()` result with computed `sla_deadline` + `escalation_deadline` ISO timestamps (`at` + rule hours; both null when monitor_only) and an ordered `notifications_chain[]` of `{step_no, channel, assignee_role, tier:'primary'|'secondary'}` pairs. Chain shape: primary tier × every channel first (step_no 1..N), then secondary CC tier × every channel when `secondary_assignee` is set. Skips emitting links when `primary_assignee='none'` (green-class default → empty chain).
+- `services/bff/__tests__/alert_routing_preview.test.ts` (new) — 14 jest tests: 6 unit (red full chain + SLA + escalation; orange tier shape + 24h/12h timing; yellow with no secondary; green monitor-only nulls + empty chain; tenant override changes source + chain; custom `at` propagates) + 8 route (200 happy with envelope, ?at honored, 400 missing severity, 400 invalid severity classification error, 400 invalid at, 403 wrong role, tenant_override resolves through route, cross-tenant: BANK_DEMO sees its own defaults not BIL's override).
+- `services/bff/src/server.ts` — new route `POST /v1/alerts/routing/preview` body `{severity, at?}`. `audit:read` RBAC matches M8 analytics routes. Validates `at` via `Number.isFinite(new Date(s).getTime())` → 400 on bad input. Maps `AlertClassificationError` → 400 for unrecognized severity strings.
+
+### Decisions
+- **Pure decorator on top of `engine.route()`.** No re-implementation of the routing logic; just adds temporal projection (`at + hours`) and chain reshape. Single source of truth for which rule applies.
+- **Chain ordering: primary tier × all channels, then secondary tier × all channels.** Matches the dispatch order an alert hits in practice — primary is the first to be notified across every channel before secondary CCs come in. Tested explicitly with red (head_of_risk + supervisor, email + sms → 4 links in exact order).
+- **`primary='none'` short-circuits to empty chain.** Green-class default has `primary='none'`, so the chain is empty rather than a one-link `none → in_app` which would be misleading.
+- **`at` defaults to `now()`, takes any ISO-8601.** Lets ops preview "what if this fires at midnight on a holiday?" with explicit deadline math.
+
+### Hand-offs
+- **agent-ui** — alert routing config page can add a "Preview" button per class → `POST /v1/alerts/routing/preview` with the matching severity → render the chain as a numbered list with deadline countdown timers. Particularly useful when an operator sets an override and wants to verify the deadlines + channel shape before saving.
+
+### Verification
+- `npx jest __tests__/alert_routing_preview.test.ts` — 14/14 pass.
+- `npx jest` (full BFF suite) — 4375 pass / 58 skipped / 4434 total. Intermittent cross-suite singleton flakiness in `ews_rules_routes` (passes 32/32 alone); pre-existing pattern unrelated to M8.7.
+- `npx tsc --noEmit` — clean.

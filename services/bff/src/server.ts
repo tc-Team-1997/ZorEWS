@@ -1985,6 +1985,66 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/alerts/routing/preview (T6 M8.7) — dry-run that
+   *  decorates the M8.2 routing decision with computed sla_deadline
+   *  + escalation_deadline ISO timestamps and an ordered
+   *  notifications_chain[] of {channel, assignee_role, tier} pairs.
+   *  Body { severity, at? }. `at` defaults to now(); accepts any
+   *  ISO-8601 timestamp. `audit:read` RBAC matches the rest of M8. */
+  app.post(
+    '/v1/alerts/routing/preview',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { severity?: unknown; at?: unknown };
+      if (wrapper.severity === undefined) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'severity is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      let at = now();
+      if (typeof wrapper.at === 'string' && wrapper.at.trim()) {
+        const d = new Date(wrapper.at);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'at must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        at = d;
+      }
+      try {
+        const { previewAlertRouting } = require('./alert_routing_preview') as
+          typeof import('./alert_routing_preview');
+        const preview = previewAlertRouting(
+          alertRoutingEngine,
+          req.tenant!.tenant_id,
+          wrapper.severity as SeverityInput,
+          at,
+        );
+        return res.json(wrapResponse(preview, ctx));
+      } catch (e) {
+        if (e instanceof AlertClassificationError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /**
    * POST /v1/alerts/routing/decide
    * body: { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL' (case-insensitive) }
