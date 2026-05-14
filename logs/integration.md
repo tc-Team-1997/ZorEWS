@@ -420,3 +420,27 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/admin_config_reset_category.test.ts` — 10/10 pass.
 - `npx jest` (full BFF suite) — 4324 pass / 58 skipped / 4383 total. Intermittent cross-suite singleton flakiness in `ews_rules_routes` (passes 32/32 when run alone); pre-existing pattern unrelated to M13.8.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M2.6 — Tenant onboarding readiness score
+
+### Tasks ticked
+- T6 sub-phase M2.6 — tenant onboarding readiness score. T6 sub-phase tally 120 → 121.
+
+### Files touched
+- `services/bff/src/tenant_onboarding_readiness.ts` (new) — pure `computeOnboardingReadiness(state)` derives `OnboardingReadiness` from M2.2 `OnboardingState`. `completeness_score = round(0.7 × required_pct + 0.3 × overall_pct)` (0..100). `blockers[]` lists required steps NOT in `completed` status (pending OR skipped), sorted by `step.order`, with the M2.5 `skip_reason` carried through when the blocker is skipped. `next_action` points at the FIRST PENDING required step — skipped required steps are blockers but aren't "next action" (they need an unblock decision, not a status flip). `is_complete` mirrors `OnboardingState.is_complete`.
+- `services/bff/__tests__/tenant_onboarding_readiness.test.ts` (new) — 13 jest tests: 1 untouched-tenant zero-state, 3 partial-progress (1 done with score math; all 7 required done with score 96 because optional pending; all 8 done = 100/100/100), 3 skipped-required-handling (skipped counts as blocker not completion + carries M2.5 skip_reason; next_action skips over skipped required to the next pending; all required skipped → next_action=null), 1 blocker-order-stable, 5 route (200 happy, after-completions, 403 wrong role, admin lookup for another tenant, M2.2 /onboarding regression).
+- `services/bff/src/server.ts` — two new routes `GET /v1/tenants/me/onboarding/readiness` + `GET /v1/tenants/:tenant_id/onboarding/readiness` mounted right after `/me/onboarding`. `audit:read` RBAC on both. The admin lookup uses an open `:tenant_id` path so this MUST be mounted BEFORE the catch-all `/:tenant_id/onboarding` route — but Express matches on full path so the literal `/readiness` segment after `/onboarding` already disambiguates.
+
+### Decisions
+- **Weighted score 0.7 × required + 0.3 × overall.** Required steps dominate (operationally, a tenant with 7/7 required + 0 optional is "ready to use"). Optional step contributes 30% so it still moves the gauge but doesn't gate readiness.
+- **`next_action` is the first PENDING required step, not the first BLOCKER.** A skipped required step is a deferred decision — it needs a reviewer to either unblock with reason or flip back to pending. "Next action" should always be something the operator can DO immediately.
+- **`is_complete` mirrors `OnboardingState.is_complete`.** Single source of truth; readiness score = 96% for required-done + optional-pending matches the M2.2 contract (is_complete=true only requires all REQUIRED done).
+- **`blockers` includes both pending AND skipped.** Skipped required steps are visible as blockers with the M2.5 skip_reason so reviewers can audit "why are we deferring this?".
+
+### Hand-offs
+- **agent-ui** — admin tenant dashboard can render the readiness as a gauge card: big number (completeness_score), badge ("ready" when is_complete else "in progress"), and a stacked list of blockers with the skip_reason rendered inline as a strike-through. "Next action" → CTA button to mark that step complete from the dashboard.
+
+### Verification
+- `npx jest __tests__/tenant_onboarding_readiness.test.ts` — 13/13 pass.
+- `npx jest` (full BFF suite) — 4401 pass / 58 skipped / 4461 total. Intermittent cross-suite singleton flakiness in `customer_breach_scan` / `rules` — both pass when run alone or together (79/79); pre-existing pattern unrelated to M2.6.
+- `npx tsc --noEmit` — clean.

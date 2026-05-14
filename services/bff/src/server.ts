@@ -9742,6 +9742,43 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/me/onboarding/readiness (T6 M2.6) — caller's tenant
+   *  readiness score derived from the M2.2 onboarding state. Weighted
+   *  blend (70% required, 30% overall) + structured blockers + next
+   *  pending required step. audit:read RBAC. */
+  app.get(
+    '/v1/tenants/me/onboarding/readiness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const { computeOnboardingReadiness } = require('./tenant_onboarding_readiness') as
+        typeof import('./tenant_onboarding_readiness');
+      const readiness = computeOnboardingReadiness(state);
+      return res.json(wrapResponse(readiness, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/:tenant_id/onboarding/readiness (T6 M2.6) — admin
+   *  lookup of any tenant's readiness. Mounted BEFORE the catch-all
+   *  `/:tenant_id/onboarding` so the literal /readiness segment isn't
+   *  captured as a sub-path of the state route. */
+  app.get(
+    '/v1/tenants/:tenant_id/onboarding/readiness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const target = req.params.tenant_id ?? '';
+      const state = onboardingStore.get(target);
+      const { computeOnboardingReadiness } = require('./tenant_onboarding_readiness') as
+        typeof import('./tenant_onboarding_readiness');
+      const readiness = computeOnboardingReadiness(state);
+      return res.json(wrapResponse(readiness, ctx));
+    },
+  );
+
   /** GET /v1/tenants/:tenant_id/onboarding — admin lookup. */
   app.get(
     '/v1/tenants/:tenant_id/onboarding',
