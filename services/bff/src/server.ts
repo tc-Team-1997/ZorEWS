@@ -4882,6 +4882,98 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scenarios/library/custom/export-bundle (T6 M16.13) —
+   *  versioned JSON envelope for migrating N custom scenario presets
+   *  between tenants. Body { preset_ids: string[] } (cap 30). Returns
+   *  the bundle with deep-copied items stripped of live identity
+   *  (re-minted on import). Mirrors M5.11 / M11.9 shape. */
+  app.post(
+    '/v1/scenarios/library/custom/export-bundle',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { preset_ids?: unknown };
+      const exported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const { exportScenarioBundle, ScenarioBundleError } = require('./scenario_bundle') as
+          typeof import('./scenario_bundle');
+        const bundle = exportScenarioBundle(customPresetStore, {
+          tenant_id: req.tenant!.tenant_id,
+          preset_ids: Array.isArray(wrapper.preset_ids)
+            ? (wrapper.preset_ids as unknown[]).map((x) => String(x))
+            : [],
+          exported_by,
+          now: now(),
+        });
+        return res.json(wrapResponse(bundle, ctx));
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        void ScenarioBundleError;
+      } catch (e) {
+        const { ScenarioBundleError } = require('./scenario_bundle') as
+          typeof import('./scenario_bundle');
+        if (e instanceof ScenarioBundleError) {
+          if (e.code === 'unknown_preset') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/scenarios/library/custom/import-bundle (T6 M16.13) —
+   *  replay an export-bundle into the caller's tenant. Body
+   *  { bundle, name_prefix? }. Per-row outcomes (created / skipped
+   *  already_exists / error). */
+  app.post(
+    '/v1/scenarios/library/custom/import-bundle',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { bundle?: unknown; name_prefix?: unknown };
+      const imported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const { importScenarioBundle } = require('./scenario_bundle') as
+          typeof import('./scenario_bundle');
+        const result = importScenarioBundle(customPresetStore, {
+          target_tenant_id: req.tenant!.tenant_id,
+          bundle: wrapper.bundle,
+          imported_by,
+          name_prefix:
+            typeof wrapper.name_prefix === 'string' ? wrapper.name_prefix : undefined,
+          now: now(),
+        });
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        const { ScenarioBundleError } = require('./scenario_bundle') as
+          typeof import('./scenario_bundle');
+        if (e instanceof ScenarioBundleError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** POST /v1/scenarios/library/custom/bulk-delete (T6 M16.12) — delete
    *  up to 10 custom presets in one call. Per-row outcomes so a partial
    *  success (some ids unknown / cross-tenant) surfaces each row's

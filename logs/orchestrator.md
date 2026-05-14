@@ -363,3 +363,28 @@
 - `npx jest __tests__/report_schedule_preview.test.ts` — 19/19 pass.
 - `npx jest` (full BFF suite) — 4360 pass / 58 skipped / 4420 total. Intermittent cross-suite singleton flakiness in `case_maker_checker` / `scenario_bulk` (both pass when run together in isolation, 81/81); pre-existing pattern unrelated to M12.6.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M16.13 — Custom scenario preset bundle export/import
+
+### Tasks ticked
+- T6 sub-phase M16.13 — custom scenario preset bundle. T6 sub-phase tally 121 → 122.
+
+### Files touched
+- `services/bff/src/scenario_bundle.ts` (new) — mirrors the M5.11 (rule templates) + M11.9 (dashboards) bundle shape. Versioned envelope (`schema_version='1'`, `exported_at`, `exported_by`, `source_tenant_id`, `items[]`). `validateBundle` rejects empty items + items > cap (30) + missing shocks; `exportScenarioBundle` strips live `id` from each `ScenarioPreset` so import re-mints; `importScenarioBundle` replays via `store.create` with per-row outcomes (`created` / `skipped already_exists` / `error` captures `cap_reached` and any `CustomPresetError` code); `name_prefix` ≤ 24 chars for same-tenant cloning; intra-bundle sibling dedup via in-memory existingNames set updated after each successful create.
+- `services/bff/__tests__/scenario_bundle.test.ts` (new) — 21 jest tests: 5 validation (non-object, schema_version mismatch, empty items, items > cap, item-missing-shocks), 4 export (envelope shape + deep-copy independence; unknown_preset; duplicate ids; empty ids), 5 import (clean target → all created; name collision → skipped with already_exists; name_prefix sidesteps same-tenant collisions; intra-bundle dup second occurrence skipped against first; name_prefix > 24 chars → invalid_input), 7 route (200 export envelope; 404 unknown_preset; 403 wrong role on export; 200 import with per-row outcomes; 400 bad schema_version on import; cross-tenant: imports land in caller tenant; 403 wrong role on import).
+- `services/bff/src/server.ts` — two new routes `POST /v1/scenarios/library/custom/export-bundle` + `POST /v1/scenarios/library/custom/import-bundle` mounted BEFORE the catch-all `/:preset_id` so the literal `/export-bundle` and `/import-bundle` segments aren't captured as preset_ids. Export route maps `ScenarioBundleError('unknown_preset')` → 404 with `EWS_404_unknown_preset`; all other `ScenarioBundleError` codes → 400. Import route maps every `ScenarioBundleError` → 400. `customers:read_risk_profile` RBAC matches the rest of M16.
+
+### Decisions
+- **Mirror M5.11 + M11.9 exactly.** Same envelope shape, same per-row outcome shape, same name_prefix posture. SPA reuses the existing bundle-viewer UX for rule templates / dashboards / scenarios.
+- **Cap 30 items/bundle matches M16.4's CAP_PER_TENANT.** A bundle larger than the per-tenant cap could never be imported wholesale anyway.
+- **Strip identity on export.** No `id` in the bundle — import re-mints via `store.create`. Bundles stay portable across environments.
+- **400 vs 404 on the export side.** Unknown_preset gets a discrete 404; everything else (bad shape, dup ids, empty ids, exceeded cap) is 400. Mirrors M5.11.
+- **Inline `require()` for the bundle module in the route.** Same pattern as other late-bound analytics/bundle modules — keeps the import graph cheaper at startup.
+
+### Hand-offs
+- **agent-ui** — multi-select rows on `/scenarios/custom` → "Export selected" button → `POST .../export-bundle` → download `.json`. Import: drag-and-drop / paste-JSON dialog → `POST .../import-bundle` → render per-row outcomes (reuse the M5.11 / M11.9 viewer).
+
+### Verification
+- `npx jest __tests__/scenario_bundle.test.ts` — 21/21 pass.
+- `npx jest` (full BFF suite) — 4424 pass / 58 skipped / 4482 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
