@@ -12244,6 +12244,27 @@ export function makeApp(deps: AppDeps = {}) {
   // All routes are admin-only (audit:read) — config is sensitive ops
   // surface, not analyst-level.
 
+  /** GET /v1/admin/config/catalog (T6 M13.10) — schema-only view of the
+   *  config registry: per-key {key, category, type, default_value,
+   *  description} grouped by category + by_type counts. Lets the SPA
+   *  admin form render type-appropriate controls (number stepper,
+   *  toggle, textarea for json) without inferring type from value.
+   *  Platform-static (same response per tenant). Mounted BEFORE the
+   *  catch-all GET /v1/admin/config and `/:key` routes so the literal
+   *  `/catalog` segment wins. */
+  app.get(
+    '/v1/admin/config/catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { introspectConfigCatalog } = require('./admin_config_catalog') as
+        typeof import('./admin_config_catalog');
+      const out = introspectConfigCatalog();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/categories — list distinct categories. */
   app.get(
     '/v1/admin/config/categories',

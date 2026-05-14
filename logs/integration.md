@@ -542,3 +542,27 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 
 ### Sub-phase tally
 - T6 tally **131 → 132**.
+
+## 2026-05-14 — T6 M13.10 — Admin config schema catalog introspection
+
+**Goal.** Expose the M13.1 schema as a discoverable catalog: per-key type/default/description grouped by category. Orthogonal to `GET /v1/admin/config` (current values) — this is the SCHEMA-only view the SPA needs to render type-appropriate form controls without inferring type from value.
+
+### Files
+
+- **NEW** `services/bff/src/admin_config_catalog.ts` — pure `introspectConfigCatalog()`. Walks `DEFAULTS`, tallies `by_type` counts, groups by `category` in `listCategories` canonical order, sorts keys alphabetically within each group.
+- **NEW** `services/bff/__tests__/admin_config_catalog.test.ts` — 12 tests (8 pure + 4 route): total_keys matches DEFAULTS length, by_type sum invariant, category coverage match, canonical category order, alphabetical sort within category, full ConfigDef shape preservation, per-group key_count consistency, by_type recount sanity, admin happy, 403, platform-static-across-tenants, M13.1 regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/admin/config/catalog` (audit:read) right above `GET /v1/admin/config/categories` so the literal `/catalog` segment is found before any `/:key` wildcard.
+
+### Design notes
+
+- Pattern-aligned with M15.6 (audit catalog) + M11.11 (widget usage) — same Map-of-buckets + materialise-sorted + canonical-order pattern. Consistent.
+- Platform-static: the schema doesn't vary per tenant. Returning the same response across tenants is the contract (asserted in tests).
+- by_type counts let the SPA pre-render category tabs with type-mix badges ("alerts: 3 numbers, 0 booleans") at-a-glance.
+- Sort: categories follow `listCategories` (already canonical: alerts → notifications → reporting → scoring → features per M13.1); keys within each category alphabetical for stable rendering.
+
+### Verification
+- `npx jest __tests__/admin_config_catalog.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **142 → 143**.
