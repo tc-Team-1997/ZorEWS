@@ -5262,6 +5262,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/:preset_id/clones-in-tenant (T6 M16.14)
+   *  — back-reference query: for this library scenario preset, list
+   *  every custom preset in the calling tenant that was cloned from
+   *  it (per the M16.8/M16.9 `cloned_from` audit metadata). Mirror
+   *  of M5.13 (rule template clone history). Mounted BEFORE `/:id`
+   *  so the literal `/clones-in-tenant` segment isn't captured.
+   *  404 EWS_404_unknown_preset when the library id doesn't exist. */
+  app.get(
+    '/v1/scenarios/library/:preset_id/clones-in-tenant',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const preset = getScenarioPreset(id);
+      if (!preset) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { analyseScenarioCloneHistory } = require('./scenario_clone_analysis') as
+        typeof import('./scenario_clone_analysis');
+      const out = analyseScenarioCloneHistory(page.items, id);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/:id — single preset. 404 EWS_404_unknown_preset. */
   app.get(
     '/v1/scenarios/library/:id',

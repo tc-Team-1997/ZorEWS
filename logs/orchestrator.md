@@ -482,3 +482,26 @@
 
 ### Sub-phase tally
 - T6 tally **138 → 139**.
+
+## 2026-05-14 — T6 M16.14 — Library scenario preset clone-from back-reference
+
+**Goal.** Direct scenario equivalent of M5.13 (rule template clone history). Same audit-walk shape, opposite resource family.
+
+### Files
+
+- **NEW** `services/bff/src/scenario_clone_analysis.ts` — pure `analyseScenarioCloneHistory(events, library_preset_id)`. Filters strictly to `action='scenario.create' + resource_type='scenario' + metadata.cloned_from === library_preset_id` so unrelated events drop. Sorts newest-first by `cloned_at` with `custom_preset_id` asc tie-break. Absent optional metadata (name/category) surfaces as null.
+- **NEW** `services/bff/__tests__/scenario_clone_analysis.test.ts` — 9 tests (4 pure + 5 route): empty, filter combinations, ordering + tie-break, null optional metadata, route 404 unknown_preset, zero-clones envelope, populated back-reference, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/scenarios/library/:preset_id/clones-in-tenant` (customers:read_risk_profile) right ABOVE the existing `/v1/scenarios/library/:id` catch-all so the literal `/clones-in-tenant` wins.
+
+### Design notes
+
+- Mirrors M5.13 verbatim — same Pure aggregator pattern, same filter logic, same sort. Differences: source filter is `scenario.create` not `rule.create`; per-record shape carries `category` (scenario taxonomy) instead of `vertical`+`category` (template taxonomy).
+- Per-tenant scope: the auditTrailStore is per-tenant, so this answers "which of MY custom scenarios trace back to this library preset?" — not the cross-tenant "how many tenants have cloned this preset?" view.
+- 404 uses `getScenarioPreset(id)` — same library registry M16.8/M16.9 validate against.
+
+### Verification
+- `npx jest __tests__/scenario_clone_analysis.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **139 → 140**.
