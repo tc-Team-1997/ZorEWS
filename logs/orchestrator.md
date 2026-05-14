@@ -412,3 +412,26 @@
 - `npx jest __tests__/scoring_preset_effective_weights.test.ts` — 17/17 pass.
 - `npx jest` (full BFF suite) — 4510 pass / 58 skipped / 4571 total. Intermittent cross-suite singleton flakiness in `notification_template_dispatch` / `rule_bulk_clone` / `scoring_presets_custom` — all pass when run together (90/90); pre-existing pattern unrelated to M6.10.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M6.11 — Weight preset clone-from-library
+
+**Goal.** Mirror of M5.9 (rule template clone-from-library) for the M6.3 / M6.4 weight preset surface. Lets tenants take a curated library preset (conservative-banking, balanced-insurance, etc.) and create an editable custom copy without re-authoring the multiplier map.
+
+### Files
+
+- **EDIT** `services/bff/src/server.ts` — new route `POST /v1/scoring/presets/custom/clone-from-library` mounted right BEFORE `DELETE /v1/scoring/presets/custom/:preset_id`. Reads source via `getWeightPreset`, builds an input dict matching `CustomWeightPresetInput` with a deep-copy of `weight_multipliers` (object spread), then calls `customWeightPresetStore.create(...)`. Same error shape as the existing M6.4 manual create route: 400 invalid_input / 404 unknown_preset / 409 cap_reached / 400 other validation. Default name when no override: `Copy of <source.name>`.
+- **NEW** `services/bff/__tests__/scoring_preset_clone_from_library.test.ts` — 9 tests: 400 missing source, 404 unknown library, 201 default name + multiplier equality, 201 name override, deep-copy verification (mutating clone doesn't mutate the library), 409 cap_reached at 30 seeded entries, 403, cross-tenant invisibility, M6.4 manual create regression.
+
+### Design notes
+
+- Pattern-aligned with M5.9 — same route shape, same `getXxx(source_id) → 404 if null → store.create()` flow, same audit-omission (existing M6.4 create doesn't audit either; staying consistent).
+- Deep-copy is just `{...source.weight_multipliers}` since the values are numbers (immutable primitives). Verified via the explicit mutation test.
+- Library preset registry exposed via `getWeightPreset` / `listWeightPresets` from `scoring_presets.ts` — both library AND custom presets share the same `WeightPreset` shape so the clone passes straight through `validate()` in `CustomWeightPresetStore`.
+- Tests use `listWeightPresets()[0]` rather than hardcoding a preset id — safer if the library set is re-ordered, and exercises whatever real preset is at index 0.
+
+### Verification
+- `npx jest __tests__/scoring_preset_clone_from_library.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **132 → 133**.

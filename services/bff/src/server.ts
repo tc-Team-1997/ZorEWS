@@ -8818,6 +8818,87 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/scoring/presets/custom/clone-from-library (T6 M6.11)
+   *  body { source_preset_id, name? } — reads a library weight preset
+   *  and creates an editable custom copy (deep-cloned multipliers).
+   *  Mirror of M5.9 (rule template clone) for the M6.3 / M6.4 weight
+   *  preset surface. 404 EWS_404_unknown_preset when the library id
+   *  doesn't resolve; 409 EWS_409_cap_reached when the tenant is at
+   *  the 30-preset cap. Mounted BEFORE `/custom/:preset_id` so the
+   *  literal `clone-from-library` segment isn't captured. */
+  app.post(
+    '/v1/scoring/presets/custom/clone-from-library',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const created_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { source_preset_id?: unknown; name?: unknown };
+      if (typeof wrapper.source_preset_id !== 'string' || !wrapper.source_preset_id.trim()) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_preset_id is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const source = getWeightPreset(wrapper.source_preset_id);
+      if (!source) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_preset',
+              message: `library weight preset ${wrapper.source_preset_id} not found`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const overrideName = typeof wrapper.name === 'string' && wrapper.name.trim()
+        ? wrapper.name.trim()
+        : null;
+      const createInput = {
+        name: overrideName ?? `Copy of ${source.name}`,
+        description: source.description,
+        vertical: source.vertical,
+        mode: source.mode,
+        weight_multipliers: { ...source.weight_multipliers },
+      };
+      try {
+        const preset = customWeightPresetStore.create(
+          req.tenant!.tenant_id,
+          createInput,
+          created_by,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(preset, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomWeightPresetError) {
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** DELETE /v1/scoring/presets/custom/:preset_id — remove custom preset. */
   app.delete(
     '/v1/scoring/presets/custom/:preset_id',
