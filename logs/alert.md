@@ -252,3 +252,26 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 
 ### Sub-phase tally
 - T6 tally **143 → 144**.
+
+## 2026-05-14 — T6 M8.9 — Routing channel transport coverage
+
+**Goal.** Cross-module validator that joins M8.2 routing rules with M10.1/M10.2/M10.3 wired transports. Surfaces gaps like "I configured this rule to fire SMS but I haven't enabled the SMS transport for this tenant" before they bite in production.
+
+### Files
+
+- **NEW** `services/bff/src/routing_channel_coverage.ts` — pure `checkRoutingChannelCoverage(rules)`. Wired set is `{email, sms, push}` — `in_app` is intentionally absent because it's an in-process SPA bell-badge, not a `<Channel>Transport`. Per-rule + envelope partition counts.
+- **NEW** `services/bff/__tests__/routing_channel_coverage.test.ts` — 11 tests (6 pure + 5 route): WIRED_CHANNELS invariant, empty input, defaults expose in_app gap, fully-wired rule, per-rule channel-status enumeration, partition invariant, admin happy, override-fully-wires-rule, 403, cross-tenant, M8.2 routing-rules regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/alerts/routing/channel-coverage` (audit:read) right above the M8.8 matrix route to keep all the routing diagnostics grouped.
+
+### Design notes
+
+- `in_app` is intentionally NOT in the wired set. The decision: in_app notifications surface via the existing in-process notifications bus → SPA bell badge → not a Transport that needs explicit wiring. Flagging it as "unwired" is the correct contract for the validator's intent (which is "does this channel have an OUT-OF-PROCESS delivery transport?").
+- Empty rules → `all_wired=true` (vacuous truth). Tested explicitly so a future caller passing an empty list doesn't get a confusing "all_wired=false because zero rules failed" — that would be wrong by predicate logic.
+- Default routing matrix has 3 of 4 rules partially wired (orange/yellow/green all include in_app); red is fully wired. The validator surfaces this immediately, so a new BIL tenant viewing the matrix sees the gap at-a-glance.
+
+### Verification
+- `npx jest __tests__/routing_channel_coverage.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **146 → 147**.

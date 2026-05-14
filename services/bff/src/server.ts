@@ -1979,6 +1979,28 @@ export function makeApp(deps: AppDeps = {}) {
   // Rules are admin-managed (audit:read); the decide endpoint is
   // analyst-level (alerts:list) since it's a read.
 
+  /** GET /v1/alerts/routing/channel-coverage (T6 M8.9) — cross-module
+   *  validator: for each routing rule, check whether every channel
+   *  in its `channels[]` has a wired M10 transport. Surfaces gaps
+   *  like 'in_app' (no out-of-process transport — it's a SPA bell
+   *  badge). Per-rule {class, channels[]: {channel, wired},
+   *  has_unwired_channel, unwired_channels[]}; envelope adds
+   *  fully_wired_count + partially_wired_count + all_wired bool +
+   *  distinct_unwired_channels[] union. */
+  app.get(
+    '/v1/alerts/routing/channel-coverage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const rules = alertRoutingEngine.listRules(req.tenant!.tenant_id);
+      const { checkRoutingChannelCoverage } = require('./routing_channel_coverage') as
+        typeof import('./routing_channel_coverage');
+      const out = checkRoutingChannelCoverage(rules);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/routing/matrix (T6 M8.8) — full 4-class routing
    *  matrix snapshot for the tenant + SHA-256 fingerprint of the
    *  canonical encoding. Lets the SPA detect "routing has been
