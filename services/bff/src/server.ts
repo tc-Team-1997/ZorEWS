@@ -8836,6 +8836,54 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scoring/presets/:preset_id/effective-weights?vertical=
+   *  (T6 M6.10) — per-indicator effective weights view. Walks the
+   *  M6.2 catalog × the preset's multiplier map, emits per-indicator
+   *  {catalog_weight, multiplier, effective_weight (clamped [0,1]),
+   *  source: 'preset_multiplier'|'catalog_default'}. Library + custom
+   *  presets resolved via getEffectiveWeightPreset. customers:read_risk_profile
+   *  RBAC. Mounted BEFORE /:id catch-all + before /diff so the
+   *  literal /effective-weights segment isn't captured. */
+  app.get(
+    '/v1/scoring/presets/:preset_id/effective-weights',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.preset_id ?? '';
+      const preset = getEffectiveWeightPreset(
+        customWeightPresetStore,
+        req.tenant!.tenant_id,
+        id,
+      );
+      if (!preset) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_preset', message: `unknown preset: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const verticalRaw = req.query.vertical as string | undefined;
+      let vertical: ScoringVertical | undefined;
+      if (verticalRaw !== undefined && verticalRaw !== '') {
+        if (verticalRaw !== 'banking' && verticalRaw !== 'insurance') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'vertical must be banking|insurance', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        vertical = verticalRaw;
+      }
+      const { resolveEffectivePresetWeights } = require('./scoring_preset_effective_weights') as
+        typeof import('./scoring_preset_effective_weights');
+      const out = resolveEffectivePresetWeights(preset, vertical);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scoring/presets/diff?from=<id>&to=<id> (T6 M6.9) —
    *  structural diff between two presets (library OR custom).
    *  Resolves each id via getEffectiveWeightPreset (library checked

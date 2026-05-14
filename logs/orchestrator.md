@@ -388,3 +388,27 @@
 - `npx jest __tests__/scenario_bundle.test.ts` — 21/21 pass.
 - `npx jest` (full BFF suite) — 4424 pass / 58 skipped / 4482 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M6.10 — Weight preset effective weights view
+
+### Tasks ticked
+- T6 sub-phase M6.10 — weight preset effective weights view. T6 sub-phase tally 126 → 127.
+
+### Files touched
+- `services/bff/src/scoring_preset_effective_weights.ts` (new) — pure `resolveEffectivePresetWeights(preset, vertical?)` walks `STUB_CATALOG` (every indicator), applies `preset.weight_multipliers[id]` if listed (else 1.0), computes `effective_weight = clamp01(catalog_weight × multiplier)`. Per-entry `{indicator_id, name, vertical, catalog_weight, multiplier, effective_weight, source: 'preset_multiplier'|'catalog_default'}`. Totals `{multiplier_count, default_count, total}`. Sorted by `indicator_id` asc. Validates `vertical` via `isScoringVertical` → throws on invalid.
+- `services/bff/__tests__/scoring_preset_effective_weights.test.ts` (new) — 17 jest tests: 2 empty-preset (all catalog_default, sorted asc), 3 sparse-multiplier (source flip, count split, [0,1] clamp), 3 vertical filter (banking, insurance, invalid throws), 2 real-library-preset (conservative_banking explicit multipliers + balanced empty), 7 route (200 library, custom resolved through store, ?vertical narrow, invalid vertical → 400, unknown_preset → 404, 403, M6.3 regression).
+- `services/bff/src/server.ts` — `GET /v1/scoring/presets/:preset_id/effective-weights?vertical=banking|insurance` mounted BEFORE the catch-all `/:id` route + before `/diff` so the literal `/effective-weights` segment isn't captured. `customers:read_risk_profile` RBAC. Resolves library + custom presets via the existing `getEffectiveWeightPreset` helper. 404 unknown_preset.
+
+### Decisions
+- **Mirror M4.9 resolution-chain shape.** Same `source` enum naming convention; both levels visible side-by-side. SPA can reuse the same renderer.
+- **`effective_weight` clamped to [0, 1] per M6.3 contract.** A multiplier of 100 on a 0.9-catalog-weight indicator produces 90, which clamps to 1.0. Tested explicitly.
+- **Catalog_default means multiplier = 1.0 implicit.** When the preset's sparse map doesn't list an indicator, its multiplier is 1.0 by definition. Tested via `hasOwnProperty` check (so explicit `{indicator: 1.0}` flips to `preset_multiplier` while absence keeps `catalog_default`).
+- **No need to score anything.** The M6.3 `scoreByPreset` already returns `effective_weights[]` as a side-effect of scoring, but M6.10 exposes the same view as a STANDALONE introspection endpoint — useful when an operator is authoring a preset and wants to preview "what would this look like?" before applying it to real customers.
+
+### Hand-offs
+- **agent-ui** — preset author UX can render an "Effective weights" table per preset: every indicator on one row, catalog weight in greyed column, multiplier in editable column, effective weight (clamped) in highlighted column, source badge. Pair with M6.9 (preset diff) for compare-against-baseline view.
+
+### Verification
+- `npx jest __tests__/scoring_preset_effective_weights.test.ts` — 17/17 pass.
+- `npx jest` (full BFF suite) — 4510 pass / 58 skipped / 4571 total. Intermittent cross-suite singleton flakiness in `notification_template_dispatch` / `rule_bulk_clone` / `scoring_presets_custom` — all pass when run together (90/90); pre-existing pattern unrelated to M6.10.
+- `npx tsc --noEmit` — clean.
