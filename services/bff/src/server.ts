@@ -196,6 +196,7 @@ import {
 import {
   InMemoryModelPerformanceStore,
   ModelPerformanceError,
+  PERFORMANCE_METRICS,
   isPerformanceMetric,
   summarizePerformance,
   type ModelPerformanceStore,
@@ -3614,6 +3615,63 @@ export function makeApp(deps: AppDeps = {}) {
   //
   // Route ordering: literal `/performance/summary` declared BEFORE
   // `/performance` so the param doesn't shadow.
+
+  /** GET /v1/ai/models/:model_id/performance/outliers?z=2&metric=…
+   *  (T6 M7.7) — z-score-based outlier detection over the M7.5 ledger.
+   *  For each metric: sample mean + sample std-dev (Bessel n-1) +
+   *  per-entry z-score; flags entries where |z| > z_threshold.
+   *  Default z=2 (≈ 95% interval). `?metric=` narrows to a single
+   *  metric. `?since` / `?until` reuse the M7.5 filter shape. Mounted
+   *  BEFORE the /summary.txt + /summary routes so the literal
+   *  /outliers segment isn't captured. customers:read_risk_profile. */
+  app.get(
+    '/v1/ai/models/:model_id/performance/outliers',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const q = req.query;
+      const zRaw = q.z as string | undefined;
+      const z = zRaw === undefined ? undefined : Number(zRaw);
+      if (z !== undefined && !Number.isFinite(z)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'z must be a finite number', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const filter: PerformanceFilter = {};
+      if (typeof q.metric === 'string' && q.metric) {
+        if (!isPerformanceMetric(q.metric)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `metric must be one of ${PERFORMANCE_METRICS.join(', ')}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.metric = q.metric;
+      }
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      try {
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, filter);
+        const { detectPerformanceOutliers, DEFAULT_Z_THRESHOLD } = require('./model_performance_outliers') as
+          typeof import('./model_performance_outliers');
+        const out = detectPerformanceOutliers(entries, z ?? DEFAULT_Z_THRESHOLD);
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceError && e.code === 'unknown_model') {
+          return res.status(404).json(
+            wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
 
   /** GET /v1/ai/models/:model_id/performance/summary.txt (T6 M7.6)
    *  — printable plain-text summary suitable for browser print-to-PDF.

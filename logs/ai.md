@@ -165,3 +165,28 @@ the seed=42, n=5000 generator config — comfortably above the 0.78 floor.
 - `npx jest __tests__/model_performance_summary.test.ts` — 12/12 pass.
 - `npx jest` (full BFF suite) — 4257 pass / 58 skipped / 4317 total. Intermittent cross-suite singleton flakiness in `report_schedules` / `scenario_custom` — both pass when run alone (210/210); pre-existing pattern unrelated to M7.6.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M7.7 — Model performance outlier detection
+
+### Tasks ticked
+- T6 sub-phase M7.7 — model performance outlier detection. T6 sub-phase tally 124 → 125.
+
+### Files touched
+- `services/bff/src/model_performance_outliers.ts` (new) — pure `detectPerformanceOutliers(entries, z_threshold)` returns `PerformanceOutliersResult {total_entries, z_threshold, per_metric[], total_outlier_count}`. Per-metric: sample mean + sample std dev (Bessel n-1 denominator; `null` when n<2). For each entry, compute z-score = (value - mean) / std_dev; flag when `|z| > z_threshold`. Each `OutlierEntry` carries `entry_id, value, recorded_at, z_score` (signed) + `direction: 'high'|'low'`. Outliers sorted newest-first within each metric. `std_dev=0` (all-identical) produces empty outliers (z-score undefined). `DEFAULT_Z_THRESHOLD = 2`, `MIN_Z_THRESHOLD = 0.5`, `MAX_Z_THRESHOLD = 10` — z clamped silently; non-positive falls back to default.
+- `services/bff/__tests__/model_performance_outliers.test.ts` (new) — 19 jest tests: 3 empty/edge (empty entries, single entry → std_dev null, all-same → std_dev=0 + no outliers), 4 z-score detection (high-direction flag, low-direction flag, within-threshold not flagged, sort order newest-first), 2 multi-metric (each metric independent; absent metric not in per_metric), 4 z-threshold tuning (tighter z=1 flags more than z=2, non-positive falls back, below MIN clamps, above MAX clamps), 6 route (empty 200, outlier detected after recording, ?z=invalid → 400, unknown_model → 404, 403 wrong role, M7.5 /summary regression).
+- `services/bff/src/server.ts` — import `PERFORMANCE_METRICS` (was missing from the existing module_performance import block — caught by tsc when my route's error-message template referenced it). New route `GET /v1/ai/models/:model_id/performance/outliers?z=2&metric=&since=&until=` mounted BEFORE the M7.6 `/summary.txt` and M7.5 `/summary` routes so the literal `/outliers` segment isn't captured. `customers:read_risk_profile` RBAC. Validates `?z` is finite via `Number.isFinite`, `?metric` via `isPerformanceMetric`; `?since` / `?until` reuse the M7.5 `PerformanceFilter` shape.
+
+### Decisions
+- **Sample std dev with Bessel (n-1) denominator.** Standard sample-statistics correction. When n < 2 std_dev is null (single observation has no meaningful deviation).
+- **Treat std_dev=0 as "no outliers possible."** All-identical observations produce z-score 0/0; the impl short-circuits via `std_dev > 0` guard.
+- **Z threshold clamped, not validated.** Operator-supplied z gets silently nudged into [0.5, 10] rather than 400-erroring on out-of-range. The route's `?z=invalid` (non-numeric) still 400s.
+- **`direction: 'high' | 'low'`** is computed from sign of z_score. Useful for SPA — render an upward red arrow for high (value above mean), downward blue arrow for low.
+- **Outliers sorted newest-first by recorded_at.** Matches the "recent activity" reading pattern; SPA shows the most-recent concerning observation at the top.
+
+### Hand-offs
+- **agent-ui** — model registry detail page can add an "Outliers" panel: poll `GET /v1/ai/models/:id/performance/outliers?z=2&since=last-week` → render each outlier as a chip with `z_score` magnitude badge + direction arrow + drill-down link to the underlying ledger entry. Pair with M7.5 `/summary` for the baseline metric, M7.6 `/summary.txt` for the printable export.
+
+### Verification
+- `npx jest __tests__/model_performance_outliers.test.ts` — 19/19 pass.
+- `npx jest` (full BFF suite) — 4480 pass / 58 skipped / 4538 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
