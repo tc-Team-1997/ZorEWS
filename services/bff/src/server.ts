@@ -13828,6 +13828,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/connectors/:id/schema/source-map (T6 M3.7) —
+   *  per-field source attribution (platform vs tenant_addition).
+   *  Companion to /schema/effective that lets the SPA badge each
+   *  field's origin without comparing platform vs effective by hand.
+   *  audit:read RBAC; 404 unknown_connector. */
+  app.get(
+    '/v1/ingestion/connectors/:id/schema/source-map',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const platform = getConnectorSchema(id);
+      if (!platform) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const overrides = schemaOverrideStore.list(req.tenant!.tenant_id, id);
+      const { mapConnectorSchemaSources } = require('./connector_schema_source_map') as
+        typeof import('./connector_schema_source_map');
+      const out = mapConnectorSchemaSources(platform, overrides);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/connectors/:id/schema/effective — platform + tenant additions. */
   app.get(
     '/v1/ingestion/connectors/:id/schema/effective',

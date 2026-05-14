@@ -173,3 +173,27 @@ pipeline-svc:
 - `npx jest __tests__/connector_run_failure_patterns.test.ts` — 22/22 pass.
 - `npx jest` (full BFF suite) — 4281 pass / 58 skipped / 4339 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M3.7 — Connector schema source-map view
+
+### Tasks ticked
+- T6 sub-phase M3.7 — connector schema source-map. T6 sub-phase tally 127 → 128.
+
+### Files touched
+- `services/bff/src/connector_schema_source_map.ts` (new) — pure `mapConnectorSchemaSources(platform: ConnectorSchema, overrides: readonly FieldDef[])` returns `ConnectorSchemaSourceMap {connector_id, version, total_fields, platform_field_count, tenant_addition_count, fields[{name, type, required, source: 'platform'|'tenant_addition'}]}`. Iterates platform fields first (declared order), then tenant overrides (insertion order). Defensive: an override with the same name as a platform field is dropped — platform wins. M3.3's `add()` already rejects collisions via `reserved_field`, but the source-map is honest about precedence if data slipped through.
+- `services/bff/__tests__/connector_schema_source_map.test.ts` (new) — 13 jest tests: 2 empty-overrides (all source=platform + field order preserved), 4 with-additions (mark source/count split, platform-then-additions order, insertion order preserved, collision defence), 1 metadata projection (type + required carry through), 6 route (200 happy + after-add, 404 unknown_connector, 403 wrong role, cross-tenant invisibility, M3.3 /schema/effective regression).
+- `services/bff/src/server.ts` — `GET /v1/ingestion/connectors/:id/schema/source-map` mounted right before the existing `/schema/effective` route. `audit:read` RBAC matches the rest of M3.x. 404 unknown_connector via the existing `getConnectorSchema(id)` lookup (null → 404).
+
+### Decisions
+- **Companion route, not replacement.** `/schema/effective` already exists + returns the merged schema for clients that just need the fields. M3.7 adds the source attribution as a separate endpoint — non-breaking, and the SPA can call BOTH if it needs both the values and the source badges.
+- **Mirror M4.9 / M6.10 / M10.10 resolution-chain shape.** Same `source` enum convention; both levels (platform + tenant) visible side-by-side via `platform_field_count` + `tenant_addition_count` totals.
+- **Platform-then-additions order.** Matches the order `schemaOverrideStore.effective(...)` produces so SPA renderers can index both responses by row when rendering side-by-side.
+- **Collision defence treats platform as winning.** The M3.3 `add()` already rejects platform-name overrides, but the source-map's defensive skip ensures even malformed historical data renders consistently (platform wins).
+
+### Hand-offs
+- **agent-ui** — connector column-mapper page can fetch BOTH `/schema/effective` (for the value column types + samples) AND `/schema/source-map` (for the source badge per row), zip them by `name`, render the source badge alongside each field. The `platform_field_count` + `tenant_addition_count` totals fit a header chip ("8 platform + 2 tenant").
+
+### Verification
+- `npx jest __tests__/connector_schema_source_map.test.ts` — 13/13 pass.
+- `npx jest` (full BFF suite) — 4526 pass / 58 skipped / 4584 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
