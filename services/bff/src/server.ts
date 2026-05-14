@@ -14688,6 +14688,48 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/upcoming?n=20&from=ISO (T6 M12.7)
+   *  — fleet-wide calendar view: walks every ENABLED schedule in
+   *  the tenant, generates each schedule's next-N firings via
+   *  previewScheduleEntryRuns, merges them sorted by fire_at asc,
+   *  and trims to the top n overall. Useful for a SPA calendar
+   *  ("what's firing in the next hour / day / week across all
+   *  my schedules?"). Mounted BEFORE /:schedule_id so the literal
+   *  /upcoming wins. */
+  app.get(
+    '/v1/reports/schedules/upcoming',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const nRaw = req.query.n as string | undefined;
+      const fromRaw = req.query.from as string | undefined;
+      const n = nRaw === undefined ? 20 : Number(nRaw);
+      const from = fromRaw ? new Date(fromRaw) : now();
+      if (!Number.isInteger(n) || n < 1 || n > 100) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'n must be an integer in 1..100', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (Number.isNaN(from.getTime())) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'from must be an ISO timestamp', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const page = reportScheduleStore.list(req.tenant!.tenant_id, 1, 500);
+      const { previewScheduleFleet } = require('./report_schedule_fleet_preview') as
+        typeof import('./report_schedule_fleet_preview');
+      const out = previewScheduleFleet(page.items, from, n);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/schedules/due?as_of=ISO — schedules ready to fire.
    *  Declared BEFORE /:schedule_id so the literal "due" wins. */
   app.get(

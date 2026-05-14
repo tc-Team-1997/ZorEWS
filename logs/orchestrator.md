@@ -458,3 +458,27 @@
 
 ### Sub-phase tally
 - T6 tally **136 → 137**.
+
+## 2026-05-14 — T6 M12.7 — Report schedule fleet-wide upcoming runs
+
+**Goal.** Widen M12.6's single-schedule preview to the entire tenant. The SPA wants a calendar view answering "what's firing across all my saved schedules in the next hour / day / week?" — currently it'd have to call M12.6 once per schedule and merge client-side. M12.7 does the merge server-side and returns the top-N overall.
+
+### Files
+
+- **NEW** `services/bff/src/report_schedule_fleet_preview.ts` — pure `previewScheduleFleet(schedules, from, n)`. Filters to `enabled === true`, calls `previewScheduleEntryRuns(s, from, n)` for each, accumulates `{schedule_id, name, report_id, format, fire_at}` items into a pool, sorts by `fire_at` asc with `schedule_id` asc tie-break, trims to top-n. Default n=20, max=100. Validates n + from up-front via `FleetPreviewError`.
+- **NEW** `services/bff/__tests__/report_schedule_fleet_preview.test.ts` — 15 tests across 6 pure + 1 validation + 1 tie-break + 6 route describe blocks: empty input, single schedule top-n, multi-schedule merge+sort, top-n cap on larger pool, disabled-schedule exclusion, n bounds + invalid from, same-timestamp tie-break, route 200 empty, populated, 400 invalid_n, 400 invalid_from, 403, cross-tenant.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/reports/schedules/upcoming` (audit:read) BEFORE `/v1/reports/schedules/:schedule_id` catch-all so the literal `/upcoming` segment wins.
+
+### Design notes
+
+- Each enabled schedule contributes UP TO `n` candidates to the merge pool — that's enough to ensure the top-n overall is complete even when one fast-firing schedule (e.g. hourly) would otherwise dominate the early slots. Pool size is bounded at n × |enabled| ≤ 100 × |enabled| which is fine for the in-memory store.
+- Tie-break by schedule_id asc when two schedules fire at the same minute. Stable + deterministic.
+- Disabled schedules are excluded silently — their `next_run_at` field is a stale value that hasn't been advanced since pause. Including them would surface confusing "this schedule is paused but will fire" items.
+- Reuses `previewScheduleEntryRuns` from M12.6 — no duplicate slope/cadence logic.
+
+### Verification
+- `npx jest __tests__/report_schedule_fleet_preview.test.ts` — 15/15 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **138 → 139**.
