@@ -138,6 +138,20 @@ export interface ChainVerification {
   };
 }
 
+/** T6 M15.5 — sample-window verification result. Superset of
+ *  ChainVerification with window-positioning fields so a SPA
+ *  dashboard can render "verified the newest 50 of 12,431 events". */
+export interface ChainSampleVerification extends ChainVerification {
+  /** Newest-first cap requested by the caller. */
+  window_size: number;
+  /** Number of events the verification actually covered (= min of
+   *  window_size and total_events). */
+  sample_size: number;
+  /** 0-based index (in oldest-first ordering) of the first event in
+   *  the verified window. 0 when the window covered the entire chain. */
+  window_start_index: number;
+}
+
 export interface AuditTrailStore {
   /** Record a new event. Throws AuditValidationError on bad input. */
   record(tenant_id: string, input: AuditEventInput, now: Date): AuditEvent;
@@ -151,6 +165,18 @@ export interface AuditTrailStore {
   summarise(tenant_id: string, days: number, now: Date): AuditSummary;
   /** Walk the chain + recompute every hash. Reports tampering. */
   verifyChain(tenant_id: string, now: Date): ChainVerification;
+  /** T6 M15.5 — fast spot-check over the newest N events. Cheaper
+   *  than full verifyChain for dashboard health-pulse use. Verifies
+   *  hash + prev_hash links within the window AND that the first
+   *  event in the window correctly chains to the event before it
+   *  (or 'GENESIS' if the window starts at index 0). Returns a
+   *  ChainSampleVerification (superset of ChainVerification adding
+   *  window-positioning fields). */
+  verifyChainSample(
+    tenant_id: string,
+    window_size: number,
+    now: Date,
+  ): ChainSampleVerification;
 }
 
 export class AuditValidationError extends Error {
@@ -159,6 +185,10 @@ export class AuditValidationError extends Error {
     this.name = 'AuditValidationError';
   }
 }
+
+/** T6 M15.5 — sample-window verification defaults. */
+export const CHAIN_SAMPLE_DEFAULT_WINDOW = 50;
+export const CHAIN_SAMPLE_MAX_WINDOW = 500;
 
 const VALID_OUTCOMES: AuditOutcome[] = ['success', 'failure', 'denied'];
 const VALID_SEVERITIES: AuditSeverity[] = ['info', 'warning', 'critical'];
@@ -396,6 +426,115 @@ export class InMemoryAuditTrailStore implements AuditTrailStore {
     };
   }
 
+  verifyChainSample(
+    tenant_id: string,
+    window_size: number,
+    now: Date,
+  ): ChainSampleVerification {
+    const arr = this.events.get(tenant_id) ?? [];
+    const total_events = arr.length;
+    if (!Number.isInteger(window_size) || window_size < 1) {
+      // Defensive — route layer validates first, but in case a caller
+      // bypasses, treat as a 0-result verification rather than throwing.
+      return {
+        tenant_id,
+        generated_at: now.toISOString(),
+        total_events,
+        valid: true,
+        last_hash: total_events === 0 ? 'GENESIS' : arr[arr.length - 1]!.hash,
+        window_size: 0,
+        sample_size: 0,
+        window_start_index: total_events,
+      };
+    }
+    if (total_events === 0) {
+      return {
+        tenant_id,
+        generated_at: now.toISOString(),
+        total_events: 0,
+        valid: true,
+        last_hash: 'GENESIS',
+        window_size,
+        sample_size: 0,
+        window_start_index: 0,
+      };
+    }
+    const sample_size = Math.min(window_size, total_events);
+    const window_start_index = total_events - sample_size;
+    // prev seeded with the hash of the event immediately before the
+    // window (or 'GENESIS' when the window starts at index 0). This
+    // closes the chain back to the un-verified prefix.
+    let prev = window_start_index === 0 ? 'GENESIS' : arr[window_start_index - 1]!.hash;
+    for (let i = window_start_index; i < total_events; i++) {
+      const e = arr[i]!;
+      const recomputed = computeEventHash({
+        event_id: e.event_id,
+        ts: e.ts,
+        tenant_id: e.tenant_id,
+        actor_username: e.actor_username,
+        actor_role: e.actor_role,
+        action: e.action,
+        resource_type: e.resource_type,
+        resource_id: e.resource_id,
+        outcome: e.outcome,
+        severity: e.severity,
+        correlation_id: e.correlation_id,
+        ip_address: e.ip_address,
+        metadata: e.metadata,
+        prev_hash: e.prev_hash,
+      });
+      if (recomputed !== e.hash) {
+        return {
+          tenant_id,
+          generated_at: now.toISOString(),
+          total_events,
+          valid: false,
+          last_hash: arr[arr.length - 1]!.hash,
+          window_size,
+          sample_size,
+          window_start_index,
+          broken_at: {
+            index: i,
+            event_id: e.event_id,
+            expected_hash: recomputed,
+            actual_hash: e.hash,
+            reason: 'hash_mismatch',
+          },
+        };
+      }
+      if (e.prev_hash !== prev) {
+        return {
+          tenant_id,
+          generated_at: now.toISOString(),
+          total_events,
+          valid: false,
+          last_hash: arr[arr.length - 1]!.hash,
+          window_size,
+          sample_size,
+          window_start_index,
+          broken_at: {
+            index: i,
+            event_id: e.event_id,
+            expected_hash: prev,
+            actual_hash: e.prev_hash,
+            reason: 'prev_hash_mismatch',
+          },
+        };
+      }
+      prev = e.hash;
+    }
+    return {
+      tenant_id,
+      generated_at: now.toISOString(),
+      total_events,
+      valid: true,
+      last_hash: arr[arr.length - 1]!.hash,
+      window_size,
+      sample_size,
+      window_start_index,
+    };
+  }
+
   /** Test helper. */
   reset(): void {
     this.events.clear();
@@ -416,8 +555,12 @@ export class InMemoryAuditTrailStore implements AuditTrailStore {
  * Canonical SHA-256 of an event. Excludes the `hash` field (we're
  * computing it!) but INCLUDES `prev_hash` so a tampered earlier event
  * invalidates every subsequent hash. Field order is deterministic per
- * the explicit object literal. */
-function computeEventHash(e: Omit<AuditEvent, 'hash'>): string {
+ * the explicit object literal.
+ *
+ * Exported so the M15.5 sample verifier can recompute hashes against
+ * the same canonical encoding the M15.2 full-chain verifier uses —
+ * keeps the two integrity surfaces guaranteed-consistent. */
+export function computeEventHash(e: Omit<AuditEvent, 'hash'>): string {
   // Sort metadata keys so JSON.stringify is deterministic across input
   // shapes. The other fields are scalars so their order doesn't change.
   const meta_canonical: Record<string, unknown> = {};

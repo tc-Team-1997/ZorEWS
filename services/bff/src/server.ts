@@ -558,6 +558,8 @@ import {
 } from './admin_config';
 import {
   AuditValidationError,
+  CHAIN_SAMPLE_DEFAULT_WINDOW,
+  CHAIN_SAMPLE_MAX_WINDOW,
   defaultAuditTrailStore,
   isAuditOutcome,
   isAuditResourceType,
@@ -12111,6 +12113,34 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const out = auditTrailStore.verifyChain(req.tenant!.tenant_id, now());
       res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/audit/integrity/sample?window=N (T6 M15.5) — spot-check
+   *  the newest N events. Cheaper than M15.2's full-chain walk for
+   *  dashboard health-pulse polling. Verifies hashes + prev_hash
+   *  links within the window AND that the first event in the window
+   *  correctly chains to the event before it (or 'GENESIS' when the
+   *  window covers the entire chain). Default window=50, max=500. */
+  app.get(
+    '/v1/audit/integrity/sample',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? CHAIN_SAMPLE_DEFAULT_WINDOW : Number(windowRaw);
+      if (!Number.isInteger(window) || window < 1 || window > CHAIN_SAMPLE_MAX_WINDOW) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `window must be 1..${CHAIN_SAMPLE_MAX_WINDOW}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const out = auditTrailStore.verifyChainSample(req.tenant!.tenant_id, window, now());
+      return res.json(wrapResponse(out, ctx));
     },
   );
 

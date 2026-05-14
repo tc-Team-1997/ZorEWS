@@ -320,3 +320,28 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/field_operations_analytics.test.ts` — 15/15 pass.
 - `npx jest` (full BFF suite) — 4108 pass / 58 skipped / 4167 total. Intermittent cross-suite singleton flakiness in `config_bulk` / `cms_case_tracking` — both pass when run alone; pre-existing pattern unrelated to M14.19.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M15.5 — Audit log integrity spot-check
+
+### Tasks ticked
+- T6 sub-phase M15.5 — audit chain integrity spot-check. T6 sub-phase tally 109 → 110.
+
+### Files touched
+- `services/bff/src/audit_trail.ts` — exported `computeEventHash` (was module-local) so the sample verifier uses the same canonical SHA-256 encoding as M15.2's full-chain walker. Added `ChainSampleVerification` type (superset of `ChainVerification` adding `window_size`, `sample_size`, `window_start_index`). Extended `AuditTrailStore` interface with `verifyChainSample(tenant, window_size, now)` method. Implemented on `InMemoryAuditTrailStore`: walks `arr.slice(total - window_size)` recomputing each event's hash and verifying each `prev_hash` matches the previous event's `hash`. Seeds `prev` with `arr[window_start_index - 1].hash` (or `'GENESIS'` when window covers the whole chain) so the leading edge of the window is also verified — catches tampering on the first event in the window. Constants `CHAIN_SAMPLE_DEFAULT_WINDOW = 50` and `CHAIN_SAMPLE_MAX_WINDOW = 500` surfaced to the route.
+- `services/bff/__tests__/audit_chain_sample.test.ts` (new) — 18 jest tests: 9 store-level (empty tenant, non-positive window defensive return, window<total, window>total, agrees-with-full-chain-on-clean, hash tampering inside window, prev_hash tampering at window edge, tampering outside window is undetected by sample but caught by full M15.2 walk, tenant isolation) + 9 route (empty default window, ?window=5 honored, window=0 → 400, window>max → 400, ?window=abc NaN → 400, tampering inside → 200 valid=false with broken_at, 403 wrong role, cross-tenant invisible, M15.2 /integrity regression check).
+- `services/bff/src/server.ts` — import `CHAIN_SAMPLE_DEFAULT_WINDOW` + `CHAIN_SAMPLE_MAX_WINDOW`. New route `GET /v1/audit/integrity/sample?window=N` mounted right after the M15.2 `/integrity` route. Validates window is int in `[1, 500]` → 400 otherwise. Delegates to `auditTrailStore.verifyChainSample`. `audit:read` RBAC matches M15.2.
+
+### Decisions
+- **Sample closes the chain back to the un-verified prefix.** The first event in the window's `prev_hash` is verified against the hash of the event immediately before the window (or `'GENESIS'` if window starts at index 0). Without this, tampering on the first event in the window would slip through. Costs one extra dictionary lookup, gains full chain-edge coverage.
+- **Same canonical encoding as M15.2.** Exporting `computeEventHash` keeps the two verifiers guaranteed-consistent — a future change to the hash inputs lands in one place. Documented why the export exists at the function comment.
+- **Defensive non-positive window returns 0-result, doesn't throw.** Route layer validates; if a misbehaving caller bypasses, the store returns a sample_size=0 / valid=true envelope rather than crashing.
+- **Sample does NOT catch tampering OUTSIDE the window.** Documented in tests + STATUS. M15.2's full walk remains the truth oracle; M15.5 is the cheap-but-incomplete health pulse for dashboard polling.
+- **Default window=50, max=500.** Same posture as M3.5's analytics window. Larger windows are still cheaper than the full walk in tenants with millions of events.
+
+### Hand-offs
+- **agent-ui** — audit dashboard health-pulse card can poll `GET /v1/audit/integrity/sample` every minute and render a 🟢/🔴 indicator + sample_size context ("verified newest 50 of 12,431 events"). Full M15.2 walk stays the "Run full integrity check" button for the heavier on-demand verification.
+
+### Verification
+- `npx jest __tests__/audit_chain_sample.test.ts` — 18/18 pass.
+- `npx jest` (full BFF suite) — 4232 pass / 58 skipped / 4290 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
