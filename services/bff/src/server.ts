@@ -12956,6 +12956,25 @@ export function makeApp(deps: AppDeps = {}) {
   // All routes are admin-only (audit:read) — config is sensitive ops
   // surface, not analyst-level.
 
+  /** GET /v1/admin/config/override-rate (T6 M13.12) — category-pivoted
+   *  rollup over the config registry showing per-category default-vs-
+   *  override counts + override_rate (0..1). Envelope adds aggregate
+   *  total_keys/total_overrides + overall_override_rate +
+   *  most_customised_category + pristine_categories[]. Companion to
+   *  M13.11 (age axis) — same store, different lens. */
+  app.get(
+    '/v1/admin/config/override-rate',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConfigOverrideRateSnapshot } = require('./admin_config_override_rate') as
+        typeof import('./admin_config_override_rate');
+      const out = buildConfigOverrideRateSnapshot(configStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/override-ages?fresh_days=&stale_days= (T6 M13.11)
    *  — per-override age tracker. For each tenant override, compute
    *  age_days + bucket into recent/stable/stale via the configurable

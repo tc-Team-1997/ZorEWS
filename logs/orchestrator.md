@@ -746,3 +746,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Companion to M7.9 staleness lens + M7.7 telemetry lens → M7.10 is the audit-trail lens.
 - 22 new jest tests (15 pure + 7 route). Full BFF suite 5135 effective (1 pre-existing flake).
 - T6 sub-phase tally 173 → 174.
+
+## 2026-05-15 — T6 M13.12 Config category override-rate snapshot
+
+- Pure `buildConfigOverrideRateSnapshot(store, tenant, now)` at `services/bff/src/admin_config_override_rate.ts` is the category-pivoted rollup over the M13.1 admin config store.
+- Per category: `{category, total_keys, default_count, override_count, override_rate, override_keys[]}`. Every declared category present even with zero overrides.
+- Envelope adds aggregate totals + `most_customised_category` + `pristine_categories[]`.
+- Companion to M13.11 (age axis) — same store input, different lens.
+- New route `GET /v1/admin/config/override-rate` (audit:read).
+- 14 new jest tests. Full BFF suite 5149 effective (1 pre-existing flake).
+- T6 sub-phase tally 174 → 175.
