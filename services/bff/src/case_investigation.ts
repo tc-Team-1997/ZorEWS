@@ -152,6 +152,15 @@ export class InvestigationError extends Error {
 
 // ─── Schema ────────────────────────────────────────────────────────────
 
+export const INVESTIGATION_STATUSES: readonly InvestigationStatus[] = [
+  'triage',
+  'gathering_evidence',
+  'awaiting_response',
+  'review',
+  'decision',
+  'closed',
+];
+
 const VALID_STATUSES: InvestigationStatus[] = [
   'triage',
   'gathering_evidence',
@@ -179,8 +188,11 @@ export function isInvestigationDecision(s: unknown): s is NonNullable<Investigat
  * State machine — defines which transitions are legal. Re-opening a
  * closed investigation requires going back to `gathering_evidence` to
  * make the audit trail explicit. closed→closed is a no-op (allowed).
+ *
+ * Exported (T6 M9.7) so the state-machine introspection route can
+ * walk it without duplicating the source-of-truth.
  */
-const TRANSITIONS: Record<InvestigationStatus, InvestigationStatus[]> = {
+export const TRANSITIONS: Record<InvestigationStatus, InvestigationStatus[]> = {
   triage: ['gathering_evidence', 'closed'],
   gathering_evidence: ['awaiting_response', 'review', 'closed'],
   awaiting_response: ['gathering_evidence', 'review', 'closed'],

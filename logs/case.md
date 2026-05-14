@@ -72,3 +72,28 @@
 - `npx jest __tests__/case_timeline.test.ts` — 14/14 pass.
 - `npx jest` (full BFF suite) — 4390 pass / 58 skipped / 4448 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M9.7 — Investigation state-machine catalog
+
+**Goal.** Expose the M9.1 state machine + M9.5 SLA defaults as a single readable graph so the SPA can build a data-driven "Move case to..." dropdown and a status-legend tooltip without hardcoding the state machine in TypeScript on the frontend (where it would inevitably drift from the backend).
+
+### Files
+
+- **EDIT** `services/bff/src/case_investigation.ts` — promoted private `TRANSITIONS` and added a public `INVESTIGATION_STATUSES` constant (the ordered list of state names) to give M9.7 a single source of truth without forcing the workflow author to write the state list in two places.
+- **NEW** `services/bff/src/investigation_state_graph.ts` — pure `listInvestigationStateGraph()` walks `INVESTIGATION_STATUSES` in declared order and emits per-state `{state, sla_hours_default, terminal, allowed_next_states[] sorted asc}`. Derives entirely from the shared constants; no I/O.
+- **NEW** `services/bff/__tests__/investigation_state_graph.test.ts` — 9 tests (6 pure + 3 route): catalog shape, terminal-only-for-closed, SLA mapping match, allowed_next_states sorted, triage→2 outgoing contract, review-can't-jump-to-closed invariant, route happy path, 403, same-graph-across-tenants.
+- **EDIT** `services/bff/src/server.ts` — imported `listInvestigationStateGraph`; mounted `GET /v1/cases/states/graph` (audit:read) right after `/v1/cases/sla-summary`. The state graph is platform-static (no tenant-scoped state), so any tenant gets the same response.
+
+### Design notes
+
+- The state machine is platform-static — there's no tenant-level customization right now. The route is tenant-required for RBAC + auditing, but the response shape is identical across tenants. Tests assert this explicitly so a future change that introduces tenant overrides would force a tests/contract conversation.
+- `audit:read` chosen as the RBAC because this surface is operator-facing (case investigators) not engineer-facing. `case_owner` would also be reasonable, but `audit:read` matches the existing M9.4/M9.5/M9.6 audit-flavoured case routes.
+- `terminal: true` only on `closed`. Even though `closed` has outgoing transitions (`gathering_evidence` for re-opening), it's still the workflow terminus for KPIs — SPA can render it differently (gray vs colored).
+- `allowed_next_states` sorted asc so the SPA's dropdown order is deterministic. The declared workflow order is preserved at the top-level `states[]` array — that ordering carries the workflow story (triage first, closed last). 
+
+### Verification
+- `npx jest __tests__/investigation_state_graph.test.ts` — 9/9 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **133 → 134**.

@@ -575,6 +575,7 @@ import {
 import { introspectAuditCatalog } from './audit_action_catalog';
 import { analyseTemplateCloneHistory } from './template_clone_analysis';
 import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
+import { listInvestigationStateGraph } from './investigation_state_graph';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -7360,6 +7361,23 @@ export function makeApp(deps: AppDeps = {}) {
     const summary = summariseSla(fleet, now());
     res.json(wrapResponse(summary, ctx));
   });
+
+  /** GET /v1/cases/states/graph (T6 M9.7) — investigation state-machine
+   *  catalog. Per state: {state, sla_hours_default, terminal,
+   *  allowed_next_states[]}. Lets the SPA build a data-driven "Move
+   *  case to..." dropdown + "Status legend" tooltip instead of
+   *  hardcoding the state graph in two places. Same shape for every
+   *  tenant (the state machine is platform-static). audit:read RBAC. */
+  app.get(
+    '/v1/cases/states/graph',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const graph = listInvestigationStateGraph();
+      return res.json(wrapResponse(graph, ctx));
+    },
+  );
 
   // ── BIL Case Investigation tracker (T6 M9.1) ──────────────────────────
   //
