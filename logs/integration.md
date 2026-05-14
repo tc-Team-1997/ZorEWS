@@ -396,3 +396,27 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/adapter_sla_breach_analytics.test.ts` — 15/15 pass.
 - `npx jest` (full BFF suite) — 4313 pass / 58 skipped / 4373 total. Intermittent cross-suite singleton flakiness in `cms_routes` / `indicator_thresholds` — both pass when run alone (109/109); pre-existing pattern unrelated to M14.20.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M13.8 — Admin config bulk-reset by category
+
+### Tasks ticked
+- T6 sub-phase M13.8 — admin config bulk-reset by category. T6 sub-phase tally 115 → 116.
+
+### Files touched
+- `services/bff/src/server.ts` — new route `POST /v1/admin/config/_reset-category` body `{category, dry_run?}`. Validates `category ∈ {alerts, notifications, reporting, scoring, features}` (inline literal whitelist matching the `ConfigCategory` union). Iterates `configStore.list(tenant).filter(e => e.category === category)`, calls `configStore.reset` on each non-default entry, writes `config.reset` audit event per success with `{previous_value, default_value, bulk:true, category}` metadata (extends the single-DELETE shape with the bulk marker). Already-default entries are added to `skipped[]` with `reason: 'no_override'`. Returns `{category, dry_run, total_keys_in_category, reset_count, skipped_count, reset[], skipped[]}` with per-key `previous_value` + `default_value`. `dry_run=true` returns the preview shape WITHOUT mutating the store OR writing audit events. Mounted BEFORE `DELETE /:key` + `GET /:key/history` so the literal "_reset-category" segment isn't captured as a key. `audit:read` RBAC matches the rest of M13.
+- `services/bff/__tests__/admin_config_reset_category.test.ts` (new) — 10 jest tests: 3 validation (missing category → 400, invalid category → 400 with allowed list in message, 403 wrong role), 4 happy (empty tenant → all skipped no_override, mixed overrides → reset count correct + skipped count correct, dry_run preview shape with no mutation + no audit events, audit events written per reset with bulk:true + category metadata), 1 tenant isolation (resetting BIL leaves BANK_DEMO overrides intact), 2 route ordering ("_reset-category" segment routed correctly + M13.2 DELETE /:key regression check).
+
+### Decisions
+- **Mirror the single-DELETE M13.2 shape on the audit event.** Same `config.reset` action + `{previous_value, default_value}` metadata, just adds `bulk:true` and `category` markers. SPA's audit timeline can reuse its existing renderer.
+- **`dry_run` skips BOTH the reset AND the audit event.** A dry-run is a read-only preview; writing an audit event would lie to reviewers. Tested explicitly.
+- **Inline category whitelist, no isConfigCategory guard.** No type guard exists in `admin_config.ts`; inlining the literal 5-element list keeps the route self-contained and the error message helpful ("must be one of alerts, notifications, reporting, scoring, features").
+- **No new file — inline logic in server.ts.** The reset loop is small enough (~50 LoC) that extracting to a separate module would be more ceremony than value. Mirrors how M16.12 bulk-delete handled the same shape.
+- **Closes the M13 module.** M13.1–M13.8 all shipped. This session has now touched every module 2..16; only M1 (auth-svc, separate codebase) is untouched.
+
+### Hand-offs
+- **agent-ui** — admin config page can add a "Reset all alerts thresholds" affordance per category section → opens a confirm dialog with `dry_run=true` preview → "Confirm" repeats with `dry_run=false`. Render reset[] as a strike-through of previous values + the new default.
+
+### Verification
+- `npx jest __tests__/admin_config_reset_category.test.ts` — 10/10 pass.
+- `npx jest` (full BFF suite) — 4324 pass / 58 skipped / 4383 total. Intermittent cross-suite singleton flakiness in `ews_rules_routes` (passes 32/32 when run alone); pre-existing pattern unrelated to M13.8.
+- `npx tsc --noEmit` — clean.

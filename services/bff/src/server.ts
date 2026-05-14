@@ -11720,6 +11720,132 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/admin/config/_reset-category (T6 M13.8) — bulk-reset
+   *  every tenant override in a category back to its platform default.
+   *  Body { category: ConfigCategory, dry_run?: boolean }.
+   *  Returns per-key outcomes: keys with an override get reset (or
+   *  previewed when dry_run=true); keys already at default get skipped
+   *  with reason='no_override'. Audit-event writes match the
+   *  single-DELETE route (one `config.reset` per actually-reset key
+   *  with metadata { previous_value, default_value, bulk:true }).
+   *  Mounted BEFORE DELETE /:key + GET /:key/history so the literal
+   *  "_reset-category" segment isn't captured as a key. */
+  app.post(
+    '/v1/admin/config/_reset-category',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const reset_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { category?: unknown; dry_run?: unknown };
+      const validCategories: readonly ConfigCategory[] = [
+        'alerts',
+        'notifications',
+        'reporting',
+        'scoring',
+        'features',
+      ];
+      if (
+        typeof wrapper.category !== 'string' ||
+        !validCategories.includes(wrapper.category as ConfigCategory)
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `category must be one of ${validCategories.join(', ')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const category = wrapper.category as ConfigCategory;
+      const dry_run = wrapper.dry_run === true;
+      const tenantId = req.tenant!.tenant_id;
+      const entries = configStore.list(tenantId).filter((e) => e.category === category);
+      const reset: Array<{
+        key: string;
+        previous_value: ConfigValue;
+        default_value: ConfigValue;
+      }> = [];
+      const skipped: Array<{ key: string; reason: string }> = [];
+
+      for (const entry of entries) {
+        if (entry.is_default) {
+          skipped.push({ key: entry.key, reason: 'no_override' });
+          continue;
+        }
+        const previous_value = entry.value;
+        if (dry_run) {
+          reset.push({
+            key: entry.key,
+            previous_value,
+            default_value: entry.default_value,
+          });
+          continue;
+        }
+        try {
+          const reverted = configStore.reset(tenantId, entry.key);
+          reset.push({
+            key: entry.key,
+            previous_value,
+            default_value: reverted.value,
+          });
+          // Best-effort audit per key — mirror the single-DELETE shape
+          // with a bulk:true marker.
+          try {
+            auditTrailStore.record(
+              tenantId,
+              {
+                actor_username: reset_by,
+                actor_role: 'admin',
+                action: 'config.reset',
+                resource_type: 'config',
+                resource_id: entry.key,
+                outcome: 'success',
+                severity: 'info',
+                metadata: {
+                  previous_value,
+                  default_value: reverted.value,
+                  bulk: true,
+                  category,
+                },
+              },
+              now(),
+            );
+          } catch {
+            // swallow
+          }
+        } catch {
+          // Defensive — should never happen since we just listed the
+          // key, but covers a race where another caller raced us.
+          skipped.push({ key: entry.key, reason: 'reset_failed' });
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            category,
+            dry_run,
+            total_keys_in_category: entries.length,
+            reset_count: reset.length,
+            skipped_count: skipped.length,
+            reset,
+            skipped,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
   /**
    * DELETE /v1/admin/config/:key — clear override → revert to default.
    * T6 M13.2 — writes a config.reset audit event with metadata
