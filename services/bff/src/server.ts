@@ -2001,6 +2001,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/routing/diff (T6 M8.10) — per-class diff between
+   *  tenant's effective routing rule and DEFAULT_RULES. Per-class:
+   *  is_default, changed_field_count, changed_fields[]: {field,
+   *  default_value, effective_value}. Envelope adds total_overrides
+   *  + most_customised_class + pristine_classes[]. Companion to
+   *  M8.8 (matrix snapshot) — same engine, adds field-level diff
+   *  detail. */
+  app.get(
+    '/v1/alerts/routing/diff',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAlertRoutingDiff } = require('./alert_routing_diff') as
+        typeof import('./alert_routing_diff');
+      const out = buildAlertRoutingDiff(alertRoutingEngine, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/routing/matrix (T6 M8.8) — full 4-class routing
    *  matrix snapshot for the tenant + SHA-256 fingerprint of the
    *  canonical encoding. Lets the SPA detect "routing has been

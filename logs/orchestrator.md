@@ -788,3 +788,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Mirror of M15.6 (action catalog by verb) but pivoted by actor.
 - 18 new jest tests. Clean full-suite run: 5203 pass / 58 skipped / 5261 total (no flakes).
 - T6 sub-phase tally 177 → 178.
+
+## 2026-05-15 — T6 M8.10 Alert routing rule diff vs platform default
+
+- Pure `buildAlertRoutingDiff(engine, tenant, now)` at `services/bff/src/alert_routing_diff.ts` walks every BIL class and compares the tenant's effective rule against `DEFAULT_RULES`.
+- Per-class: `{class, is_default, changed_field_count, changed_fields[]: {field, default_value, effective_value}}`. Fields ordered by declared ALL_FIELDS sequence.
+- `channels` compared element-wise (different order = different).
+- Envelope: `{total_overrides, classes[] in BIL_CLASS_ORDER, most_customised_class, pristine_classes[]}`.
+- Defensive deep-copy on channels array so SPA mutations don't pollute engine.
+- Extends M8.8 matrix snapshot with field-level diff detail. Mirror of M13.12 (config override-rate).
+- New route `GET /v1/alerts/routing/diff` (audit:read).
+- 18 new jest tests. Full BFF suite 5221 effective (2 pre-existing flakes).
+- T6 sub-phase tally 178 → 179.
