@@ -5619,6 +5619,28 @@ export function makeApp(deps: AppDeps = {}) {
     );
   });
 
+  /** GET /v1/notifications/ledger-analytics (T6 M10.12) — cross-
+   *  channel rollup over M10.1 email + M10.2 SMS + M10.3 push send
+   *  ledgers. Per-channel totals + by_template_id (cap 5) + top
+   *  recipients (cap 10) + most_recent_at. Lets the SPA show a
+   *  unified "notifications activity" panel without 3 round-trips. */
+  app.get(
+    '/v1/notifications/ledger-analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const emails = emailTransport.recent(tenant, 500);
+      const sms = smsTransport.recent(tenant, 500);
+      const push = pushTransport.recent(tenant, 500);
+      const { analyseNotificationLedgers } = require('./notification_ledger_analytics') as
+        typeof import('./notification_ledger_analytics');
+      const out = analyseNotificationLedgers(tenant, emails, sms, push, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   // ── Email channel (T6 M10.1) — DataNetworks-EWS-Ver1.pdf §13 ──────────
   //
   // Out-of-band delivery transport for BIL. The default StubEmailTransport

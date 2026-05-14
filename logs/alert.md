@@ -275,3 +275,27 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 
 ### Sub-phase tally
 - T6 tally **146 → 147**.
+
+## 2026-05-14 — T6 M10.12 — Cross-channel ledger analytics
+
+**Goal.** Unified rollup across M10.1/M10.2/M10.3 notification ledgers. The SPA wants a single "notifications activity" panel; without this rollup it'd need 3 round-trips and 3 different shapes.
+
+### Files
+
+- **NEW** `services/bff/src/notification_ledger_analytics.ts` — pure `analyseNotificationLedgers(tenant, emails, sms, push, now)`. Channel-specific aggregator functions handle the per-channel TYPE differences (email.to is `string[]`, sms.to is `string`, push.to is `PushDevice[]`). Generic `topN<T>` helper sorts by count desc with secondary string-field asc tie-break.
+- **NEW** `services/bff/__tests__/notification_ledger_analytics.test.ts` — 12 tests (9 pure + 3 route): empty, per-channel totals sum, template mix sort + untemplated exclusion, email by-address count, push distinct-user-per-send invariant, top_recipients cap 10, most_recent_at, by_template_id cap 5, admin empty, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/notifications/ledger-analytics` (audit:read) right ABOVE the M10.1 email channel block. Pulls `transport.recent(tenant, 500)` from each of the 3 transports.
+
+### Design notes
+
+- Push recipient counting: a single push send may fan out to 2 devices for the SAME user (one fcm, one apns). The analytics counts USERS not DEVICES — that's the operational metric ops cares about ("how many distinct users got pinged?"). Tested explicitly.
+- SMS `to` is a single E.164 string (M10.2 shape), not an array — TS error caught this during wiring. Fixed by single `by_recipient.set(e.to, …)` not iteration.
+- Untemplated entries don't contribute to `by_template_id` but DO count in `total_sent` — this matches the SPA's expected "template mix is a subset of total" rendering.
+- StubXxxTransport constructors take `{now: () => Date, ...}` options (not a bare Date) — fixed during test wiring.
+
+### Verification
+- `npx jest __tests__/notification_ledger_analytics.test.ts` — 12/12 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **152 → 153**.
