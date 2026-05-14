@@ -517,3 +517,28 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 
 ### Sub-phase tally
 - T6 tally **129 → 130**.
+
+## 2026-05-14 — T6 M14.22 — Field-visit day-of-week × hour-of-day heatmap
+
+**Goal.** Bin the M14.10 visit ledger into a 7 × 24 temporal grid so the SPA can render a calendar-style heatmap answering "when are field officers most active?". Different shape from M14.19 (per-officer rollups) and M14.21 (geo clusters) — this is 2D temporal bucketing.
+
+### Files
+
+- **NEW** `services/bff/src/field_visit_heatmap.ts` — pure `bucketVisitsByDowHour(visits, tz='UTC')`. Extracts (weekday, hour) per visit via `Intl.DateTimeFormat({timeZone, weekday: 'short', hour: '2-digit', hour12: false})` and maps short-weekday strings to ISO Mon=0..Sun=6. Returns the 7×24 matrix + per-axis marginals + the peak cell (row-major scan: dow asc, hour asc for tie-break). Reuses the M12.4 13-zone tz whitelist via `isScheduleTz`.
+- **NEW** `services/bff/__tests__/field_visit_heatmap.test.ts` — 13 tests: 8 pure (empty, Mon 14:00, Sun 09:00, marginal sums, LA DST shift across the day boundary, IST +5:30 hour shift, peak tie-break) + 5 route (empty tenant, populated bucketing, ?tz=Asia/Kolkata wall-clock shift, invalid tz → 400, 403, cross-tenant invisibility).
+- **EDIT** `services/bff/src/server.ts` — imported `bucketVisitsByDowHour` + `isHeatmapTz`; mounted `GET /v1/field/visits/dow-hour-heatmap` (audit:read) right before `/v1/field/officers/:officer_id/today` to keep the `/v1/field/*` routes grouped. Reuses the existing M14.10 `VisitFilter` shape for the optional ?officer_id / ?customer_id / ?outcome / ?since / ?until filters.
+
+### Design notes
+
+- ISO Mon=0..Sun=6 is the international standard for weekday indexing; the SPA can render row labels however it wants without server-side coupling.
+- `hour: '2-digit'` + `hour12: false` keeps Intl output in [0,23]; defensive normalisation of '24' (some locales emit it for midnight) keeps the matrix sound.
+- Peak ties tilt toward earlier-in-week / earlier-in-day in row-major scan order. Deterministic + cheap.
+- Visits without a parseable `visit_at` silently drop — the M14.10 store already validates on insert.
+- The 13-zone tz whitelist reused unchanged from M12.4 / report_schedules — adding a new whitelist would have been needless duplication.
+
+### Verification
+- `npx jest __tests__/field_visit_heatmap.test.ts` — 13/13 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **131 → 132**.

@@ -574,6 +574,7 @@ import {
 } from './audit_trail';
 import { introspectAuditCatalog } from './audit_action_catalog';
 import { analyseTemplateCloneHistory } from './template_clone_analysis';
+import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -9829,6 +9830,50 @@ export function makeApp(deps: AppDeps = {}) {
       const visits = fieldVisitStore.list(req.tenant!.tenant_id, filter);
       const analytics = summarizeFieldOperations(visits);
       return res.json(wrapResponse({ analytics }, ctx));
+    },
+  );
+
+  /** GET /v1/field/visits/dow-hour-heatmap (T6 M14.22) — 7 × 24 day-of-
+   *  week × hour-of-day matrix over the M14.10 visit ledger. ISO Mon=0
+   *  ..Sun=6 ordering. ?tz= shifts the wall-clock used for bucketing
+   *  (13-zone whitelist from M12.4 / report_schedules). Filters mirror
+   *  /v1/field/visits: ?officer_id= ?customer_id= ?outcome= ?since=
+   *  ?until=. */
+  app.get(
+    '/v1/field/visits/dow-hour-heatmap',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      const tzRaw = (q.tz as string | undefined) ?? 'UTC';
+      if (!isHeatmapTz(tzRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `tz '${tzRaw}' is not in the supported list`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const filter: VisitFilter = {};
+      if (typeof q.customer_id === 'string' && q.customer_id) filter.customer_id = q.customer_id;
+      if (typeof q.officer_id === 'string' && q.officer_id) filter.officer_id = q.officer_id;
+      if (typeof q.outcome === 'string' && q.outcome) {
+        if (!isVisitOutcome(q.outcome)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `outcome '${q.outcome}' is not a recognised visit outcome`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.outcome = q.outcome;
+      }
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      const visits = fieldVisitStore.list(req.tenant!.tenant_id, filter);
+      const heatmap = bucketVisitsByDowHour(visits, tzRaw);
+      return res.json(wrapResponse(heatmap, ctx));
     },
   );
 
