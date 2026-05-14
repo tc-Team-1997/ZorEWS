@@ -12377,6 +12377,52 @@ export function makeApp(deps: AppDeps = {}) {
   // All routes are admin-only (audit:read) — config is sensitive ops
   // surface, not analyst-level.
 
+  /** GET /v1/admin/config/override-ages?fresh_days=&stale_days= (T6 M13.11)
+   *  — per-override age tracker. For each tenant override, compute
+   *  age_days + bucket into recent/stable/stale via the configurable
+   *  thresholds (defaults: fresh<30d → recent; >90d → stale; in
+   *  between → stable). Envelope has oldest/newest pointers + bucket
+   *  counts so the SPA can render a "config that needs review"
+   *  banner. Sorted by age_days desc with key asc tie-break. */
+  app.get(
+    '/v1/admin/config/override-ages',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const freshRaw = req.query.fresh_days as string | undefined;
+      const staleRaw = req.query.stale_days as string | undefined;
+      const fresh_days = freshRaw === undefined ? 30 : Number(freshRaw);
+      const stale_days = staleRaw === undefined ? 90 : Number(staleRaw);
+      if (!Number.isFinite(fresh_days) || !Number.isFinite(stale_days)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'fresh_days + stale_days must be finite numbers', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const entries = configStore.list(req.tenant!.tenant_id);
+        const { analyseConfigOverrideAges, OverrideAgeError } = require('./admin_config_override_age') as
+          typeof import('./admin_config_override_age');
+        try {
+          const out = analyseConfigOverrideAges(req.tenant!.tenant_id, entries, now(), fresh_days, stale_days);
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof OverrideAgeError) {
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/config/catalog (T6 M13.10) — schema-only view of the
    *  config registry: per-key {key, category, type, default_value,
    *  description} grouped by category + by_type counts. Lets the SPA

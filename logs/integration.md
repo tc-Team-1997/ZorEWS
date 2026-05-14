@@ -566,3 +566,27 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 
 ### Sub-phase tally
 - T6 tally **142 → 143**.
+
+## 2026-05-14 — T6 M13.11 — Admin config override age tracker
+
+**Goal.** Per-override age view over the M13.1 config registry. Lets ops spot "this override has been in place 100+ days — still appropriate?" without having to dig through individual histories.
+
+### Files
+
+- **NEW** `services/bff/src/admin_config_override_age.ts` — pure `analyseConfigOverrideAges(tenant, entries, now, fresh_days, stale_days)`. Filters to overrides only (excludes default entries), computes age_days via floor-divide, buckets into recent/stable/stale, sorts age_days desc + key asc, emits envelope with oldest/newest pointers + bucket counts.
+- **NEW** `services/bff/__tests__/admin_config_override_age.test.ts` — 15 tests (8 pure + 7 route): empty, freshness bucket classification, sort order with tie-break, configurable thresholds, boundary semantics (exact-fresh + exact-stale = stable, not recent / not stale), defaults excluded, validation rejections, route admin happy / 400 × 2 / 403 / cross-tenant.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/admin/config/override-ages` (audit:read) right ABOVE the M13.10 catalog route to keep the M13 cluster grouped.
+
+### Design notes
+
+- Boundary at fresh/stale: strict-less-than recent and strict-greater-than stale → exactly-on-boundary lands in stable. Tested explicitly so the contract is unambiguous (alternative would have been `<=` either way which creates a 3-way fence-post problem).
+- `fresh_days=0` is allowed (means "everything except today's overrides is at least stable"). `stale_days=0` is rejected by the `stale_days < fresh_days` invariant when fresh_days>0; allowed when fresh_days=0 (everything is stale, useful for testing).
+- Defaults (entries where is_default=true) are excluded entirely — they don't have meaningful ages, only overrides do. Same filter the M13.9 summary report uses.
+- audit:read RBAC matches the M13.x family.
+
+### Verification
+- `npx jest __tests__/admin_config_override_age.test.ts` — 15/15 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **151 → 152**.
