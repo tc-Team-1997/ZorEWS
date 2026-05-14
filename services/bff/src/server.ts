@@ -14156,6 +14156,61 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/ingestion/connectors/:id/schema/compare (T6 M3.9) —
+   *  forward-looking compat check: given a candidate schema, report
+   *  what BREAKS for existing publishers and what's ADDITIVE. Mirror
+   *  of infra/schema-registry/scripts/check_compat.py for the M3.2
+   *  connector schema shape. Mounted BEFORE other /schema/* routes
+   *  so the literal /compare segment wins. */
+  app.post(
+    '/v1/ingestion/connectors/:id/schema/compare',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const current = getConnectorSchema(id);
+      if (!current) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_connector', message: `unknown connector: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { candidate?: unknown };
+      if (!wrapper.candidate) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'candidate schema is required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const { compareConnectorSchemas, validateCandidateSchema, SchemaCompatInputError } = require('./connector_schema_compat') as
+          typeof import('./connector_schema_compat');
+        const candidate = validateCandidateSchema(wrapper.candidate, id);
+        const out = compareConnectorSchemas(current, candidate);
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const { SchemaCompatInputError } = require('./connector_schema_compat') as
+          typeof import('./connector_schema_compat');
+        if (e instanceof SchemaCompatInputError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   // ── Connector schema metadata (T6 M3.2) ─────────────────────────────
   //
   // Per-connector field-level schema (name, type, required, sample,

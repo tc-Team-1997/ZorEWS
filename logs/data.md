@@ -221,3 +221,29 @@ pipeline-svc:
 
 ### Sub-phase tally
 - T6 tally **134 → 135**.
+
+## 2026-05-14 — T6 M3.9 — Connector schema BACKWARD-compat check
+
+**Goal.** Forward-looking compat checker for the M3.2 connector schema shape. Mirror of `infra/schema-registry/scripts/check_compat.py` (Glue BACKWARD-compat for Kafka topics) — same idea, different domain. Lets ops preview "what breaks if we deploy this CBS schema bump?" without rolling it out and hoping.
+
+### Files
+
+- **NEW** `services/bff/src/connector_schema_compat.ts` — pure `compareConnectorSchemas(before, after)`. Walks before.fields, classifies each into breaking/additive/unchanged based on the change kind table. Also walks after.fields for new fields (required → breaking; optional → additive). Helper `validateCandidateSchema(candidate, connector_id)` enforces minimum shape so the route can map to 400 cleanly.
+- **NEW** `services/bff/__tests__/connector_schema_compat.test.ts` — 21 tests (15 pure + 6 route): identical schemas, every breaking kind (field_removed, type_changed, required_added, new_required_field, enum_narrowed, max_length_decreased, min_increased, max_decreased, record_format_changed), every additive kind (field_added, required_loosened, enum_widened, max_length_increased, min_decreased, max_increased), validateCandidateSchema rejections (non-object, missing version, bad type) + accept-minimal-valid, route happy/404/missing-candidate-400/invalid-type-400/403.
+- **EDIT** `services/bff/src/server.ts` — mounted `POST /v1/ingestion/connectors/:id/schema/compare` (audit:read) right above the M3.2 schema block so it sits with the related routes. Mounting before other `/schema/*` routes keeps the literal `/compare` segment safe.
+
+### Design notes
+
+- 8 breaking kinds + 6 additive kinds is the closed enum. Designed to match the JSON-Schema BACKWARD-compat semantics from the Glue checker so anyone familiar with that knows what to expect here.
+- Required transition asymmetry: optional → required IS breaking (new validation that existing publishers fail); required → optional is additive (looser constraint). Tested explicitly to lock this in.
+- New field addition asymmetry: optional → additive; required → breaking with the distinct kind `new_required_field` (vs `required_added` which is for existing-field promotion). Two distinct kinds because the SPA can render them differently (one is "you broke existing data", the other is "your new schema doesn't satisfy itself").
+- record_format change is breaking at the schema level (wire format flips). Surfaced with `field: null` since it's a connector-level change not a per-field one.
+- Numeric bounds: tightening (raise min, lower max) is breaking; loosening is additive. Standard schema-evolution semantics.
+- validateCandidateSchema is a separate function so tests can exercise the validation paths cleanly without going through HTTP. The route catches `SchemaCompatInputError` and maps to 400.
+
+### Verification
+- `npx jest __tests__/connector_schema_compat.test.ts` — 21/21 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **147 → 148**.
