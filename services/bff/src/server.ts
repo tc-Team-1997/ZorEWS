@@ -7750,6 +7750,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/cases/:case_id/timeline (T6 M9.6) — reconstruct ONE case's
+   *  full state-transition ladder from the M9.4 event journal. Returns
+   *  CaseTimeline with `transitions[]` (per-state durations), action
+   *  counts, current_state + age, total_age_hours. Pure-function over
+   *  the existing forCase store API; unknown case returns an empty
+   *  timeline (not 404) because the event log is total. */
+  app.get(
+    '/v1/cases/:case_id/timeline',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const case_id = req.params.case_id ?? '';
+      const events = caseEventStore.forCase(req.tenant!.tenant_id, case_id);
+      const { reconstructCaseTimeline } = require('./case_timeline') as
+        typeof import('./case_timeline');
+      const timeline = reconstructCaseTimeline(events, case_id, now());
+      return res.json(wrapResponse(timeline, ctx));
+    },
+  );
+
   /** GET /v1/cases/sla-breaches (T6 M9.5) — reconstruct each case's
    *  state timeline from the M9.4 event journal, compare time-in-state
    *  against the per-state SLA, and surface cases past their window.

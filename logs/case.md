@@ -47,3 +47,28 @@
 - `npx jest __tests__/case_sla_breach.test.ts` — 18/18 pass.
 - `npx jest` (full BFF suite) — 4093 pass / 58 skipped / 4152 total. Intermittent cross-suite singleton flakiness in `api_keys` / `admin_config` / `scenario_bulk` / `notification_template_dispatch` / `finance_adapter` — all pass when run alone; pre-existing pattern unrelated to M9.5 (also observed on M8.6).
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M9.6 — Case investigation timeline reconstruction
+
+### Tasks ticked
+- T6 sub-phase M9.6 — case investigation timeline reconstruction. T6 sub-phase tally 119 → 120.
+
+### Files touched
+- `services/bff/src/case_timeline.ts` (new) — pure `reconstructCaseTimeline(events, case_id, now)` walks one case's events in sequence_no order. Returns `CaseTimeline` with `total_events`, `events_by_action` (every CaseEventAction key present at 0 when absent), `opened_at`, `closed_at`, `current_state`, `time_in_current_state_hours`, `total_age_hours` (`now` for open cases, `closed_at` for closed), and `transitions[]` of `{sequence_no, occurred_at, actor, from_state, to_state, duration_in_previous_state_hours}`. State-shifting events (`opened`/`state_change`/`closed`) produce transition rows; non-state events (`note_added`/`checklist_updated`/`override_*`/`escalated`) only bump action counts. Defensively sorts by sequence_no.
+- `services/bff/__tests__/case_timeline.test.ts` (new) — 14 jest tests: 2 empty (no events for case, non-opened events without an opened parent → no transitions), 2 single-opened (default 'triage' seed, custom initial_state honored), 2 multi-transition (durations + shuffled sequence_no), 2 closed (closed_at + closed-uses-closed_at-not-now for time_in_current_state, open-case total_age uses now), 1 non-state-events-only-bump-action-counts, 1 case_id filter, 4 route (200 happy, empty timeline for unknown case, cross-tenant invisibility, 403 wrong role).
+- `services/bff/src/server.ts` — `GET /v1/cases/:case_id/timeline` mounted right after `/v1/cases/:case_id/events`. `audit:read` RBAC matches M9.5. Returns the timeline directly (no envelope wrap of `{timeline}`).
+
+### Decisions
+- **Returns empty timeline (not 404) for unknown cases.** M9.4's event log is total over case_ids — `forCase(unknown)` returns `[]` without erroring. Matches that posture; the SPA shows "no activity" rather than a 404 panel.
+- **`total_age_hours` uses `now` for open cases, `closed_at` for closed.** Captures "how long has this case been around?" consistently in both lifecycles.
+- **Non-state events fold into events_by_action only.** A `note_added` doesn't shift state — it shouldn't add a transition row. Tested explicitly with all 5 non-state actions.
+- **Defensively sorts by sequence_no.** Same posture as M9.5 — protects against callers passing re-batched event arrays.
+- **First opened transition has `from_state: null` + `duration_in_previous_state_hours: null`.** Makes the lack of "prior state" explicit in the timeline ladder rather than guessing a default.
+
+### Hand-offs
+- **agent-ui** — case detail page can render a vertical "timeline ladder" component reading `GET /v1/cases/:case_id/timeline`. Each transition becomes a card with the duration badge ("3.4h in triage"); the `events_by_action` count chip surfaces alongside ("4 notes, 2 checklist updates").
+
+### Verification
+- `npx jest __tests__/case_timeline.test.ts` — 14/14 pass.
+- `npx jest` (full BFF suite) — 4390 pass / 58 skipped / 4448 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
