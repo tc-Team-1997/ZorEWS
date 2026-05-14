@@ -172,6 +172,13 @@ export interface NotificationPreferenceStore {
     updated_by: string,
     now: Date,
   ): TenantPreferenceDefault;
+
+  /** T6 M10.10 — true iff the user has an explicit (override) row
+   *  in the store. Used by the effective-preference resolver to
+   *  distinguish "user has overridden this" from "tenant default
+   *  showing through". `get()` collapses both cases into the same
+   *  shape so this is the canonical way to detect overrides. */
+  hasUserOverride(tenant_id: string, username: string): boolean;
 }
 
 function defaultTenantPref(tenant_id: string): TenantPreferenceDefault {
@@ -276,6 +283,11 @@ export class InMemoryNotificationPreferenceStore implements NotificationPreferen
 
   reset(tenant_id: string, username: string): boolean {
     return this.map.delete(this.k(tenant_id, username));
+  }
+
+  hasUserOverride(tenant_id: string, username: string): boolean {
+    if (!tenant_id || !username) return false;
+    return this.map.has(this.k(tenant_id, username));
   }
 
   // ── M10.6 tenant defaults ────────────────────────────────────────────

@@ -5992,6 +5992,62 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/preferences/effective?username=X&asOf=ISO
+   *  (T6 M10.10) — effective preferences with the full 3-way
+   *  resolution chain (user_override / tenant_default /
+   *  platform_default) per channel. `audit:read` RBAC; admin-only
+   *  view of any user. Mounted BEFORE /me + /:username catch-all
+   *  routes so the literal /effective segment isn't captured. */
+  app.get(
+    '/v1/notifications/preferences/effective',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const username = (req.query.username as string | undefined)?.trim();
+      if (!username) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'username query param required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const asOfRaw = req.query.asOf as string | undefined;
+      let asOf: Date | undefined;
+      if (typeof asOfRaw === 'string' && asOfRaw.trim()) {
+        const d = new Date(asOfRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'asOf must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        asOf = d;
+      }
+      try {
+        const { resolveEffectivePreference } = require('./notification_preferences_effective') as
+          typeof import('./notification_preferences_effective');
+        const out = resolveEffectivePreference(
+          notificationPreferenceStore,
+          req.tenant!.tenant_id,
+          username,
+          asOf,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof PreferenceError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/notifications/preferences/me — returns the caller's prefs.
    *  Always 200 (defaults to all-enabled for never-touched users). */
   app.get(

@@ -176,3 +176,29 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 - `npx jest __tests__/alert_routing_preview.test.ts` — 14/14 pass.
 - `npx jest` (full BFF suite) — 4375 pass / 58 skipped / 4434 total. Intermittent cross-suite singleton flakiness in `ews_rules_routes` (passes 32/32 alone); pre-existing pattern unrelated to M8.7.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M10.10 — Notification preference effective view + resolution chain
+
+### Tasks ticked
+- T6 sub-phase M10.10 — notification preference effective view + resolution chain. T6 sub-phase tally 123 → 124.
+
+### Files touched
+- `services/bff/src/notification_preferences.ts` — extended `NotificationPreferenceStore` interface + `InMemoryNotificationPreferenceStore` impl with `hasUserOverride(tenant_id, username): boolean`. Returns `true` iff the user has an explicit override row in the store. Distinguishes "user has explicitly set this" from "tenant default showing through" — `get()` collapses both into the same `ChannelPreference` shape, so this new method is the canonical detection path.
+- `services/bff/src/notification_preferences_effective.ts` (new) — pure `resolveEffectivePreference(store, tenant, username, asOf?)` walks the 3-way resolution chain per channel and returns `EffectivePreference {tenant_id, username, channels[], quiet_hours, asOf}`. Each `ChannelResolution` carries `effective_enabled`, `resolution: 'user_override'|'tenant_default'|'platform_default'`, and `levels[]` (3 entries, one per level — `user_override`, `tenant_default`, `platform_default=true`). When a level isn't set its `value` is `null`. Tenant-default level carries `set_at` + `set_by` when populated. `applyQuietHoursMute(effective, asOf)` convenience emits the final dispatch decision INCLUDING the M10.7 quiet-hours mute; webhook bypasses (transactional, per M10.7 contract).
+- `services/bff/__tests__/notification_preferences_effective.test.ts` (new) — 18 jest tests: 1 platform-default zero-state, 1 tenant_default override, 2 user_override (full + partial-patch behaviour), 3 quiet_hours (surfaces on response, mute applied within window with webhook bypass, mute released outside window), 1 asOf echo, 3 hasUserOverride store-level (false→true on update, reset clears, tenant_default doesn't register), 7 route (200 platform_default, override resolution chain, missing username → 400, ?asOf echoed + validated, ?asOf=invalid → 400, 403 wrong role, cross-tenant invisibility).
+- `services/bff/src/server.ts` — new route `GET /v1/notifications/preferences/effective?username=X&asOf=ISO` mounted BEFORE `/v1/notifications/preferences/me` so the literal `/effective` segment isn't captured. `audit:read` RBAC (admin-only view of any user). Validates `?username` is present (400 invalid_input) and `?asOf` parses to a finite Date (400 invalid_input).
+
+### Decisions
+- **`hasUserOverride` as a separate interface method.** The existing `get()` is total: returns the merged view (user-override OR tenant-default OR hardcoded). There was no way for downstream code to ask "did the user explicitly set this?". The new method exposes that signal without breaking existing callers.
+- **Resolution chain levels[] always 3 entries.** Even when the user has no override and tenant has no default, the chain shows `user_override: null`, `tenant_default: null`, `platform_default: true`. Makes the SPA's chain renderer uniform.
+- **Tenant default detection via `updated_at !== null`.** The store returns a default-shaped `TenantPreferenceDefault` even when the tenant has never set one (all-true hardcoded). `updated_at: null` is the canonical "tenant has not set a default" signal.
+- **`applyQuietHoursMute` is a separate convenience.** Keeps `resolveEffectivePreference` pure-shape; quiet-hours is a temporal concern that downstream dispatchers handle differently from the preference resolution. Splits the read-shape from the runtime-decision shape.
+- **Webhook bypasses quiet hours.** M10.7 contract. `applyQuietHoursMute` honours it explicitly via the channel name check.
+
+### Hand-offs
+- **agent-ui** — admin notification-preferences page can add an "Effective preferences" debug panel: select a user → `GET /v1/notifications/preferences/effective?username=...` → render the 4 channels as cards with the resolution chain unfolded (visual: user_override row strikethrough when null, tenant_default highlighted when winning, platform_default greyed out when overridden).
+
+### Verification
+- `npx jest __tests__/notification_preferences_effective.test.ts` — 18/18 pass.
+- `npx jest` (full BFF suite) — 4458 pass / 58 skipped / 4519 total. Intermittent cross-suite singleton flakiness in `copilot_v2_routes` / `customer_watchlist` / `scenario_diff` — all pass when run together in isolation (89/89); pre-existing pattern unrelated to M10.10.
+- `npx tsc --noEmit` — clean.
