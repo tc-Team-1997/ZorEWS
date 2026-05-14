@@ -579,6 +579,7 @@ import {
   type EvidencePackageStore,
 } from './audit_evidence';
 import { renderEvidenceSummary } from './audit_evidence_summary';
+import { renderPerformanceSummary } from './model_performance_summary';
 import {
   defaultIngestionRegistry,
   IngestionError,
@@ -3553,6 +3554,56 @@ export function makeApp(deps: AppDeps = {}) {
   //
   // Route ordering: literal `/performance/summary` declared BEFORE
   // `/performance` so the param doesn't shadow.
+
+  /** GET /v1/ai/models/:model_id/performance/summary.txt (T6 M7.6)
+   *  — printable plain-text summary suitable for browser print-to-PDF.
+   *  Same `?since`/`?until` filter as M7.5 /summary. Returns text/plain
+   *  (NOT the T4.24 envelope). Mounted BEFORE the M7.5 /summary route
+   *  so the literal ".txt" suffix isn't swallowed by the wildcard. */
+  app.get(
+    '/v1/ai/models/:model_id/performance/summary.txt',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const q = req.query;
+      const filter: PerformanceFilter = {};
+      const range: { since?: string; until?: string } = {};
+      if (typeof q.since === 'string' && q.since) {
+        filter.since = q.since;
+        range.since = q.since;
+      }
+      if (typeof q.until === 'string' && q.until) {
+        filter.until = q.until;
+        range.until = q.until;
+      }
+      const generated_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, filter);
+        const summary = summarizePerformance(req.tenant!.tenant_id, id, entries);
+        const text = renderPerformanceSummary(summary, {
+          generated_at: now().toISOString(),
+          generated_by,
+          range: range.since || range.until ? range : undefined,
+        });
+        res.set('Content-Type', 'text/plain; charset=utf-8');
+        res.set(
+          'Content-Disposition',
+          `inline; filename="${id}.performance.summary.txt"`,
+        );
+        void ctx;
+        return res.status(200).send(text);
+      } catch (e) {
+        if (e instanceof ModelPerformanceError && e.code === 'unknown_model') {
+          return res.status(404).json(
+            wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
 
   /** GET /v1/ai/models/:model_id/performance/summary — aggregate
    *  per-metric latest + mean/p50/p95 over the queried window

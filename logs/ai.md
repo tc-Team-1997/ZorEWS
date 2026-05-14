@@ -141,3 +141,27 @@ the seed=42, n=5000 generator config — comfortably above the 0.78 floor.
 
 - None code-side. Execution-bound DoD steps (above) require the user to
   run Python locally; flagged in the Phase 2 hand-off summary.
+
+## 2026-05-14 — T6 M7.6 — Printable model performance summary
+
+### Tasks ticked
+- T6 sub-phase M7.6 — printable model performance summary export. T6 sub-phase tally 111 → 112.
+
+### Files touched
+- `services/bff/src/model_performance_summary.ts` (new) — pure `renderPerformanceSummary(summary, ctx)` returns plain-text mirroring M15.4 `renderEvidenceSummary` style. Fixed-width monospace; header section (tenant, model, generated_at, generated_by, entry_count, window) + per-metric blocks (latest@ts, mean, min/p50/p95/max line) + tail "Not observed: …" listing absent metrics. Trims trailing zeros via `fmtNum` for readability. `PerformanceSummaryRenderContext` carries `generated_at`, `generated_by`, optional `range: {since?, until?}`.
+- `services/bff/__tests__/model_performance_summary.test.ts` (new) — 12 jest tests: 6 unit (empty shell, "full ledger" window when no range, range → since→until format, single-metric format with absent-metric tail, all-5-metrics no "Not observed" line, integer-value trailing-zero trim) + 6 route (empty ledger 200 text/plain + Content-Disposition, recorded metric surfaces, unknown_model → 404 JSON not text, ?since reflected on Window line, 403 wrong role, M7.5 /summary still returns JSON envelope).
+- `services/bff/src/server.ts` — new route `GET /v1/ai/models/:model_id/performance/summary.txt` mounted BEFORE `/performance/summary` so the literal `.txt` suffix isn't swallowed by the parent wildcard. Same `customers:read_risk_profile` RBAC as M7.5. Returns `text/plain; charset=utf-8` with `Content-Disposition: inline`. 404 unknown_model returned as JSON envelope.
+
+### Decisions
+- **Mirror M15.4 exactly.** Same separators, formatting, response posture. SPA reuses the same print-to-PDF UI for both audit + model summaries.
+- **Window line surfaces filter context.** Auditors reading the printed page know what subset is shown.
+- **Trim trailing zeros.** `0.85` not `0.8500`. Cleaner monospace look.
+- **404 returned as JSON, not text.** Consistent error shape with the rest of `/v1/*` even on a text-flavored route.
+
+### Hand-offs
+- **agent-ui** — model registry page can render a "Print performance summary" button → opens `/v1/ai/models/:model_id/performance/summary.txt?since=...` in a new tab → browser print preview attaches it to model cards / regulator filings.
+
+### Verification
+- `npx jest __tests__/model_performance_summary.test.ts` — 12/12 pass.
+- `npx jest` (full BFF suite) — 4257 pass / 58 skipped / 4317 total. Intermittent cross-suite singleton flakiness in `report_schedules` / `scenario_custom` — both pass when run alone (210/210); pre-existing pattern unrelated to M7.6.
+- `npx tsc --noEmit` — clean.
