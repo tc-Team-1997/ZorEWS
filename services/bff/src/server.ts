@@ -157,6 +157,11 @@ import {
   type DashboardWidget,
 } from './custom_dashboards';
 import {
+  DashboardBundleError,
+  exportDashboardBundle,
+  importDashboardBundle,
+} from './custom_dashboard_bundle';
+import {
   WidgetResolverError,
   resolveDashboard,
   resolveWidget,
@@ -7831,6 +7836,86 @@ export function makeApp(deps: AppDeps = {}) {
               wrapError({ code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
             );
           }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/dashboards/custom/export (T6 M11.9) — bundle N dashboards
+   *  into a versioned JSON envelope. body { dashboard_ids: string[] }.
+   *  Cap 10/bundle. unknown_dashboard → 404; bad shape → 400. */
+  app.post(
+    '/v1/dashboards/custom/export',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { dashboard_ids?: unknown };
+      const exported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const bundle = exportDashboardBundle(customDashboardStore, {
+          tenant_id: req.tenant!.tenant_id,
+          dashboard_ids: Array.isArray(wrapper.dashboard_ids)
+            ? (wrapper.dashboard_ids as unknown[]).map((x) => String(x))
+            : [],
+          exported_by,
+          now: now(),
+        });
+        return res.json(wrapResponse(bundle, ctx));
+      } catch (e) {
+        if (e instanceof DashboardBundleError) {
+          if (e.code === 'unknown_dashboard') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** POST /v1/dashboards/custom/import (T6 M11.9) — replay a bundle
+   *  into the caller's tenant. body { bundle: DashboardBundle,
+   *  name_prefix?: string }. Returns per-row outcomes (created/skipped/
+   *  error). */
+  app.post(
+    '/v1/dashboards/custom/import',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { bundle?: unknown; name_prefix?: unknown };
+      const imported_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const result = importDashboardBundle(customDashboardStore, {
+          target_tenant_id: req.tenant!.tenant_id,
+          bundle: wrapper.bundle,
+          imported_by,
+          name_prefix:
+            typeof wrapper.name_prefix === 'string' ? wrapper.name_prefix : undefined,
+          now: now(),
+        });
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof DashboardBundleError) {
           return res.status(400).json(
             wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
           );

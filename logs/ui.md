@@ -127,3 +127,28 @@
 - **Feature humaniser:** maps the model's encoded column names to human-readable labels (`dpd_max_90d → Max DPD (90d)`, `utilization → Utilisation`, etc.) and handles encoded categorical features (`product_type=credit_card → Product type = credit card`).
 - **Tests:** 22/22 web tests pass; `tsc --noEmit` clean; `vite build` clean (770 KB bundle, same magnitude).
 - **Visual verification gap:** did not run `npm run dev` in a real browser. The diverging-bar visual + Tailwind classes were not eyeballed; recommend a quick `localhost:5173/customers/c-101` smoke before demoing.
+
+## 2026-05-14 — T6 M11.9 — Custom dashboard export/import bundle
+
+### Tasks ticked
+- T6 sub-phase M11.9 — custom dashboard bundle. T6 sub-phase tally 104 → 105.
+
+### Files touched
+- `services/bff/src/custom_dashboard_bundle.ts` (new) — `validateBundle`, `exportDashboardBundle`, `importDashboardBundle`, `DashboardBundleError`. Versioned envelope (`schema_version='1'`, `exported_at`, `exported_by`, `source_tenant_id`, `items[]`). Item shape `{name, description, widgets}` — store-identity fields stripped on export, re-minted on import via `store.create`. Cap 10/bundle (matches M11.7's per-tenant cap).
+- `services/bff/__tests__/custom_dashboard_bundle.test.ts` (new) — 23 jest tests: 5 validation, 4 export (envelope + deep-copy + unknown_dashboard + duplicate/empty ids), 6 import (clean target, name-collision skip, name_prefix sidestep, intra-bundle dedup, cap_reached → error row, prefix > 24 chars rejected), 8 route (200/400/403/404 + cross-tenant isolation).
+- `services/bff/src/server.ts` — `POST /v1/dashboards/custom/export` (404 maps `unknown_dashboard`) + `POST /v1/dashboards/custom/import` (400 maps every `DashboardBundleError` code). Both `audit:read` to match the existing M11.7 dashboard-CRUD posture. Mounted BEFORE `/v1/dashboards/custom/:dashboard_id` so the literal "export"/"import" segments aren't captured as ids.
+
+### Decisions
+- **Mirror M5.11 exactly.** SPA can reuse the existing bundle-viewer UX for both rule templates and dashboards.
+- **Strip identity on export.** No `dashboard_id` / `tenant_id` / audit fields in the bundle — the import path mints fresh ids and stamps caller-tenant + `imported_by`. Bundles stay portable.
+- **`validateBundle` doesn't redo full widget validation.** Just spot-checks `widgets` is non-empty; the per-widget overlap + config validation re-runs inside `store.create` and surfaces as per-row `error` outcomes.
+- **`name_prefix` cap 24 chars** — same as M5.11.
+- **Cap = M11.7 per-tenant cap (10).** A bundle larger than the cap could never be imported wholesale; rejecting at export keeps failure surface small.
+
+### Hand-offs
+- **agent-ui** — surface a multi-select "Export" affordance on `/dashboards/custom` → `POST /v1/dashboards/custom/export` → download `.json`. For import, paste-JSON / drag-drop dialog → `POST /v1/dashboards/custom/import` → render per-row outcomes (mirror the M5.11 viewer).
+
+### Verification
+- `npx jest __tests__/custom_dashboard_bundle.test.ts` — 23/23 pass.
+- `npx jest` (full BFF suite) — 4147 pass / 58 skipped / 4205 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
