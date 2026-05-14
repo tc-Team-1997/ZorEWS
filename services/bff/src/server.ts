@@ -15232,6 +15232,28 @@ export function makeApp(deps: AppDeps = {}) {
   // `/v1/rules/variables` MUST come before `/v1/rules/:id` to win
   // pattern matching.
 
+  /** GET /v1/rules/templates/indicator-coverage (T6 M5.14) — cross-
+   *  reference each rule template's supporting_indicators against
+   *  the M6.2 catalog. Per-template: indicators_total / known_count /
+   *  unknown_count / vertical_mismatch_count + status enum
+   *  (fully_resolved | has_unknown | has_mismatch | no_indicators).
+   *  Envelope counters partition the template set. Lets ops catch
+   *  drift when an indicator was renamed in the catalog but the
+   *  template wasn't updated. Platform-static (same across tenants).
+   *  Mounted BEFORE the catch-all `/:id` so the literal segment wins. */
+  app.get(
+    '/v1/rules/templates/indicator-coverage',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { checkTemplateIndicatorCoverage } = require('./template_indicator_coverage') as
+        typeof import('./template_indicator_coverage');
+      const out = checkTemplateIndicatorCoverage();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/categories — distinct template categories. */
   app.get(
     '/v1/rules/templates/categories',

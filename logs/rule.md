@@ -124,3 +124,28 @@ Picked TS+Express over Python+FastAPI because:
 
 ### Sub-phase tally
 - T6 tally **130 → 131**.
+
+## 2026-05-14 — T6 M5.14 — Rule template indicator-coverage check
+
+**Goal.** Cross-module consistency validator: every M5.1 rule template's `supporting_indicators` should resolve to a real M6.2 catalog entry, and the indicator's vertical should align with the template's. Catches the drift that happens when an indicator is renamed in the catalog but the template references the old id.
+
+### Files
+
+- **NEW** `services/bff/src/template_indicator_coverage.ts` — pure `checkTemplateIndicatorCoverage(templates, catalog)`. Walks every template, looks up each `supporting_indicator` id in the catalog, classifies into 4-valued status enum, emits per-template + envelope counts. Defaults to `listRuleTemplates()` + `STUB_CATALOG` so tests can call it without arguments.
+- **NEW** `services/bff/__tests__/template_indicator_coverage.test.ts` — 11 tests (8 pure + 3 route): fully_resolved, has_unknown, has_mismatch, vertical=both accepts-either, no_indicators, unknown-takes-precedence-over-mismatch, multi-template envelope partition invariant, default-registries integration, admin happy, 403, platform-static.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/rules/templates/indicator-coverage` (rules:list) BEFORE the catch-all `/:id` so the literal segment wins.
+
+### Design notes
+
+- Status precedence: when a template has BOTH unknown ids AND vertical mismatches, the status is `has_unknown` not `has_mismatch`. Broken refs are operationally worse than vertical misalignment (a banking template referencing an insurance indicator may still function; a template referencing a dead id can't function at all).
+- `vertical='both'` (the M5.1 cross-vertical template flavor) matches any indicator vertical. Tested explicitly so a future refactor that drops the `'both'` semantic gets caught.
+- Envelope counters partition the template set — the sum of `fully_resolved + has_unknown + has_mismatch + no_indicators` always equals `total_templates`. Asserted in the multi-template aggregation test.
+- Platform-static: both templates and catalog are static module-level constants. Same response across tenants (asserted in test).
+- The function is in a position to surface gaps EARLY (before activation) rather than at rule-fire time when a `getIndicator(id)` call would return null and break the rule.
+
+### Verification
+- `npx jest __tests__/template_indicator_coverage.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **145 → 146**.
