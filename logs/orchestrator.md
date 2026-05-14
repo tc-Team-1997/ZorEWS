@@ -734,3 +734,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Distinct from M14.9 (fleet probe) and M14.23 (SLA targets) — this is the "what queries can I make?" lens.
 - 18 new jest tests. Full BFF suite 5113 effective (2 pre-existing flakes).
 - T6 sub-phase tally 172 → 173.
+
+## 2026-05-14 — T6 M7.10 AI model promotion request timeline
+
+- Two pure surfaces at `services/bff/src/ai_model_promotion_timeline.ts`:
+  - `buildModelPromotionTimeline(engine, registry, tenant, model_id)` — per-model audit chain (oldest-first) with aggregate counts + `latest_decision_at` + `oldest_pending_at` + `decision_latency_ms` per entry.
+  - `buildPromotionFleetOverview(engine, registry, tenant, now)` — fleet-wide rollup; every registry model surfaced (zero-request models too) + every orphan model_id seen in engine.
+- Unknown model_id surfaces as orphan (model_name=null, current_model_status=null) — useful for delisted models.
+- Drains via `engine.list({page, page_size: 500})` pagination (200-page cap).
+- Two new routes: per-model + fleet. Both mounted with literal segments BEFORE catch-alls.
+- Companion to M7.9 staleness lens + M7.7 telemetry lens → M7.10 is the audit-trail lens.
+- 22 new jest tests (15 pure + 7 route). Full BFF suite 5135 effective (1 pre-existing flake).
+- T6 sub-phase tally 173 → 174.

@@ -3484,6 +3484,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/promotion-fleet (T6 M7.10) — fleet-wide
+   *  promotion-request rollup. Walks the M7.1 registry + drains the
+   *  M7.2 PromotionEngine to produce a per-model timeline (oldest-
+   *  first) with aggregate counts. Models without any promotion
+   *  requests still surfaced. Sorted by total_requests desc with
+   *  model_id asc tie-break. Mounted BEFORE `/by-type/:type` +
+   *  `/retirement-candidates` so the literal segment wins. */
+  app.get(
+    '/v1/ai/models/promotion-fleet',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildPromotionFleetOverview } = require('./ai_model_promotion_timeline') as
+        typeof import('./ai_model_promotion_timeline');
+      const out = buildPromotionFleetOverview(
+        promotionEngine,
+        aiModelRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/retirement-candidates?stale_days=&aging_days=
    *  (T6 M7.9) — non-retired models with deployment age past
    *  thresholds. Buckets per-model into stale | aging | fresh |
@@ -3650,6 +3675,35 @@ export function makeApp(deps: AppDeps = {}) {
           ctx,
         ),
       );
+    },
+  );
+
+  /** GET /v1/ai/models/:model_id/promotion-timeline (T6 M7.10) —
+   *  per-model promotion-request audit trail. Drains the M7.2
+   *  engine for this model and returns the chronological timeline
+   *  oldest-first plus aggregate counts + latest_decision_at +
+   *  oldest_pending_at. Unknown model_id surfaces as orphan
+   *  (model_name=null) rather than 404 — useful for surfacing
+   *  promotion requests filed against models that have since been
+   *  delisted from the registry. Mounted BEFORE `/:model_id/score`
+   *  catch-all wildcard so the literal `/promotion-timeline`
+   *  segment wins. */
+  app.get(
+    '/v1/ai/models/:model_id/promotion-timeline',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const { buildModelPromotionTimeline } = require('./ai_model_promotion_timeline') as
+        typeof import('./ai_model_promotion_timeline');
+      const out = buildModelPromotionTimeline(
+        promotionEngine,
+        aiModelRegistry,
+        req.tenant!.tenant_id,
+        id,
+      );
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
