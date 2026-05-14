@@ -14084,6 +14084,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/per-actor-activity (T6 M15.8) — actor-pivoted
+   *  rollup over the audit chain. Per-actor: total_events,
+   *  distinct_actions, by_action_top (top 5), by_outcome (every
+   *  AuditOutcome key), by_resource_type (every AuditResourceType
+   *  key), first/last event ts, primary_role. Envelope adds
+   *  most_active_actor + failure_only_actors[]. Mirror of M15.6
+   *  (action catalog) pivoted by actor instead. */
+  app.get(
+    '/v1/audit/per-actor-activity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { summarizePerActorActivity } = require('./audit_per_actor_activity') as
+        typeof import('./audit_per_actor_activity');
+      const out = summarizePerActorActivity(req.tenant!.tenant_id, page.items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/activity-heatmap?tz=Asia/Kolkata (T6 M15.7) — day-
    *  of-week × hour-of-day heatmap of audit events. Mirror of M14.22
    *  (field-visit heatmap) over the audit chain. ISO Mon=0..Sun=6 ×

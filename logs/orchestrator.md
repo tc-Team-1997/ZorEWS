@@ -777,3 +777,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Mirror of M16.17 (scenario coverage) but for connectors × types.
 - 17 new jest tests (13 pure + 4 route). Full BFF suite 5185 effective (2 pre-existing flakes).
 - T6 sub-phase tally 176 → 177.
+
+## 2026-05-15 — T6 M15.8 Audit log per-actor activity rollup
+
+- Pure `summarizePerActorActivity(tenant, events, now)` at `services/bff/src/audit_per_actor_activity.ts` is the actor-pivoted rollup over the audit chain.
+- Per-actor: `{actor_username, total_events, distinct_actions, by_action_top[] top-5, by_outcome (3 keys), by_resource_type (10 keys), first/last_event_at, primary_role}`.
+- Envelope: `{actors[] sorted, most_active_actor, failure_only_actors[]}`.
+- `primary_role` ranks admin > supervisor > risk_analyst > case_owner > field_officer > alphabetical for actors who flipped role over time.
+- New route `GET /v1/audit/per-actor-activity` (audit:read).
+- Mirror of M15.6 (action catalog by verb) but pivoted by actor.
+- 18 new jest tests. Clean full-suite run: 5203 pass / 58 skipped / 5261 total (no flakes).
+- T6 sub-phase tally 177 → 178.
