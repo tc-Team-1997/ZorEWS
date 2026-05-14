@@ -5772,6 +5772,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/variables/index (T6 M10.13) — inverted
+   *  index over the M10.11 catalog. Per-variable: templates[] +
+   *  reference_count + channels[] + spans_all_channels. Envelope:
+   *  single_use_variables (refactor candidates), shared_variables
+   *  (cross-channel concepts), most_referenced. Answers "which
+   *  templates require {{X}}?". Mirror of M5.15 / M4.11 reverse
+   *  cross-reference shape. Platform-static. */
+  app.get(
+    '/v1/notifications/variables/index',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildNotificationVariableIndex } = require('./notification_variable_index') as
+        typeof import('./notification_variable_index');
+      const out = buildNotificationVariableIndex();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/email/templates — list canned BIL templates. */
   app.get(
     '/v1/notifications/email/templates',

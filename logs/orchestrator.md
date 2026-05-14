@@ -711,3 +711,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Surfaces stress-test inventory gaps. Mirror of M5.14 (template indicator coverage) but for 2D matrix shape.
 - 19 new jest tests (14 pure + 5 route). Full BFF suite 5076 effective (1 pre-existing flake).
 - T6 sub-phase tally 170 → 171.
+
+## 2026-05-14 — T6 M10.13 Notification template variable cross-reference
+
+- Pure `buildNotificationVariableIndex()` at `services/bff/src/notification_variable_index.ts` is the inverted index over M10.11. For each `{{variable}}` across the 12 BIL canned templates, list referencing templates + channels covered + spans_all_channels.
+- Per-variable: `{variable, templates[] sorted by channel asc + template_id asc, reference_count, channels[] in declared order (email/sms/push), spans_all_channels}`.
+- Envelope: `single_use_variables` (refactor candidates), `shared_variables` (cross-channel concepts), `most_referenced`.
+- Defensive intra-template dedup.
+- New route `GET /v1/notifications/variables/index` (audit:read; platform-static).
+- Mirror of M5.15 / M4.11 reverse cross-reference shape.
+- 19 new jest tests (14 pure + 5 route). Full BFF suite 5095 effective (1 pre-existing flake).
+- T6 sub-phase tally 171 → 172.
