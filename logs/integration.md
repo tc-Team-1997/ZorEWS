@@ -371,3 +371,28 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/tenant_onboarding.test.ts` — 46/46 (pre-existing tests unaffected by the field addition).
 - `npx jest` (full BFF suite) — 4300 pass / 58 skipped / 4358 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M14.20 — Adapter SLA breach event analytics
+
+### Tasks ticked
+- T6 sub-phase M14.20 — adapter SLA breach event analytics. T6 sub-phase tally 114 → 115.
+
+### Files touched
+- `services/bff/src/adapter_sla_breach_analytics.ts` (new) — pure `summarizeBreachEvents(events)` returns `AdapterSlaBreachAnalytics`: sample_size, distinct_connectors, acknowledged_count + unacknowledged_count + ack_rate, by_reason (all 3 SlaBreachReason keys present at 0 when absent; one event with N reasons in sla_breaches[] increments each), by_day (UTC YYYY-MM-DD oldest-first), top_breachers cap 10 sorted by breach_count desc → last_breached_at desc → connector_id asc with per-connector recent_reasons cap 3 newest-first and rename-safe connector_name (tracks the newest event's name).
+- `services/bff/__tests__/adapter_sla_breach_analytics.test.ts` (new) — 15 jest tests: 9 unit (empty zero envelope, reason mix, distinct connectors, ack split, top_breachers sort + cap, recent_reasons cap, connector_name rename-safe, by_day UTC oldest-first) + 6 route (empty, populated, ?since narrows, ?since=invalid → 400, 403 wrong role, cross-tenant isolation).
+- `services/bff/src/server.ts` — `GET /v1/ingestion/adapters/sla-breaches/analytics?since=ISO` mounted BEFORE the M14.14 `/:event_id/acknowledge` wildcard so the literal "analytics" segment isn't captured as an event_id. `audit:read` RBAC matches M14.13. Validates `?since` via `Number.isFinite(new Date(s).getTime())` → 400 on bad input.
+
+### Decisions
+- **Reuse existing `query(tenant, {since})` — no new store method needed.** The breach event store already exposes a tenant-filtered, newest-first query with optional since/limit/acknowledged. M14.20 just runs the pure aggregator over the slice.
+- **`by_reason` increments PER REASON, not per event.** An event with `sla_breaches: ['success_rate_below_target', 'p95_latency_above_target']` increments BOTH keys by 1. Tests this explicitly. Reflects the operational reality — those are independent SRE concerns.
+- **`connector_name` rename-safe.** If an operator renames the connector between observations, the rollup uses the newest event's name. Tested explicitly.
+- **`recent_reasons` cap 3, newest-first.** Same posture as M3.6's exemplar messages.
+- **No `last_acknowledgement_note` surfaced.** The breach detail view (M14.13 + M14.14) carries the ack metadata; analytics just counts. Keeps payload size predictable.
+
+### Hand-offs
+- **agent-ui** — admin dashboard adapter card can drive against `GET /v1/ingestion/adapters/sla-breaches/analytics?since=2026-05-01T00:00:00Z`. Envelope: `{ analytics: AdapterSlaBreachAnalytics }`. `top_breachers` is already a leaderboard; `by_reason` is a 3-bar mini-chart; `ack_rate` is the headline gauge.
+
+### Verification
+- `npx jest __tests__/adapter_sla_breach_analytics.test.ts` — 15/15 pass.
+- `npx jest` (full BFF suite) — 4313 pass / 58 skipped / 4373 total. Intermittent cross-suite singleton flakiness in `cms_routes` / `indicator_thresholds` — both pass when run alone (109/109); pre-existing pattern unrelated to M14.20.
+- `npx tsc --noEmit` — clean.

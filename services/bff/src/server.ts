@@ -12932,6 +12932,43 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/adapters/sla-breaches/analytics?since=ISO
+   *  (T6 M14.20) — tenant-wide rollup over the M14.13 adapter SLA
+   *  breach event store: sample size, distinct connectors, ack split,
+   *  ack_rate, by_reason (every key present), by_day (UTC oldest-first),
+   *  top_breachers (cap 10) with per-connector breach_count +
+   *  last_breached_at + recent_reasons. Mounted BEFORE the DELETE on
+   *  /v1/ingestion/adapters/sla-breaches and BEFORE the
+   *  /:event_id/acknowledge wildcard so the literal "analytics" segment
+   *  isn't captured. */
+  app.get(
+    '/v1/ingestion/adapters/sla-breaches/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sinceRaw = req.query.since;
+      let since: Date | undefined;
+      if (typeof sinceRaw === 'string' && sinceRaw.trim()) {
+        const d = new Date(sinceRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'since must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        since = d;
+      }
+      const events = adapterSlaBreachEventStore.query(req.tenant!.tenant_id, { since });
+      const { summarizeBreachEvents } = require('./adapter_sla_breach_analytics') as
+        typeof import('./adapter_sla_breach_analytics');
+      const analytics = summarizeBreachEvents(events);
+      return res.json(wrapResponse({ analytics }, ctx));
+    },
+  );
+
   /** DELETE /v1/ingestion/adapters/sla-breaches (T6 M14.13) — wipe the
    *  tenant's audit history. Returns { cleared: N }. */
   app.delete(
