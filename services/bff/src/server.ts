@@ -3624,6 +3624,52 @@ export function makeApp(deps: AppDeps = {}) {
   // Route ordering: literal `/performance/summary` declared BEFORE
   // `/performance` so the param doesn't shadow.
 
+  /** GET /v1/ai/models/:model_id/performance/trend?metric=auc
+   *  (T6 M7.8) — linear-regression slope over a single metric's
+   *  history. Returns null trend when the model has < 2 entries
+   *  for the requested metric. Sign convention is neutral: positive
+   *  slope = value increasing; SPA maps to improving/declining per
+   *  metric polarity. `?since` / `?until` reuse the M7.5 window
+   *  filter. Mounted BEFORE /performance/outliers (and the other
+   *  /performance/* routes) so the literal /trend segment isn't
+   *  captured by a wildcard. */
+  app.get(
+    '/v1/ai/models/:model_id/performance/trend',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const q = req.query;
+      const metric = q.metric;
+      if (typeof metric !== 'string' || !isPerformanceMetric(metric)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `metric must be one of ${PERFORMANCE_METRICS.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const filter: PerformanceFilter = { metric };
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      try {
+        const entries = modelPerformanceStore.list(req.tenant!.tenant_id, id, filter);
+        const { computeMetricTrend } = require('./model_performance_trend') as
+          typeof import('./model_performance_trend');
+        const trend = computeMetricTrend(entries, metric);
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, model_id: id, trend }, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceError && e.code === 'unknown_model') {
+          return res.status(404).json(
+            wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ai/models/:model_id/performance/outliers?z=2&metric=…
    *  (T6 M7.7) — z-score-based outlier detection over the M7.5 ledger.
    *  For each metric: sample mean + sample std-dev (Bessel n-1) +

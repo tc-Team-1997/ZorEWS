@@ -190,3 +190,27 @@ the seed=42, n=5000 generator config — comfortably above the 0.78 floor.
 - `npx jest __tests__/model_performance_outliers.test.ts` — 19/19 pass.
 - `npx jest` (full BFF suite) — 4480 pass / 58 skipped / 4538 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M7.8 — Model performance metric trend
+
+**Goal.** Time-series trend extractor over the M7.5 telemetry ledger. Linear-regression slope on (recorded_at_unix_days, value) so the SPA can render a "↗ 0.04/day over 12 samples" badge. Sign convention neutral: positive slope = value increasing; the SPA maps to improving/declining per metric polarity (auc improving = positive, drift_score improving = negative).
+
+### Files
+
+- **NEW** `services/bff/src/model_performance_trend.ts` — pure `computeMetricTrend(entries, metric): MetricTrend | null`. Filters entries to the metric, sorts oldest-first, computes least-squares slope + first/last/abs_change + abs_change_pct (null on first_value=0). Returns null when 0 entries; `slope_per_day` null when sample_size<2 OR same-timestamp series (no time progression to fit).
+- **NEW** `services/bff/__tests__/model_performance_trend.test.ts` — 15 tests (8 pure + 7 route): empty input, single-entry (slope=null), monotonic increasing/decreasing, flat series (~0 slope), same-timestamp edge, per-metric filter, divide-by-zero on percent change, shuffled-input robustness, route 404 unknown_model, route 400 missing/invalid metric, insufficient_data route, populated route, 403, cross-tenant invisibility.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/ai/models/:model_id/performance/trend?metric=` (customers:read_risk_profile) BEFORE the M7.7 /outliers route so the literal `/trend` segment wins over the wildcard.
+
+### Design notes
+
+- Sign neutrality is load-bearing: the trend computer doesn't know whether higher AUC is good or higher drift_score is bad. It just reports the slope. The SPA owns the polarity table.
+- Same-timestamp edge: when all entries share `recorded_at`, the x-variance is 0 and least-squares is undefined. Returning null avoids NaN propagation through the JSON envelope.
+- Internal sort-then-compute makes the function safe against unsorted input — the M7.5 store doesn't guarantee an ordering on `list()`.
+- abs_change_pct null on first_value=0 keeps the field semantically honest. "1000% growth from zero" is not actually informative.
+
+### Verification
+- `npx jest __tests__/model_performance_trend.test.ts` — 15/15 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **137 → 138**.
