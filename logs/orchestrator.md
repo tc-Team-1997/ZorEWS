@@ -689,3 +689,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Companion to M16.15: M16.15 normalises shocks onto [-1, 1] for radar charts (visual), M16.16 emits the text (label). Both pure, both platform-static.
 - 20 new jest tests (8 formatShockPhrases + 3 formatScenarioNarrative + 4 listScenarioNarratives + 5 route). Clean full-suite run: 5041 pass / 58 skipped / 5099 total.
 - T6 sub-phase tally 168 → 169.
+
+## 2026-05-14 — T6 M5.15 Rule template recommended-action inventory
+
+- Pure `mapTemplateActionUsage()` at `services/bff/src/rule_template_action_inventory.ts` is the inverted index over the M5.1 template library. For each of 6 `RecommendedAction` enum values, list referencing templates + per-category + per-severity breakdowns.
+- Each breakdown map carries every enum key (zero when absent) — stable grid for the SPA.
+- Envelope `{total_templates, actions[] sorted by reference_count desc + action name asc, unused_actions[], most_referenced}`.
+- Defensive intra-template dedup: same action twice on one template counts once.
+- New route `GET /v1/rules/templates/action-inventory` (rules:list; mounted before catch-all `/:id`).
+- Mirror of M4.11 (indicator → templates reverse map) but for actions.
+- 16 new jest tests (12 pure + 4 route). Full BFF suite 5057 effective (1 pre-existing flake).
+- T6 sub-phase tally 169 → 170.

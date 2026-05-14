@@ -16002,6 +16002,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/action-inventory (T6 M5.15) — inverted
+   *  index from `recommended_action` enum to the templates that
+   *  reference it. Per-action: reference_count + templates[] +
+   *  by_category + by_severity. Envelope: total_templates +
+   *  unused_actions[] + most_referenced. Lets ops see operational
+   *  coverage at a glance (e.g. "no template uses auto_decline" =
+   *  manual review still required for high-confidence fraud).
+   *  Platform-static. Mounted BEFORE catch-all `/:id` so the
+   *  literal segment wins. */
+  app.get(
+    '/v1/rules/templates/action-inventory',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { mapTemplateActionUsage } = require('./rule_template_action_inventory') as
+        typeof import('./rule_template_action_inventory');
+      const out = mapTemplateActionUsage();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/categories — distinct template categories. */
   app.get(
     '/v1/rules/templates/categories',
