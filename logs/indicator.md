@@ -177,3 +177,26 @@ These compute fns return `value=null, breached=false` until agent-data extends t
 - `npx jest __tests__/indicator_threshold_effective.test.ts` — 16/16 pass.
 - `npx jest` (full BFF suite) — 4496 pass / 58 skipped / 4554 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M4.10 — Indicator threshold auto-tune suggestion
+
+**Goal.** Derive red/orange/yellow thresholds from observed historical values via percentile — lets tenants bootstrap their M4.4 overrides from real data instead of hand-picking numbers. Fresh shape this session: percentile-based suggestion with polarity awareness.
+
+### Files
+
+- **NEW** `services/bff/src/threshold_auto_tune.ts` — pure `suggestThresholdsFromHistory(values, polarity)`. Drops non-finite values; refuses with `suggested=null + insufficient_reason` when < 5 finite samples. Polarity 'higher_is_worse' (default; DPD/repeat-claim/drift): red=p95, orange=p75, yellow=p50. Polarity 'lower_is_worse' (customer health, AUC-like): red=p5, orange=p25, yellow=p50. Uses M3.5 `linearPercentile`.
+- **NEW** `services/bff/__tests__/threshold_auto_tune.test.ts` — 18 tests (10 pure + 8 route) covering empty input, insufficient samples (5-sample floor), all-NaN, polarity validation, uniform [0,1] for both polarities, skewed-distribution sanity check, default polarity, 404 unknown_indicator, validation 400s, 403.
+- **EDIT** `services/bff/src/server.ts` — mounted `POST /v1/indicators/thresholds/:indicator_id/suggest` (customers:read_risk_profile) BEFORE the catch-all `/:indicator_id` GET so the literal `/suggest` segment wins. 404 maps `getThreshold(id) === null`.
+
+### Design notes
+
+- 5-sample floor: percentile estimation on tiny samples is noise. Refusing with `insufficient_reason='too_few_samples'` is more useful than emitting a misleading suggestion. Returning 200 (not 400) so the SPA can render "collect more data" instead of an error toast.
+- Polarity is metric-aware: for "higher-is-worse" signals (DPD, drift_score) the worst tail of the distribution defines red. For "lower-is-worse" signals (customer health score) the bottom tail defines red. Tested explicitly that lower_is_worse produces inverted ordering (red < orange < yellow).
+- Non-finite filter drops NaN + Infinity defensively — the backtest mart can emit infinities under degenerate cohorts.
+
+### Verification
+- `npx jest __tests__/threshold_auto_tune.test.ts` — 18/18 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **140 → 141**.

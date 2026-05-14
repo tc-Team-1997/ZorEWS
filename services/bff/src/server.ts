@@ -9555,6 +9555,76 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/indicators/thresholds/:indicator_id/suggest (T6 M4.10)
+   *  body { values[], polarity? } — derives suggested {yellow, orange,
+   *  red} thresholds from historical observed values via percentile.
+   *  Default polarity='higher_is_worse' (red=p95, orange=p75, yellow=p50).
+   *  Returns 200 with `suggested=null + insufficient_reason` when
+   *  fewer than 5 finite samples — lets ops bootstrap thresholds
+   *  from real data without forcing every endpoint into 400-territory
+   *  when the cohort is small. 404 unknown_indicator. Mounted BEFORE
+   *  `/:indicator_id` GET so the literal `/suggest` segment wins. */
+  app.post(
+    '/v1/indicators/thresholds/:indicator_id/suggest',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.indicator_id ?? '';
+      const { getThreshold } = require('./indicator_thresholds') as
+        typeof import('./indicator_thresholds');
+      if (!getThreshold(id)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_indicator', message: `unknown indicator: ${id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const wrapper = (inner ?? {}) as { values?: unknown; polarity?: unknown };
+      if (!Array.isArray(wrapper.values)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'values must be an array of numbers', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      for (const v of wrapper.values) {
+        if (typeof v !== 'number') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'values[] must contain only numbers', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      const polarity = wrapper.polarity ?? 'higher_is_worse';
+      try {
+        const { suggestThresholdsFromHistory } = require('./threshold_auto_tune') as
+          typeof import('./threshold_auto_tune');
+        const out = suggestThresholdsFromHistory(
+          wrapper.values as number[],
+          polarity as 'higher_is_worse' | 'lower_is_worse',
+        );
+        return res.json(wrapResponse({ indicator_id: id, ...out }, ctx));
+      } catch (e) {
+        if (e instanceof Error && /polarity/.test(e.message)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_input', message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/indicators/thresholds/:indicator_id — single threshold
    *  resolved through tenant overrides (M4.4 wires getEffectiveThreshold). */
   app.get(
