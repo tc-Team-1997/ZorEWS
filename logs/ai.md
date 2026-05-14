@@ -214,3 +214,32 @@ the seed=42, n=5000 generator config — comfortably above the 0.78 floor.
 
 ### Sub-phase tally
 - T6 tally **137 → 138**.
+
+## 2026-05-14 — T6 M7.9 — AI model retirement candidates
+
+**Goal.** Surface non-retired models whose deployment age exceeds operational thresholds. Lets ops review "is this 18-month-old PD model still appropriate, or should we retrain + retire?" without grepping deployed_at timestamps by hand.
+
+### Files
+
+- **NEW** `services/bff/src/ai_model_retirement_candidates.ts` — pure `findRetirementCandidates(models, now, stale_days, aging_days)`. Filter out retired models, compute days_since_deployed + days_since_trained, classify into 4 candidacy buckets, sort by oldest-first.
+- **NEW** `services/bff/__tests__/ai_model_retirement_candidates.test.ts` — 15 tests (10 pure + 5 route): empty, each candidacy class (stale/aging/fresh/never_deployed), retired-excluded invariant, sort order, validation, default registry integration, admin happy, threshold widening, 400, 403, platform-static.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/ai/models/retirement-candidates` (audit:read) BEFORE the `/by-type/:type` route so the literal `/retirement-candidates` segment wins.
+
+### Design notes
+
+- 4-valued candidacy enum captures different cleanup actions:
+  - `stale`: deployed > 365 days ago — strongest retirement candidate
+  - `aging`: 180-365 days — warrants review at the next quarterly cycle
+  - `fresh`: under 180 days — leave alone
+  - `never_deployed`: never went to prod AND trained > stale_days ago — surfaces forgotten experimentals that should be deleted
+- Retired models EXCLUDED from consideration by definition (filter on `status !== 'retired'`) — they're already retired, can't be retired further.
+- Sort tiebreak: when days_since_deployed is null (never_deployed), falls back to days_since_trained for sort comparison. Oldest experimental floats to the top alongside oldest deployed.
+- Validation: stale_days must be ≥ aging_days (otherwise the buckets collapse / become non-disjoint).
+- audit:read RBAC — same as the existing M7.x admin-tier routes.
+
+### Verification
+- `npx jest __tests__/ai_model_retirement_candidates.test.ts` — 15/15 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **158 → 159**.

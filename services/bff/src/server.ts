@@ -3484,6 +3484,51 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/retirement-candidates?stale_days=&aging_days=
+   *  (T6 M7.9) — non-retired models with deployment age past
+   *  thresholds. Buckets per-model into stale | aging | fresh |
+   *  never_deployed. Retired models excluded by definition. Sorted
+   *  oldest-deployment first. Mounted BEFORE `/by-type/:type` so the
+   *  literal `/retirement-candidates` segment wins. */
+  app.get(
+    '/v1/ai/models/retirement-candidates',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const staleRaw = req.query.stale_days as string | undefined;
+      const agingRaw = req.query.aging_days as string | undefined;
+      const stale_days = staleRaw === undefined ? 365 : Number(staleRaw);
+      const aging_days = agingRaw === undefined ? 180 : Number(agingRaw);
+      if (!Number.isFinite(stale_days) || !Number.isFinite(aging_days)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'stale_days + aging_days must be finite numbers', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const models = aiModelRegistry.list();
+        const { findRetirementCandidates, RetirementCandidatesError } = require('./ai_model_retirement_candidates') as
+          typeof import('./ai_model_retirement_candidates');
+        try {
+          const out = findRetirementCandidates(models, now(), stale_days, aging_days);
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof RetirementCandidatesError) {
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ai/models/types — enumerate the closed model-type set. */
   app.get(
     '/v1/ai/models/types',
