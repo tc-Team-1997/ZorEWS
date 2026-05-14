@@ -232,3 +232,29 @@
 
 ### Sub-phase tally
 - T6 tally **156 → 157**.
+
+## 2026-05-14 — T6 M11.13 — Custom dashboard starter packs
+
+**Goal.** Get new tenants from "empty dashboards screen" to "operationally useful boards" with one click. M11.7 ships the CRUD authoring; M11.12 ships per-widget config defaults; M11.13 ships entire pre-built layouts.
+
+### Files
+
+- **NEW** `services/bff/src/dashboard_starter_packs.ts` — `listStarterPacks()` + `getStarterPack(id)`. 3 hand-curated packs covering ops / executive / audit audiences. `widget()` helper builds a DashboardWidget instance with the catalog default_span + an inline config override merged on top of the M11.12 default config.
+- **NEW** `services/bff/__tests__/dashboard_starter_packs.test.ts` — 13 tests (10 pure + 3 route): 3-pack count, unique pack_ids, full-shape invariant, real-WidgetType invariant, config-key subset invariant, position/span bounds, all 3 audiences present, deep-copy invariant, known/unknown lookups, admin happy, 403, platform-static.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/dashboards/custom/starter-packs` (audit:read) BEFORE the `/custom/:dashboard_id` catch-all so the literal segment wins.
+
+### Design notes
+
+- Curation: 3 packs deliberately cover distinct audiences. Adding more packs is cheap (static const) but 3 is enough to get every BIL role started.
+- `daily_ops` = alerts + cases + fleet health — what ops looks at first thing.
+- `executive_overview` = KPI tile + risk distribution + top breaches — single-page exec view.
+- `audit_compliance` = audit recent + cases filtered to review state + KPI — compliance officer's view.
+- Each widget instance is deep-copied at list time. SPA can mutate freely without corrupting the singleton.
+- audit:read RBAC matches the rest of the dashboards module. Future enhancement: allow tenants to author + share their own starter packs cross-tenant (out of scope today).
+
+### Verification
+- `npx jest __tests__/dashboard_starter_packs.test.ts` — 13/13 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **163 → 164**.

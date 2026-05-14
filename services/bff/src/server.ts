@@ -8668,6 +8668,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/starter-packs (T6 M11.13) — 3 hand-
+   *  curated starter dashboard layouts ("Daily ops", "Executive
+   *  overview", "Audit + compliance") for new tenants to adopt
+   *  with one click. Platform-static. Mounted BEFORE the
+   *  `/custom/:dashboard_id` catch-all so the literal segment
+   *  wins. */
+  app.get(
+    '/v1/dashboards/custom/starter-packs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listStarterPacks } = require('./dashboard_starter_packs') as
+        typeof import('./dashboard_starter_packs');
+      const out = listStarterPacks();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/widgets/defaults (T6 M11.12) — per-widget
    *  default config seed for the SPA's "Add widget" wizard. Returns
    *  one entry per widget_type with a sensible default_config so the
