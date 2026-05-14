@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M14.19 — Field-operations analytics shipped — pure `summarizeFieldOperations(visits)` rolls up the M14.10 visit ledger into supervisor view (outcome mix, distinct officers + customers, success_rate, per-officer breakdown sorted by visit_count desc); new route `GET /v1/field/operations/analytics` mirrors the /v1/field/visits filter set. Previous: M9.5 case SLA breach, M8.6 alert auto-routing analytics.)
+**Last updated:** 2026-05-14 (T6 M12.5 — Report job analytics shipped — pure `summarizeReportJobs(jobs)` rolls up the M12.1 ReportJob ledger (status mix, per-report success_rate + mean processing time, top_requesters cap 10, processing_ms p50/p95 via M3.5 percentile, last_failure newest); new route `GET /v1/reports/jobs/analytics?status=&report_id=`. Previous: M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

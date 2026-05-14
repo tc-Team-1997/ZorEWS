@@ -615,6 +615,7 @@ import {
   type ReportJobStore,
   type ReportRegulator,
 } from './reports_catalog';
+import { summarizeReportJobs } from './report_job_analytics';
 import {
   ScheduleError,
   defaultReportScheduleStore,
@@ -13089,6 +13090,42 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const out = reportJobStore.list(req.tenant!.tenant_id, filters);
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
+   *  over the M12.1 reports-job ledger: status mix, format mix,
+   *  per-report counts + success rate + mean processing time, top
+   *  requesters (cap 10), processing latency percentiles, last failure.
+   *
+   *  Optional ?status= / ?report_id= filters reuse the M12.1 list shape.
+   *  MUST be registered before /v1/reports/jobs/:job_id so the literal
+   *  segment doesn't get captured as a job_id. */
+  app.get(
+    '/v1/reports/jobs/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      const filters: { status?: JobStatus; report_id?: string; page_size?: number } = {
+        page_size: 200,
+      };
+      if (typeof q.status === 'string' && q.status) {
+        if (!isJobStatus(q.status)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `status must be queued|running|completed|failed`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filters.status = q.status;
+      }
+      if (typeof q.report_id === 'string' && q.report_id) filters.report_id = q.report_id;
+      const page = reportJobStore.list(req.tenant!.tenant_id, filters);
+      const analytics = summarizeReportJobs(page.items);
+      return res.json(wrapResponse({ analytics, sample_total: page.total }, ctx));
     },
   );
 

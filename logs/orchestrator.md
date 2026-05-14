@@ -266,3 +266,28 @@
 - **Verified locally:** `make help` prints; `make lint` runs clean (terraform fmt + per-layer validate, 5/5 green).
 - **Caveat:** workflows are not running in CI (no GH remote). Same for everything in this session.
 - **Session totals: 19 discrete pieces of work end-to-end.**
+
+## 2026-05-14 — T6 M12.5 — Report job analytics
+
+### Tasks ticked
+- T6 sub-phase M12.5 — report job analytics. T6 sub-phase tally 103 → 104.
+
+### Files touched
+- `services/bff/src/report_job_analytics.ts` (new) — pure `summarizeReportJobs(jobs)` returning `ReportJobAnalytics`: sample_size, by_status (all 4 keys), by_format (only observed keys), per_report (job_count + completed/failed + success_rate + mean_processing_ms; sorted by job_count desc → report_id asc), top_requesters (cap 10, by_count desc → name asc), processing_ms min/mean/p50/p95/max via M3.5 `linearPercentile`, success_rate (completed/(completed+failed)), last_failure (newest by `requested_at`).
+- `services/bff/__tests__/report_job_analytics.test.ts` (new) — 15 jest tests: 11 unit (empty input, status mix, format mix, success_rate denominator, processing-ms percentiles ignoring non-completed, per-report rollup + tie-break, top_requesters cap, last_failure newest, last_failure null) + 4 route (200 empty, 200 with submitted job, 403 wrong role, cross-tenant isolation).
+- `services/bff/src/server.ts` — import `summarizeReportJobs`; new route `GET /v1/reports/jobs/analytics` mounted BEFORE `/v1/reports/jobs/:job_id` so the literal "analytics" segment isn't captured as a job_id. Filters: `?status=` (validated against `isJobStatus`, 400 on invalid) + `?report_id=` (free string). Pulls up to 200 jobs from the store and runs the resolver.
+
+### Decisions
+- **Route order matters.** The existing `/v1/reports/jobs/:job_id` is a wildcard; the analytics route must be registered first. Confirmed via test — `GET /v1/reports/jobs/analytics` returns 200 (zero envelope) on an empty store, not 404 from the `:job_id` handler.
+- **success_rate denominator excludes queued/running.** Matches the M3.5 connector-analytics posture (in-flight is reported separately, not folded into rate).
+- **last_failure by requested_at (not completed_at).** completed_at can be null on failed jobs; requested_at always exists.
+- **Top requesters cap 10.** Same posture as the M11.x leaderboard convention.
+- **No new store.** Derived from M12.1's existing job tracker.
+
+### Hand-offs
+- **agent-ui** — supervisor "reports activity" panel can drive against `GET /v1/reports/jobs/analytics`. Envelope: `{ analytics: ReportJobAnalytics, sample_total }`. `top_requesters` is already a leaderboard, `per_report` is sorted highest-traffic first.
+
+### Verification
+- `npx jest __tests__/report_job_analytics.test.ts` — 15/15 pass.
+- `npx jest` (full BFF suite) — 4124 pass / 58 skipped / 4182 total, **zero failures** (no cross-suite flakiness on this run).
+- `npx tsc --noEmit` — clean.
