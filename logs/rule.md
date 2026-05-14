@@ -75,3 +75,28 @@ Picked TS+Express over Python+FastAPI because:
 - ✅ Tests written under `__tests__/` (DSL + lifecycle + simulator). `npm test` will go green once dependencies install.
 - ✅ Simulator runs end-to-end and emits `rules/sim/report.json` with per-rule stats.
 - ✅ Mean FP rate across seeded rules ≤ 25% (analytical estimate ≈ 13%).
+
+## 2026-05-14 — T6 M5.12 — Rule template version snapshots
+
+### Tasks ticked
+- T6 sub-phase M5.12 — rule template version snapshots. T6 sub-phase tally 106 → 107.
+
+### Files touched
+- `services/bff/src/rule_templates_custom.ts` — extended `CustomRuleTemplateStore` interface + `InMemoryCustomRuleTemplateStore` impl with M16.10-style version tracking. New `TemplateVersion {version, captured_at, captured_by, snapshot}` exported type. Private `pushVersion()` keyed by `(tenant, template_id)`. `create` pushes v1, `update` pushes the new POST-write state, `restoreVersion` rolls live to the chosen version AND pushes a fresh version representing the restore (audit trail shows it as a discrete event). Defensive deep-copies on read. Cap 20/template with monotonic numbers stable across eviction. `delete` keeps versions queryable as an audit trail.
+- `services/bff/__tests__/rule_template_versions.test.ts` (new) — 19 jest tests: 11 store-level (v1 on create, increment on update, monotonic-after-cap-eviction, restore returns `restored_from_version` + bumps live, restore pushes new version, unknown_version + unknown_template errors, defensive-copy independence, tenant isolation × 2) + 8 route (200 list oldest-first, 404 unknown template, 403 wrong role, 200 restore returns `restored_from_version` + 3rd snapshot, 404 unknown_version, 404 unknown_template, 400 non-integer version, 403 wrong role, 404 cross-tenant).
+- `services/bff/src/server.ts` — `GET /v1/rules/templates/custom/:template_id/versions` (404 when template missing/cross-tenant) + `POST /v1/rules/templates/custom/:template_id/versions/:version/restore` (400 on non-integer; 404 maps both `unknown_template` + `unknown_version`). `rules:list` RBAC; mounted BEFORE `/v1/rules/templates/:id` so literal segments aren't captured.
+
+### Decisions
+- **Mirror M16.10 exactly.** Same `pushVersion` helper shape, same cap, same "snapshot is POST-write state", same monotonic-after-eviction numbering, same restore-is-a-version posture. SPA can reuse the M16.10 version-history viewer with no shape changes.
+- **Restore re-snapshots.** The restored state becomes version_{N+1}, not "version N reactivated". Keeps the ledger a strict timeline of states + tells reviewers WHEN the restore happened.
+- **Versions persist after delete.** Audit trail queryable forever (within cap); a new template with the same id never reaches that key because `tpl_custom_` ids are UUID-suffixed.
+- **`rules:list` RBAC.** Matches M5.x route convention rather than introducing a new permission for read-only version queries.
+
+### Hand-offs
+- **agent-ui** — rule template author UX can render a version history strip on the custom template edit page; `GET .../versions` returns oldest-first with `version`/`captured_at`/`captured_by`/full `snapshot`. Restore button → `POST .../versions/:version/restore` → re-render the live template panel with the response's `template`.
+
+### Verification
+- `npx jest __tests__/rule_template_versions.test.ts` — 19/19 pass.
+- `npx jest __tests__/rule_templates_custom.test.ts` — 60/60 (pre-existing tests unaffected by the interface extension).
+- `npx jest` (full BFF suite) — 4183 pass / 58 skipped / 4241 total, **zero failures**.
+- `npx tsc --noEmit` — clean.

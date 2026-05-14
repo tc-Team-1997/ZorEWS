@@ -166,6 +166,21 @@ function validate(input: unknown): CustomRuleTemplateInput {
   };
 }
 
+/** T6 M5.12 — version snapshot. Captured on create + on every
+ *  successful update (snapshot of the POST-write state — so
+ *  version_n always equals "the state at version n"). Also pushed
+ *  on restoreVersion so restoring is itself an audit-visible
+ *  event. Cap 20 per template; oldest evicted on overflow with
+ *  version numbers staying monotonic across eviction. */
+export interface TemplateVersion {
+  version: number; // 1-based
+  captured_at: string;
+  captured_by: string;
+  snapshot: RuleTemplate;
+}
+
+const TEMPLATE_VERSION_CAP = 20;
+
 export interface CustomRuleTemplateStore {
   list(tenant_id: string): RuleTemplate[];
   get(tenant_id: string, template_id: string): RuleTemplate | null;
@@ -185,10 +200,61 @@ export interface CustomRuleTemplateStore {
     now: Date,
   ): RuleTemplate;
   delete(tenant_id: string, template_id: string): boolean;
+  /** T6 M5.12 — version snapshots oldest-first. Empty list when
+   *  the template has been evicted from versions but still exists
+   *  live (shouldn't happen — every CRUD path pushes a snapshot —
+   *  but defensive). */
+  listVersions(tenant_id: string, template_id: string): TemplateVersion[];
+  /** T6 M5.12 — restore the live template to a captured version.
+   *  Returns the new live state + the version number restored from.
+   *  A new version snapshot is pushed AFTER the restore so the
+   *  audit trail shows the restore as a discrete event. */
+  restoreVersion(
+    tenant_id: string,
+    template_id: string,
+    version: number,
+    restored_by: string,
+    now: Date,
+  ): { template: RuleTemplate; restored_from_version: number };
 }
 
 export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore {
   private readonly perTenant = new Map<string, RuleTemplate[]>();
+  // (tenant, template_id) → versions[] (oldest-first; newest at end)
+  private readonly versions = new Map<string, TemplateVersion[]>();
+
+  private vk(tenant_id: string, template_id: string): string {
+    return `${tenant_id}::${template_id}`;
+  }
+
+  private pushVersion(
+    tenant_id: string,
+    template_id: string,
+    snapshot: RuleTemplate,
+    captured_by: string,
+    now: Date,
+  ): void {
+    const key = this.vk(tenant_id, template_id);
+    const arr = this.versions.get(key) ?? [];
+    // Monotonic — derive from the last entry, not arr.length, so
+    // numbers stay stable after the cap evicts oldest entries.
+    const last = arr[arr.length - 1];
+    const next: TemplateVersion = {
+      version: last ? last.version + 1 : 1,
+      captured_at: now.toISOString(),
+      captured_by,
+      snapshot: {
+        ...snapshot,
+        recommended_actions: [...snapshot.recommended_actions],
+        supporting_indicators: [...snapshot.supporting_indicators],
+      },
+    };
+    arr.push(next);
+    if (arr.length > TEMPLATE_VERSION_CAP) {
+      arr.splice(0, arr.length - TEMPLATE_VERSION_CAP);
+    }
+    this.versions.set(key, arr);
+  }
 
   list(tenant_id: string): RuleTemplate[] {
     return [...(this.perTenant.get(tenant_id) ?? [])];
@@ -209,7 +275,6 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
     if (!created_by || !created_by.trim()) {
       throw new CustomRuleTemplateError('invalid_input', 'created_by required');
     }
-    void now;
     const valid = validate(input);
     const arr = this.perTenant.get(tenant_id) ?? [];
     if (arr.length >= CAP_PER_TENANT) {
@@ -238,6 +303,8 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
     }
     arr.push(template);
     this.perTenant.set(tenant_id, arr);
+    // T6 M5.12 — capture v1 on create.
+    this.pushVersion(tenant_id, template.id, template, created_by.trim(), now);
     return template;
   }
 
@@ -251,7 +318,6 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
     if (!updated_by || !updated_by.trim()) {
       throw new CustomRuleTemplateError('invalid_input', 'updated_by required');
     }
-    void now;
     const arr = this.perTenant.get(tenant_id);
     const idx = arr ? arr.findIndex((t) => t.id === template_id) : -1;
     if (!arr || idx < 0) {
@@ -277,6 +343,8 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
       source_doc: valid.source_doc ?? cur.source_doc,
     };
     arr[idx] = next;
+    // T6 M5.12 — push the new state as the next version.
+    this.pushVersion(tenant_id, template_id, next, updated_by.trim(), now);
     return next;
   }
 
@@ -286,7 +354,59 @@ export class InMemoryCustomRuleTemplateStore implements CustomRuleTemplateStore 
     const idx = arr.findIndex((t) => t.id === template_id);
     if (idx < 0) return false;
     arr.splice(idx, 1);
+    // Versions stay; they remain queryable as an audit trail of the
+    // template that used to exist. Tenant-isolated by the key prefix.
     return true;
+  }
+
+  listVersions(tenant_id: string, template_id: string): TemplateVersion[] {
+    const arr = this.versions.get(this.vk(tenant_id, template_id)) ?? [];
+    return arr.map((v) => ({
+      ...v,
+      snapshot: {
+        ...v.snapshot,
+        recommended_actions: [...v.snapshot.recommended_actions],
+        supporting_indicators: [...v.snapshot.supporting_indicators],
+      },
+    }));
+  }
+
+  restoreVersion(
+    tenant_id: string,
+    template_id: string,
+    version: number,
+    restored_by: string,
+    now: Date,
+  ): { template: RuleTemplate; restored_from_version: number } {
+    if (!restored_by || !restored_by.trim()) {
+      throw new CustomRuleTemplateError('invalid_input', 'restored_by required');
+    }
+    const arr = this.perTenant.get(tenant_id);
+    const idx = arr ? arr.findIndex((t) => t.id === template_id) : -1;
+    if (!arr || idx < 0) {
+      throw new CustomRuleTemplateError(
+        'unknown_template',
+        `custom template ${template_id} not found`,
+      );
+    }
+    const versionArr = this.versions.get(this.vk(tenant_id, template_id)) ?? [];
+    const match = versionArr.find((v) => v.version === version);
+    if (!match) {
+      throw new CustomRuleTemplateError(
+        'unknown_version',
+        `version ${version} not found for template ${template_id}`,
+      );
+    }
+    const restored: RuleTemplate = {
+      ...match.snapshot,
+      recommended_actions: [...match.snapshot.recommended_actions],
+      supporting_indicators: [...match.snapshot.supporting_indicators],
+    };
+    arr[idx] = restored;
+    // Push a new version representing the restore so the audit trail
+    // shows it as a discrete event (not just an unexplained jump back).
+    this.pushVersion(tenant_id, template_id, restored, restored_by.trim(), now);
+    return { template: restored, restored_from_version: match.version };
   }
 }
 

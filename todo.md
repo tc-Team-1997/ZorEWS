@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M6.9 — Weight preset definition diff shipped — pure `diffWeightPresets(from, to)` returns header changes + multiplier added/removed/changed (with delta) + unchanged_count; library + custom presets diffable; new route `GET /v1/scoring/presets/diff?from=&to=`. Previous: M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
+**Last updated:** 2026-05-14 (T6 M5.12 — Rule template version snapshots shipped — extended `CustomRuleTemplateStore` with M16.10-style version tracking: create captures v1, update pushes next, restoreVersion rolls back + re-snapshots; cap 20/template with monotonic numbers stable across eviction; new routes `GET /v1/rules/templates/custom/:id/versions` + `POST /v1/rules/templates/custom/:id/versions/:version/restore`. Previous: M6.9 preset diff, M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

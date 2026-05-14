@@ -14281,6 +14281,79 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/custom/:template_id/versions (T6 M5.12)
+   *  — version snapshots oldest-first. Cap 20 per template; restored
+   *  templates re-snapshot so the restore itself is auditable. */
+  app.get(
+    '/v1/rules/templates/custom/:template_id/versions',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const live = customRuleTemplateStore.get(req.tenant!.tenant_id, id);
+      if (!live) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_template', message: `custom template ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const items = customRuleTemplateStore.listVersions(req.tenant!.tenant_id, id);
+      return res.json(
+        wrapResponse({ items, total: items.length, template_id: id }, ctx),
+      );
+    },
+  );
+
+  /** POST /v1/rules/templates/custom/:template_id/versions/:version/restore
+   *  (T6 M5.12) — restore the live template to the captured version.
+   *  Returns {template, restored_from_version}. Pushes a new version
+   *  snapshot recording the restore. */
+  app.post(
+    '/v1/rules/templates/custom/:template_id/versions/:version/restore',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.template_id ?? '';
+      const versionRaw = req.params.version ?? '';
+      const version = Number(versionRaw);
+      if (!Number.isInteger(version) || version < 1) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'version must be a positive integer', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const restored_by = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const out = customRuleTemplateStore.restoreVersion(
+          req.tenant!.tenant_id,
+          id,
+          version,
+          restored_by,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof CustomRuleTemplateError) {
+          if (e.code === 'unknown_template' || e.code === 'unknown_version') {
+            return res.status(404).json(
+              wrapError({ code: `EWS_404_${e.code}`, message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/rules/templates/:id — single template. 404 EWS_404_unknown_template. */
   app.get(
     '/v1/rules/templates/:id',
