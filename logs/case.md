@@ -97,3 +97,28 @@
 
 ### Sub-phase tally
 - T6 tally **133 → 134**.
+
+## 2026-05-14 — T6 M9.8 — Investigation cohort summary
+
+**Goal.** Executive rollup over ALL investigations in the tenant for the SPA's risk dashboard. Mirrors M14.19 / M3.5 analytics shape but for case investigations.
+
+### Files
+
+- **NEW** `services/bff/src/investigation_cohort_summary.ts` — pure `summarizeInvestigationCohort(tenant, investigations, now)`. Walks every investigation, increments per-status + per-decision counters, accumulates age-open + time-to-close sums for the means, tracks earliest-opened + latest-closed pointers.
+- **NEW** `services/bff/__tests__/investigation_cohort_summary.test.ts` — 11 tests (6 pure + 5 route): empty (all-status-keys-emitted invariant), single open (open_count + oldest_open + mean_age), multi-open oldest_open invariant, single closed (decision bucket + mean_time_to_close), multi-closed newest_closed invariant, mixed cohort independence, empty route, populated, 403, cross-tenant invisibility, M9.1 list regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/investigations/summary` (audit:read) right BEFORE `/v1/investigations/:id` so the literal `/summary` segment isn't captured by `:id`.
+
+### Design notes
+
+- `by_status` always emits every 6 InvestigationStatus key (zeros when absent) so the SPA's state-mix bar chart doesn't have to backfill missing buckets.
+- `by_decision` uses the literal `'null'` string for closed-without-decision (closed via `triage` → `closed` dismissal path). The 4 named buckets + 1 null bucket sum to closed_count.
+- Means use null (not 0) when count=0 — avoids the misleading "your mean time-to-close is 0 hours" on an empty cohort. SPA renders "no data yet" when null.
+- `oldest_open` / `newest_closed` provide single-row pointers for at-a-glance triage. Useful for "this investigation has been open 14 days, take action" badges.
+- audit:read RBAC matches the existing dashboard-style routes (M14.19, M3.5, M11.11) — not analyst-tier `cases:list` because this is exec-tier aggregate data.
+
+### Verification
+- `npx jest __tests__/investigation_cohort_summary.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **144 → 145**.

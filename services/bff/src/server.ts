@@ -8171,6 +8171,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/summary (T6 M9.8) — executive cohort
+   *  rollup over ALL investigations in the tenant. Returns per-status
+   *  counts (every state key emitted), per-decision counts for closed
+   *  cases (4 named buckets + 'null' bucket for closed-without-
+   *  decision), open/closed split, mean age of opens, mean time-to-
+   *  close, oldest open + newest closed pointers. Mirrors the M14.19
+   *  / M3.5 analytics rollup shape but for case investigations. Mounted
+   *  BEFORE `/:id` so the literal `/summary` segment wins. */
+  app.get(
+    '/v1/investigations/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = caseInvestigationStore.list(req.tenant!.tenant_id, { page_size: 100000 }).items;
+      const { summarizeInvestigationCohort } = require('./investigation_cohort_summary') as
+        typeof import('./investigation_cohort_summary');
+      const out = summarizeInvestigationCohort(req.tenant!.tenant_id, items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/:id — single. 404 on miss/cross-tenant. */
   app.get(
     '/v1/investigations/:id',
