@@ -9550,6 +9550,51 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/field/visits/geo-clusters?radius_km=1&since=ISO (T6 M14.21)
+   *  — greedy Haversine clustering of field visits with GPS pins.
+   *  Visits without GPS are skipped + counted in total_without_gps.
+   *  Default radius 1 km, max 500 km. Clusters sorted by visit_count
+   *  desc with latest_visit_at tie-break. audit:read RBAC. Mounted
+   *  BEFORE any `:visit_id` wildcard would conflict (none currently). */
+  app.get(
+    '/v1/field/visits/geo-clusters',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      const radiusRaw = q.radius_km;
+      const radius_km =
+        radiusRaw === undefined || radiusRaw === '' ? undefined : Number(radiusRaw);
+      if (radius_km !== undefined && !Number.isFinite(radius_km)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'radius_km must be a finite number', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const filter: VisitFilter = {};
+      if (typeof q.since === 'string' && q.since) {
+        const d = new Date(q.since);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'since must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.since = q.since;
+      }
+      const visits = fieldVisitStore.list(req.tenant!.tenant_id, filter);
+      const { clusterFieldVisits, DEFAULT_RADIUS_KM } = require('./field_visit_geo_clustering') as
+        typeof import('./field_visit_geo_clustering');
+      const clusters = clusterFieldVisits(visits, radius_km ?? DEFAULT_RADIUS_KM);
+      return res.json(wrapResponse({ clusters }, ctx));
+    },
+  );
+
   /** GET /v1/field/operations/analytics (T6 M14.19) — supervisor view
    *  rollup over the M14.10 visit ledger: outcome mix, distinct
    *  officers + customers, per-officer breakdown (visit count, success

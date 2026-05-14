@@ -444,3 +444,28 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - `npx jest __tests__/tenant_onboarding_readiness.test.ts` — 13/13 pass.
 - `npx jest` (full BFF suite) — 4401 pass / 58 skipped / 4461 total. Intermittent cross-suite singleton flakiness in `customer_breach_scan` / `rules` — both pass when run alone or together (79/79); pre-existing pattern unrelated to M2.6.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M14.21 — Field visit geo-clustering
+
+### Tasks ticked
+- T6 sub-phase M14.21 — field visit geo-clustering. T6 sub-phase tally 122 → 123.
+
+### Files touched
+- `services/bff/src/field_visit_geo_clustering.ts` (new) — pure `clusterFieldVisits(visits, radius_km)` returns `FieldVisitGeoClusters {radius_km, cluster_count, total_with_gps, total_without_gps, clusters[]}`. Greedy O(n × k) Haversine clustering: walk visits oldest-first, assign each to the FIRST existing cluster whose centroid is within `radius_km`. Running-mean centroid (`c' = c + (point - c) / (n + 1)`) — simple and stable for the small clusters this surface produces. Per-cluster shape `{cluster_id ('c-N'), centroid: {lat, lon}, visit_count, officer_ids[] sorted asc, customer_ids[] sorted asc, by_outcome (all 6 VISIT_OUTCOMES keys), latest_visit_at}`. Visits without `location` are skipped + counted in `total_without_gps`. Default radius 1 km, max 500 km (silently clamped); non-positive radius falls back to default. Clusters sorted by visit_count desc → latest_visit_at desc. Exported `haversineKm` helper separately for testability.
+- `services/bff/__tests__/field_visit_geo_clustering.test.ts` (new) — 19 jest tests: 4 haversine (same-point=0, Mumbai-Delhi ≈ 1148, equatorial 1° ≈ 111, antipodal ≈ 20015), 8 clustering (empty, no-GPS skip, within-radius cluster, outside-radius separate, centroid running mean, latest_visit_at tracks newest, sort order, 3-cluster mixed ranking), 3 radius tuning (wider collapses Mumbai-Pune within MAX_RADIUS_KM clamp, non-positive falls back to default, > MAX clamps), 5 route (empty 200, populated, radius_km=abc → 400, 403 wrong role, cross-tenant invisibility).
+- `services/bff/src/server.ts` — `GET /v1/field/visits/geo-clusters?radius_km=N&since=ISO` placed before `/v1/field/operations/analytics` (mounted in M14.19). Validates `radius_km` via `Number.isFinite` → 400 on non-numeric; validates `since` via `Number.isFinite(new Date(s).getTime())` → 400 on bad input. `audit:read` RBAC.
+
+### Decisions
+- **Greedy clustering, not k-means.** Greedy assignment to the first within-radius cluster is O(n×k) and deterministic — given the same input + radius, always produces the same output. Real geo-clustering is rarely interesting at the precision a 1 km radius implies; supervisor maps want "are these visits in the same neighbourhood?" not "find the optimal 5 clusters".
+- **Running-mean centroid.** As visits join, the centroid drifts toward their average. Simpler than recomputing the centroid from scratch after each assignment, and stable for small clusters. Tested with two points at lat=0, lon=0 vs lat=0, lon=0.001 → centroid lon = 0.0005.
+- **MAX_RADIUS_KM = 500.** Field ops view rarely needs > 500 km; clamping prevents accidental cross-country clusters that would collapse all visits into one dot.
+- **Visits without GPS skipped, not synthesized.** No fake lat/lon — operators see `total_without_gps` separately and know the cluster view is partial.
+- **Haversine helper exported separately.** Lets the geographic-math tests stand alone from the clustering tests; if the formula breaks (R changes, etc.) the haversine tests catch it.
+
+### Hand-offs
+- **agent-ui** — supervisor map page can render `GET /v1/field/visits/geo-clusters?since=2026-05-01T00:00:00Z&radius_km=2` over a Leaflet/Mapbox layer: each cluster a sized marker (radius scales with `visit_count`), click → popup with officer + customer chips + by_outcome mini-bar. The `total_without_gps` count surfaces as a card footer ("plus 3 visits without GPS").
+
+### Verification
+- `npx jest __tests__/field_visit_geo_clustering.test.ts` — 19/19 pass.
+- `npx jest` (full BFF suite) — 4443 pass / 58 skipped / 4501 total, **zero failures**.
+- `npx tsc --noEmit` — clean.
