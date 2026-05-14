@@ -295,3 +295,28 @@ T0.6 vendor stubs, T3.x integration deepening + RBAC matrix doc + Glue Schema Re
 - **alerts test suite:** added supertest dependency; new `__tests__/rbac.test.ts` with 8 tests (admin-only /evaluate, denied roles per matrix, allowed roles per matrix). 40/40 jest pass total; tsc clean.
 - **SPA axios interceptor:** `web/src/lib/http.ts` now reads the auth store's `apex.ews.user` blob from localStorage and sends `roles[0]` as `x-apex-role` on every request, alongside the existing Bearer token interceptor. 5 new vitest tests cover all paths (token-only, role-only, neither, malformed-blob, both).
 - **End-to-end posture:** SPA login → user object cached to localStorage → axios interceptor sets `x-apex-role` → service reads header via `defaultGetRole` → `@apex-ews/rbac.requireRole` checks the canonical matrix. Same path for cases, alerts, bff, collection-adapter. JWT-claim extraction is the production swap point at both ends.
+
+## 2026-05-14 — T6 M14.19 — Field-operations analytics
+
+### Tasks ticked
+- T6 sub-phase M14.19 — field-operations analytics. T6 sub-phase tally 102 → 103.
+
+### Files touched
+- `services/bff/src/field_operations_analytics.ts` (new) — pure `summarizeFieldOperations(visits)` returning `FieldOperationsAnalytics` with sample_size, distinct_officers, distinct_customers, outcome_mix (re-uses existing `aggregateByOutcome`), success_count + success_rate (success = met_customer + partial_payment + promised_to_pay; tunable via exported `SUCCESS_OUTCOMES`), mean_visits_per_officer, per-officer rollup (visit_count, distinct_customers, success_rate, by_outcome, last_visit_at) sorted by visit_count desc → success_rate desc → officer_id asc.
+- `services/bff/__tests__/field_operations_analytics.test.ts` (new) — 15 jest tests: 9 unit (empty input shape, SUCCESS_OUTCOMES contents, success_rate denominator, outcome_mix double-counting, per-officer distinct_customers + last_visit_at + success_rate, primary sort by visit_count, secondary sort by success_rate, tertiary alphabetical tie-break, distinct customers across officers) + 6 route (200 empty, 200 with visits, filter narrowing, invalid outcome → 400, 403 wrong role, cross-tenant isolation).
+- `services/bff/src/server.ts` — import `summarizeFieldOperations` + `isVisitOutcome`; new route `GET /v1/field/operations/analytics` (`audit:read`, tenant-isolated) accepting the same filter set as `/v1/field/visits` (officer_id/customer_id/outcome/since/until), with strict `isVisitOutcome` validation on `?outcome=`. Returns `{ analytics }`.
+
+### Decisions
+- **Success = met_customer + partial_payment + promised_to_pay.** Collections-workflow positives. no_response / dispute / escalation_needed are negatives. Exported `SUCCESS_OUTCOMES` so tests + future consumers can use the canonical set instead of duplicating the literal.
+- **Sort order is deterministic.** Tie-break chain (visit_count desc → success_rate desc → officer_id asc) makes the per-officer list snapshot-stable across runs.
+- **Reuse existing filter shape.** `/v1/field/operations/analytics` mirrors `/v1/field/visits` so callers compose the same query params; reduces SPA surface complexity.
+- **`audit:read` RBAC.** Matches M3.5 / M8.6 / M9.5 analytics-route convention.
+- **No new store.** Derived from M14.10's existing visit ledger.
+
+### Hand-offs
+- **agent-ui** — supervisor "team operations" panel can drive against `GET /v1/field/operations/analytics?since=...`. Envelope: `{ analytics: FieldOperationsAnalytics }`. The per_officer list is already sorted leaderboard-style.
+
+### Verification
+- `npx jest __tests__/field_operations_analytics.test.ts` — 15/15 pass.
+- `npx jest` (full BFF suite) — 4108 pass / 58 skipped / 4167 total. Intermittent cross-suite singleton flakiness in `config_bulk` / `cms_case_tracking` — both pass when run alone; pre-existing pattern unrelated to M14.19.
+- `npx tsc --noEmit` — clean.

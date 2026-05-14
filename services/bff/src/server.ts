@@ -127,11 +127,13 @@ import {
   FieldVisitError,
   aggregateByOutcome,
   defaultFieldVisitStore,
+  isVisitOutcome,
   isVisitTz,
   type FieldVisitStore,
   type VisitFilter,
   type VisitOutcome,
 } from './field_officer';
+import { summarizeFieldOperations } from './field_operations_analytics';
 import {
   PreviewError,
   applyBulkImportPreview,
@@ -9011,6 +9013,42 @@ export function makeApp(deps: AppDeps = {}) {
       const items = fieldVisitStore.list(req.tenant!.tenant_id, filter);
       const aggregate = aggregateByOutcome(items);
       return res.json(wrapResponse({ items, total: items.length, aggregate }, ctx));
+    },
+  );
+
+  /** GET /v1/field/operations/analytics (T6 M14.19) — supervisor view
+   *  rollup over the M14.10 visit ledger: outcome mix, distinct
+   *  officers + customers, per-officer breakdown (visit count, success
+   *  rate, last visit), mean visits per officer.
+   *
+   *  Filters mirror /v1/field/visits: ?officer_id= ?customer_id=
+   *  ?outcome= ?since= ?until=. */
+  app.get(
+    '/v1/field/operations/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      const filter: VisitFilter = {};
+      if (typeof q.customer_id === 'string' && q.customer_id) filter.customer_id = q.customer_id;
+      if (typeof q.officer_id === 'string' && q.officer_id) filter.officer_id = q.officer_id;
+      if (typeof q.outcome === 'string' && q.outcome) {
+        if (!isVisitOutcome(q.outcome)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `outcome '${q.outcome}' is not a recognised visit outcome`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        filter.outcome = q.outcome;
+      }
+      if (typeof q.since === 'string' && q.since) filter.since = q.since;
+      if (typeof q.until === 'string' && q.until) filter.until = q.until;
+      const visits = fieldVisitStore.list(req.tenant!.tenant_id, filter);
+      const analytics = summarizeFieldOperations(visits);
+      return res.json(wrapResponse({ analytics }, ctx));
     },
   );
 
