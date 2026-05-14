@@ -80,6 +80,10 @@ export interface QuietHoursMuteEventStore {
   countForUser(tenant_id: string, username: string): number;
   /** Clear a user's history (used by tests + the SPA "clear" button). */
   clearForUser(tenant_id: string, username: string): number;
+  /** T6 M10.9 — newest-first list across every user in the tenant.
+   *  Optional `since` filter on muted_at. Used by the analytics
+   *  rollup to span all users for a tenant-wide view. */
+  listAllForTenant(tenant_id: string, since?: Date): readonly QuietHoursMuteEvent[];
 }
 
 export class InMemoryQuietHoursMuteEventStore implements QuietHoursMuteEventStore {
@@ -123,6 +127,21 @@ export class InMemoryQuietHoursMuteEventStore implements QuietHoursMuteEventStor
     const n = this.map.get(k)?.length ?? 0;
     this.map.delete(k);
     return n;
+  }
+
+  listAllForTenant(tenant_id: string, since?: Date): readonly QuietHoursMuteEvent[] {
+    const prefix = `${tenant_id}::`;
+    const out: QuietHoursMuteEvent[] = [];
+    for (const [k, arr] of this.map) {
+      if (!k.startsWith(prefix)) continue;
+      for (const e of arr) {
+        if (since && new Date(e.muted_at).getTime() < since.getTime()) continue;
+        out.push(e);
+      }
+    }
+    // Newest-first by muted_at.
+    out.sort((a, b) => (a.muted_at < b.muted_at ? 1 : a.muted_at > b.muted_at ? -1 : 0));
+    return out;
   }
 }
 

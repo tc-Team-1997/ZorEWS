@@ -1,6 +1,6 @@
 # EWS.docx — Feature Gap Registry
 
-**Last updated:** 2026-05-14 (T6 M15.5 — Audit chain integrity spot-check shipped — `AuditTrailStore.verifyChainSample` walks newest N events with full-chain-equivalent semantics (recomputes hashes + closes the window's leading edge against the prior event or GENESIS); new route `GET /v1/audit/integrity/sample?window=N` (default 50, max 500). Previous: M4.8 backtest comparison, M16.12 scenario bulk delete, M5.12 rule template versions, M6.9 preset diff, M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
+**Last updated:** 2026-05-14 (T6 M10.9 — Quiet-hours mute analytics shipped — extended `QuietHoursMuteEventStore` with `listAllForTenant`; pure `summarizeQuietHoursMutes(events)` returns sample_size, distinct_users, by_class, by_day, top_users (cap 10); new route `GET /v1/alerts/quiet-hours-muted/analytics?since=ISO`. Previous: M15.5 audit chain spot-check, M4.8 backtest comparison, M16.12 scenario bulk delete, M5.12 rule template versions, M6.9 preset diff, M11.9 dashboard bundle, M12.5 report job analytics, M14.19 field-ops analytics, M9.5 case SLA breach, M8.6 alert routing analytics.)
 
 > Section-by-section walk through `EWS.docx` (the original design source — 11 MB Word doc at repo root, 133 text paragraphs) against what is actually shipped in the prototype. Each row is a feature called out by the doc, mapped to its current implementation status and the canonical task in `TASKS.md` (if any).
 >

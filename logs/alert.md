@@ -127,3 +127,28 @@ HIGH was not explicitly listed in FR-ALERT-4 ("Critical: SMS+Email; Medium: emai
 - `npx jest __tests__/alert_routing_analytics.test.ts` — 20/20 pass.
 - `npx jest` (full BFF suite) — 4076 pass / 58 skipped / 4134 total (was 3155/9/3164 in STATUS.md — incremental growth since 2026-05-07, all green).
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M10.9 — Quiet-hours mute analytics
+
+### Tasks ticked
+- T6 sub-phase M10.9 — quiet-hours mute analytics. T6 sub-phase tally 110 → 111.
+
+### Files touched
+- `services/bff/src/alert_quiet_hours_mute.ts` — extended `QuietHoursMuteEventStore` interface with `listAllForTenant(tenant_id, since?)` returning events across all users for the tenant, newest-first. `InMemoryQuietHoursMuteEventStore` implementation iterates the internal `${tenant}::${user}` keyed map, filters by prefix + optional `since`, sorts by `muted_at` desc.
+- `services/bff/src/alert_quiet_hours_mute_analytics.ts` (new) — pure `summarizeQuietHoursMutes(events)` returns `QuietHoursMuteAnalytics`: sample_size, distinct_users, by_class (all 4 keys; RED stays 0 by design since M10.8 bypasses red), by_day (UTC YYYY-MM-DD buckets oldest-first), top_users cap 10 sorted by mute_count desc then username asc.
+- `services/bff/__tests__/alert_quiet_hours_mute_analytics.test.ts` (new) — 15 jest tests: 6 pure unit (empty, class mix, distinct_users, top_users tie-break, top_users cap, by_day sort), 3 store-level (listAllForTenant newest-first across users, since filter, tenant isolation), 6 route (empty, populated, ?since narrows, ?since=invalid → 400, 403 wrong role, cross-tenant invisible).
+- `services/bff/src/server.ts` — `GET /v1/alerts/quiet-hours-muted/analytics?since=ISO` route mounted before the M10.8 `/me` route so the literal "analytics" segment isn't captured. `audit:read` RBAC matches M10.8. Validates ?since with `Number.isFinite(new Date(s).getTime())` and returns 400 on bad input.
+
+### Decisions
+- **`listAllForTenant` on the store, not pure-function over the events.** The store already encapsulates the per-(tenant, user) keying; exposing the tenant slice as a method keeps the events-array internals private. Mirrors how M15.5 went vs M15.2.
+- **Top 10 cap.** Same posture as M12.5's top_requesters; SPA can paginate later if needed.
+- **`by_day` uses UTC.** Mute timestamps are ISO so YYYY-MM-DD slice is the UTC day. Tenant-local-day grouping isn't worth the complexity for an internal supervisor view.
+- **`by_class` keeps RED at 0.** RED bypasses M10.8 by design, so the analytics will never see RED events. Surfacing the key at 0 keeps the SPA's stable 4-bucket strip without conditionals.
+
+### Hand-offs
+- **agent-ui** — admin dashboard can drive against `GET /v1/alerts/quiet-hours-muted/analytics?since=2026-05-01T00:00:00Z`. Envelope: `{ analytics: QuietHoursMuteAnalytics }`. `top_users` is already a leaderboard; `by_day` is a stacked-bar candidate.
+
+### Verification
+- `npx jest __tests__/alert_quiet_hours_mute_analytics.test.ts` — 15/15 pass.
+- `npx jest` (full BFF suite) — 4247 pass / 58 skipped / 4305 total, **zero failures**.
+- `npx tsc --noEmit` — clean.

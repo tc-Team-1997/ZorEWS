@@ -2554,6 +2554,43 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/quiet-hours-muted/analytics?since=ISO (T6 M10.9)
+   *  — tenant-wide rollup over the M10.8 quiet-hours mute event log:
+   *  sample size, distinct users, class mix (RED never appears since
+   *  M10.8 bypasses it by design), per-day buckets oldest-first, top
+   *  10 muted users (sorted by count desc, tie-broken by username asc).
+   *  audit:read RBAC; mounted before any /:username wildcard. */
+  app.get(
+    '/v1/alerts/quiet-hours-muted/analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sinceRaw = req.query.since;
+      let since: Date | undefined;
+      if (typeof sinceRaw === 'string' && sinceRaw.trim()) {
+        const d = new Date(sinceRaw);
+        if (!Number.isFinite(d.getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'since must be a valid ISO-8601 timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        since = d;
+      }
+      const events = quietHoursMuteEventStore.listAllForTenant(
+        req.tenant!.tenant_id,
+        since,
+      );
+      const { summarizeQuietHoursMutes } = require('./alert_quiet_hours_mute_analytics') as
+        typeof import('./alert_quiet_hours_mute_analytics');
+      const analytics = summarizeQuietHoursMutes(events);
+      return res.json(wrapResponse({ analytics }, ctx));
+    },
+  );
+
   /** DELETE /v1/alerts/quiet-hours-muted/me (T6 M10.8) — clear the
    *  caller's quiet-hours-mute audit history (e.g. after the user
    *  reviewed it). Returns the number of cleared rows. */
