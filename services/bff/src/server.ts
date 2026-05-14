@@ -14751,6 +14751,25 @@ export function makeApp(deps: AppDeps = {}) {
   // a column-mapper preview before file upload + validate sample
   // rows server-side.
 
+  /** GET /v1/ingestion/retry-policies (T6 M3.10) — per-connector
+   *  hand-calibrated retry strategy (max_retries, backoff curve,
+   *  retryable error codes, dead-letter flag). Policy keyed by
+   *  connector TYPE — kafka_stream connectors share one curve,
+   *  rest_api share another, etc. Lets the SPA render a "retry
+   *  transparency" panel next to M3.6 failure pattern report. */
+  app.get(
+    '/v1/ingestion/retry-policies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listConnectorRetryPolicies } = require('./connector_retry_policies') as
+        typeof import('./connector_retry_policies');
+      const out = listConnectorRetryPolicies();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/schema/field-index (T6 M3.8) — inverted index
    *  over every connector's fields. For each unique field_name across
    *  the platform schema catalogue, returns the connector_ids that

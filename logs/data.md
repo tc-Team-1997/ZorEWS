@@ -247,3 +247,32 @@ pipeline-svc:
 
 ### Sub-phase tally
 - T6 tally **147 → 148**.
+
+## 2026-05-14 — T6 M3.10 — Connector retry policy catalog
+
+**Goal.** Per-connector retry strategy metadata for the SPA's "retry transparency" panel. Surfaces "why didn't this connector retry that timeout?" by exposing the policy operators can inspect alongside M3.6's failure-pattern report.
+
+### Files
+
+- **NEW** `services/bff/src/connector_retry_policies.ts` — `listConnectorRetryPolicies()` + `getConnectorRetryPolicy(id)`. Policy is TYPE-keyed: 5 connector types (kafka_stream, sftp_drop, batch_csv, rest_api, soap_api) each have one canonical retry curve. Per-connector lookup composes the type policy + the connector's id+name.
+- **NEW** `services/bff/__tests__/connector_retry_policies.test.ts` — 11 tests (8 pure + 3 route): every seed has policy, sort, full shape, type-policy consistency, rest_api 429-retryable invariant, deep-copy, known/unknown lookups, admin happy, 403, platform-static.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/ingestion/retry-policies` (audit:read) right ABOVE the M3.8 field-index route to keep the M3 cluster grouped.
+
+### Design notes
+
+- TYPE-keyed not ID-keyed: all kafka_stream connectors should follow the same retry curve (they're talking to the same Kafka broker, share rate limits, fail in the same ways). Per-id policies would be over-engineering.
+- 5 curves represent operationally distinct posture:
+  - kafka_stream: 5 retries, exp 1s→60s, dead-letter (broker outage hurts; need aggressive recovery)
+  - sftp_drop: 3 retries, exp 30s→600s, no dead-letter (file appears later, no point losing it to DLQ)
+  - batch_csv: 2 retries, linear 60s→120s, no dead-letter (next batch will retry anyway)
+  - rest_api: 4 retries, exp 2s→120s, dead-letter (429 + 503 are standard retryable codes)
+  - soap_api: 3 retries, exp 5s→180s, dead-letter (SOAP-fault-aware codes)
+- retryable_error_codes is the heart of the policy — surface lets the SPA show "this error wasn't in the retry list, that's why it didn't retry."
+- Per-policy retryable_error_codes deep-copied at list time so SPA can mutate without polluting the singleton.
+
+### Verification
+- `npx jest __tests__/connector_retry_policies.test.ts` — 11/11 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **164 → 165**.
