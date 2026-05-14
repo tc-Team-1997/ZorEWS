@@ -177,3 +177,27 @@
 - `npx jest __tests__/custom_dashboard_lint.test.ts` — 18/18 pass.
 - `npx jest` (full BFF suite) — 4343 pass / 58 skipped / 4401 total, **zero failures**.
 - `npx tsc --noEmit` — clean.
+
+## 2026-05-14 — T6 M11.11 — Custom dashboard widget usage analytics
+
+**Goal.** Cross-cut over a tenant's saved dashboards: for each platform widget_type, count the dashboards using it + the total widget instances + the per-dashboard breakdown. Surfaces popular widgets (top of the usage table) AND completely-unused catalog entries (candidates for a cleanup or guided tour). Distinct from M11.7 (CRUD) / M11.8 (resolver) / M11.10 (lint) — this is the tenant-scoped adoption telemetry.
+
+### Files
+
+- **NEW** `services/bff/src/dashboard_widget_usage.ts` — pure `analyseDashboardWidgetUsage(dashboards: readonly CustomDashboard[]): DashboardWidgetUsage`. Seeds accumulators for every `WIDGET_TYPES` entry up-front so unused widgets emit at count=0. Tracks per-dashboard `localPerWidget` map during each dashboard pass + rolls up to `dashboard_count` (distinct) + `total_instances` (sum) at the end. Per-dashboard breakdown sorted by count desc then name asc; top-level entries sorted by total_instances desc then widget_type asc.
+- **NEW** `services/bff/__tests__/dashboard_widget_usage.test.ts` — 10 tests across 5 pure + 5 route describe blocks: empty tenant with full catalog emission, distinct-vs-total semantics on a single dashboard, multi-dashboard aggregation, sort order for both top-level entries AND per-dashboard breakdown, route happy path, 403, cross-tenant invisibility, /widgets/catalog regression.
+- **EDIT** `services/bff/src/server.ts` — imported `analyseDashboardWidgetUsage`; mounted `GET /v1/dashboards/widgets/usage` (audit:read) right after `/v1/dashboards/widgets/catalog`. Mount ordering keeps both literal `/widgets/*` segments before any wildcards.
+
+### Design notes
+
+- Seeding accumulators for EVERY catalog widget_type up-front (before walking the dashboards) is what guarantees the "unused widgets surface at count=0" contract. Otherwise an empty tenant would emit an empty `by_widget_type` array and the SPA would have to remember to render the missing widgets manually.
+- `dashboard_count` vs `total_instances` semantics: 1 dashboard with 3 alerts widgets = (1, 3). Tested explicitly so a future refactor that conflates them gets caught.
+- Per-dashboard breakdown only includes dashboards that actually use the widget_type — a dashboard with zero widgets of type X doesn't appear under X's `dashboards[]`. Otherwise the breakdown would balloon to N×W entries for no benefit.
+- Pattern overlap with M15.6 (audit action catalog) and M3.8 (field index): the Map-of-accumulators → materialise sorted arrays → sort entries shape is now used three times. Consistent and well-tested.
+
+### Verification
+- `npx jest __tests__/dashboard_widget_usage.test.ts` — 10/10 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **135 → 136**.

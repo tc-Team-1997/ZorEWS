@@ -577,6 +577,7 @@ import { analyseTemplateCloneHistory } from './template_clone_analysis';
 import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
 import { listInvestigationStateGraph } from './investigation_state_graph';
 import { indexConnectorSchemaFields } from './connector_schema_field_index';
+import { analyseDashboardWidgetUsage } from './dashboard_widget_usage';
 import {
   EvidenceError,
   defaultEvidencePackageStore,
@@ -8301,6 +8302,27 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const items = Object.values(WIDGET_CATALOG);
       return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** GET /v1/dashboards/widgets/usage (T6 M11.11) — cross-cut over the
+   *  tenant's saved dashboards. For each widget_type in WIDGET_CATALOG
+   *  (every row always emitted, even at count=0) returns
+   *  {widget_type, display_name, dashboard_count, total_instances,
+   *   dashboards[]: {dashboard_id, name, count}}. Surfaces popular
+   *  widgets + completely-unused catalog entries (candidates for a
+   *  cleanup or guided tour). Mounted right after `/widgets/catalog`
+   *  so the literal `/widgets/usage` segment isn't captured by any
+   *  `:dashboard_id` wildcard. */
+  app.get(
+    '/v1/dashboards/widgets/usage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboards = customDashboardStore.list(req.tenant!.tenant_id);
+      const out = analyseDashboardWidgetUsage(dashboards);
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
