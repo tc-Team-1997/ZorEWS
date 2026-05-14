@@ -800,3 +800,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/alerts/routing/diff` (audit:read).
 - 18 new jest tests. Full BFF suite 5221 effective (2 pre-existing flakes).
 - T6 sub-phase tally 178 → 179.
+
+## 2026-05-15 — T6 M4.12 Indicator threshold drift analytics
+
+- Pure `buildIndicatorThresholdDrift(store, tenant, now)` at `services/bff/src/indicator_threshold_drift.ts` computes per-tenant threshold drift over the M4.4 override store.
+- Per-override: per-band `{default_value, effective_value, delta_abs (signed), delta_rel (|delta_abs|/|default|; null when default=0)}` for yellow/orange/red, then `drift_score = mean(non-null delta_rel)` + `peak_band_drift` + `peak_band` enum.
+- Envelope: `{total_overrides, total_with_drift, total_zero_drift, mean_drift_score, most_drifted_indicator, indicators[]}` sorted by drift_score desc.
+- Companion to M4.10 (auto-tune) — M4.10 says "what to use", M4.12 says "how far have you drifted".
+- New route `GET /v1/indicators/thresholds/drift` (audit:read).
+- 16 new jest tests. Full BFF suite 5237 effective (2 pre-existing flakes).
+- T6 sub-phase tally 179 → 180. **180 sub-phases milestone crossed.**

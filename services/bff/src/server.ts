@@ -10179,6 +10179,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/drift (T6 M4.12) — per-indicator
+   *  drift score over the M4.4 override store. Per-row: band-by-
+   *  band deltas (default/effective/delta_abs/delta_rel) for
+   *  yellow/orange/red + drift_score (mean |delta_rel|) +
+   *  peak_band_drift + peak_band. Envelope adds total_overrides +
+   *  total_with_drift + total_zero_drift + mean_drift_score +
+   *  most_drifted_indicator. Sorted by drift_score desc. Mounted
+   *  BEFORE catch-all `/:indicator_id` so the literal segment wins. */
+  app.get(
+    '/v1/indicators/thresholds/drift',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorThresholdDrift } = require('./indicator_threshold_drift') as
+        typeof import('./indicator_threshold_drift');
+      const out = buildIndicatorThresholdDrift(
+        thresholdOverrideStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/effective?vertical=banking|insurance
    *  (T6 M4.9) — every platform indicator's effective threshold for the
    *  caller's tenant, with the resolution chain (library_default vs
