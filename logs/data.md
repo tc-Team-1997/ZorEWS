@@ -149,3 +149,27 @@ pipeline-svc:
   in `txn_features` plus `customer_360.exposure_to_income_ratio` and
   `loan_360.dpd_bucket` should cover the Financial / Behavioural / Transaction
   families directly. Credit family pulls from `customer_360.bureau_*`.
+
+## 2026-05-14 — T6 M3.6 — Connector run failure pattern clustering
+
+### Tasks ticked
+- T6 sub-phase M3.6 — connector run failure pattern clustering. T6 sub-phase tally 112 → 113.
+
+### Files touched
+- `services/bff/src/connector_run_failure_patterns.ts` (new) — pure `clusterRunFailures(runs)` returns `FailurePatternsResult {sample_size, failure_count, distinct_patterns, clusters[]}`. `normaliseError(msg)` regex chain (order matters — most-specific first): ISO timestamps → `<TS>`, hex UUIDs → `<UUID>`, single/double-quoted strings → `'<STR>'` / `"<STR>"`, POSIX paths → `<PATH>`, long hex runs (≥ 16) → `<HASH>`, remaining numbers → `<N>`, whitespace collapsed + trimmed. Skips runs with `status` not in `failure|partial` AND skips runs without an `error_message`. Per-cluster exemplars sorted newest-first and capped at 3. Top 10 clusters returned, sorted by count desc with last_failed_at desc tie-break.
+- `services/bff/__tests__/connector_run_failure_patterns.test.ts` (new) — 22 jest tests: 8 normalisation (each regex + whitespace + same-pattern collapse), 9 clustering (empty, all-success, null/empty/whitespace error_message skipped, grouping similar errors, partial-status clusters, sort by count → last_failed_at tie-break, recent_messages cap 3, top_clusters cap 10, last_failed_at + sample_run_id reflects newest matching run), 5 route (empty 200, window=0 → 400, unknown_connector → 404, 403 wrong role, cross-tenant invisible).
+- `services/bff/src/server.ts` — new route `GET /v1/ingestion/connectors/:id/runs/failure-patterns?window=N` reusing M3.5's `RUN_ANALYTICS_DEFAULT_WINDOW` (20) and `RUN_ANALYTICS_MAX_WINDOW` (200) constants for consistency. `audit:read` RBAC matches M3.5. 404 unknown_connector returned via the existing `IngestionError` path. Inline `require()` for the analytics module (consistent with other late-bound analytics routes).
+
+### Decisions
+- **Skip runs without error_message.** A failure with no error text has nothing to cluster by; better to count it in `failure_count` only if we have a pattern. Current impl skips ENTIRELY (doesn't bump failure_count) — operators reading the patterns view should see counts that match the cluster list, not phantom failures.
+- **Partial == failure-flavored for clustering.** M3.5's success_rate denominator already counts partials as failures; matching that posture here so the two surfaces tell a consistent story.
+- **Regex order matters.** ISO timestamps → UUIDs → quoted strings → paths → hashes → numbers. Doing numbers FIRST would shred the UUID format before the UUID regex sees it; the test "UUID inside a quoted string" covers the trickiest interaction.
+- **Top 10 cap.** Same posture as M12.5 top_requesters + M14.19 per_officer leaderboards.
+
+### Hand-offs
+- **agent-ui** — connector detail page can add a "Top failure patterns" panel reading `GET .../runs/failure-patterns?window=50`. Render each cluster as a card with the normalized pattern as the title, count as a badge, recent_messages collapsed into a "Show raw" expander.
+
+### Verification
+- `npx jest __tests__/connector_run_failure_patterns.test.ts` — 22/22 pass.
+- `npx jest` (full BFF suite) — 4281 pass / 58 skipped / 4339 total, **zero failures**.
+- `npx tsc --noEmit` — clean.

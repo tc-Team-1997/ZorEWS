@@ -12502,6 +12502,51 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/connectors/:id/runs/failure-patterns?window=N
+   *  (T6 M3.6) — cluster failed/partial runs by normalized error
+   *  message. Same window semantics as M3.5 (default 20, max 200).
+   *  Returns top 10 clusters with pattern + count + recent_messages
+   *  (3 newest) + last_failed_at + sample_run_id. */
+  app.get(
+    '/v1/ingestion/connectors/:id/runs/failure-patterns',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? RUN_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (!Number.isInteger(window) || window < 1 || window > RUN_ANALYTICS_MAX_WINDOW) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `window must be 1..${RUN_ANALYTICS_MAX_WINDOW}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const runs = ingestionRegistry.listRuns(req.tenant!.tenant_id, id, window);
+        const { clusterRunFailures } = require('./connector_run_failure_patterns') as
+          typeof import('./connector_run_failure_patterns');
+        const patterns = clusterRunFailures(runs);
+        return res.json(
+          wrapResponse({ connector_id: id, window, patterns }, ctx),
+        );
+      } catch (e) {
+        if (e instanceof IngestionError && e.code === 'unknown_connector') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ingestion/adapters/sla-dashboard (T6 M14.11) — fleet-wide
    *  SLA dashboard. Runs M3.5 analytics across every connector for the
    *  tenant + applies per-adapter SLA gates.
