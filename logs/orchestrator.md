@@ -505,3 +505,28 @@
 
 ### Sub-phase tally
 - T6 tally **139 → 140**.
+
+## 2026-05-14 — T6 M12.8 — Report schedule conflict detection
+
+**Goal.** Pair-finder over the report schedule fleet: detect schedules that fire within X minutes of each other. Lets ops spot "these two heavy reports slam the database simultaneously" resource contention before it bites.
+
+### Files
+
+- **NEW** `services/bff/src/schedule_conflict_detection.ts` — pure `detectScheduleConflicts(schedules, from, window_minutes, lookahead_n)`. Re-uses M12.6 `previewScheduleEntryRuns` to generate each enabled schedule's next-N firings, merges into a flat sorted timeline, then sweeps with a two-pointer algorithm: for each firing i, walk j=i+1 while gap ≤ window, emit conflict ONLY when schedule_id[i] !== schedule_id[j]. Same-schedule self-pairs are filtered out (by construction they're never closer than the cadence period).
+- **NEW** `services/bff/__tests__/schedule_conflict_detection.test.ts` — 19 tests (12 pure + 7 route) cover empty input, single schedule (no conflicts), two-at-same-time, window-threshold sensitivity (15min vs 90min), same-schedule-no-self-conflict invariant, disabled-exclusion, 3-schedule C(3,2)=3 pair count, validation rejections, sort order, route happy paths, 400 × 2, 403, M12.7 upcoming regression.
+- **EDIT** `services/bff/src/server.ts` — mounted `GET /v1/reports/schedules/conflicts` (audit:read) right above the M12.7 /upcoming route so all the fleet-wide diagnostics sit together. Mounting before `/:schedule_id` ensures the literal segment wins.
+
+### Design notes
+
+- Two-pointer sweep is O(n × k) in the worst case but k is bounded by the window — once `gap > window` we break the inner loop. Average case linear-ish given the window+lookahead bounds.
+- Same-schedule self-pair filter is the load-bearing assertion. Daily schedules generate ~lookahead_n firings each, all separated by ≥24h; conflicts between those are not interesting (and would never fit a sub-day window anyway).
+- Sort: conflicts surface earliest-first so the SPA renders the most urgent contention at the top.
+- Bound choices: window 0-240 min (4-hour upper bound — wider than that and "conflict" becomes meaningless); lookahead 1-50 (matches M12.6's PREVIEW_MAX_N).
+- Validation rejection through ConflictDetectionError → 400 — same shape as M12.7's FleetPreviewError handling.
+
+### Verification
+- `npx jest __tests__/schedule_conflict_detection.test.ts` — 19/19 pass.
+- `npx tsc --noEmit` — clean.
+
+### Sub-phase tally
+- T6 tally **148 → 149**.

@@ -14950,6 +14950,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/conflicts?window=15&n=10&from=ISO
+   *  (T6 M12.8) — finds pairs of DIFFERENT schedules whose fire_at
+   *  falls within `window` minutes of each other. Useful for ops to
+   *  spot resource contention (two heavy reports firing the same
+   *  minute and slamming the database). Same-schedule self-pairs are
+   *  filtered out. Mounted BEFORE /:schedule_id so the literal
+   *  /conflicts wins. */
+  app.get(
+    '/v1/reports/schedules/conflicts',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const nRaw = req.query.n as string | undefined;
+      const fromRaw = req.query.from as string | undefined;
+      const window_minutes = windowRaw === undefined ? 15 : Number(windowRaw);
+      const lookahead_n = nRaw === undefined ? 10 : Number(nRaw);
+      const from = fromRaw ? new Date(fromRaw) : now();
+      try {
+        const page = reportScheduleStore.list(req.tenant!.tenant_id, 1, 500);
+        const { detectScheduleConflicts, ConflictDetectionError } = require('./schedule_conflict_detection') as
+          typeof import('./schedule_conflict_detection');
+        try {
+          const out = detectScheduleConflicts(page.items, from, window_minutes, lookahead_n);
+          return res.json(wrapResponse(out, ctx));
+        } catch (e) {
+          if (e instanceof ConflictDetectionError) {
+            return res.status(400).json(
+              wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/reports/schedules/upcoming?n=20&from=ISO (T6 M12.7)
    *  — fleet-wide calendar view: walks every ENABLED schedule in
    *  the tenant, generates each schedule's next-N firings via
