@@ -16419,6 +16419,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/severity-distribution (T6 M5.16) —
+   *  templates grouped by recommended_severity (critical/high/
+   *  medium/low). Per-severity: total_count + by_category + by_vertical
+   *  + template_ids[]. Envelope: most_common_severity + unused_severities[].
+   *  Mirror of M5.15 (action inventory) pivoted by severity instead.
+   *  Platform-static. Mounted BEFORE catch-all `/:id`. */
+  app.get(
+    '/v1/rules/templates/severity-distribution',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildTemplateSeverityDistribution } = require('./rule_template_severity_distribution') as
+        typeof import('./rule_template_severity_distribution');
+      const out = buildTemplateSeverityDistribution();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/categories — distinct template categories. */
   app.get(
     '/v1/rules/templates/categories',

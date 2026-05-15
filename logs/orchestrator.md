@@ -879,3 +879,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/scenarios/library/magnitude` (customers:read_risk_profile; platform-static).
 - 21 new jest tests. Full suite 5350 effective (3 pre-existing cross-suite flakes; isolated runs pass).
 - T6 sub-phase tally 185 → 186.
+
+## 2026-05-15 — T6 M5.16 Rule template severity distribution
+
+- Pure `buildTemplateSeverityDistribution()` at `services/bff/src/rule_template_severity_distribution.ts` pivots M5.1 templates by `recommended_severity`.
+- Per-severity: `{severity, total_count, by_category (5 keys), by_vertical (3 keys), template_ids[]}`.
+- Envelope: `{total_templates, severities[] in canonical order (critical → high → medium → low), most_common_severity, unused_severities[]}`.
+- Every template appears in exactly one severity bucket (invariant tested).
+- New route `GET /v1/rules/templates/severity-distribution` (rules:list; platform-static).
+- Companion to M5.15 (action inventory) but pivoted by severity.
+- 19 new jest tests. Full suite 5369 effective (2 pre-existing flakes).
+- T6 sub-phase tally 186 → 187.
