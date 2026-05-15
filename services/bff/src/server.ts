@@ -13282,6 +13282,32 @@ export function makeApp(deps: AppDeps = {}) {
    * category filter narrows the list. Each entry includes
    * `is_default` so the SPA can highlight overridden values.
    */
+  /** GET /v1/admin/config/schema.md (T6 M13.13) — Markdown reference
+   *  export of the M13.1 platform schema (NOT tenant overrides; just
+   *  the static catalogue of keys + types + defaults + descriptions).
+   *  Hand-publishable in ops onboarding docs / regulator submissions.
+   *  text/markdown + Content-Disposition for download. Mounted BEFORE
+   *  GET /v1/admin/config so the literal .md suffix isn't lost in
+   *  the catch-all. */
+  app.get(
+    '/v1/admin/config/schema.md',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { renderConfigSchemaMarkdown } = require('./admin_config_markdown') as
+        typeof import('./admin_config_markdown');
+      const md = renderConfigSchemaMarkdown(now());
+      res.set('Content-Type', 'text/markdown; charset=utf-8');
+      res.set(
+        'Content-Disposition',
+        `inline; filename="admin-config-schema.md"`,
+      );
+      void ctx;
+      return res.status(200).send(md);
+    },
+  );
+
   /** GET /v1/admin/config/summary.txt (T6 M13.9) — printable plain-text
    *  summary of every config key with effective value + override
    *  metadata. Mirrors M15.4 (audit evidence) + M7.6 (model

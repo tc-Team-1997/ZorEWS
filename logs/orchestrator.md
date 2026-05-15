@@ -921,3 +921,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/reports/jobs/runtime-trend` (audit:read; mounted before catch-all `/:job_id`).
 - 16 new jest tests. Full suite 5424 effective (2 pre-existing flakes).
 - T6 sub-phase tally 189 → 190. **190 sub-phases milestone crossed.**
+
+## 2026-05-15 — T6 M13.13 Config schema Markdown reference export
+
+- Pure `renderConfigSchemaMarkdown(now)` at `services/bff/src/admin_config_markdown.ts` emits the M13.1 PLATFORM schema (static catalogue, not tenant overrides) as a publishable Markdown doc.
+- Structure: H1 + summary line + one H2 per non-empty category + per-category GFM table (key/type/default/description).
+- Keys sorted alphabetically per category; categories in `listCategories` canonical order.
+- Default values rendered as backticked literals: numbers/booleans bare, strings double-quoted, JSON serialised.
+- Pipe characters escaped for GFM table safety.
+- Companion to M13.9 (printable plain-text per-tenant STATE) — M13.13 is the static SCHEMA reference.
+- New route `GET /v1/admin/config/schema.md` returns `text/markdown` with Content-Disposition (audit:read; mounted before catch-all `/:key`).
+- 19 new jest tests. Clean full-suite run: 5443 pass / 58 skipped / 5501 total (no flakes).
+- T6 sub-phase tally 190 → 191.
