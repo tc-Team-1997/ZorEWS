@@ -5505,6 +5505,25 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/magnitude (T6 M16.18) — single
+   *  severity score per preset (mean of per-axis normalised
+   *  absolute shock values vs library max). Companion to M16.15
+   *  (radar normalisation) — M16.18 emits ONE comparable score.
+   *  Per-preset row + per-category rollup + most_aggressive
+   *  pointers. Mounted BEFORE `/:preset_id` catch-all. */
+  app.get(
+    '/v1/scenarios/library/magnitude',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioMagnitudeSummary } = require('./scenario_magnitude') as
+        typeof import('./scenario_magnitude');
+      const out = buildScenarioMagnitudeSummary(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/:preset_id/clones-in-tenant (T6 M16.14)
    *  — back-reference query: for this library scenario preset, list
    *  every custom preset in the calling tenant that was cloned from

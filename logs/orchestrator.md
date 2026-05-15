@@ -867,3 +867,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/notifications/per-recipient` (audit:read) drains 500 per channel via the transports.
 - 19 new jest tests. Clean full-suite run: 5329 pass / 58 skipped / 5387 total (no flakes).
 - T6 sub-phase tally 184 → 185.
+
+## 2026-05-15 — T6 M16.18 Scenario library shock magnitude rollup
+
+- Pure `buildScenarioMagnitudeSummary(now, presets?)` at `services/bff/src/scenario_magnitude.ts` normalises every preset shock to [0, 1] against the library MAX-ABS per axis, averages → magnitude_normalised ∈ [0, 1].
+- Per-preset: `{preset_id, name, category, severity, gdp_abs/rate_abs/fx_abs, gdp_norm/rate_norm/fx_norm, magnitude_normalised}`.
+- Per-category rollup: `{preset_count, total_magnitude, mean_magnitude (null when empty), max_magnitude_preset_id}`.
+- Envelope: `{library_max_abs, presets[] sorted desc, by_category[] sorted, most_aggressive_preset, most_aggressive_category}`.
+- Sign-agnostic; divide-by-zero guarded for constant-zero axes.
+- Companion to M16.15 (radar per-axis [-1, 1]) — M16.18 produces ONE severity number per preset.
+- New route `GET /v1/scenarios/library/magnitude` (customers:read_risk_profile; platform-static).
+- 21 new jest tests. Full suite 5350 effective (3 pre-existing cross-suite flakes; isolated runs pass).
+- T6 sub-phase tally 185 → 186.
