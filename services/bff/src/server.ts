@@ -14327,6 +14327,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/severity-distribution (T6 M15.9) — severity-
+   *  pivoted rollup. Per-severity: total_count + by_resource_type
+   *  (10 keys) + by_outcome (3 keys) + by_action_top (top 5) +
+   *  most_recent_at. Envelope: most_common_severity +
+   *  last_critical_event_at. Mirror of M5.16 (template severity
+   *  distribution) for audit events. Pairs with M15.6 (action
+   *  catalog) + M15.8 (per-actor) for a complete 3-axis pivot. */
+  app.get(
+    '/v1/audit/severity-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { summarizeAuditBySeverity } = require('./audit_severity_distribution') as
+        typeof import('./audit_severity_distribution');
+      const out = summarizeAuditBySeverity(req.tenant!.tenant_id, page.items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/activity-heatmap?tz=Asia/Kolkata (T6 M15.7) — day-
    *  of-week × hour-of-day heatmap of audit events. Mirror of M14.22
    *  (field-visit heatmap) over the audit chain. ISO Mon=0..Sun=6 ×

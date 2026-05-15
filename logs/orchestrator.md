@@ -900,3 +900,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/tenants/me/onboarding/milestone` (audit:read).
 - 19 new jest tests. Full suite 5388 effective (1 pre-existing flake).
 - T6 sub-phase tally 187 → 188.
+
+## 2026-05-15 — T6 M15.9 Audit event severity distribution
+
+- Pure `summarizeAuditBySeverity(tenant, events, now)` at `services/bff/src/audit_severity_distribution.ts` is the severity-pivoted rollup over the audit chain.
+- Per-severity row: `{severity, total_count, by_resource_type (10 keys), by_outcome (3 keys), by_action_top (top 5), most_recent_at}`.
+- Envelope: `{total_events, severities[] in critical→warning→info order, most_common_severity, last_critical_event_at}`.
+- Mirror of M5.16 (template severity distribution) for the audit surface.
+- Completes the 3-axis pivot family with M15.6 (verb) + M15.8 (actor) + M15.9 (severity).
+- New route `GET /v1/audit/severity-distribution` (audit:read).
+- 20 new jest tests. Clean full-suite run: 5408 pass / 58 skipped / 5466 total (no flakes).
+- T6 sub-phase tally 188 → 189.
