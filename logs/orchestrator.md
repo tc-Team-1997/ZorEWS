@@ -911,3 +911,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/audit/severity-distribution` (audit:read).
 - 20 new jest tests. Clean full-suite run: 5408 pass / 58 skipped / 5466 total (no flakes).
 - T6 sub-phase tally 188 → 189.
+
+## 2026-05-15 — T6 M12.10 Report job runtime trend per report_id
+
+- Pure `buildReportRuntimeTrend(store, tenant, now)` at `services/bff/src/report_job_runtime_trend.ts` drains completed jobs via `store.list({status: completed})` (200×500 pages), buckets by report_id, runs least-squares regression over (days_since_first, processing_ms).
+- Per-row: `{report_id, sample_size, mean_processing_ms, first/last_*, abs_change_ms, slope_ms_per_day}`.
+- Envelope: `{report_trends[] sorted by |slope| desc, biggest_regression_report_id, biggest_improvement_report_id}`.
+- Mirror of M7.8 (model performance trend) for the reports surface.
+- New route `GET /v1/reports/jobs/runtime-trend` (audit:read; mounted before catch-all `/:job_id`).
+- 16 new jest tests. Full suite 5424 effective (2 pre-existing flakes).
+- T6 sub-phase tally 189 → 190. **190 sub-phases milestone crossed.**

@@ -15875,6 +15875,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/runtime-trend (T6 M12.10) — per report_id
+   *  least-squares slope of processing_ms over time. Per-row:
+   *  sample_size, first/last_processing_ms, abs_change_ms,
+   *  slope_ms_per_day. Envelope: biggest_regression_report_id +
+   *  biggest_improvement_report_id. Mirror of M7.8 (model performance
+   *  trend) for the reports surface. MUST be registered before
+   *  `/v1/reports/jobs/:job_id` so the literal segment isn't captured. */
+  app.get(
+    '/v1/reports/jobs/runtime-trend',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportRuntimeTrend } = require('./report_job_runtime_trend') as
+        typeof import('./report_job_runtime_trend');
+      const out = buildReportRuntimeTrend(reportJobStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
    *  over the M12.1 reports-job ledger: status mix, format mix,
    *  per-report counts + success rate + mean processing time, top
