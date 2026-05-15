@@ -833,3 +833,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/dashboards/custom/fleet-lint` (audit:read; mounted before catch-all `/custom/:dashboard_id`).
 - 16 new jest tests. Full BFF suite 5274 effective (2 pre-existing flakes).
 - T6 sub-phase tally 181 → 182.
+
+## 2026-05-15 — T6 M7.11 Model deployment age histogram
+
+- Pure `bucketModelsByDeploymentAge(registry, now)` at `services/bff/src/ai_model_deployment_age.ts` is the 5-bucket histogram over non-retired M7.1 models by `days_since_deployed` plus a `never_deployed` tail.
+- Buckets: under_30d / 30_to_90d / 90_to_180d / 180_to_365d / 365d_plus / never_deployed (in canonical order, even when empty).
+- Per-bucket: top-3 oldest samples sorted by days_since_deployed desc + model_id asc; never_deployed sorts by days_since_trained desc instead.
+- Envelope: `{total_models_considered (non-retired), total_models_in_registry, total_retired_excluded, buckets[], dominant_bucket}`.
+- Mirror of M9.11 (investigation age buckets) for AI models. Companion to M7.9 (threshold-based shortlist).
+- New route `GET /v1/ai/models/deployment-age` (audit:read; mounted before `/by-type/:type` + `/retirement-candidates`).
+- 20 new jest tests. Clean full-suite run: 5294 pass / 58 skipped / 5352 total (no flakes).
+- T6 sub-phase tally 182 → 183.

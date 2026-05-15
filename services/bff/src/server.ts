@@ -3504,6 +3504,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/deployment-age (T6 M7.11) — 5-bucket
+   *  histogram over non-retired models by days_since_deployed
+   *  (under_30d / 30_to_90d / 90_to_180d / 180_to_365d /
+   *  365d_plus / never_deployed). Per-bucket count + top-3
+   *  oldest samples. Envelope adds dominant_bucket. Mirror of
+   *  M9.11 (investigation age buckets). Mounted BEFORE
+   *  /by-type/:type + /retirement-candidates so the literal
+   *  segment wins. */
+  app.get(
+    '/v1/ai/models/deployment-age',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { bucketModelsByDeploymentAge } = require('./ai_model_deployment_age') as
+        typeof import('./ai_model_deployment_age');
+      const out = bucketModelsByDeploymentAge(aiModelRegistry, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/promotion-fleet (T6 M7.10) — fleet-wide
    *  promotion-request rollup. Walks the M7.1 registry + drains the
    *  M7.2 PromotionEngine to produce a per-model timeline (oldest-
