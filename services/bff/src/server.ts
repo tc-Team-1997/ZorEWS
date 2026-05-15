@@ -11258,6 +11258,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/me/onboarding/milestone (T6 M2.11) — 5-stage
+   *  milestone classification (starting → in_progress → near_done
+   *  → final_review → complete) derived from the M2.6
+   *  completeness_score, with progress_within_stage [0..1] and
+   *  remaining_required_blockers. Enriches the numeric score with a
+   *  SPA-friendly higher-level progress bar. */
+  app.get(
+    '/v1/tenants/me/onboarding/milestone',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const state = onboardingStore.get(req.tenant!.tenant_id);
+      const { computeOnboardingMilestone } = require('./tenant_onboarding_milestone') as
+        typeof import('./tenant_onboarding_milestone');
+      const out = computeOnboardingMilestone(state, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding/eta (T6 M2.8) — operational time
    *  projection: per-step minute estimates → remaining_minutes +
    *  projected_completion_at. Lets the SPA show "this tenant has

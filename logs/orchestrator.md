@@ -890,3 +890,13 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Companion to M5.15 (action inventory) but pivoted by severity.
 - 19 new jest tests. Full suite 5369 effective (2 pre-existing flakes).
 - T6 sub-phase tally 186 → 187.
+
+## 2026-05-15 — T6 M2.11 Tenant onboarding milestone tracker
+
+- Pure `computeOnboardingMilestone(state, now)` at `services/bff/src/tenant_onboarding_milestone.ts` enriches M2.6 readiness with a 5-stage classification: starting [0, 25) → in_progress [25, 50) → near_done [50, 75) → final_review [75, 100) → complete (100).
+- Per-stage carries label + description for SPA chip rendering.
+- Envelope: `{completeness_score, current_stage, current_label, current_description, next_stage_threshold, progress_within_stage, remaining_required_blockers, all_stages[]}`.
+- `remaining_required_blockers` excludes skipped (skipped required steps need an unblock decision, not more work).
+- New route `GET /v1/tenants/me/onboarding/milestone` (audit:read).
+- 19 new jest tests. Full suite 5388 effective (1 pre-existing flake).
+- T6 sub-phase tally 187 → 188.
