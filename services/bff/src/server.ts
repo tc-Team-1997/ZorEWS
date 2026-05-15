@@ -13171,6 +13171,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/sla-budget (T6 M14.26) — bridges
+   *  M14.9 fleet probe + M14.23 SLA catalog. Per-adapter
+   *  {expected_p95_ms, observed_latency_ms, status, within_budget,
+   *  headroom_ms, headroom_pct, verdict}. Verdict enum:
+   *  within_budget | over_budget | over_budget_severe (>125% of
+   *  expected) | degraded (probe failed). Envelope: totals + worst
+   *  offender + most slack. Drives the SPA's green/amber/red SLA
+   *  badges. */
+  app.get(
+    '/v1/integrations/adapters/sla-budget',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterSlaBudgetReport } = require('./adapter_sla_budget') as
+        typeof import('./adapter_sla_budget');
+      const report = await buildAdapterSlaBudgetReport(req.tenant!.tenant_id, now(), fleetForHealth);
+      return res.json(wrapResponse(report, ctx));
+    },
+  );
+
   // ── Admin Configuration registry (T6 M13.1) ──────────────────────────
   //
   // Tenant-scoped key-value config store. The schema is platform-wide

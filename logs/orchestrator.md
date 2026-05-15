@@ -933,3 +933,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/admin/config/schema.md` returns `text/markdown` with Content-Disposition (audit:read; mounted before catch-all `/:key`).
 - 19 new jest tests. Clean full-suite run: 5443 pass / 58 skipped / 5501 total (no flakes).
 - T6 sub-phase tally 190 → 191.
+
+## 2026-05-15 — T6 M14.26 Adapter SLA latency budget check
+
+- `buildAdapterSlaBudgetReport(tenant, asOf, fleet)` at `services/bff/src/adapter_sla_budget.ts` bridges M14.9 probe + M14.23 SLA catalog. Async — re-runs runFleetHealth() under the hood.
+- Per-adapter: `{expected_p95_ms, observed_latency_ms, status, within_budget, headroom_ms, headroom_pct, verdict}`.
+- Verdict enum: within_budget / over_budget (within 25% over) / over_budget_severe (>1.25× expected) / degraded.
+- Envelope: `{totals, worst_offender, most_slack, adapters[] sorted by headroom asc with degraded last}`.
+- New route `GET /v1/integrations/adapters/sla-budget` (audit:read; async).
+- Drives the SPA's green/amber/red SLA badges directly.
+- 18 new jest tests. Full suite 5461 effective (1 pre-existing flake).
+- T6 sub-phase tally 191 → 192.
