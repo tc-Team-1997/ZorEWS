@@ -844,3 +844,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `GET /v1/ai/models/deployment-age` (audit:read; mounted before `/by-type/:type` + `/retirement-candidates`).
 - 20 new jest tests. Clean full-suite run: 5294 pass / 58 skipped / 5352 total (no flakes).
 - T6 sub-phase tally 182 → 183.
+
+## 2026-05-15 — T6 M14.25 Adapter entity ID format catalog
+
+- Hand-curated `listAdapterIdCatalog()` + `buildPatternForTenant(template, tenant)` at `services/bff/src/adapter_id_catalog.ts` expose every entity ID format the M14 adapters produce.
+- Per-adapter group: `{adapter_id, label, base_path, entities[]: {entity, id_field, pattern_template, example, description}}`.
+- Covers 10 entities across 8 adapters: agent(1) / aml(1) / bureau(1) / dms(1) / finance(2) / hr(1) / ifrs9(1) / insurance(2).
+- `buildPatternForTenant()` returns a tenant-anchored RegExp; heuristic via first alpha in pattern picks slug case (upper vs lower).
+- New route `GET /v1/integrations/adapters/id-catalog` (audit:read; platform-static).
+- Drives SPA "paste an ID, route to the right adapter" + client-side validation.
+- 16 new jest tests. Full suite 5310 effective (5 pre-existing cross-suite flakes; all isolated runs clean).
+- T6 sub-phase tally 183 → 184.

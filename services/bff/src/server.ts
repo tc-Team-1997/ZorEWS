@@ -13075,6 +13075,24 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/id-catalog (T6 M14.25) — per-
+   *  adapter entity ID format catalog (entity, id_field,
+   *  pattern_template, example, description). Drives client-side
+   *  ID-shape validation + "paste an ID and we'll route to the
+   *  right adapter" SPA feature. Platform-static. */
+  app.get(
+    '/v1/integrations/adapters/id-catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listAdapterIdCatalog } = require('./adapter_id_catalog') as
+        typeof import('./adapter_id_catalog');
+      const out = listAdapterIdCatalog();
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/health — probe all 8 in parallel. */
   app.get(
     '/v1/integrations/adapters/health',
