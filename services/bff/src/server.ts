@@ -5841,6 +5841,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/per-recipient (T6 M10.14) — UNIFIED
+   *  per-recipient list across all 3 channels. Email recipients,
+   *  SMS phones, and push user_ids surface as separate rows
+   *  (recipient_kind disambiguates). Sorted by total_sent desc
+   *  with recipient_id asc tie-break. Envelope adds top_recipients
+   *  (cap 20) + by_kind distinct counts + most_active_recipient.
+   *  Mirror of M15.8 (audit per-actor activity) for notifications. */
+  app.get(
+    '/v1/notifications/per-recipient',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const { buildPerRecipientSummaryFromTransports } = require('./notification_per_recipient') as
+        typeof import('./notification_per_recipient');
+      const out = buildPerRecipientSummaryFromTransports(
+        tenant,
+        emailTransport,
+        smsTransport,
+        pushTransport,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   // ── Email channel (T6 M10.1) — DataNetworks-EWS-Ver1.pdf §13 ──────────
   //
   // Out-of-band delivery transport for BIL. The default StubEmailTransport

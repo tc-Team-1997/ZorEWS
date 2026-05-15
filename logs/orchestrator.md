@@ -855,3 +855,15 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - Drives SPA "paste an ID, route to the right adapter" + client-side validation.
 - 16 new jest tests. Full suite 5310 effective (5 pre-existing cross-suite flakes; all isolated runs clean).
 - T6 sub-phase tally 183 → 184.
+
+## 2026-05-15 — T6 M10.14 Notification per-recipient cross-channel rollup
+
+- Pure `buildPerRecipientSummary(tenant, email[], sms[], push[], now)` at `services/bff/src/notification_per_recipient.ts` unifies all 3 ledgers into one per-recipient list.
+- 3 recipient kinds: `email_address` / `sms_phone` / `push_user` — same human across channels = different rows (address spaces are distinct).
+- Push fan-out across devices of same user = 1 send for that user (matches M10.12 convention).
+- Per-row: `{recipient_id, recipient_kind, total_sent, by_channel, most_recent_at, distinct_templates[]}`.
+- Envelope: `{total_sent_all_channels, total_distinct_recipients, by_kind, top_recipients[] cap 20, recipients[] full, most_active_recipient}`.
+- Mirror of M15.8 (audit per-actor activity) for notifications.
+- New route `GET /v1/notifications/per-recipient` (audit:read) drains 500 per channel via the transports.
+- 19 new jest tests. Clean full-suite run: 5329 pass / 58 skipped / 5387 total (no flakes).
+- T6 sub-phase tally 184 → 185.
