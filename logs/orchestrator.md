@@ -822,3 +822,14 @@ This is the BFF jest suite crossing 5000 passing tests this session. Started at 
 - New route `POST /v1/scoring/what-if` (customers:read_risk_profile; envelope-aware).
 - 21 new jest tests. Clean full-suite run: 5258 pass / 58 skipped / 5316 total (no flakes).
 - T6 sub-phase tally 180 → 181.
+
+## 2026-05-15 — T6 M11.14 Custom dashboard fleet lint summary
+
+- Pure `buildFleetLintSummary(store, tenant, now)` at `services/bff/src/custom_dashboard_fleet_lint.ts` walks every saved dashboard and composes M11.10 `lintDashboardLayout` per row.
+- Per-dashboard summary: `{dashboard_id, name, total_widgets, errors_count, warnings_count, info_count, passes}`.
+- Envelope: `{total_dashboards, passing_count, failing_count, with_warnings_count, total_errors/warnings/infos, by_issue_type (5 keys), dashboards[] sorted desc, dashboards_with_errors[], worst_dashboard}`.
+- Sort key: errors_count desc → warnings_count desc → dashboard_id asc.
+- Companion lens to M11.11 widget usage analytics (popular vs broken).
+- New route `GET /v1/dashboards/custom/fleet-lint` (audit:read; mounted before catch-all `/custom/:dashboard_id`).
+- 16 new jest tests. Full BFF suite 5274 effective (2 pre-existing flakes).
+- T6 sub-phase tally 181 → 182.

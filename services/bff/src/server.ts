@@ -8845,6 +8845,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/fleet-lint (T6 M11.14) — aggregates
+   *  M11.10 lint reports across every saved dashboard in the
+   *  tenant. Per-dashboard summary row + envelope totals +
+   *  by_issue_type (all 5 LintIssueType keys present) +
+   *  dashboards_with_errors[] + worst_dashboard. Companion to
+   *  M11.11 (widget usage). Mounted BEFORE the catch-all
+   *  `/custom/:dashboard_id` so the literal segment wins. */
+  app.get(
+    '/v1/dashboards/custom/fleet-lint',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildFleetLintSummary } = require('./custom_dashboard_fleet_lint') as
+        typeof import('./custom_dashboard_fleet_lint');
+      const out = buildFleetLintSummary(customDashboardStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/widgets/defaults (T6 M11.12) — per-widget
    *  default config seed for the SPA's "Add widget" wizard. Returns
    *  one entry per widget_type with a sensible default_config so the
