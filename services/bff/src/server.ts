@@ -14029,6 +14029,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/usage (T6 M1.4) — usage analytics rollup
+   *  over the M1.2 API key store. Per-key row carries days_since_last_use
+   *  / days_until_expiry / ever_used + 4 classification flags
+   *  (expires_soon / is_dormant / is_idle_never_used / is_expired).
+   *  Envelope adds totals for each bucket + by_scope counts (active
+   *  keys only) + most_recent_use + expiring_soon leaderboard
+   *  (soonest first) + dormant_keys leaderboard (most-dormant first).
+   *  Drives the SPA's "API keys" status chip strip + drill-downs.
+   *  Mounted BEFORE /:key_id so the literal `/usage` segment wins. */
+  app.get(
+    '/v1/admin/api-keys/usage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain the store — page_size=100 is the store cap; cap at 100
+      // pages × 100 = 10k keys (way above the per-tenant 20-key
+      // active cap; revoked keys can accumulate beyond it).
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { summarizeApiKeyUsage } = require('./api_key_usage_analytics') as
+        typeof import('./api_key_usage_analytics');
+      const out = summarizeApiKeyUsage(req.tenant!.tenant_id, entries, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/:key_id — single redacted entry. */
   app.get(
     '/v1/admin/api-keys/:key_id',
