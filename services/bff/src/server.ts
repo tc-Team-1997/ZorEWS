@@ -8626,6 +8626,38 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/age-status-matrix (T6 M9.13) — 2D pivot
+   *  combining M9.11 age buckets × M9.8 cohort status. Per-cell count
+   *  with every (status, bucket) pair emitted at 0 when absent.
+   *  Per-row totals (Σ buckets per status) + per-column totals
+   *  (Σ statuses per bucket). Envelope: peak_cell (highest count;
+   *  canonical row × col iteration tie-break), oldest_open_status
+   *  (status with most cases in 7_to_30d + 30d_plus combined; canonical
+   *  status order tie-break). Drives "which status has the most stuck
+   *  cases?" triage view. Mirror of M3.11 type-matrix pattern.
+   *  Mounted BEFORE /:id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/investigations/age-status-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = caseInvestigationStore.list(
+        req.tenant!.tenant_id,
+        { page_size: 100000 },
+      ).items;
+      const { buildInvestigationAgeStatusMatrix } =
+        require('./investigation_age_status_matrix') as
+        typeof import('./investigation_age_status_matrix');
+      const out = buildInvestigationAgeStatusMatrix(
+        req.tenant!.tenant_id,
+        items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/outcome-by-template (T6 M9.12) —
    *  groups investigations by `checklist_template_id` to answer
    *  "which checklist gives the highest fraud-confirmation rate?".
