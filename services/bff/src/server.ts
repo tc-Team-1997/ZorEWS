@@ -13481,6 +13481,29 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations/method-distribution
+   *  (T6 M14.27) — orthogonal pivot of the M14.24 operation catalog
+   *  by HTTP method (GET/POST/PATCH/DELETE). Per-method row: count,
+   *  by_adapter Record (only non-zero adapters as keys),
+   *  distinct_adapters, sample_operations (cap 5; sorted adapter_id
+   *  asc + path asc). Envelope: methods[] in canonical order even
+   *  when zero-count, most_common_method (canonical tie-break),
+   *  unused_methods[]. Platform-static. Mirror of M5.16 / M11.11 /
+   *  M3.12 pivot pattern for the adapter operations surface. */
+  app.get(
+    '/v1/integrations/adapters/operations/method-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeAdapterOperationsByMethod } =
+        require('./adapter_operation_method_distribution') as
+        typeof import('./adapter_operation_method_distribution');
+      const out = summarizeAdapterOperationsByMethod(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/id-catalog (T6 M14.25) — per-
    *  adapter entity ID format catalog (entity, id_field,
    *  pattern_template, example, description). Drives client-side
