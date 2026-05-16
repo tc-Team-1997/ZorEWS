@@ -16207,6 +16207,29 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/per-requester (T6 M12.12) — per-requester
+   *  rollup over the M12.1 job store. Per requester: total_jobs,
+   *  by_status (every JobStatus key), by_format (every ReportFormat key),
+   *  by_report_id_top (cap 5), distinct_reports, most_recent_at,
+   *  has_failure. Envelope: requesters[] sorted total_jobs desc +
+   *  requested_by asc tie-break, most_active_requester,
+   *  requesters_with_failures[] (failed_count desc + requested_by asc).
+   *  Mirror of M15.8 (audit per-actor) for the reports surface.
+   *  MUST be registered before `/v1/reports/jobs/:job_id` so the literal
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/reports/jobs/per-requester',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportPerRequester } = require('./report_per_requester') as
+        typeof import('./report_per_requester');
+      const out = buildReportPerRequester(reportJobStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
    *  over the M12.1 reports-job ledger: status mix, format mix,
    *  per-report counts + success rate + mean processing time, top
