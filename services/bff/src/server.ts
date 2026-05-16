@@ -14104,6 +14104,38 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/scope-distribution (T6 M1.5) — BY-SCOPE
+   *  pivot over the M1.2 store (inverts M1.4's BY-KEY view). Per
+   *  scope: total_keys (active+revoked), active_keys, revoked_keys,
+   *  ever_used_count, latest_active_created_at, most_recently_used_*.
+   *  Envelope: scopes[] in canonical VALID_SCOPES order, most_used_scope
+   *  (canonical tie-break), unused_scopes[] (zero active_keys subset),
+   *  scope_coverage_rate. Mirror of M5.16 / M11.11 / M12.11 / M7.12
+   *  pivot pattern. Mounted BEFORE /:key_id so the literal segment wins. */
+  app.get(
+    '/v1/admin/api-keys/scope-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain via paginated 100/page loop with 100-page cap (= 10k keys
+      // ceiling, well above the per-tenant 20-active-key cap; revoked
+      // keys can accumulate above the active cap).
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { summarizeApiKeyScopeDistribution } = require('./api_key_scope_distribution') as
+        typeof import('./api_key_scope_distribution');
+      const out = summarizeApiKeyScopeDistribution(req.tenant!.tenant_id, entries, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/usage (T6 M1.4) — usage analytics rollup
    *  over the M1.2 API key store. Per-key row carries days_since_last_use
    *  / days_until_expiry / ever_used + 4 classification flags
