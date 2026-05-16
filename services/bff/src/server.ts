@@ -14714,6 +14714,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/run-volume/hourly (T6 M3.12) — fleet-wide
+   *  histogram of connector runs bucketed by UTC hour-of-day 0..23.
+   *  Per bucket: total_runs + by_status (every RunStatus key at 0
+   *  when absent: success / failure / partial / running). Envelope:
+   *  total_runs, active_connectors, total_connectors, by_hour[24]
+   *  always present in 0..23 order, peak_hour (asc tie-break), peak_count,
+   *  quiet_hours[], mean_runs_per_hour. Drives the ops dashboard
+   *  Fleet Activity timeline + maintenance-window planning. Mirror
+   *  of M14.22 / M15.7 heatmap pattern but as a 1D timeline. Pulls
+   *  up to 200 runs per connector via listRuns. */
+  app.get(
+    '/v1/ingestion/run-volume/hourly',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorRunHourlyVolume } = require('./connector_run_volume_hourly') as
+        typeof import('./connector_run_volume_hourly');
+      const out = buildConnectorRunHourlyVolume(
+        ingestionRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/connectors — list every connector. */
   app.get(
     '/v1/ingestion/connectors',
