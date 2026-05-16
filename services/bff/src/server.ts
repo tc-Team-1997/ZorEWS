@@ -5607,6 +5607,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/inventory (T6 M16.19) — 2D cross-tab
+   *  pivot of M16.1 library + M16.4 custom by category × severity.
+   *  4 categories × 3 severities = 12 cells in canonical row-major
+   *  order (category major, severity minor). Per cell: library_count,
+   *  custom_count, total_count, library_preset_ids[] / custom_preset_ids[]
+   *  sorted asc. Envelope: by_category + by_severity marginals (every key
+   *  present), most_populated_cell + most_customised_category (canonical
+   *  tie-breaks), uncovered_cells[] (library_count=0). Mirror of M6.15
+   *  pattern. Distinct from M16.17 (category × REGULATOR) — orthogonal
+   *  pivot answers "do we have severe-stress for every category?".
+   *  Mounted BEFORE catch-all /:preset_id so the literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/inventory',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeScenarioInventory } = require('./scenario_inventory') as
+        typeof import('./scenario_inventory');
+      const out = summarizeScenarioInventory(
+        req.tenant!.tenant_id,
+        customPresetStore,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/coverage-matrix (T6 M16.17) — 2D
    *  rollup over the M16.1 library showing per-(category,
    *  regulator) coverage counts. Cells with `count < expected_min`
