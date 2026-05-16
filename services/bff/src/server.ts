@@ -14395,6 +14395,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/correlations (T6 M15.10) — correlation_id-pivoted
+   *  rollup. Groups every audit event with a non-null correlation_id
+   *  and surfaces the workflow it represents. Per-correlation row:
+   *  event_count, distinct_actors[], distinct_resource_types[],
+   *  distinct_actions[], first/last_event_at, duration_ms, action_chain[]
+   *  oldest-first (ts + action + actor + outcome), has_failure. Envelope:
+   *  total_events_with/without_correlation, total_correlations,
+   *  most_active_correlation, longest_running_correlation,
+   *  failed_correlations[]. Completes the 4-axis pivot family with
+   *  M15.6 (action) + M15.8 (actor) + M15.9 (severity). Trace
+   *  "everything that happened during request X" in one round-trip. */
+  app.get(
+    '/v1/audit/correlations',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { summarizeAuditByCorrelation } = require('./audit_correlation_rollup') as
+        typeof import('./audit_correlation_rollup');
+      const out = summarizeAuditByCorrelation(req.tenant!.tenant_id, page.items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/activity-heatmap?tz=Asia/Kolkata (T6 M15.7) — day-
    *  of-week × hour-of-day heatmap of audit events. Mirror of M14.22
    *  (field-visit heatmap) over the audit chain. ISO Mon=0..Sun=6 ×
