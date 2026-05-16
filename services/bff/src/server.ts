@@ -13522,6 +13522,43 @@ export function makeApp(deps: AppDeps = {}) {
    * category filter narrows the list. Each entry includes
    * `is_default` so the SPA can highlight overridden values.
    */
+  /** GET /v1/admin/config/feature-adoption (T6 M13.14) — cross-tenant
+   *  pivot over the features.* boolean toggles. Per-feature row:
+   *  default_value, enabled/disabled counts, override_count,
+   *  enabled_tenant_ids[] / disabled_tenant_ids[] (sorted asc),
+   *  adoption_rate. Envelope: features[] in canonical schema order,
+   *  most_adopted_feature + least_adopted_feature (canonical key tie-
+   *  break), features_with_overrides subset. Async because
+   *  tenantLookup.all() may be async. 501 envelope when lookup
+   *  doesn't expose .all(). Mounted BEFORE GET /v1/admin/config/:key
+   *  so the literal /feature-adoption segment isn't captured. */
+  app.get(
+    '/v1/admin/config/feature-adoption',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { summarizeFeatureAdoption } = require('./admin_config_feature_adoption') as
+        typeof import('./admin_config_feature_adoption');
+      const out = summarizeFeatureAdoption(tenants, configStore, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/schema.md (T6 M13.13) — Markdown reference
    *  export of the M13.1 platform schema (NOT tenant overrides; just
    *  the static catalogue of keys + types + defaults + descriptions).
