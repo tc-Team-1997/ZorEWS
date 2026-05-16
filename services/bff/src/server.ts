@@ -5961,6 +5961,74 @@ export function makeApp(deps: AppDeps = {}) {
     );
   });
 
+  /** GET /v1/notifications/daily-volume?days=N (T6 M10.15) — TREND-
+   *  LINE view across N consecutive UTC calendar days. Per-day bucket:
+   *  total + by_channel (3 keys: email/sms/push). Every day in
+   *  [window_start, window_end] emitted even when zero — stable
+   *  time-series x-axis. Envelope: peak_day (earliest-day tie-break),
+   *  mean_per_day, growth_rate (second-half vs first-half; null when
+   *  first-half=0 / days<2), busiest_channel (canonical email > sms >
+   *  push tie-break). Default days=30, bounds [1, 365]. 400
+   *  EWS_400_invalid_input on out-of-range. Mirror of M15.11 audit
+   *  daily volume shape. Drives "are we sending more notifications
+   *  this month than last?" trend question. */
+  app.get(
+    '/v1/notifications/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const daysRaw = req.query.days as string | undefined;
+      const {
+        DEFAULT_NOTIF_DAILY_WINDOW,
+        MAX_NOTIF_DAILY_WINDOW,
+        MIN_NOTIF_DAILY_WINDOW,
+        summarizeNotificationDailyVolume,
+        NotificationDailyVolumeError,
+      } = require('./notification_daily_volume') as
+        typeof import('./notification_daily_volume');
+      const days = daysRaw === undefined
+        ? DEFAULT_NOTIF_DAILY_WINDOW
+        : Number(daysRaw);
+      if (
+        !Number.isInteger(days)
+        || days < MIN_NOTIF_DAILY_WINDOW
+        || days > MAX_NOTIF_DAILY_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `days must be an integer in [${MIN_NOTIF_DAILY_WINDOW}, ${MAX_NOTIF_DAILY_WINDOW}]`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenant = req.tenant!.tenant_id;
+      const emails = emailTransport.recent(tenant, 500);
+      const sms = smsTransport.recent(tenant, 500);
+      const push = pushTransport.recent(tenant, 500);
+      try {
+        const out = summarizeNotificationDailyVolume(
+          tenant, emails, sms, push, days, now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof NotificationDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/notifications/ledger-analytics (T6 M10.12) — cross-
    *  channel rollup over M10.1 email + M10.2 SMS + M10.3 push send
    *  ledgers. Per-channel totals + by_template_id (cap 5) + top
