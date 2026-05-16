@@ -2431,6 +2431,56 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/sla-breaches/detail?window=N (T6 M8.11) —
+   *  per-alert SLA breach detail over the recent ledger window.
+   *  M8.6 returns aggregate COUNTS; M8.11 returns the actual ROW
+   *  list with status (acked_on_time / acked_late / open_within_sla /
+   *  open_escalation_due / open_breached / monitor_only /
+   *  no_sla_configured), age_ms, sla_deadline_at, escalation_
+   *  deadline_at, ms_past_sla (signed). Envelope: by_status,
+   *  breaching_by_class, breaching[] (open_breached + acked_late,
+   *  worst-first by ms_past_sla), escalation_due[] (open + past
+   *  escalate but within SLA, oldest-first), worst_offender. Drives
+   *  the SPA's supervisor escalation panel. Mirror of M9.5 (case SLA
+   *  breach) for the alert surface. */
+  app.get(
+    '/v1/alerts/sla-breaches/detail',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { summarizeAlertSlaBreaches } = require('./alert_sla_breach_detail') as
+        typeof import('./alert_sla_breach_detail');
+      const out = summarizeAlertSlaBreaches(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   // ── Alert auto-ack threshold rules (T6 M8.4) ─────────────────────────
   //
   // Tenant-scoped policy: which alerts get auto-acked at receipt
