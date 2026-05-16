@@ -15195,6 +15195,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/type-distribution (T6 M3.13) — PIVOT-BY-TYPE
+   *  rollup over the M3.1 registry. 5 ConnectorTypes (kafka_stream /
+   *  batch_csv / rest_api / soap_api / sftp_drop). Per row: count +
+   *  by_status (every key present) + by_source_system (compact map) +
+   *  distinct_source_systems + sample_connectors (cap 3, sorted by
+   *  connector_id asc). Envelope: types[] in canonical order,
+   *  most_common_type (canonical tie-break: kafka_stream wins),
+   *  unused_types[]. Tenant-aware (status may be tenant-overridden
+   *  via M3.1's per-tenant paused state). Mirror of M14.27 method
+   *  distribution / M5.16 / M11.11 pivot pattern. */
+  app.get(
+    '/v1/ingestion/type-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeConnectorTypeDistribution } =
+        require('./connector_type_distribution') as
+        typeof import('./connector_type_distribution');
+      const out = summarizeConnectorTypeDistribution(
+        ingestionRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/run-volume/hourly (T6 M3.12) — fleet-wide
    *  histogram of connector runs bucketed by UTC hour-of-day 0..23.
    *  Per bucket: total_runs + by_status (every RunStatus key at 0
