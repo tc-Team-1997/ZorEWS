@@ -2431,6 +2431,54 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/ack-time/histogram?window=N (T6 M8.12) —
+   *  ABSOLUTE wall-clock ack-time histogram over the M8.6 routing
+   *  ledger. Where M8.11 classifies by SLA-relative status, M8.12
+   *  buckets by wall-clock duration: under_1h / 1_to_4h / 4_to_24h /
+   *  24h_plus / still_open / monitor_only. Per-bucket count + top-3
+   *  samples (fastest in acked buckets; oldest-waiting in still_open).
+   *  Envelope: total_records, total_acked + total_still_open +
+   *  total_monitor_only, mean_ack_ms, median_ack_ms, p95_ack_ms (over
+   *  acked only), peak_bucket (canonical tie-break). Mirror of M9.11
+   *  age-buckets pattern for the alert ack-time surface. */
+  app.get(
+    '/v1/alerts/ack-time/histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { summarizeAlertAckTime } = require('./alert_ack_time_histogram') as
+        typeof import('./alert_ack_time_histogram');
+      const out = summarizeAlertAckTime(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/sla-breaches/detail?window=N (T6 M8.11) —
    *  per-alert SLA breach detail over the recent ledger window.
    *  M8.6 returns aggregate COUNTS; M8.11 returns the actual ROW
