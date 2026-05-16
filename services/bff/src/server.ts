@@ -9135,6 +9135,29 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/authorship (T6 M11.15) — PIVOT-BY-
+   *  CREATED_BY rollup over saved dashboards. Per author:
+   *  dashboard_count, total_widgets (Σ widgets.length), distinct_
+   *  widget_types, dashboard_ids[] (sorted asc), most_recent_created_at,
+   *  most_recent_updated_at. Envelope: authors[] sorted dashboard_count
+   *  desc + created_by asc tie-break, most_prolific_author + most_
+   *  widgets_author (both with canonical tie-break). Mirror of M15.8
+   *  per-actor + M12.12 per-requester for the dashboards surface.
+   *  Mounted BEFORE catch-all `/custom/:dashboard_id` so literal wins. */
+  app.get(
+    '/v1/dashboards/custom/authorship',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboards = customDashboardStore.list(req.tenant!.tenant_id);
+      const { summarizeDashboardAuthorship } = require('./custom_dashboard_authorship') as
+        typeof import('./custom_dashboard_authorship');
+      const out = summarizeDashboardAuthorship(req.tenant!.tenant_id, dashboards, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/fleet-lint (T6 M11.14) — aggregates
    *  M11.10 lint reports across every saved dashboard in the
    *  tenant. Per-dashboard summary row + envelope totals +
