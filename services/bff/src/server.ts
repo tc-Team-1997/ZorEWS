@@ -14913,6 +14913,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/resource-type-distribution (T6 M15.12) — pivot
+   *  the audit chain by resource_type (10-key axis). Per-type row:
+   *  total_count + by_severity (3 keys present) + by_outcome (3 keys
+   *  present) + by_action_top (cap 5) + distinct_actors +
+   *  most_recent_at. Envelope: types[] in canonical order, most_
+   *  active_type (canonical tie-break), unused_types, last_event_at.
+   *  Inverse of M15.9 (which has resource_type INSIDE severity rows).
+   *  Drives "which resource type sees the most audit traffic?" view. */
+  app.get(
+    '/v1/audit/resource-type-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { summarizeAuditByResourceType } = require('./audit_resource_type_distribution') as
+        typeof import('./audit_resource_type_distribution');
+      const out = summarizeAuditByResourceType(req.tenant!.tenant_id, page.items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/daily-volume?days=N (T6 M15.11) — trend-line view
    *  across N consecutive UTC calendar days. Complements M15.7
    *  (cyclic dow×hour heatmap). Per-day bucket: total + by_severity
