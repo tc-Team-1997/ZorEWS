@@ -16050,6 +16050,30 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/format-distribution (T6 M12.11) — pivot
+   *  ReportJobs by format (json / csv / pdf / xlsx). Per-format row:
+   *  total_count, by_status (every JobStatus key present), success_rate
+   *  (completed / completed+failed), mean_processing_ms over completed,
+   *  most_recent_at, by_report_id_top top-5, distinct_reports.
+   *  Envelope: every format in canonical order even when zero,
+   *  most_common_format (canonical-order tie-break), unused_formats[].
+   *  Mirror of M5.16 / M11.11 / M7.11 pivot pattern. Reads ALL jobs
+   *  (failed + queued still represent a format choice). MUST be
+   *  registered before `/v1/reports/jobs/:job_id` so the literal
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/reports/jobs/format-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportFormatDistribution } = require('./report_format_distribution') as
+        typeof import('./report_format_distribution');
+      const out = buildReportFormatDistribution(reportJobStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
    *  over the M12.1 reports-job ledger: status mix, format mix,
    *  per-report counts + success rate + mean processing time, top
