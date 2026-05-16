@@ -3623,6 +3623,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/framework-distribution (T6 M7.13) —
+   *  PIVOT-BY-FRAMEWORK view over the M7.1 registry. Orthogonal to
+   *  M7.12 (type coverage). 5 ModelFramework rows. Per row: count,
+   *  by_status (5-key), by_type (6-key), has_production,
+   *  production_count, most_recent_trained_at, sorted model_ids.
+   *  Envelope: frameworks[] canonical order, most_common_framework
+   *  (canonical tie-break: xgboost > sklearn), unused_frameworks,
+   *  framework_with_most_production. Drives "what's our ML-framework
+   *  mix? are we over-indexed on xgboost?" view. Mounted BEFORE
+   *  /by-type/:type + /retirement-candidates + /deployment-age +
+   *  /promotion-fleet + /type-coverage + /:model_id catch-alls. */
+  app.get(
+    '/v1/ai/models/framework-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeModelFrameworkDistribution } =
+        require('./ai_model_framework_distribution') as
+        typeof import('./ai_model_framework_distribution');
+      const out = summarizeModelFrameworkDistribution(aiModelRegistry, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/type-coverage (T6 M7.12) — TYPE-pivoted
    *  coverage matrix over the M7.1 registry. Per BIL model type
    *  (pd / fraud / churn / lapse / anomaly / claim_severity):
