@@ -10384,6 +10384,28 @@ export function makeApp(deps: AppDeps = {}) {
   // catalog. Foundational primitive that turns an indicator value into
   // a breach class — the input the M8.1 alert classifier needs.
 
+/** GET /v1/indicators/catalog-stats (T6 M4.13) — platform-static
+   *  rollup over the M6.2 STUB_CATALOG. Per-vertical (banking +
+   *  insurance) count + by_family Record + distinct_families +
+   *  weight stats (min/mean/max) + top_weighted top-3. Envelope:
+   *  total_indicators, total_distinct_families, most_populated_vertical
+   *  (canonical tie-break: banking wins), heaviest_indicator (canonical
+   *  id asc tie-break). Same response per tenant (platform-static).
+   *  Mounted BEFORE /v1/indicators/thresholds so the literal segment
+   *  isn't captured by any future wildcard. */
+  app.get(
+    '/v1/indicators/catalog-stats',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeIndicatorCatalog } = require('./indicator_catalog_stats') as
+        typeof import('./indicator_catalog_stats');
+      const out = summarizeIndicatorCatalog(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/usage (T6 M4.11) — reverse cross-reference
    *  for every indicator in the M6.2 catalog: which rule templates
    *  (M5.1) reference it. Mirror of M5.14 (template → indicators)
