@@ -11355,6 +11355,48 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/fleet (T6 M2.12) — cross-tenant
+   *  admin view returning onboarding posture for EVERY configured
+   *  tenant in one round-trip. Per-row: tenant_id, name, vertical,
+   *  active, completeness_score, current_stage, is_complete,
+   *  total_blockers, remaining_required_blockers, last_updated_at.
+   *  Envelope: by_stage rollup (every OnboardingStage at 0 when
+   *  absent), mean_completeness_score, tenants_needing_attention[]
+   *  (completeness < 70 subset; least-progressed first), most_
+   *  advanced_tenant. Async because tenantLookup.all() may be async.
+   *  Mounted BEFORE /v1/tenants/:tenant_id catch-all so the literal
+   *  /onboarding/fleet segment isn't captured. */
+  app.get(
+    '/v1/tenants/onboarding/fleet',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { summarizeOnboardingFleet } = require('./tenant_onboarding_fleet') as
+        typeof import('./tenant_onboarding_fleet');
+      const out = summarizeOnboardingFleet(
+        tenants,
+        (id: string) => onboardingStore.get(id),
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding — caller's tenant onboarding state. */
   app.get(
     '/v1/tenants/me/onboarding',
