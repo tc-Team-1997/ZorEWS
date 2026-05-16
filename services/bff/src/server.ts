@@ -14528,6 +14528,55 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/daily-volume?days=N (T6 M15.11) — trend-line view
+   *  across N consecutive UTC calendar days. Complements M15.7
+   *  (cyclic dow×hour heatmap). Per-day bucket: total + by_severity
+   *  (3 keys) + by_outcome (3 keys). Every day in [window_start,
+   *  window_end] emitted even when zero — stable time-series x-axis.
+   *  Envelope adds peak_day (earliest-day tie-break), mean_per_day,
+   *  growth_rate (second-half mean vs first-half mean; null when
+   *  first-half is zero / days<2), busiest_severity. Default days=30,
+   *  bounds [1, 365]. 400 EWS_400_invalid_input on out-of-range. */
+  app.get(
+    '/v1/audit/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const daysRaw = req.query.days as string | undefined;
+      const { DEFAULT_DAILY_WINDOW, MAX_DAILY_WINDOW, MIN_DAILY_WINDOW, summarizeAuditDailyVolume, AuditDailyVolumeError } =
+        require('./audit_daily_volume') as typeof import('./audit_daily_volume');
+      const days = daysRaw === undefined ? DEFAULT_DAILY_WINDOW : Number(daysRaw);
+      if (!Number.isInteger(days) || days < MIN_DAILY_WINDOW || days > MAX_DAILY_WINDOW) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `days must be an integer in [${MIN_DAILY_WINDOW}, ${MAX_DAILY_WINDOW}]`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      try {
+        const out = summarizeAuditDailyVolume(req.tenant!.tenant_id, page.items, days, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AuditDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/audit/activity-heatmap?tz=Asia/Kolkata (T6 M15.7) — day-
    *  of-week × hour-of-day heatmap of audit events. Mirror of M14.22
    *  (field-visit heatmap) over the audit chain. ISO Mon=0..Sun=6 ×
