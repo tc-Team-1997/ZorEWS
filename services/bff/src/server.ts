@@ -3575,6 +3575,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/type-coverage (T6 M7.12) — TYPE-pivoted
+   *  coverage matrix over the M7.1 registry. Per BIL model type
+   *  (pd / fraud / churn / lapse / anomaly / claim_severity):
+   *  count, by_status (every ModelStatus key at 0 when absent),
+   *  by_framework (every ModelFramework key at 0 when absent),
+   *  has_production, production_model_id (most-recently-trained
+   *  production version), most_recent_trained_at, distinct_frameworks.
+   *  Envelope: types[] in canonical order, types_without_production[]
+   *  (coverage gaps), most_supported_type (canonical tie-break).
+   *  Mirror of M5.16 / M11.11 / M12.11 pivot pattern. Mounted BEFORE
+   *  /by-type/:type + /retirement-candidates so the literal segment
+   *  isn't captured by either wildcard. */
+  app.get(
+    '/v1/ai/models/type-coverage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildModelTypeCoverageMatrix } = require('./ai_model_type_coverage') as
+        typeof import('./ai_model_type_coverage');
+      const out = buildModelTypeCoverageMatrix(aiModelRegistry, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/promotion-fleet (T6 M7.10) — fleet-wide
    *  promotion-request rollup. Walks the M7.1 registry + drains the
    *  M7.2 PromotionEngine to produce a per-model timeline (oldest-
