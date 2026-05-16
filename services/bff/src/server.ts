@@ -9568,6 +9568,36 @@ export function makeApp(deps: AppDeps = {}) {
   // M6.2 catalog defaults. Pure-data — no store, no tenant overrides
   // here; M6.4 will land custom presets.
 
+  /** GET /v1/scoring/presets/inventory (T6 M6.15) — 2D cross-tab
+   *  inventory: 3 modes × 2 verticals with per-cell library + custom
+   *  counts. Per-cell: library_count, custom_count, total_count,
+   *  library_preset_ids[] (sorted asc), custom_preset_ids[] (sorted asc).
+   *  Envelope: cells[6] in canonical row-major order (mode major,
+   *  vertical minor), by_mode + by_vertical marginal totals,
+   *  most_customised_mode (highest custom_count + canonical tie-break;
+   *  null when no customs), uncovered_cells[] (library_count=0; should
+   *  be empty for a complete catalog). Drives the SPA "is our preset
+   *  catalog balanced?" + "where have ops added custom presets?" view.
+   *  Mirror of M3.11 / M9.13 matrix pattern. Mounted BEFORE
+   *  /:preset_id catch-all so the literal /inventory segment isn't
+   *  captured. */
+  app.get(
+    '/v1/scoring/presets/inventory',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizePresetInventory } = require('./scoring_preset_inventory') as
+        typeof import('./scoring_preset_inventory');
+      const out = summarizePresetInventory(
+        req.tenant!.tenant_id,
+        customWeightPresetStore,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scoring/presets?vertical=&mode= — filtered list of presets. */
   app.get(
     '/v1/scoring/presets',
