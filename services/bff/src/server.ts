@@ -13967,6 +13967,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/config/type-matrix (T6 M13.15) — 2D cross-tab over
+   *  the static DEFAULTS schema: rows = category, cols = type. Per-row
+   *  {category, total, by_type (every ConfigType at 0 when absent),
+   *  types_without[] in canonical type order — coverage-gap per
+   *  category}. Per-col {type, total, by_category (every category at
+   *  0), categories_without[] in canonical category order}. Envelope:
+   *  peak_cell (canonical iteration tie-break; null when zero keys),
+   *  empty_cells[] (count=0 cells in canonical category × type order),
+   *  most_diverse_category (highest distinct non-zero by_type count;
+   *  canonical category-order tie-break; null when zero keys). Mirror
+   *  of M14.28 / M3.11 / M9.13 matrix pattern for the admin config
+   *  schema surface. Platform-static. Drives "which categories are
+   *  dominated by booleans vs numbers?" + "are there gaps (no JSON in
+   *  reporting?)". Mounted BEFORE catch-all `/v1/admin/config/:key`
+   *  so the literal `/type-matrix` isn't captured. */
+  app.get(
+    '/v1/admin/config/type-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdminConfigTypeMatrix } =
+        require('./admin_config_type_matrix') as
+        typeof import('./admin_config_type_matrix');
+      const out = buildAdminConfigTypeMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/schema.md (T6 M13.13) — Markdown reference
    *  export of the M13.1 platform schema (NOT tenant overrides; just
    *  the static catalogue of keys + types + defaults + descriptions).
