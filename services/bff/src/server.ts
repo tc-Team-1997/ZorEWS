@@ -17692,6 +17692,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/category-vertical-matrix (T6 M5.17) —
+   *  2D cross-tab over RULE_TEMPLATES. Rows = 5 RuleTemplateCategory
+   *  (canonical listCategories() order) × cols = 3 RuleTemplateVertical
+   *  (banking/insurance/both). Per-row {category, total, by_vertical
+   *  (every vertical at 0 when absent), verticals_without[] in
+   *  canonical order — coverage-gap per category}. Per-col {vertical,
+   *  total, by_category (every category at 0), categories_without[]
+   *  in canonical category order}. Envelope: peak_cell (canonical
+   *  iteration tie-break + template_ids[] sorted asc; null on empty),
+   *  empty_cells[] in canonical category × vertical row-major order,
+   *  most_covered_category + most_covered_vertical (highest distinct
+   *  non-zero span; canonical-order tie-break each; null on empty).
+   *  Mirror of M13.15 / M14.28 / M3.11 / M9.13 matrix pattern.
+   *  Platform-static. Mounted BEFORE catch-all `/:id`. Drives "do we
+   *  have insurance underwriting templates? where are the gaps?". */
+  app.get(
+    '/v1/rules/templates/category-vertical-matrix',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildRuleTemplateCategoryVerticalMatrix } =
+        require('./rule_template_category_vertical_matrix') as
+        typeof import('./rule_template_category_vertical_matrix');
+      const out = buildRuleTemplateCategoryVerticalMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/categories — distinct template categories. */
   app.get(
     '/v1/rules/templates/categories',
