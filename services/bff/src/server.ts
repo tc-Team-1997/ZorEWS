@@ -2431,6 +2431,53 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/channel-distribution?window=N (T6 M8.13) —
+   *  pivot the M8.6 routing ledger by NotificationChannel. Per
+   *  channel: dispatch_count (Σ across records), distinct_alerts,
+   *  by_class (4 keys), acked_count + open_count + monitor_only_count.
+   *  Envelope: channels[] canonical order, most_used_channel
+   *  (canonical tie-break: email > sms > in_app > push), unused_channels.
+   *  Default window=50, max=200. Mirror of M14.27 / M7.13 / M3.13
+   *  distribution pattern for the alerts surface. */
+  app.get(
+    '/v1/alerts/channel-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { summarizeAlertChannelDispatch } =
+        require('./alert_channel_distribution') as
+        typeof import('./alert_channel_distribution');
+      const out = summarizeAlertChannelDispatch(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/ack-time/histogram?window=N (T6 M8.12) —
    *  ABSOLUTE wall-clock ack-time histogram over the M8.6 routing
    *  ledger. Where M8.11 classifies by SLA-relative status, M8.12

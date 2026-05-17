@@ -22,6 +22,9 @@ import { StubRiskProfileSource } from '../src/risk_profile';
 import { UnavailableCaseActionSink } from '../src/case_action';
 
 // UTC midnight so window boundaries are predictable.
+// Past-dated anchor: the transport stubs default to real time, so
+// the route-level "populated" test injects clocks below to keep
+// sends INSIDE the window regardless of when the test runs.
 const NOW = new Date('2026-05-16T00:00:00.000Z');
 const TH_BIL = { 'X-Tenant-ID': 'BIL', 'X-Channel': 'API' };
 
@@ -70,9 +73,11 @@ function pushEntry(sent_at: Date, tenant = 'BIL'): PushLedgerEntry {
 }
 
 function makeDailyApp(role = 'admin') {
-  const emailTransport = new StubEmailTransport();
-  const smsTransport = new StubSmsTransport();
-  const pushTransport = new StubPushTransport();
+  // Inject the test clock into the transports so .send() inside route
+  // tests timestamps inside NOW's window, not real wall-clock time.
+  const emailTransport = new StubEmailTransport({ now: () => NOW });
+  const smsTransport = new StubSmsTransport({ now: () => NOW });
+  const pushTransport = new StubPushTransport({ now: () => NOW });
   const built = makeApp({
     source: new StaticSource([]),
     evaluator: new StubEvaluator(),
