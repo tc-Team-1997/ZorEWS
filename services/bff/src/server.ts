@@ -14968,6 +14968,49 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/scope-status-matrix (T6 M1.8) — 2D
+   *  cross-tab over the M1.2 redacted ApiKeyEntry surface combining
+   *  M1.5 scope × M1.2 status. Rows = 7 ApiKeyScope (canonical
+   *  VALID_SCOPES order) × cols = 2 ApiKeyStatus (canonical active →
+   *  revoked) = 14 cells. Cells count KEY-SCOPE PAIRS — a multi-scope
+   *  key contributes 1 to each (scope, status) cell. Defensive intra-
+   *  key scope dedup. Per-row {scope, total, by_status (every status
+   *  at 0 when absent), statuses_without[] canonical}. Per-col
+   *  {status, total, by_scope (every scope at 0 when absent),
+   *  scopes_without[] canonical}. Envelope {tenant_id, generated_at,
+   *  total_keys (= entries.length), total_dispatches (Σ all cells),
+   *  rows[], columns[], peak_cell (canonical iteration tie-break;
+   *  null on empty), empty_cells[] in canonical scope × status
+   *  row-major order, most_distributed_scope (highest distinct
+   *  non-zero by_status entries; canonical-order tie-break; null on
+   *  empty), total_active_dispatches + total_revoked_dispatches
+   *  (convenience top-level — Σ active column / Σ revoked column)}.
+   *  Mirror of M14.28 / M15.14 / M12.14 / M3.14 / M8.14 matrix
+   *  pattern. Drives "which scopes are revoked-heavy (cleanup
+   *  candidates)? which are active-only?". Mounted BEFORE `/:key_id`
+   *  so the literal `/scope-status-matrix` segment isn't captured. */
+  app.get(
+    '/v1/admin/api-keys/scope-status-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { buildApiKeyScopeStatusMatrix } =
+        require('./api_key_scope_status_matrix') as
+        typeof import('./api_key_scope_status_matrix');
+      const out = buildApiKeyScopeStatusMatrix(req.tenant!.tenant_id, entries, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/by-creator (T6 M1.6) — BY-CREATOR pivot
    *  view over the M1.2 redacted ApiKeyEntry surface. Per-creator row
    *  {creator_username, total_keys, active_keys, revoked_keys, scopes
