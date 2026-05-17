@@ -23,7 +23,7 @@ import {
 
 // ─── Public types ─────────────────────────────────────────────────────
 
-const ALL_FIELD_TYPES: readonly FieldType[] = [
+export const ALL_FIELD_TYPES: readonly FieldType[] = [
   'string',
   'integer',
   'number',

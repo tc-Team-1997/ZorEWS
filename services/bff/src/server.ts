@@ -16458,6 +16458,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/schema/required-matrix (T6 M3.14) — 2D cross-
+   *  tab over the WHOLE schema catalog: rows = 7 FieldType (canonical
+   *  ALL_FIELD_TYPES order) × cols = 2 (required, optional) = 14 cells.
+   *  Cells count FIELDS across the catalog (not unique connectors).
+   *  Per-row {type, total, required_count, optional_count,
+   *  required_ratio (required / total; 0 when total=0)}. Per-col
+   *  {required_column, total, by_type (every type at 0 when absent)}.
+   *  Envelope: peak_cell (with samples cap 5 sorted connector_id +
+   *  field_name asc; canonical iteration tie-break — types in
+   *  ALL_FIELD_TYPES order, required before optional; null when
+   *  empty), empty_cells[] in canonical row-major order, strictest_type
+   *  (highest required_ratio among types with total>0; canonical
+   *  tie-break) + loosest_type (lowest required_ratio; canonical
+   *  tie-break). Mirror of M3.11 / M8.14 / M14.28 matrix pattern.
+   *  Platform-static. Mounted BEFORE catch-all
+   *  `/v1/ingestion/connectors/:id/schema` so the literal `/schema/
+   *  required-matrix` segment isn't captured. */
+  app.get(
+    '/v1/ingestion/schema/required-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorSchemaRequiredMatrix } =
+        require('./connector_schema_required_matrix') as
+        typeof import('./connector_schema_required_matrix');
+      const out = buildConnectorSchemaRequiredMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/connectors/:id/schema — full field schema. */
   app.get(
     '/v1/ingestion/connectors/:id/schema',
