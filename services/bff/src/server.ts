@@ -9931,6 +9931,36 @@ export function makeApp(deps: AppDeps = {}) {
   // M6.2 catalog defaults. Pure-data — no store, no tenant overrides
   // here; M6.4 will land custom presets.
 
+  /** GET /v1/scoring/presets/multiplier-histogram (T6 M6.16) —
+   *  per-library-preset histogram of explicit weight_multipliers
+   *  bucketed strong_dampen (< 0.5) / mild_dampen [0.5, 1.0) /
+   *  mild_boost (1.0, 1.5] / strong_boost (> 1.5). Per-row {preset_id,
+   *  name, mode, vertical, total_multipliers, by_bucket (every bucket
+   *  at 0 when absent), min/mean/max_multiplier, boost_count,
+   *  dampen_count}. Envelope: rows[] sorted preset_id asc,
+   *  most_active_preset (highest total_multipliers; canonical
+   *  preset_id tie-break; null when balanced-only catalog),
+   *  most_boosted_preset + most_dampened_preset (canonical tie-break
+   *  each; null when no boost/dampen entries), highest_multiplier +
+   *  lowest_multiplier (with indicator_id; canonical tie-break),
+   *  by_bucket_totals (marginal counts across catalog). Drives
+   *  "which presets are most aggressive on the upside? which dampen
+   *  most?". Platform-static. Mounted BEFORE catch-all `/:preset_id`
+   *  so the literal `/multiplier-histogram` segment isn't captured. */
+  app.get(
+    '/v1/scoring/presets/multiplier-histogram',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildPresetMultiplierHistogram } =
+        require('./scoring_preset_multiplier_histogram') as
+        typeof import('./scoring_preset_multiplier_histogram');
+      const out = buildPresetMultiplierHistogram(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scoring/presets/inventory (T6 M6.15) — 2D cross-tab
    *  inventory: 3 modes × 2 verticals with per-cell library + custom
    *  counts. Per-cell: library_count, custom_count, total_count,
