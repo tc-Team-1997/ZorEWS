@@ -10913,6 +10913,38 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/band-gap (T6 M4.14) — quality
+   *  scorecard over the platform DEFAULTS threshold catalog.
+   *  Distinct from M4.12 (per-tenant drift) — M4.14 audits the
+   *  LIBRARY DEFAULTS themselves. Per-row: {indicator_id, vertical,
+   *  name, yellow_at/orange_at/red_at, yellow_orange_gap (= orange_at
+   *  − yellow_at), orange_red_gap (= red_at − orange_at), total_spread
+   *  (= red_at − yellow_at), monotonic flag, and 5 boolean quality
+   *  flags: has_tight_yellow_orange_gap (gap < 0.10),
+   *  has_tight_orange_red_gap, has_high_yellow_floor (yellow_at >
+   *  0.65), has_low_red_ceiling (red_at < 0.65), has_inverted_bands
+   *  (monotonicity violated)}. Envelope: mean gaps + mean spread
+   *  across monotonic rows, tightest_yellow_orange + widest_total_
+   *  spread (canonical indicator_id asc tie-break), by_vertical
+   *  rollup (every ScoringVertical at 0 when absent), flagged_
+   *  indicators[] (any quality flag set; sorted indicator_id asc).
+   *  Platform-static. Mounted BEFORE `/v1/indicators/thresholds/
+   *  effective` + catch-all `/:indicator_id` so the literal `/band-
+   *  gap` segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/indicators/thresholds/band-gap',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorThresholdBandGap } =
+        require('./indicator_threshold_band_gap') as
+        typeof import('./indicator_threshold_band_gap');
+      const out = buildIndicatorThresholdBandGap(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/effective?vertical=banking|insurance
    *  (T6 M4.9) — every platform indicator's effective threshold for the
    *  caller's tenant, with the resolution chain (library_default vs
