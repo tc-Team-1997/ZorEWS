@@ -3670,6 +3670,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/framework-type-matrix (T6 M7.14) — 2D cross-
+   *  tab over the M7.1 registry combining M7.12 (type coverage) ×
+   *  M7.13 (framework distribution). Rows = 5 ModelFramework
+   *  (canonical xgboost → sklearn → torch → lightgbm → isolation_forest)
+   *  × cols = 6 ModelType (canonical pd → fraud → churn → lapse →
+   *  anomaly → claim_severity) = 30 cells. Per-row {framework, total,
+   *  by_type, types_without[] canonical}. Per-col {type, total,
+   *  by_framework, frameworks_without[] canonical}. Envelope:
+   *  peak_cell (with model_ids[] sorted asc; canonical iteration
+   *  tie-break), empty_cells[] in canonical framework × type
+   *  row-major order, most_versatile_framework + best_supported_type
+   *  (highest distinct non-zero span; canonical-order tie-break).
+   *  Mirror of M5.17 / M13.15 / M14.28 / M3.11 / M9.13 matrix pattern.
+   *  Drives "do we have torch models for every type?" + "where are
+   *  the framework × type gaps?". Mounted BEFORE /by-type/:type +
+   *  /:model_id catch-alls so the literal `/framework-type-matrix`
+   *  segment isn't captured. */
+  app.get(
+    '/v1/ai/models/framework-type-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAiModelFrameworkTypeMatrix } =
+        require('./ai_model_framework_type_matrix') as
+        typeof import('./ai_model_framework_type_matrix');
+      const out = buildAiModelFrameworkTypeMatrix(aiModelRegistry, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/framework-distribution (T6 M7.13) —
    *  PIVOT-BY-FRAMEWORK view over the M7.1 registry. Orthogonal to
    *  M7.12 (type coverage). 5 ModelFramework rows. Per row: count,
