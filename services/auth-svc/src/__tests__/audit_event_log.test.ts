@@ -1,9 +1,9 @@
 // Integration tests for AuditEventLogClient + PgAuthAuditLog fan-out.
 //
 // Skipped when AUTH_SVC_PG_URL is unset (the default — keeps `npm test`
-// hermetic in CI). Run locally with the `apex-ews-pg` container up:
+// hermetic in CI). Run locally with the `zorews-pg` container up:
 //
-//   AUTH_SVC_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   AUTH_SVC_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npm test -- src/__tests__/audit_event_log.test.ts
 //
 // These tests TRUNCATE audit.event_log to assert on counts. The

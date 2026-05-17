@@ -1,4 +1,4 @@
-# APEX EWS — Aurora schema bootstrap.
+# ZorEWS — Aurora schema bootstrap.
 #
 # Targets:
 #   make up      : start a local postgres:16 container (port 55432).
@@ -10,11 +10,11 @@
 #
 # The local DB matches Aurora PG 16 (we pin the image tag).
 
-PG_CONTAINER ?= apex-ews-pg
+PG_CONTAINER ?= zorews-pg
 PG_IMAGE     ?= postgres:16
 PG_PORT      ?= 55432
-PG_DB        ?= apex_ews
-PG_USER      ?= apex
+PG_DB        ?= zorews
+PG_USER      ?= zorews_user
 PG_PASSWORD  ?= apex
 PSQL         ?= PGPASSWORD=$(PG_PASSWORD) psql -h localhost -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB)
 

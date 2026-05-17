@@ -1,9 +1,9 @@
 // Integration tests for PgSmartQueue.
 //
 // Skipped when ALERTS_PG_URL is unset (the default — keeps `npm test`
-// hermetic in CI). Run locally with the `apex-ews-pg` container up:
+// hermetic in CI). Run locally with the `zorews-pg` container up:
 //
-//   ALERTS_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   ALERTS_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npm test -- alerts_pg
 //
 // Each test calls queue.reset() in beforeEach which TRUNCATEs both

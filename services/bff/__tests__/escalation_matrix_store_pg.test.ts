@@ -2,7 +2,7 @@
 //
 // Skipped when ADMIN_PG_URL/BFF_PG_URL is unset. Run locally:
 //
-//   ADMIN_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   ADMIN_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npx jest escalation_matrix_store_pg
 //
 // TRUNCATEs only TEST_M14_22 tenant rows so the live BANK_DEMO/BIL

@@ -1,9 +1,9 @@
 // Integration tests for PgWebhookSubscriptionStore.
 //
 // Skipped when BFF_PG_URL is unset (the default — keeps `npm test`
-// hermetic in CI). Run locally with the `apex-ews-pg` container up:
+// hermetic in CI). Run locally with the `zorews-pg` container up:
 //
-//   BFF_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   BFF_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npm test -- --testPathPattern=webhooks_pg
 //
 // Each test calls store.reset() in beforeEach which TRUNCATEs the two

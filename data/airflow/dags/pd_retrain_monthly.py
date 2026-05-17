@@ -44,7 +44,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 REPO_ROOT = os.environ.get("APEX_REPO_ROOT", "/opt/airflow/repo")
-DBT_PROJECT_DIR = os.environ.get("DBT_PROJECT_DIR", "/opt/airflow/dbt/apex_ews")
+DBT_PROJECT_DIR = os.environ.get("DBT_PROJECT_DIR", "/opt/airflow/dbt/zorews")
 DBT_PROFILES_DIR = os.environ.get("DBT_PROFILES_DIR", "/opt/airflow/dbt")
 SKIP_DBT_REFRESH = os.environ.get("PD_RETRAIN_SKIP_DBT", "0") == "1"
 

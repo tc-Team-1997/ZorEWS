@@ -1,9 +1,9 @@
 // Integration tests for PgUserStore + PgSessionStore + PgAuthAuditLog.
 //
 // Skipped when AUTH_SVC_PG_URL is unset (the default — keeps `npm test`
-// hermetic in CI). Run locally with the `apex-ews-pg` container up:
+// hermetic in CI). Run locally with the `zorews-pg` container up:
 //
-//   AUTH_SVC_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   AUTH_SVC_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npm test -- src/__tests__/pg_stores.test.ts
 //
 // Each test calls reset() in its setup which TRUNCATEs the four
@@ -38,7 +38,7 @@ test("PgUserStore — init() seeds + create persists + restart rehydrates", { sk
     // Register a new user — confirm cache + pg both have it after a beat.
     const result = await store.register({
       username: "pg.test.user",
-      email: "pg.test@apex-ews.test",
+      email: "pg.test@zorews.test",
       password: "PgTest!Pass1",
       display_name: "Pg Test",
       role: "risk_analyst",

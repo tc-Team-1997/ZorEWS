@@ -47,8 +47,8 @@ resource "aws_rds_cluster" "aurora" {
   cluster_identifier                  = "apex-ews-${var.env}-aurora"
   engine                              = "aurora-postgresql"
   engine_version                      = var.aurora_engine_version
-  database_name                       = "apex_ews"
-  master_username                     = "apex_admin"
+  database_name                       = "zorews"
+  master_username                     = "zorews_user"
   manage_master_user_password         = true
   master_user_secret_kms_key_id       = data.aws_kms_alias.aurora.target_key_arn
   db_subnet_group_name                = aws_db_subnet_group.aurora.name
@@ -338,9 +338,9 @@ resource "aws_msk_cluster" "this" {
 # half — Kafka producers + consumers consult the registry over IAM-auth.
 ###############################################################################
 
-resource "aws_glue_registry" "apex_ews" {
+resource "aws_glue_registry" "zorews" {
   registry_name = "apex-ews-${var.env}"
-  description   = "APEX EWS canonical event contracts. Schemas registered here mirror infra/schema-registry/*.json with BACKWARD compatibility enforced in CI."
+  description   = "ZorEWS canonical event contracts. Schemas registered here mirror infra/schema-registry/*.json with BACKWARD compatibility enforced in CI."
 
   tags = {
     project = "apex-ews"
@@ -374,7 +374,7 @@ resource "aws_glue_schema" "topics" {
     title => files[length(files) - 1]
   }
 
-  registry_arn      = aws_glue_registry.apex_ews.arn
+  registry_arn      = aws_glue_registry.zorews.arn
   schema_name       = each.key
   data_format       = "JSON"
   compatibility     = "BACKWARD"

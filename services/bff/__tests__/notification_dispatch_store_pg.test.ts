@@ -1,9 +1,9 @@
 // Integration tests for PgNotificationDispatchStore (T6 M14.24c).
 //
 // Skipped when ADMIN_PG_URL/BFF_PG_URL is unset. Run locally with the
-// apex-ews-pg container up and migration 022 applied:
+// zorews-pg container up and migration 022 applied:
 //
-//   ADMIN_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   ADMIN_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npx jest notification_dispatch_store_pg
 //
 // Uses a per-suite tenant id (TEST_M14_24_DISP) so parallel PG suites

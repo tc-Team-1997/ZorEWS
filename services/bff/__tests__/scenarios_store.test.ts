@@ -3,7 +3,7 @@
 // In-memory tests run unconditionally. The pg integration suite is gated
 // on BFF_PG_URL — skipped by default to keep CI hermetic. Run locally:
 //
-//   BFF_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   BFF_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npm test -- scenarios_store
 
 import express from 'express';

@@ -14,7 +14,7 @@
 -- Its admin page renders live state, not stored rows.
 --
 -- Apply:
---   docker exec -i apex-ews-pg psql -U apex -d apex_ews \
+--   docker exec -i zorews-pg psql -U zorews_user -d zorews \
 --     -v ON_ERROR_STOP=1 -f /tmp/seed_admin_sample_data.sql
 --
 -- Idempotent: each INSERT uses ON CONFLICT DO NOTHING against the natural

@@ -1,8 +1,8 @@
-name: 'apex_ews'
+name: 'zorews'
 version: '0.1.0'
 config-version: 2
 
-profile: 'apex_ews'
+profile: 'zorews'
 
 model-paths:    ["models"]
 seed-paths:     ["seeds"]
@@ -17,7 +17,7 @@ clean-targets:  ["target", "dbt_packages"]
 # We use dbt's schema-suffix convention via the `+schema` config so that
 # `models/staging/*.sql` ends up in `staging`, `models/marts/*.sql` in `mart`.
 models:
-  apex_ews:
+  zorews:
     +materialized: view
     staging:
       +schema: staging
@@ -27,7 +27,7 @@ models:
       +materialized: table
 
 seeds:
-  apex_ews:
+  zorews:
     +schema: raw
     +quote_columns: false
     seed_customers:

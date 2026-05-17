@@ -1,14 +1,14 @@
 # Copy to ~/.dbt/profiles.yml or set DBT_PROFILES_DIR to this directory.
-apex_ews:
+zorews:
   target: dev
   outputs:
     dev:
       type: postgres
       host: localhost
       port: 55432
-      user: apex
+      user: zorews_user
       password: apex
-      dbname: apex_ews
+      dbname: zorews
       schema: staging        # default schema; per-folder overrides in dbt_project.yml
       threads: 4
       keepalives_idle: 0
@@ -17,9 +17,9 @@ apex_ews:
       type: postgres
       host: "{{ env_var('PGHOST', 'localhost') }}"
       port: "{{ env_var('PGPORT', '5432') | int }}"
-      user: "{{ env_var('PGUSER', 'apex') }}"
+      user: "{{ env_var('PGUSER', 'zorews_user') }}"
       password: "{{ env_var('PGPASSWORD', 'apex') }}"
-      dbname: "{{ env_var('PGDATABASE', 'apex_ews') }}"
+      dbname: "{{ env_var('PGDATABASE', 'zorews') }}"
       schema: staging
       threads: 4
       sslmode: require

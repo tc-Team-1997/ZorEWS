@@ -76,8 +76,8 @@ make web-dev
 **Postgres-backed stores (cases + alerts + scenarios + webhooks):**
 
 ```sh
-# Postgres (apex-ews-pg) must be running — see "Database" below.
-PG=postgres://apex:apex@localhost:55432/apex_ews
+# Postgres (zorews-pg) must be running — see "Database" below.
+PG=postgres://zorews_user:apex@localhost:55432/zorews
 CASES_PG_URL=$PG ALERTS_PG_URL=$PG BFF_PG_URL=$PG make up
 ```
 
@@ -90,14 +90,14 @@ make down
 
 ### Database (Postgres)
 
-The dev database runs in Docker (`apex-ews-pg` on `:55432`, role `apex` / db `apex_ews`). Bootstrap from scratch:
+The dev database runs in Docker (`zorews-pg` on `:55432`, role `zorews_user` / db `zorews`). Bootstrap from scratch:
 
 ```sh
 # One-time bootstrap of the schemas + seed data:
 cd data/schema
-make up                         # docker run apex-ews-pg (postgres:16) on :55432
+make up                         # docker run zorews-pg (postgres:16) on :55432
 make migrate                    # apply 001_init_schemas.sql, 002_raw_tables.sql, 003_audit_table.sql
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
   -v ON_ERROR_STOP=1 -f 004_app_schemas.sql      # 5 new app_* schemas
 
 # Load raw seed CSVs (10k customers; ~4 min):
@@ -109,7 +109,7 @@ dbt deps && dbt seed --full-refresh && dbt run && dbt test
 # Load synthetic app data into the new app_* schemas (~26k rows):
 cd ../schema
 python3 _generate_app_seeds.py
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
   -v ON_ERROR_STOP=1 -f app_seeds.sql
 ```
 

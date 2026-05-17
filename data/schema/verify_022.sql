@@ -4,7 +4,7 @@
 -- 022_notification_dispatch_log.
 --
 -- Run with:
---   PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+--   PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
 --     -f data/schema/verify_022.sql
 
 \echo

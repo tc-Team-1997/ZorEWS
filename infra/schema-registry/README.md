@@ -21,7 +21,7 @@ field is still required, so v1 consumers continue to validate (BACKWARD).
 Each schema declares `version` and `compatibility` at the top level — these
 are read by the `validate-schemas` CI step. In production the same JSON files
 are uploaded to AWS Glue Schema Registry (`infra/terraform/30-data/main.tf`
-`aws_glue_registry.apex_ews` + `aws_glue_schema.topics`).
+`aws_glue_registry.zorews` + `aws_glue_schema.topics`).
 
 ## CI gate (T3.8)
 

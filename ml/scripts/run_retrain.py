@@ -232,7 +232,7 @@ def main() -> int:
     parser.add_argument("--auc-gate", type=float, default=0.78)
     parser.add_argument("--skip-dbt", action="store_true", default=True)
     parser.add_argument("--no-skip-dbt", dest="skip_dbt", action="store_false")
-    parser.add_argument("--dbt-project-dir", default="data/dbt/apex_ews")
+    parser.add_argument("--dbt-project-dir", default="data/dbt/zorews")
     parser.add_argument("--dbt-profiles-dir", default="data/dbt")
     parser.add_argument(
         "--notify",

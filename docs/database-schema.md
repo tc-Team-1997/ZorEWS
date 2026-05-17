@@ -1,7 +1,7 @@
 # ZorEWS — Backend Database Schema
 
 **Last updated:** 2026-05-03 (post 10k-scale-up + app schemas)
-**Database:** PostgreSQL 16 (local: `apex-ews-pg` on `:55432`; production: Aurora PostgreSQL 16 Multi-AZ via `infra/terraform/30-data`)
+**Database:** PostgreSQL 16 (local: `zorews-pg` on `:55432`, db `zorews`; production: Aurora PostgreSQL 16 Multi-AZ via `infra/terraform/30-data`)
 **Live row count:** ~731,500 across 9 schemas / 26 tables
 
 This document is the canonical reference for every persisted table in the prototype. Source of truth is the SQL + dbt files; this doc is regenerated from those.
@@ -690,12 +690,12 @@ Local Postgres lifecycle is in [`data/schema/Makefile`](../data/schema/Makefile)
 
 ```sh
 cd data/schema
-make up        # docker run apex-ews-pg (postgres:16) on :55432
+make up        # docker run zorews-pg (postgres:16) on :55432
 make migrate   # psql -f 001_init_schemas.sql 002_raw_tables.sql 003_audit_table.sql
 make verify    # smoke: 4 schemas, audit-trigger reject test
 
 # 2026-05-03 additions — apply once, idempotent on subsequent runs:
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
   -v ON_ERROR_STOP=1 -f 004_app_schemas.sql
 
 make down      # stop + remove the container
@@ -716,7 +716,7 @@ Then load the synthetic app data:
 ```sh
 cd data/schema
 python3 _generate_app_seeds.py    # writes app_seeds.sql (~26k rows)
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
   -v ON_ERROR_STOP=1 -f app_seeds.sql
 ```
 

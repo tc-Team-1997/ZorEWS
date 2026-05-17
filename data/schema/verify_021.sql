@@ -3,7 +3,7 @@
 -- Post-migration verification queries for 021_case_scenarios_and_admin_extensions.
 --
 -- Run with:
---   PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+--   PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
 --     -f data/schema/verify_021.sql
 --
 -- Each section prints either a row count or a structural fact. Visual

@@ -1,10 +1,10 @@
 // Integration tests for PgNotificationTemplateStore (T6 M14.22).
 //
 // Skipped when ADMIN_PG_URL/BFF_PG_URL is unset (the default — keeps
-// `npm test` hermetic in CI). Run locally with the `apex-ews-pg`
+// `npm test` hermetic in CI). Run locally with the `zorews-pg`
 // container up + migration 021 applied:
 //
-//   ADMIN_PG_URL=postgres://apex:apex@localhost:55432/apex_ews \
+//   ADMIN_PG_URL=postgres://zorews_user:apex@localhost:55432/zorews \
 //     npx jest notification_templates_store_pg
 //
 // TRUNCATEs app_admin.notification_templates in beforeEach so the suite

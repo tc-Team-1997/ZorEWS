@@ -4,7 +4,7 @@
 **Last updated:** 2026-05-03 (T4.13–T4.18 all live; **all 5 original gaps closed**; final cleanup of dead state dirs + Gap 4 clarification done)
 **Scope:** What's actually persisted in Postgres vs. what should be, and the fix plan for each remaining gap.
 
-This document is the result of a live inventory of the running `apex-ews-pg` Postgres container against the codebase's schema definitions and service code paths. Each gap below is paired with an honest "is this a problem?" verdict and a sized fix.
+This document is the result of a live inventory of the running `zorews-pg` Postgres container against the codebase's schema definitions and service code paths. Each gap below is paired with an honest "is this a problem?" verdict and a sized fix.
 
 > **Update 2026-05-03 (final):** all 5 original gaps closed across six sessions. **Gap 1 closed**, **Gap 2 closed (T4.16)**, **Gap 3 closed (T4.13–T4.18 — all 5 services now persist to Postgres)**, **Gap 4 closed (dead state dir removed; outbox dirs intentionally kept as fake-Kafka event bus — see clarification below)**, **Gap 5 closed**.
 
@@ -219,4 +219,4 @@ Beyond these, every other gap is explicitly tracked in the per-service wiring ba
 - dbt source aliasing (now clean): [`data/dbt/models/sources.yml`](../data/dbt/models/sources.yml)
 - Service-by-service in-memory store inventory: see "Out-of-Postgres state" in [`docs/database-schema.md`](database-schema.md)
 - Verification matrix (proves the analytics path works end-to-end): [`STATUS.md`](../STATUS.md)
-- Live container status: `docker ps | grep apex-ews-pg` should show `Up …` on port `:55432`
+- Live container status: `docker ps | grep zorews-pg` should show `Up …` on port `:55432`

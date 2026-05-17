@@ -32,7 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
         return None
 
 
-DBT_PROJECT_DIR  = os.environ.get("DBT_PROJECT_DIR",  "/opt/airflow/dbt/apex_ews")
+DBT_PROJECT_DIR  = os.environ.get("DBT_PROJECT_DIR",  "/opt/airflow/dbt/zorews")
 DBT_PROFILES_DIR = os.environ.get("DBT_PROFILES_DIR", "/opt/airflow/dbt")
 
 DEFAULT_ARGS = {

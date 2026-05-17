@@ -120,7 +120,7 @@ plus the AUC ≥ 0.78 hard gate inside `train_pd.py`.
 | Var | Default | Notes |
 |---|---|---|
 | `APEX_REPO_ROOT` | `/opt/airflow/repo` | Working dir for the retrain task |
-| `DBT_PROJECT_DIR` | `/opt/airflow/dbt/apex_ews` | Passed to `dbt run` |
+| `DBT_PROJECT_DIR` | `/opt/airflow/dbt/zorews` | Passed to `dbt run` |
 | `DBT_PROFILES_DIR` | `/opt/airflow/dbt` | dbt profiles location |
 | `PD_RETRAIN_SKIP_DBT` | `0` | `1` skips the dbt_refresh task |
 | `PD_RETRAIN_AUC_GATE` | `0.78` | Hard floor on holdout AUC |

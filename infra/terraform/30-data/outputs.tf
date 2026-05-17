@@ -47,7 +47,7 @@ output "msk_bootstrap_brokers_sasl_iam" {
 
 output "glue_schema_registry_arn" {
   description = "Glue Schema Registry holding the apex.* topic schemas."
-  value       = aws_glue_registry.apex_ews.arn
+  value       = aws_glue_registry.zorews.arn
 }
 
 output "glue_schema_arns" {

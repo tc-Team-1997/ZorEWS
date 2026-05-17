@@ -27,7 +27,7 @@ python3 _generate_seeds.py     # ~220 customers, ~520 loans, ~6000 txns, ~6% NPA
 
 ```bash
 cd /Users/taniya/apex-ews/data/schema
-make up                         # docker run apex-ews-pg (postgres:16) on :55432
+make up                         # docker run zorews-pg (postgres:16) on :55432
 make migrate                    # 001..011 SQL — full app schema
 make verify                     # row counts + audit-trigger smoke
 ```
@@ -38,33 +38,33 @@ make verify                     # row counts + audit-trigger smoke
 |-------|-------|
 | Host | `localhost` |
 | Port | `55432` |
-| Database | `apex_ews` |
-| User | `apex` |
+| Database | `zorews` |
+| User | `zorews_user` |
 | Password | `apex` |
-| URL | `postgres://apex:apex@localhost:55432/apex_ews` |
+| URL | `postgres://zorews_user:apex@localhost:55432/zorews` |
 
 **Apply migrations 012-015 + load 26k synthetic operator rows + 8 CMS demo cases:**
 
 ```bash
 # 012-015 weren't part of `make migrate` — apply them manually:
 for f in 012_ews_rules.sql 013_cms_cases.sql 014_copilot_audit.sql 015_ews_rules_versions.sql; do
-  PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -v ON_ERROR_STOP=1 -f "$f"
+  PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -v ON_ERROR_STOP=1 -f "$f"
 done
 
 # Or, if psql isn't on PATH, run via the container:
 for f in 012_ews_rules.sql 013_cms_cases.sql 014_copilot_audit.sql 015_ews_rules_versions.sql; do
-  docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -q < "$f"
+  docker exec -i zorews-pg psql -U zorews_user -d zorews -v ON_ERROR_STOP=1 -q < "$f"
 done
 
 # 26k synthetic operator rows (users + sessions + audit + cases + alerts + …):
 source ../../.venv/bin/activate
 python3 _generate_app_seeds.py
-docker cp app_seeds.sql apex-ews-pg:/tmp/app_seeds.sql
-docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -f /tmp/app_seeds.sql
+docker cp app_seeds.sql zorews-pg:/tmp/app_seeds.sql
+docker exec -i zorews-pg psql -U zorews_user -d zorews -v ON_ERROR_STOP=1 -f /tmp/app_seeds.sql
 
 # 10 brief-mandated EWS rules into the BIL tenant:
-docker cp seed_ews_rules.sql apex-ews-pg:/tmp/seed_ews_rules.sql
-docker exec -i apex-ews-pg psql -U apex -d apex_ews -v ON_ERROR_STOP=1 -f /tmp/seed_ews_rules.sql
+docker cp seed_ews_rules.sql zorews-pg:/tmp/seed_ews_rules.sql
+docker exec -i zorews-pg psql -U zorews_user -d zorews -v ON_ERROR_STOP=1 -f /tmp/seed_ews_rules.sql
 ```
 
 After this you'll have ~26k application rows across 9 schemas. The BFF additionally seeds 8 demo CMS cases + 10 EWS rules into its in-memory stores at cold start, so even with the database unwired the SPA pages render.
@@ -72,7 +72,7 @@ After this you'll have ~26k application rows across 9 schemas. The BFF additiona
 **Wire services to Postgres** (turns on the PG-backed code paths):
 
 ```bash
-PG=postgres://apex:apex@localhost:55432/apex_ews
+PG=postgres://zorews_user:apex@localhost:55432/zorews
 CASES_PG_URL=$PG ALERTS_PG_URL=$PG BFF_PG_URL=$PG make up
 ```
 

@@ -17,7 +17,7 @@ Produces app_seeds.sql with realistic-looking rows for:
 Total: ~31,000 app rows (added on top of the ~580k raw + 124k mart rows).
 
 Run: python3 _generate_app_seeds.py
-Then: psql -h localhost -p 55432 -U apex -d apex_ews -f app_seeds.sql
+Then: psql -h localhost -p 55432 -U zorews_user -d zorews -f app_seeds.sql
 
 Deterministic via random.seed(43) — re-running produces byte-identical SQL.
 """
