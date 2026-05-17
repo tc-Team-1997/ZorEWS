@@ -11695,6 +11695,52 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/step-completion (T6 M2.13) —
+   *  PER-STEP cross-tenant completion rollup. M2.12 pivots BY-TENANT
+   *  ("where does each tenant stand?"); M2.13 pivots BY-STEP ("which
+   *  steps get stuck for the most tenants?"). Per-step row {step_id,
+   *  name, order, required, total_tenants, completed_count,
+   *  skipped_count, pending_count, completion_rate, pending_tenant_ids[]
+   *  sorted asc}. Envelope: steps[] in canonical step.order asc,
+   *  biggest_required_bottleneck (required step with highest
+   *  pending_count; canonical step.order tie-break; null when none),
+   *  steps_needing_attention[] (completion_rate < 0.5, sorted asc),
+   *  fully_adopted_steps[] (completion_rate=1.0). Async since
+   *  tenantLookup.all() may be async. Mounted BEFORE
+   *  /v1/tenants/:tenant_id catch-all so the literal segment isn't
+   *  captured. */
+  app.get(
+    '/v1/tenants/onboarding/step-completion',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { summarizeOnboardingStepCompletion } =
+        require('./tenant_onboarding_step_completion') as
+        typeof import('./tenant_onboarding_step_completion');
+      const out = summarizeOnboardingStepCompletion(
+        tenants,
+        (id: string) => onboardingStore.get(id),
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/onboarding/fleet (T6 M2.12) — cross-tenant
    *  admin view returning onboarding posture for EVERY configured
    *  tenant in one round-trip. Per-row: tenant_id, name, vertical,
