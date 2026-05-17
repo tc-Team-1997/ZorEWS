@@ -13884,6 +13884,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations/param-type-required-matrix
+   *  (T6 M14.29) — 2D pivot ACROSS every parameter in the M14.24
+   *  catalog. Rows = 4 ParameterType (canonical string → integer →
+   *  datetime → enum) × cols = 2 (required, optional) = 8 cells.
+   *  Cells count PARAMETERS — a single operation with N params
+   *  contributes N to the relevant cells. Per-row {type, total,
+   *  required_count, optional_count, required_ratio}. Per-col
+   *  {required_column, total, by_type (every ParameterType at 0
+   *  when absent)}. Envelope: peak_cell (with samples cap 5 sorted
+   *  adapter_id + operation_id + parameter_name asc; canonical
+   *  iteration tie-break; null on empty), empty_cells[] in canonical
+   *  row-major order, strictest_type + loosest_type (highest +
+   *  lowest required_ratio among types with total>0; canonical-order
+   *  tie-break). Mirror of M3.14 (connector schema field-type ×
+   *  required) for the adapter operation catalog. Platform-static.
+   *  Mounted next to M14.28 / M14.27 / M14.24 operation routes. */
+  app.get(
+    '/v1/integrations/adapters/operations/param-type-required-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterParamTypeRequiredMatrix } =
+        require('./adapter_param_type_required_matrix') as
+        typeof import('./adapter_param_type_required_matrix');
+      const out = buildAdapterParamTypeRequiredMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/operations/matrix (T6 M14.28) —
    *  2D cross-tab over the M14.24 operation catalog: rows = HTTP
    *  method (canonical GET/POST/PATCH/DELETE), cols = adapter (8 BIL
