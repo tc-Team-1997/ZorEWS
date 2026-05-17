@@ -5764,6 +5764,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/shock-axis-histogram (T6 M16.20) —
+   *  AXIS-pivoted view over SCENARIO_PRESETS. For each of 3 shock
+   *  axes (canonical gdp → rate → fx), bucket the 10 presets'
+   *  |shock| values into 4 magnitude ranges (zero / mild / moderate
+   *  / severe) with axis-aware thresholds (GDP pp / rate bps / fx %).
+   *  Per-row {axis, thresholds, by_bucket, total_presets, min_abs,
+   *  max_abs, mean_abs, positive/negative/zero counts, severe_examples
+   *  cap 3 sorted asc}. Envelope: most_severe_axis (highest severe
+   *  count; canonical-axis-order tie-break; null when no severe
+   *  entries), highest_mean_axis + lowest_mean_axis (canonical-order
+   *  tie-break; null on empty library), by_bucket_totals (marginal
+   *  counts across 3 axes). Companion to M16.18 (per-preset
+   *  magnitude — single number) — M16.20 is the per-axis bucket
+   *  distribution. Mirror of M6.16 multiplier histogram shape.
+   *  Platform-static. Mounted next to other /scenarios/library/* routes. */
+  app.get(
+    '/v1/scenarios/library/shock-axis-histogram',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioShockAxisHistogram } =
+        require('./scenario_shock_axis_histogram') as
+        typeof import('./scenario_shock_axis_histogram');
+      const out = buildScenarioShockAxisHistogram(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/inventory (T6 M16.19) — 2D cross-tab
    *  pivot of M16.1 library + M16.4 custom by category × severity.
    *  4 categories × 3 severities = 12 cells in canonical row-major
