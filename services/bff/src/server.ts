@@ -15216,6 +15216,38 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/action-prefix-distribution (T6 M15.13) — pivot
+   *  the audit chain by ACTION PREFIX (everything before the first
+   *  `.` in `<prefix>.<verb>` actions). Coarser-grained than M15.6
+   *  (per-verb catalog). Per-prefix row {prefix, total_count,
+   *  distinct_verbs[] sorted asc, by_outcome (3 keys), distinct_
+   *  resource_types[] sorted asc, distinct_actors[] sorted asc,
+   *  most_recent_at}. Envelope: prefixes[] sorted total_count desc +
+   *  prefix asc tie-break, most_frequent_prefix (canonical tie-break;
+   *  null on empty), unprefixed_count (actions without `.` — surfaces
+   *  accidentally-flat verb writes). Mirror of M4.13 indicator family
+   *  extraction for the audit verbs surface. Drives "by-domain"
+   *  rollup answering "how much of our audit is config vs scenario
+   *  vs case?". */
+  app.get(
+    '/v1/audit/action-prefix-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { summarizeAuditActionPrefixDistribution } =
+        require('./audit_action_prefix_distribution') as
+        typeof import('./audit_action_prefix_distribution');
+      const out = summarizeAuditActionPrefixDistribution(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/resource-type-distribution (T6 M15.12) — pivot
    *  the audit chain by resource_type (10-key axis). Per-type row:
    *  total_count + by_severity (3 keys present) + by_outcome (3 keys
