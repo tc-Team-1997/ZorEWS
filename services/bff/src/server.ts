@@ -15107,6 +15107,74 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/daily-volume?days=N (T6 M1.9) — TREND-
+   *  LINE view of API key creations across the last N UTC days.
+   *  Per-day bucket {date, total, by_status (active + revoked at 0
+   *  when absent)}. Every day in [window_start, window_end] emitted
+   *  even when zero — stable SPA chart axis. Envelope
+   *  {tenant_id, generated_at, days, window_start, window_end,
+   *  total_created_in_window, total_keys_observed, by_day[],
+   *  peak_day (earliest-day-wins tie-break; null when zero
+   *  creations), peak_count, mean_per_day, growth_rate (second-half
+   *  vs first-half mean; null when first-half=0 or days<2),
+   *  total_active_in_window + total_revoked_in_window (convenience)}.
+   *  Default days=30, bounds [1, 365] enforced via
+   *  ApiKeyDailyVolumeError → 400 EWS_400_invalid_input. Mirror of
+   *  M12.13/M15.11/M10.15 daily volume pattern for API keys. Mounted
+   *  BEFORE `/:key_id` so the literal `/daily-volume` segment isn't
+   *  captured. */
+  app.get(
+    '/v1/admin/api-keys/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let days = 30;
+      if (typeof q.days === 'string' && q.days) {
+        const parsed = Number.parseInt(q.days, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be an integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { summarizeApiKeyDailyVolume, ApiKeyDailyVolumeError } =
+        require('./api_key_daily_volume') as
+        typeof import('./api_key_daily_volume');
+      try {
+        const out = summarizeApiKeyDailyVolume(req.tenant!.tenant_id, entries, days, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ApiKeyDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/api-keys/scope-status-matrix (T6 M1.8) — 2D
    *  cross-tab over the M1.2 redacted ApiKeyEntry surface combining
    *  M1.5 scope × M1.2 status. Rows = 7 ApiKeyScope (canonical
