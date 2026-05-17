@@ -14594,6 +14594,40 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/by-creator (T6 M1.6) — BY-CREATOR pivot
+   *  view over the M1.2 redacted ApiKeyEntry surface. Per-creator row
+   *  {creator_username, total_keys, active_keys, revoked_keys, scopes
+   *  (union sorted asc, defensive dedup), most_recent_creation_at,
+   *  key_names[] sorted asc cap 50}. Envelope {total_keys,
+   *  total_active_keys, total_revoked_keys, total_creators,
+   *  creators_with_active_keys, creators[] sorted by total_keys desc +
+   *  creator_username asc tie-break, most_prolific_creator,
+   *  largest_active_provisioner}. Mirror of M11.15 dashboard authorship
+   *  + M15.8 audit per-actor pivot pattern. Drives the SPA "audit who
+   *  created what" + quarterly access-review flow.
+   *  Mounted BEFORE /:key_id so the literal `/by-creator` segment wins. */
+  app.get(
+    '/v1/admin/api-keys/by-creator',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain the store — same pattern as M1.4 + M1.5.
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { summarizeApiKeysByCreator } = require('./api_key_by_creator') as
+        typeof import('./api_key_by_creator');
+      const out = summarizeApiKeysByCreator(req.tenant!.tenant_id, entries, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/:key_id — single redacted entry. */
   app.get(
     '/v1/admin/api-keys/:key_id',
