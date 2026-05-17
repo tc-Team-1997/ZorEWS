@@ -13737,6 +13737,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations/matrix (T6 M14.28) —
+   *  2D cross-tab over the M14.24 operation catalog: rows = HTTP
+   *  method (canonical GET/POST/PATCH/DELETE), cols = adapter (8 BIL
+   *  adapters). Per-row {method, total, by_adapter (every AdapterId
+   *  at 0 when absent), adapters_without[] sorted asc — coverage-gap
+   *  per method}. Per-col {adapter_id, label, base_path, total,
+   *  by_method (every method at 0 when absent), methods_without[] in
+   *  canonical method order — coverage-gap per adapter}. Envelope:
+   *  peak_cell (highest count + canonical iteration tie-break; null
+   *  when zero ops), empty_cells[] (canonical method × adapter asc
+   *  order — comprehensive gap list), most_versatile_adapter
+   *  (highest method-coverage span; canonical adapter_id asc tie-
+   *  break; null on empty). Mirror of M3.11 connector schema type-
+   *  matrix + M9.13 investigation age × status matrix for the
+   *  adapter operation surface. Platform-static. Drives "which
+   *  adapters expose PATCH endpoints?" + "where are the gaps in
+   *  DELETE coverage?". */
+  app.get(
+    '/v1/integrations/adapters/operations/matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterOperationMatrix } =
+        require('./adapter_operation_matrix') as
+        typeof import('./adapter_operation_matrix');
+      const out = buildAdapterOperationMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/id-catalog (T6 M14.25) — per-
    *  adapter entity ID format catalog (entity, id_field,
    *  pattern_template, example, description). Drives client-side
