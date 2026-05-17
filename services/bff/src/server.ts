@@ -16705,6 +16705,66 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/daily-volume?days=N (T6 M12.13) — trend
+   *  timeline over the M12.1 ReportJobStore. Per UTC day across N
+   *  days: {date, total, by_status (4-key), by_format (4-key)}.
+   *  Envelope: total_jobs_in_window, total_jobs_observed (whole store
+   *  drained — surfaces "are jobs falling outside the window?"),
+   *  peak_day (earliest-wins tie-break), peak_count, mean_per_day,
+   *  growth_rate (second-half mean vs first-half; null when
+   *  first_half=0 or days<2), busiest_format (canonical
+   *  json>csv>pdf>xlsx tie-break). Default days=30, bounds [1, 365].
+   *  Mirror of M15.11 audit daily + M10.15 notification daily for the
+   *  reports surface. MUST be registered before `/v1/reports/jobs/:job_id`
+   *  so the literal segment isn't captured. */
+  app.get(
+    '/v1/reports/jobs/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let days = 30;
+      if (typeof q.days === 'string' && q.days) {
+        const parsed = Number.parseInt(q.days, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be an integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      const { summarizeReportJobDailyVolume, ReportDailyVolumeError } = require('./report_job_daily_volume') as
+        typeof import('./report_job_daily_volume');
+      try {
+        const out = summarizeReportJobDailyVolume(
+          reportJobStore,
+          req.tenant!.tenant_id,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ReportDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
    *  over the M12.1 reports-job ledger: status mix, format mix,
    *  per-report counts + success rate + mean processing time, top
