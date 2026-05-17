@@ -4470,6 +4470,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/promotions/latency-histogram (T6 M7.15) — fleet-wide
+   *  approval-latency distribution over decided requests + still-pending
+   *  + cancelled. 7 canonical buckets (under_1h / 1_to_24h / 1_to_7d /
+   *  7_to_30d / 30d_plus / still_pending / cancelled). Per-bucket count
+   *  + samples (cap 3, oldest-decision first for completed buckets;
+   *  oldest-pending first for still_pending; newest-cancellation first
+   *  for cancelled). Envelope: mean/median/p95 over decided latencies
+   *  only, peak_bucket (canonical-order tie-break), total_decided +
+   *  total_pending + total_cancelled (partition invariant). Distinct
+   *  from M7.10 (per-model timeline) by being aggregate histogram across
+   *  the whole fleet. Mounted BEFORE `/:request_id` so the literal
+   *  `/latency-histogram` segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/ai/promotions/latency-histogram',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizePromotionLatencyHistogram } =
+        require('./ai_promotion_latency_histogram') as
+        typeof import('./ai_promotion_latency_histogram');
+      const out = summarizePromotionLatencyHistogram(
+        promotionEngine,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/promotions/:request_id — single request. */
   app.get(
     '/v1/ai/promotions/:request_id',
