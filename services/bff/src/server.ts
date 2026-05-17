@@ -15425,6 +15425,47 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/resource-severity-matrix (T6 M15.14) — 2D
+   *  cross-tab over the audit chain combining M15.12 resource_type ×
+   *  M15.9 severity. Rows = 10 AuditResourceType (canonical user →
+   *  session → config → case → alert → report → scenario → rule →
+   *  integration → system) × cols = 3 AuditSeverity (canonical
+   *  critical → warning → info) = 30 cells. Each event in exactly
+   *  one cell (partition by definition). Per-row {resource_type,
+   *  total, by_severity (every severity at 0 when absent),
+   *  severities_without[] canonical}. Per-col {severity, total,
+   *  by_resource_type (every type at 0 when absent),
+   *  resource_types_without[] canonical}. Envelope {rows[], columns[],
+   *  peak_cell (canonical iteration tie-break — types in canonical
+   *  order × severities in critical-first order; null on empty),
+   *  empty_cells[] in canonical resource_type × severity row-major
+   *  order, most_severity_spread_type + most_resource_spread_severity
+   *  (highest distinct non-zero span; canonical-order tie-break;
+   *  null on empty), total_critical (Σ critical column), resource_
+   *  types_with_critical[] (≥1 critical event; canonical order)}.
+   *  Mirror of M14.28 / M12.14 / M3.14 / M8.14 matrix pattern. Drives
+   *  "which resource types have critical events landing?" + "which
+   *  severity spans the most resource types (system-wide noise vs
+   *  one-area spike)?". Mounted with the M15 distribution family. */
+  app.get(
+    '/v1/audit/resource-severity-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { buildAuditResourceSeverityMatrix } =
+        require('./audit_resource_severity_matrix') as
+        typeof import('./audit_resource_severity_matrix');
+      const out = buildAuditResourceSeverityMatrix(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/resource-type-distribution (T6 M15.12) — pivot
    *  the audit chain by resource_type (10-key axis). Per-type row:
    *  total_count + by_severity (3 keys present) + by_outcome (3 keys
