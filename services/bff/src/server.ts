@@ -15705,6 +15705,42 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/severity-outcome-matrix (T6 M15.15) — 2D cross-tab
+   *  over the audit chain combining severity × outcome. Rows = 3
+   *  AuditSeverity (canonical critical → warning → info) × cols = 3
+   *  AuditOutcome (canonical success → failure → denied) = 9 cells.
+   *  Each event lives in exactly one cell (partition invariant).
+   *  Per-row {severity, total, by_outcome (every outcome at 0 when
+   *  absent), outcomes_without[] canonical}. Per-col {outcome, total,
+   *  by_severity (every severity at 0 when absent), severities_without[]
+   *  canonical}. Envelope: peak_cell + empty_cells (canonical row-major:
+   *  severity outer × outcome inner) + most_failing_severity (severity
+   *  with most failure+denied combined; canonical tie-break: critical
+   *  wins; null on success-only or empty) + most_critical_outcome
+   *  (outcome carrying most critical-severity events; canonical
+   *  tie-break: success wins; null when no critical events). Mirror of
+   *  M14.28 / M12.14 / M3.14 / M15.14 matrix pattern. Drives BIL
+   *  compliance "are critical events succeeding or failing? where do
+   *  denied actions cluster?". */
+  app.get(
+    '/v1/audit/severity-outcome-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { buildAuditSeverityOutcomeMatrix } =
+        require('./audit_severity_outcome_matrix') as
+        typeof import('./audit_severity_outcome_matrix');
+      const out = buildAuditSeverityOutcomeMatrix(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/resource-severity-matrix (T6 M15.14) — 2D
    *  cross-tab over the audit chain combining M15.12 resource_type ×
    *  M15.9 severity. Rows = 10 AuditResourceType (canonical user →
