@@ -17153,6 +17153,45 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/format-status-matrix (T6 M12.14) — 2D
+   *  cross-tab over the M12.1 job store combining format × status.
+   *  Rows = 4 ReportFormat (canonical json → csv → pdf → xlsx) ×
+   *  cols = 4 JobStatus (canonical queued → running → completed →
+   *  failed) = 16 cells. Each job lives in exactly one cell (its
+   *  format + current status). Per-row {format, total, by_status
+   *  (every status at 0 when absent), statuses_without[] canonical
+   *  — coverage-gap per format}. Per-col {status, total, by_format
+   *  (every format at 0 when absent), formats_without[] canonical
+   *  — coverage-gap per status}. Envelope {rows[], columns[],
+   *  peak_cell (canonical iteration tie-break; null on empty),
+   *  empty_cells[] in canonical format × status row-major order,
+   *  most_active_format (highest distinct non-zero by_status entries;
+   *  canonical-order tie-break; null on empty), most_distributed_
+   *  status (highest distinct non-zero by_format entries; canonical-
+   *  order tie-break; null on empty)}. Mirror of M14.28 / M8.14 /
+   *  M3.14 / M5.17 / M13.15 / M7.14 matrix pattern. Drives "are PDF
+   *  jobs failing more than CSV?" + "where are jobs piling up
+   *  (queued cells × format)?". Mounted BEFORE catch-all
+   *  `/v1/reports/jobs/:job_id` so the literal `/format-status-matrix`
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/reports/jobs/format-status-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportFormatStatusMatrix } =
+        require('./report_format_status_matrix') as
+        typeof import('./report_format_status_matrix');
+      const out = buildReportFormatStatusMatrix(
+        reportJobStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/per-requester (T6 M12.12) — per-requester
    *  rollup over the M12.1 job store. Per requester: total_jobs,
    *  by_status (every JobStatus key), by_format (every ReportFormat key),
