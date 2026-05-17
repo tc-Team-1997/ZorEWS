@@ -17563,6 +17563,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/error-patterns (T6 M12.15) — FAILURE
+   *  FORENSICS view over the M12.1 job store. Clusters failed jobs by
+   *  normalised error_message template (re-uses `normaliseError` from
+   *  M3.6 connector failure patterns to keep cluster shapes consistent
+   *  across surfaces). Per cluster: pattern, count, last_failed_at,
+   *  sample_job_id (newest in cluster), recent_messages (cap 3
+   *  newest-first), report_ids[] sorted asc (distinct reports
+   *  contributing). Envelope: sample_size (all jobs), failure_count
+   *  (failed + non-empty error_message), distinct_patterns, clusters[]
+   *  capped at 10, sorted count desc then last_failed_at desc.
+   *  Successful jobs + empty error_message excluded. Mirror of M3.6
+   *  connector failure cluster pattern for the reports surface. Drives
+   *  "what failure templates dominate my report jobs this week?".
+   *  MUST be registered before `/v1/reports/jobs/:job_id` so the literal
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/reports/jobs/error-patterns',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { clusterReportJobFailures } =
+        require('./report_job_error_patterns') as
+        typeof import('./report_job_error_patterns');
+      const out = clusterReportJobFailures(
+        reportJobStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/daily-volume?days=N (T6 M12.13) — trend
    *  timeline over the M12.1 ReportJobStore. Per UTC day across N
    *  days: {date, total, by_status (4-key), by_format (4-key)}.
