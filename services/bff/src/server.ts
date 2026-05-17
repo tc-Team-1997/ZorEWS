@@ -6151,6 +6151,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/template-usage (T6 M10.16) — pivot the 3
+   *  channel ledgers (email/sms/push) by template_id. For each template
+   *  in the M10.11 catalog (4 email + 4 SMS + 4 push = 12 templates),
+   *  emits {total_sent, distinct_recipients, most_recent_sent_at}.
+   *  Envelope: total_sent_all_templates, total_templates_in_catalog,
+   *  total_templates_used, templates[] in canonical order (always
+   *  emits every catalog entry — unused at 0), unused_templates[]
+   *  (total_sent=0 subset; cleanup candidates), by_channel rollup
+   *  (total_sent + used_count + catalog_count per channel),
+   *  most_used_template (canonical tie-break), stale_templates[]
+   *  (used but most_recent_sent_at > 30 days ago; sorted oldest-first).
+   *  Mirror of M10.12 (by-channel) but pivoted by TEMPLATE. Drives
+   *  the SPA "template usage" inventory + deprecation candidates. */
+  app.get(
+    '/v1/notifications/template-usage',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const { summarizeNotificationTemplateUsageFromTransports } = require('./notification_template_usage') as
+        typeof import('./notification_template_usage');
+      const out = summarizeNotificationTemplateUsageFromTransports(
+        tenant,
+        emailTransport,
+        smsTransport,
+        pushTransport,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/per-recipient (T6 M10.14) — UNIFIED
    *  per-recipient list across all 3 channels. Email recipients,
    *  SMS phones, and push user_ids surface as separate rows
