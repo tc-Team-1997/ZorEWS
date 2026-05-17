@@ -14594,6 +14594,70 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/expiry-forecast?days=N (T6 M1.7) — forward-
+   *  looking timeline of API key expirations across the next N days.
+   *  Per UTC day bucket: {date, expiring_count, sample_keys (cap 5,
+   *  name asc)}. Envelope counts active keys + classifies edge cases
+   *  (no_expiry / already_expired / beyond_window) + already_expired_keys[]
+   *  (sorted by expires_at asc — most-overdue first; cap 20) +
+   *  beyond_window_keys[] (sorted asc — soonest first; cap 20) +
+   *  peak_day with earliest-day-wins tie-break. Revoked keys excluded
+   *  (can't be rotated). Mirror of M12.13/M15.11 daily volume but
+   *  forward-looking. Default days=30, bounds [1, 365]. Drives the SPA
+   *  "rotation calendar" + "already expired — rotate now" alerts.
+   *  Mounted BEFORE /:key_id so the literal `/expiry-forecast` wins. */
+  app.get(
+    '/v1/admin/api-keys/expiry-forecast',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let days = 30;
+      if (typeof q.days === 'string' && q.days) {
+        const parsed = Number.parseInt(q.days, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be an integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      // Drain the store — same pattern as M1.4 / M1.5 / M1.6.
+      const entries = [] as Array<ReturnType<typeof apiKeyStore.list>['items'][number]>;
+      const MAX_PAGES = 100;
+      for (let p = 1; p <= MAX_PAGES; p++) {
+        const page = apiKeyStore.list(req.tenant!.tenant_id, p, 100);
+        entries.push(...page.items);
+        if (entries.length >= page.total) break;
+        if (page.items.length === 0) break;
+      }
+      const { buildApiKeyExpiryForecast, ApiKeyExpiryForecastError } = require('./api_key_expiry_forecast') as
+        typeof import('./api_key_expiry_forecast');
+      try {
+        const out = buildApiKeyExpiryForecast(req.tenant!.tenant_id, entries, days, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ApiKeyExpiryForecastError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/api-keys/by-creator (T6 M1.6) — BY-CREATOR pivot
    *  view over the M1.2 redacted ApiKeyEntry surface. Per-creator row
    *  {creator_username, total_keys, active_keys, revoked_keys, scopes
