@@ -9339,6 +9339,32 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/widgets/config-keys (T6 M11.16) — INVERTED
+   *  index over the WIDGET_CATALOG.config_keys[] arrays. For each
+   *  distinct config_key, list which widget_types declare it.
+   *  Per-key row {config_key, widget_types[] sorted asc, reference_count,
+   *  widget_display_names[] sorted asc}. Envelope: config_keys[] sorted
+   *  reference_count desc + config_key asc tie-break, single_use_keys[]
+   *  (reference_count=1; refactor candidates), universal_keys[]
+   *  (reference_count = total_widget_types — well-established
+   *  cross-cutting concepts), most_shared_key (canonical tie-break).
+   *  Mirror of M10.13 (template-variable cross-reference) for the
+   *  dashboard widget surface. Platform-static. Drives "when I add a
+   *  `limit` config, which widget_types will pick it up?" + "are
+   *  there single-use keys that could be inlined?". */
+  app.get(
+    '/v1/dashboards/widgets/config-keys',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildDashboardConfigKeyIndex } = require('./dashboard_config_key_index') as
+        typeof import('./dashboard_config_key_index');
+      const out = buildDashboardConfigKeyIndex(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/widgets/defaults (T6 M11.12) — per-widget
    *  default config seed for the SPA's "Add widget" wizard. Returns
    *  one entry per widget_type with a sensible default_config so the
