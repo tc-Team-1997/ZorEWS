@@ -8827,6 +8827,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/note-authorship (T6 M9.14) — AUTHOR-pivoted
+   *  rollup over investigation notes. Per-author row {author_username,
+   *  total_notes, distinct_investigations, first_note_at, last_note_at,
+   *  notes_per_investigation_status (every InvestigationStatus key at 0)}.
+   *  Envelope: authors[] sorted total_notes desc + author_username asc,
+   *  most_active_author (null on empty). Mirror of M15.8 (audit per-
+   *  actor activity) for the investigation-notes surface. Companion to
+   *  M9.10 (cross-investigation note SEARCH) — that surface is BY-TEXT;
+   *  this is BY-AUTHOR. Mounted BEFORE /:id catch-all so the literal
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/investigations/note-authorship',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeInvestigationNoteAuthorship } =
+        require('./investigation_note_authorship') as
+        typeof import('./investigation_note_authorship');
+      const out = summarizeInvestigationNoteAuthorship(
+        req.tenant!.tenant_id,
+        caseInvestigationStore,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/age-status-matrix (T6 M9.13) — 2D pivot
    *  combining M9.11 age buckets × M9.8 cohort status. Per-cell count
    *  with every (status, bucket) pair emitted at 0 when absent.
