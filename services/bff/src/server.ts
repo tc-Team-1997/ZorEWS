@@ -15998,6 +15998,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/schema/record-format-distribution (T6 M3.15) —
+   *  PIVOT-BY-RECORD_FORMAT over the M3.2 connector schema catalog.
+   *  4 RecordFormat values (kafka_json / csv / sftp_csv / rest_json).
+   *  Per row: count + connector_ids[] sorted asc + total_fields +
+   *  total_required_fields + total_optional_fields + mean_field_count
+   *  (rounded) + sample_connectors (cap 3, sorted field_count desc +
+   *  connector_id asc). Envelope: formats[] in canonical order,
+   *  most_common_format (canonical tie-break: kafka_json wins over
+   *  csv at same count), unused_formats[]. Platform-static — same
+   *  response across tenants. Distinct from M3.13 (connector TYPE) +
+   *  M3.14 (field type × required matrix) — record_format is the WIRE
+   *  FORMAT axis, independent of transport. Drives "schema wire-format
+   *  audit" panel: "is anyone still on csv (no header schema)?". */
+  app.get(
+    '/v1/ingestion/schema/record-format-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeConnectorSchemaRecordFormats } =
+        require('./connector_schema_record_format_distribution') as
+        typeof import('./connector_schema_record_format_distribution');
+      const out = summarizeConnectorSchemaRecordFormats(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/type-distribution (T6 M3.13) — PIVOT-BY-TYPE
    *  rollup over the M3.1 registry. 5 ConnectorTypes (kafka_stream /
    *  batch_csv / rest_api / soap_api / sftp_drop). Per row: count +
