@@ -2478,6 +2478,60 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/class-channel-matrix?window=N (T6 M8.14) —
+   *  2D cross-tab over the M8.6 routing ledger combining class
+   *  (M8.1) × channel (M8.13). Rows = 4 BilAlertClass (canonical
+   *  red → orange → yellow → green) × cols = 4 NotificationChannel
+   *  (canonical email → sms → in_app → push) = 16 cells. Cells
+   *  count DISPATCHES not unique alerts — a record with channels=
+   *  ['email','sms'] contributes 1 to (class, email) AND 1 to
+   *  (class, sms). Per-row {class, total, by_channel, channels_without[]
+   *  canonical}. Per-col {channel, total, by_class, classes_without[]
+   *  canonical}. Envelope: peak_cell (canonical iteration tie-break;
+   *  null on empty), empty_cells[] in canonical class × channel
+   *  row-major order, most_diverse_class + most_universal_channel
+   *  (highest distinct non-zero span; canonical-order tie-break).
+   *  Mirror of M7.14 / M5.17 / M13.15 / M14.28 matrix pattern. Same
+   *  window semantics as M8.6/M8.11/M8.12/M8.13 (default 50, max 200). */
+  app.get(
+    '/v1/alerts/class-channel-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { buildAlertClassChannelMatrix } =
+        require('./alert_class_channel_matrix') as
+        typeof import('./alert_class_channel_matrix');
+      const out = buildAlertClassChannelMatrix(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/ack-time/histogram?window=N (T6 M8.12) —
    *  ABSOLUTE wall-clock ack-time histogram over the M8.6 routing
    *  ledger. Where M8.11 classifies by SLA-relative status, M8.12
