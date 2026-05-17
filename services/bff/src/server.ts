@@ -11842,6 +11842,56 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/step-vertical-matrix (T6 M2.14) —
+   *  2D cross-tab over the tenant fleet combining onboarding step ×
+   *  tenant vertical. Rows = 8 ONBOARDING_STEPS (canonical step.order
+   *  asc) × cols = 2 verticals (banking → insurance) = 16 cells.
+   *  Cells count tenants who have COMPLETED that step. Per-row {step_id,
+   *  name, order, required, total_completed, by_vertical, verticals_
+   *  without[]}. Per-col {vertical, total_tenants (in this vertical),
+   *  total_completed (Σ across all steps for this vertical), by_step,
+   *  steps_universally_completed[] (every tenant in vertical has
+   *  completed)}. Envelope: peak_cell (canonical iteration tie-break;
+   *  null when no completion anywhere), empty_cells[] in canonical
+   *  step.order × vertical row-major order, fastest_vertical +
+   *  slowest_vertical (highest/lowest mean completion_rate across
+   *  steps; canonical-order tie-break; null on empty fleet). Mirror of
+   *  M3.14 / M14.28 / M14.29 / M8.14 matrix pattern for tenant
+   *  onboarding. Async — tenantLookup.all() may be async. 501 envelope
+   *  when lookup doesn't expose .all(). Mounted BEFORE catch-all
+   *  `/v1/tenants/:tenant_id` so the literal segment isn't captured. */
+  app.get(
+    '/v1/tenants/onboarding/step-vertical-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { buildOnboardingStepVerticalMatrix } =
+        require('./tenant_onboarding_step_vertical_matrix') as
+        typeof import('./tenant_onboarding_step_vertical_matrix');
+      const out = buildOnboardingStepVerticalMatrix(
+        tenants,
+        (id: string) => onboardingStore.get(id),
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/onboarding/step-completion (T6 M2.13) —
    *  PER-STEP cross-tenant completion rollup. M2.12 pivots BY-TENANT
    *  ("where does each tenant stand?"); M2.13 pivots BY-STEP ("which
