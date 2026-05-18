@@ -71,6 +71,7 @@ import {
   invokeRestore,
 } from './recovery/adapters';
 import { RecoveryError, RestoreConflictError } from './recovery/types';
+import { recordRecoveryAudit } from './recovery/audit';
 import { WebhookDispatcher } from './webhooks/dispatcher';
 import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
@@ -1347,6 +1348,8 @@ export function makeApp(deps: AppDeps = {}) {
         savedFilterStore: deps.savedFilterStore,
         auditPool: deps.reportAuditPool ?? null,
         recoveryStore,
+        auditTrailStore,
+        getRole,
         requireTenantMw,
         requireRole,
         now,
@@ -6345,7 +6348,7 @@ export function makeApp(deps: AppDeps = {}) {
       );
     }
     try {
-      await recoveryStore.archive({
+      const recovery_id = await recoveryStore.archive({
         tenant_id,
         module: 'bff',
         entity_type: 'saved_scenario',
@@ -6358,6 +6361,22 @@ export function makeApp(deps: AppDeps = {}) {
           'admin',
         source_action: 'user_initiated',
       });
+      const archived = await recoveryStore.get(tenant_id, recovery_id);
+      if (archived) {
+        recordRecoveryAudit(
+          {
+            auditTrailStore,
+            tenant_id,
+            actor_username:
+              ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+              callerUsername(req) ||
+              'admin',
+            actor_role: getRole(req) ?? 'admin',
+            now: now(),
+          },
+          archived,
+        );
+      }
     } catch (err) {
       console.error('[recovery] archive failed for scenario', s.id, err);
     }
@@ -17774,7 +17793,7 @@ export function makeApp(deps: AppDeps = {}) {
       );
     }
     try {
-      await recoveryStore.archive({
+      const recovery_id = await recoveryStore.archive({
         tenant_id,
         module: 'bff',
         entity_type: 'webhook_subscription',
@@ -17786,6 +17805,21 @@ export function makeApp(deps: AppDeps = {}) {
         source_action: 'user_initiated',
         prior_status: existing.active ? 'active' : 'inactive',
       });
+      // Audit fan-out — best-effort, never blocks.
+      const archived = await recoveryStore.get(tenant_id, recovery_id);
+      if (archived) {
+        recordRecoveryAudit(
+          {
+            auditTrailStore,
+            tenant_id,
+            actor_username:
+              ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+            actor_role: getRole(req) ?? 'admin',
+            now: now(),
+          },
+          archived,
+        );
+      }
     } catch (err) {
       // Archive failure should not block delete — log + continue
       console.error('[recovery] archive failed for webhook', id, err);
@@ -21121,6 +21155,16 @@ export function makeApp(deps: AppDeps = {}) {
       }
       await invokeRestore(record);
       const updated = await recoveryStore.markRestored(tenant_id, recovery_id, actor);
+      recordRecoveryAudit(
+        {
+          auditTrailStore,
+          tenant_id,
+          actor_username: actor,
+          actor_role: getRole(req) ?? 'admin',
+          now: now(),
+        },
+        updated,
+      );
       res.json(wrapResponse(updated, ctx));
     } catch (err) {
       if (err instanceof RecoveryError) {
@@ -21151,10 +21195,21 @@ export function makeApp(deps: AppDeps = {}) {
    *  30 days where purged_at IS NOT NULL. */
   app.delete('/v1/recovery/:recovery_id', requireTenantMw, requireRole('recovery:purge'), async (req: Request, res: Response) => {
     const ctx = extractCtx(req, now);
+    const tenant_id = req.tenant!.tenant_id;
     const actor =
       ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
     try {
-      await recoveryStore.markPurged(req.tenant!.tenant_id, req.params.recovery_id, actor);
+      const purged = await recoveryStore.markPurged(tenant_id, req.params.recovery_id, actor);
+      recordRecoveryAudit(
+        {
+          auditTrailStore,
+          tenant_id,
+          actor_username: actor,
+          actor_role: getRole(req) ?? 'admin',
+          now: now(),
+        },
+        purged,
+      );
       res.status(204).end();
     } catch (err) {
       if (err instanceof RecoveryError) {
