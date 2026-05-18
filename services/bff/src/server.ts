@@ -4523,6 +4523,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/promotions/reviewer-rollup (T6 M7.16) — PER-REVIEWER
+   *  pivot over M7.2 promotion requests. Counts only decided requests
+   *  (approved + rejected); skips pending + cancelled. Per reviewer:
+   *  {reviewed_by, total_decisions, approved_count, rejected_count,
+   *  approval_rate (approved/total; null when 0), distinct_models[]
+   *  sorted asc, most_recent_at}. Envelope: most_active_reviewer
+   *  (highest total_decisions + canonical username asc tie-break;
+   *  null on empty), rubber_stamp_reviewers[] (approval_rate=1.0 AND
+   *  total_decisions >= 3 — surfaces reviewers who haven't rejected
+   *  anything as rubber-stamping candidates for AI governance
+   *  review). Mirror of M2.15 / M13.16 / M15.8 / M9.14 / M11.15
+   *  per-actor pattern for the AI/ML promotion-workflow surface.
+   *  Drives "who has been approving model promotions?" quarterly
+   *  access-review. Mounted BEFORE /:request_id so the literal
+   *  /reviewer-rollup segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/ai/promotions/reviewer-rollup',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizePromotionReviewerActivity } =
+        require('./ai_promotion_reviewer_rollup') as
+        typeof import('./ai_promotion_reviewer_rollup');
+      const out = summarizePromotionReviewerActivity(
+        promotionEngine,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/promotions/latency-histogram (T6 M7.15) — fleet-wide
    *  approval-latency distribution over decided requests + still-pending
    *  + cancelled. 7 canonical buckets (under_1h / 1_to_24h / 1_to_7d /
