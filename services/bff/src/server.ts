@@ -16524,6 +16524,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/run-latency-histogram (T6 M3.16) — fleet-wide
+   *  duration distribution over ConnectorRun entries. 6 canonical
+   *  buckets: instant (<1s) / fast (<1m) / medium (<10m) / slow (<1h)
+   *  / very_slow (>=1h) / still_running (finished_at=null). Per-bucket
+   *  {count, by_status (4 keys), distinct_connectors, samples cap 3
+   *  longest-first (oldest-started-first for still_running)}.
+   *  Envelope: peak_bucket (canonical iteration tie-break), mean / p50
+   *  / p95 over FINISHED runs, slowest_run (id + connector + duration).
+   *  Mirror of M7.15 / M8.12 / M15.16 histogram pattern. Drives "how
+   *  long do ingestion runs typically take? are any connectors
+   *  excessively slow?" answers. */
+  app.get(
+    '/v1/ingestion/run-latency-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorRunLatencyHistogram } =
+        require('./connector_run_latency_histogram') as
+        typeof import('./connector_run_latency_histogram');
+      const out = buildConnectorRunLatencyHistogram(
+        ingestionRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/run-volume/hourly (T6 M3.12) — fleet-wide
    *  histogram of connector runs bucketed by UTC hour-of-day 0..23.
    *  Per bucket: total_runs + by_status (every RunStatus key at 0
