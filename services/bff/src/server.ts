@@ -1346,11 +1346,32 @@ export function makeApp(deps: AppDeps = {}) {
         source: deps.casesDetailSource,
         savedFilterStore: deps.savedFilterStore,
         auditPool: deps.reportAuditPool ?? null,
+        recoveryStore,
         requireTenantMw,
         requireRole,
         now,
       }),
     );
+    // Register the recovery adapter for saved report filters. The
+    // closure captures deps.savedFilterStore so restore() reaches the
+    // live store. Wrapped in try/catch because makeApp() is called
+    // multiple times in tests — the registry throws on duplicates.
+    try {
+      registerRecoveryAdapter({
+        entity_type: 'saved_report_filter',
+        display_name: 'Saved report filter',
+        module: 'bff',
+        original_table: 'app_admin.saved_report_filters',
+        restore: async (record) => {
+          const ok = await deps.savedFilterStore!.restore(
+            record.payload as never,
+          );
+          if (!ok) throw new RestoreConflictError('saved_report_filter', record.original_id);
+        },
+      });
+    } catch {
+      /* already registered */
+    }
   }
 
   // ---------- /api (internal BFF — T3.10) ----------
@@ -11186,6 +11207,33 @@ export function makeApp(deps: AppDeps = {}) {
       const { summarizeIndicatorCatalog } = require('./indicator_catalog_stats') as
         typeof import('./indicator_catalog_stats');
       const out = summarizeIndicatorCatalog(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/indicators/vertical-family-matrix (T6 M4.16) — 2D
+   *  cross-tab elevating M4.13's nested by_family view. Rows = 2
+   *  ScoringVerticals × cols = 9 canonical families (FIN, BEH, TXN,
+   *  CRD on banking; POL, CUS-INS, AGT, CLM, OPS on insurance) = 18
+   *  cells. Per-row {vertical, total, by_family (every family at 0),
+   *  families_without[] canonical}. Per-col {family, total,
+   *  by_vertical (every vertical at 0), verticals_without[]}.
+   *  Envelope: peak_cell (canonical iteration tie-break) + empty_cells[]
+   *  (canonical row-major) + most_diverse_vertical + most_universal_family
+   *  + unknown_families[] (defensive — catalog drift detector).
+   *  Mirror of M14.28 / M12.14 / M3.14 / M15.14 matrix pattern.
+   *  Platform-static. Mounted BEFORE /thresholds so the literal segment
+   *  isn't captured. */
+  app.get(
+    '/v1/indicators/vertical-family-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorVerticalFamilyMatrix } =
+        require('./indicator_vertical_family_matrix') as
+        typeof import('./indicator_vertical_family_matrix');
+      const out = buildIndicatorVerticalFamilyMatrix(now());
       return res.json(wrapResponse(out, ctx));
     },
   );
