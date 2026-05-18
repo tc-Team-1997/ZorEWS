@@ -202,10 +202,82 @@ archive. (b) is the cleanest centralisation — keep one
 
 | | |
 |---|---|
-| Auto-purge after 30 days | Not implemented. Records stay until manually purged. A nightly job that runs `DELETE FROM app_recovery.deleted_records WHERE purged_at < now() - INTERVAL '30 days'` is a separate follow-up. |
+| ~~Auto-purge after 30 days~~ | **Shipped 2026-05-19**: `POST /v1/recovery/purge-expired?days=N` (admin only, tenant-scoped, idempotent). No in-process timer — operators wire to an external scheduler (k8s CronJob / pg_cron / GitHub Actions). Default 30 days; bounds [0, 3650]. Response: `{removed, cutoff, days, tenant_id}`. See "Auto-purge scheduling" below. |
 | Cross-tenant restore | Restoring restores into the row's original tenant; cross-tenant copies not supported. |
 | Cascade restore | If a parent record had child rows that were also deleted, restoring the parent alone won't bring back the children. Each entity must register its own adapter and the SPA user restores them in order. |
 | Audit-event cross-reference | The Recovery row does NOT auto-write to `app_iam.audit_events`. A future ticket can wire `recoveryStore.archive()` to ALSO emit an audit event with `event_type='record_archived'`. |
+
+## Auto-purge scheduling
+
+`POST /v1/recovery/purge-expired?days=30` hard-deletes recovery rows
+whose `purged_at` is older than `days`. Idempotent + tenant-scoped, so
+multiple invocations (across BFF instances or multiple cron firings)
+do no harm.
+
+**No in-process timer is shipped.** Multi-instance deployments would
+otherwise race the same DELETE. Pick ONE of:
+
+### k8s CronJob (recommended for prod)
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: recovery-purge-bank-demo
+spec:
+  schedule: "30 3 * * *"            # 03:30 UTC daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: curl
+              image: curlimages/curl:latest
+              command:
+                - sh
+                - -c
+                - >
+                  curl -sS -X POST http://bff:8084/v1/recovery/purge-expired
+                  -H "Authorization: Bearer $BFF_ADMIN_TOKEN"
+                  -H "X-Tenant-ID: BANK_DEMO" -H "X-Channel: API"
+                  -H "X-Source-System: recovery-purge-cron"
+                  -H "x-apex-role: admin"
+                  -H "x-apex-user: recovery-purge-cron"
+              env:
+                - name: BFF_ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: recovery-purge
+                      key: token
+```
+
+One CronJob per tenant. The endpoint is tenant-scoped via the header,
+so no cross-tenant fan-out from a single job.
+
+### pg_cron (lighter-weight, skips the HTTP hop)
+
+```sql
+SELECT cron.schedule(
+  'recovery-purge-daily',
+  '30 3 * * *',
+  $$DELETE FROM app_recovery.deleted_records
+     WHERE purged_at IS NOT NULL
+       AND purged_at < now() - INTERVAL '30 days'$$
+);
+```
+
+This bypasses the BFF entirely. The endpoint stays as the manual /
+ad-hoc trigger (admins can run it from the Recovery Center page when
+needed).
+
+### Manual (operator-on-demand)
+
+```sh
+curl -X POST http://localhost:8084/v1/recovery/purge-expired?days=30 \
+  -H "X-Tenant-ID: BANK_DEMO" -H "X-Channel: API" -H "x-apex-role: admin"
+# → {"body":{"removed":N,"cutoff":"2026-04-19T...","days":30,"tenant_id":"BANK_DEMO"}}
+```
 
 ## Validation commands
 

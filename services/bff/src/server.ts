@@ -21170,6 +21170,42 @@ export function makeApp(deps: AppDeps = {}) {
     }
   });
 
+  /** POST /v1/recovery/purge-expired?days=N — hard-delete every
+   *  recovery row whose purged_at is older than N days (default 30).
+   *  Idempotent. Scoped to the caller's tenant.
+   *
+   *  Intended scheduling pattern (no in-process timer — multi-instance
+   *  safe): an external cron (k8s CronJob / pg_cron / GitHub Actions
+   *  scheduled job) POSTs this once a day per tenant. Operators can
+   *  also call it manually from the Recovery Center page.
+   *
+   *  Returns { removed: N, cutoff: <ISO timestamp> } so callers can
+   *  log the daily reclamation. */
+  app.post('/v1/recovery/purge-expired', requireTenantMw, requireRole('recovery:purge'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tenant_id = req.tenant!.tenant_id;
+    const q = req.query as Record<string, string | undefined>;
+    let days = 30;
+    if (typeof q.days === 'string' && q.days) {
+      const parsed = Number.parseInt(q.days, 10);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3650) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_days',
+              message: 'days must be an integer in [0, 3650]',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      days = parsed;
+    }
+    const result = await recoveryStore.purgeExpired({ tenant_id, days, now: now() });
+    res.json(wrapResponse({ ...result, days, tenant_id }, ctx));
+  });
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 

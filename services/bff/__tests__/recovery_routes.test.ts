@@ -343,6 +343,98 @@ describe('purge', () => {
   });
 });
 
+describe('POST /v1/recovery/purge-expired', () => {
+  const OLD = new Date('2026-04-01T00:00:00Z'); // 47 days before NOW
+  const RECENT = new Date('2026-05-15T00:00:00Z'); // 3 days before NOW
+
+  async function seedPurgedRow(store: InMemoryRecoveryStore, deleted_at: Date, original_id: string) {
+    const id = await store.archive(
+      {
+        tenant_id: 'BANK_DEMO',
+        module: 'bff',
+        entity_type: 'webhook_subscription',
+        original_id,
+        original_table: 't',
+        payload: {},
+        deleted_by: 'alice',
+      },
+      deleted_at,
+    );
+    await store.markPurged('BANK_DEMO', id, 'admin', deleted_at);
+  }
+
+  it('removes purged rows older than days + reports the count', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    await seedPurgedRow(recoveryStore as InMemoryRecoveryStore, OLD, 'a-old');
+    await seedPurgedRow(recoveryStore as InMemoryRecoveryStore, RECENT, 'a-recent');
+    const res = await request(app).post('/v1/recovery/purge-expired?days=30').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.removed).toBe(1);
+    expect(res.body.body.days).toBe(30);
+    expect(typeof res.body.body.cutoff).toBe('string');
+
+    // The recent purge still exists
+    const purged = await recoveryStore.list({ tenant_id: 'BANK_DEMO', status: 'purged' });
+    expect(purged.items.map((r) => r.original_id)).toEqual(['a-recent']);
+  });
+
+  it('defaults to days=30 when query param absent', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    await seedPurgedRow(recoveryStore as InMemoryRecoveryStore, OLD, 'old-1');
+    const res = await request(app).post('/v1/recovery/purge-expired').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.days).toBe(30);
+    expect(res.body.body.removed).toBe(1);
+  });
+
+  it('rejects invalid days param', async () => {
+    const { app } = makeRecoveryApp();
+    const r1 = await request(app).post('/v1/recovery/purge-expired?days=-1').set(HEADERS);
+    expect(r1.status).toBe(400);
+    const r2 = await request(app).post('/v1/recovery/purge-expired?days=abc').set(HEADERS);
+    expect(r2.status).toBe(400);
+    const r3 = await request(app).post('/v1/recovery/purge-expired?days=9999').set(HEADERS);
+    expect(r3.status).toBe(400);
+  });
+
+  it('is admin-only (403 for non-admin)', async () => {
+    const { app } = makeRecoveryApp('risk_analyst');
+    const res = await request(app).post('/v1/recovery/purge-expired').set(HEADERS);
+    expect(res.status).toBe(403);
+  });
+
+  it('tenant-scoped — does not reclaim other tenants', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    // Purge an OLD row for BIL
+    const bilId = await recoveryStore.archive(
+      {
+        tenant_id: 'BIL',
+        module: 'bff',
+        entity_type: 'webhook_subscription',
+        original_id: 'bil-old',
+        original_table: 't',
+        payload: {},
+        deleted_by: 'bob',
+      },
+      OLD,
+    );
+    await recoveryStore.markPurged('BIL', bilId, 'admin', OLD);
+    // BANK_DEMO admin calls purge-expired — should NOT touch BIL's row
+    const res = await request(app).post('/v1/recovery/purge-expired').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.removed).toBe(0);
+    const bilPurged = await recoveryStore.list({ tenant_id: 'BIL', status: 'purged' });
+    expect(bilPurged.items).toHaveLength(1);
+  });
+
+  it('returns 0 when nothing qualifies', async () => {
+    const { app } = makeRecoveryApp();
+    const res = await request(app).post('/v1/recovery/purge-expired').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.removed).toBe(0);
+  });
+});
+
 describe('tenant isolation', () => {
   it('a tenant cannot see another tenant\'s recovery records', async () => {
     const { app, recoveryStore } = makeRecoveryApp();

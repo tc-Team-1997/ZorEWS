@@ -241,6 +241,100 @@ describe('InMemoryRecoveryStore.stats', () => {
   });
 });
 
+describe('InMemoryRecoveryStore.purgeExpired', () => {
+  it('removes only purged rows older than the cutoff', async () => {
+    const store = new InMemoryRecoveryStore();
+    const now = new Date('2026-05-20T12:00:00Z');
+    const old = new Date('2026-04-01T00:00:00Z'); // 49 days back — past 30-day cutoff
+    const recent = new Date('2026-05-15T00:00:00Z'); // 5 days back — inside cutoff
+    // 3 records: archived (untouched), purged-old (should reclaim),
+    // purged-recent (should stay).
+    await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'a', original_table: 't', payload: {}, deleted_by: 'alice' },
+      old,
+    );
+    const purgeOldId = await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'b', original_table: 't', payload: {}, deleted_by: 'alice' },
+      old,
+    );
+    await store.markPurged('BANK_DEMO', purgeOldId, 'admin', old);
+    const purgeRecentId = await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'c', original_table: 't', payload: {}, deleted_by: 'alice' },
+      recent,
+    );
+    await store.markPurged('BANK_DEMO', purgeRecentId, 'admin', recent);
+
+    const result = await store.purgeExpired({ days: 30, now });
+    expect(result.removed).toBe(1);
+    expect(typeof result.cutoff).toBe('string');
+
+    // The two survivors: archived + recently-purged
+    const after = await store.list({ tenant_id: 'BANK_DEMO' });
+    expect(after.items).toHaveLength(1); // only archived shows up under default 'archived' filter
+    const purged = await store.list({ tenant_id: 'BANK_DEMO', status: 'purged' });
+    expect(purged.items).toHaveLength(1); // only the recently-purged one survives
+    expect(purged.items[0].original_id).toBe('c');
+  });
+
+  it('returns 0 when nothing qualifies', async () => {
+    const store = new InMemoryRecoveryStore();
+    const now = new Date('2026-05-20T12:00:00Z');
+    await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'a', original_table: 't', payload: {}, deleted_by: 'alice' },
+      now,
+    );
+    const out = await store.purgeExpired({ days: 30, now });
+    expect(out.removed).toBe(0);
+  });
+
+  it('honours tenant_id filter — does not reclaim other tenants', async () => {
+    const store = new InMemoryRecoveryStore();
+    const now = new Date('2026-05-20T12:00:00Z');
+    const old = new Date('2026-04-01T00:00:00Z');
+    const bankId = await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'b1', original_table: 't', payload: {}, deleted_by: 'alice' },
+      old,
+    );
+    const bilId = await store.archive(
+      { tenant_id: 'BIL', module: 'bff', entity_type: 'webhook_subscription', original_id: 'b2', original_table: 't', payload: {}, deleted_by: 'bob' },
+      old,
+    );
+    await store.markPurged('BANK_DEMO', bankId, 'admin', old);
+    await store.markPurged('BIL', bilId, 'admin', old);
+
+    const result = await store.purgeExpired({ tenant_id: 'BANK_DEMO', days: 30, now });
+    expect(result.removed).toBe(1);
+    // BIL's purged row is still around
+    const bilPurged = await store.list({ tenant_id: 'BIL', status: 'purged' });
+    expect(bilPurged.items).toHaveLength(1);
+  });
+
+  it('does not reclaim non-purged rows even if they\'re old', async () => {
+    const store = new InMemoryRecoveryStore();
+    const old = new Date('2026-04-01T00:00:00Z');
+    const now = new Date('2026-05-20T12:00:00Z');
+    // 49-day-old archived row (NEVER purged)
+    await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'a', original_table: 't', payload: {}, deleted_by: 'alice' },
+      old,
+    );
+    const out = await store.purgeExpired({ days: 30, now });
+    expect(out.removed).toBe(0);
+  });
+
+  it('days=0 means purge everything that\'s currently purged', async () => {
+    const store = new InMemoryRecoveryStore();
+    const now = new Date('2026-05-20T12:00:00Z');
+    const id = await store.archive(
+      { tenant_id: 'BANK_DEMO', module: 'bff', entity_type: 'webhook_subscription', original_id: 'a', original_table: 't', payload: {}, deleted_by: 'alice' },
+      now,
+    );
+    await store.markPurged('BANK_DEMO', id, 'admin', now);
+    const out = await store.purgeExpired({ days: 0, now });
+    expect(out.removed).toBe(1);
+  });
+});
+
 describe('recovery adapter registry', () => {
   beforeEach(() => _resetRecoveryAdapters());
 

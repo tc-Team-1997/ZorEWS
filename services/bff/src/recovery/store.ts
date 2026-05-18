@@ -61,6 +61,16 @@ export interface RecoveryStore {
     by_entity_type: Record<string, number>;
     most_recent_at: string | null;
   }>;
+
+  /** Hard-delete rows from app_recovery.deleted_records whose purged_at
+   *  is older than `days` (default 30). Idempotent: callers (operators
+   *  via the admin endpoint or external schedulers like k8s CronJob /
+   *  pg_cron) can invoke as often as they like; no-op on rows that
+   *  don't qualify. Returns the number of rows actually removed. */
+  purgeExpired(opts: { tenant_id?: string; days?: number; now?: Date }): Promise<{
+    removed: number;
+    cutoff: string;
+  }>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -266,6 +276,25 @@ export class InMemoryRecoveryStore implements RecoveryStore {
     return { total: mine.length, by_status, by_module, by_entity_type, most_recent_at };
   }
 
+  async purgeExpired(opts: { tenant_id?: string; days?: number; now?: Date }): Promise<{
+    removed: number;
+    cutoff: string;
+  }> {
+    const days = Math.max(0, opts.days ?? 30);
+    const now = opts.now ?? new Date();
+    const cutoffMs = now.getTime() - days * 86_400_000;
+    const cutoff = new Date(cutoffMs).toISOString();
+    const before = this.rows.length;
+    this.rows = this.rows.filter((r) => {
+      // Only candidate: status === 'purged' AND purged_at <= cutoff.
+      // Optionally tenant-scoped.
+      if (r.status !== 'purged' || !r.purged_at) return true;
+      if (opts.tenant_id && r.tenant_id !== opts.tenant_id) return true;
+      return r.purged_at > cutoff;
+    });
+    return { removed: before - this.rows.length, cutoff };
+  }
+
   /** Test helper. Production stores wouldn't expose this. */
   _reset() {
     this.rows = [];
@@ -460,6 +489,24 @@ export class PgRecoveryStore implements RecoveryStore {
       by_entity_type,
       most_recent_at: toIso(r.most_recent_at),
     };
+  }
+
+  async purgeExpired(opts: { tenant_id?: string; days?: number; now?: Date }): Promise<{
+    removed: number;
+    cutoff: string;
+  }> {
+    const days = Math.max(0, opts.days ?? 30);
+    const now = opts.now ?? new Date();
+    const cutoff = new Date(now.getTime() - days * 86_400_000).toISOString();
+    const params: unknown[] = [cutoff];
+    let sql = `DELETE FROM app_recovery.deleted_records
+                WHERE purged_at IS NOT NULL AND purged_at <= $1`;
+    if (opts.tenant_id) {
+      sql += ` AND tenant_id = $2`;
+      params.push(opts.tenant_id);
+    }
+    const res = await this.pool.query(sql, params);
+    return { removed: res.rowCount ?? 0, cutoff };
   }
 }
 
