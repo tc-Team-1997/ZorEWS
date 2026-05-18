@@ -11008,6 +11008,32 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/weight-histogram (T6 M4.15) — weight
+   *  distribution histogram over the M6.2 STUB_CATALOG. 5 canonical
+   *  buckets (low < 0.2 / low_medium [0.2, 0.4) / medium [0.4, 0.6) /
+   *  high [0.6, 0.8) / critical [0.8, 1.0]) with strict-< upper
+   *  bound semantics (1.0 inclusive on critical only). Per-bucket:
+   *  count + by_vertical (banking + insurance at 0 when absent) +
+   *  sample_indicator_ids (cap 5 sorted asc). Envelope: peak_bucket
+   *  (canonical iteration tie-break), mean_weight (rounded to 4
+   *  decimals), min_weight + max_weight, empty_buckets[] canonical.
+   *  Mirror of M9.11 / M8.12 histogram pattern. Platform-static.
+   *  Mounted BEFORE /v1/indicators/thresholds so the literal segment
+   *  isn't captured. */
+  app.get(
+    '/v1/indicators/weight-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorWeightHistogram } =
+        require('./indicator_weight_histogram') as
+        typeof import('./indicator_weight_histogram');
+      const out = buildIndicatorWeightHistogram(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/usage (T6 M4.11) — reverse cross-reference
    *  for every indicator in the M6.2 catalog: which rule templates
    *  (M5.1) reference it. Mirror of M5.14 (template → indicators)
