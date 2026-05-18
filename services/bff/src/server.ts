@@ -14272,6 +14272,39 @@ export function makeApp(deps: AppDeps = {}) {
   // All routes are admin-only (audit:read) — config is sensitive ops
   // surface, not analyst-level.
 
+  /** GET /v1/admin/config/actor-rollup (T6 M13.16) — per-actor pivot
+   *  over the M13.1 config store. M13.11 pivots overrides by AGE;
+   *  M13.12 by CATEGORY; M13.16 pivots by `updated_by` (the actor
+   *  that last touched each key). Per-actor row: {updated_by,
+   *  total_overrides, distinct_keys[] sorted asc, distinct_categories[]
+   *  sorted asc, by_category (every ConfigCategory at 0 when absent),
+   *  most_recent_at}. Envelope: most_active_actor (highest
+   *  total_overrides + canonical username asc tie-break; null on
+   *  empty), actors_with_features_overrides[] (subset who have touched
+   *  features.* toggles — security signal; sorted asc). Mirror of
+   *  M2.15 / M15.8 / M9.14 / M11.15 per-actor pattern for the admin
+   *  config surface. Drives quarterly access review ("who has been
+   *  changing what?"). Mounted BEFORE /v1/admin/config/:key so the
+   *  literal /actor-rollup segment isn't captured. */
+  app.get(
+    '/v1/admin/config/actor-rollup',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entries = configStore.list(req.tenant!.tenant_id);
+      const { summarizeConfigActorRollup } =
+        require('./admin_config_actor_rollup') as
+        typeof import('./admin_config_actor_rollup');
+      const out = summarizeConfigActorRollup(
+        req.tenant!.tenant_id,
+        entries,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/override-rate (T6 M13.12) — category-pivoted
    *  rollup over the config registry showing per-category default-vs-
    *  override counts + override_rate (0..1). Envelope adds aggregate
