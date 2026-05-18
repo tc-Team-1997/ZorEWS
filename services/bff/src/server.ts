@@ -6997,6 +6997,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/push/platform-distribution (T6 M10.17) —
+   *  1D pivot over the M10.3 push ledger by PushPlatform (fcm /
+   *  apns / web). Per-platform {dispatch_count (Σ per-device entries),
+   *  distinct_messages, distinct_users, by_status (every PushStatus
+   *  at 0), most_recent_at}. Envelope: most_used_platform (canonical
+   *  tie-break: fcm beats apns), unused_platforms[], overall_by_status.
+   *  Mirror of M14.27 / M5.16 / M3.13 1D distribution pattern. Drives
+   *  "is our push skewed to FCM vs APNS?" view. */
+  app.get(
+    '/v1/notifications/push/platform-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entries = pushTransport.recent(req.tenant!.tenant_id, 500);
+      const { summarizePushPlatformDistribution } =
+        require('./notification_push_platform_distribution') as
+        typeof import('./notification_push_platform_distribution');
+      const out = summarizePushPlatformDistribution(
+        req.tenant!.tenant_id,
+        entries,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/push/log?limit=50 — tenant-scoped ledger. */
   app.get(
     '/v1/notifications/push/log',
@@ -15702,6 +15729,46 @@ export function makeApp(deps: AppDeps = {}) {
         require('./api_key_creator_lifecycle_matrix') as
         typeof import('./api_key_creator_lifecycle_matrix');
       const summary = buildApiKeyCreatorLifecycleMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/admin/api-keys/creator-scope-matrix (T6 M1.12) — 2D
+   *  cross-tab combining M1.6 creators × M1.5 scopes. Rows = creators
+   *  (open set, sorted by total_keys desc + username asc tie-break) ×
+   *  cols = 7 canonical scopes (VALID_SCOPES order). Cells count
+   *  KEY-SCOPE PAIRS across this creator's ACTIVE keys (a multi-scope
+   *  key contributes to each scope it carries). Active-only — revoked
+   *  keys don't represent live granted permission surface. Per-row
+   *  {created_by, total_keys, by_scope (every scope at 0),
+   *  total_permissions (= Σ by_scope), scopes_without[], distinct_
+   *  scopes}. Per-col {scope, total, top_creators[] cap 10,
+   *  distinct_creators}. Envelope: broadest_grant_creator (largest
+   *  total_permissions footprint — natural quarterly access-review
+   *  starting point), unused_scopes[] (tenant-wide coverage gap),
+   *  peak_cell. Mirror of M1.11 (creator × lifecycle) pivot pattern
+   *  for the permission surface. Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/creator-scope-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyCreatorScopeMatrix } =
+        require('./api_key_creator_scope_matrix') as
+        typeof import('./api_key_creator_scope_matrix');
+      const summary = buildApiKeyCreatorScopeMatrix(
         req.tenant!.tenant_id,
         out,
         now(),
