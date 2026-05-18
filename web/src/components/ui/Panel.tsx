@@ -6,14 +6,19 @@ export function Panel({
   action,
   children,
   className,
+  'data-testid': testId,
 }: {
-  title?: string;
+  /** Accepts a plain string (legacy callers) or any ReactNode for richer
+   *  headers (icon + count chip). Widening string → ReactNode is type-safe
+   *  — every existing string call site still passes. */
+  title?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  'data-testid'?: string;
 }) {
   return (
-    <section className={cn('card p-5', className)}>
+    <section className={cn('card p-5', className)} data-testid={testId}>
       {(title || action) && (
         <header className="mb-4 flex items-center justify-between">
           {title && <h2 className="section-title">{title}</h2>}

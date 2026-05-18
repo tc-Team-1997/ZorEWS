@@ -32,6 +32,7 @@ import {
   SeverityDrilldown,
   TrendWeekDrilldown,
 } from '@/components/dashboard/AlertDrilldown';
+import { AlertAnalyticsSection } from '@/components/dashboard/AlertAnalyticsSection';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -327,6 +328,11 @@ export function DashboardPage() {
           />
         </div>
       )}
+
+      {/* Alert Analytics workbench — dimension-toggle bar + timeline +
+          6-axis deep drill-down. Reuses the same React Query cache as
+          TrendWeekDrilldown above so there's no extra network. */}
+      <AlertAnalyticsSection />
 
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
