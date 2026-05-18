@@ -8843,6 +8843,41 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/cases/events/action-distribution (T6 M9.15) — PIVOT-BY-
+   *  ACTION 1D rollup over the M9.4 case event journal. 9 canonical
+   *  actions (opened / state_change / closed / escalated /
+   *  override_requested / override_approved / override_rejected /
+   *  note_added / checklist_updated). Per-row {action, count,
+   *  distinct_cases, distinct_actors, most_recent_at (null when
+   *  count=0), sample_actors (cap 3, sorted newest-first by their
+   *  most-recent event of this action then actor asc tie-break)}.
+   *  Envelope: most_common_action (highest count + canonical-order
+   *  tie-break via iteration; null on empty), unused_actions[]
+   *  (canonical order; zero-count subset), most_active_actor
+   *  (fleet-wide highest count regardless of action + canonical
+   *  username asc tie-break; null on empty). Mirror of M14.27 / M7.13
+   *  / M3.13 1D distribution pattern. MUST be registered BEFORE
+   *  `/v1/cases/events/:event_id` so the literal `/action-distribution`
+   *  segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/cases/events/action-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = caseEventStore.fetchSince(req.tenant!.tenant_id, 0, 100000);
+      const { summarizeCaseEventActionDistribution } =
+        require('./case_event_action_distribution') as
+        typeof import('./case_event_action_distribution');
+      const out = summarizeCaseEventActionDistribution(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/cases/events/:event_id — single event lookup. */
   app.get(
     '/v1/cases/events/:event_id',
