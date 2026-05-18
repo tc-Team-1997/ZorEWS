@@ -14,7 +14,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { http } from '@/lib/http';
-import { Badge, type BadgeTone, Button, Panel } from '@/components/ui';
+import { Badge, type BadgeTone, Button, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { rulesPlusApi } from './rulesPlusApi';
 
@@ -453,7 +453,17 @@ export function EwsRuleBuilderPage() {
         )}
       </Panel>
 
-      {showCreate ? (
+      {/* Rule Builder mounts as a modal overlay (was rendering inline below
+          the rules list and breaking the page flow). The form itself is
+          unchanged — Modal is a thin headless wrapper that owns the
+          backdrop, escape-key, body-scroll-lock + focus restore. */}
+      <Modal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        ariaLabel="New EWS rule"
+        size="3xl"
+        testId="ews-rule-create-modal"
+      >
         <CreateRuleForm
           indicators={indicatorsQ.data ?? []}
           onCancel={() => setShowCreate(false)}
@@ -461,7 +471,7 @@ export function EwsRuleBuilderPage() {
           submitting={createMut.isPending}
           error={createMut.error}
         />
-      ) : null}
+      </Modal>
 
       {testRule ? (
         <TestRulePanel

@@ -17,3 +17,5 @@ export {
   RANGE_WEEKS,
 } from './TimeRangeSelector';
 export type { TimeRangeKey } from './TimeRangeSelector';
+export { Modal } from './Modal';
+export type { ModalProps, ModalSize } from './Modal';
