@@ -9777,6 +9777,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/widget-creator-matrix (T6 M11.17) —
+   *  2D cross-tab combining 7 WidgetType (closed) × N creators (open).
+   *  Each widget instance contributes to (creator, widget_type) cell.
+   *  Per-row {created_by, total_widgets, total_dashboards,
+   *  by_widget_type (every type at 0), widget_types_without[],
+   *  distinct_widget_types, most_recent_at}. Per-col {widget_type,
+   *  display_name, total_instances, top_creators[] cap 10,
+   *  distinct_creators}. Envelope: peak_cell + most_versatile_creator
+   *  (highest distinct_widget_types). Mirror of M1.11 / M14.28 /
+   *  M12.14 / M3.14 / M15.14 matrix pattern. Drives "which user
+   *  gravitates to which widget?" templating view. Mounted BEFORE
+   *  /custom/:dashboard_id catch-all so literal segment wins. */
+  app.get(
+    '/v1/dashboards/custom/widget-creator-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboards = customDashboardStore.list(req.tenant!.tenant_id);
+      const { buildDashboardWidgetCreatorMatrix } =
+        require('./dashboard_widget_creator_matrix') as
+        typeof import('./dashboard_widget_creator_matrix');
+      const out = buildDashboardWidgetCreatorMatrix(
+        req.tenant!.tenant_id,
+        dashboards,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/authorship (T6 M11.15) — PIVOT-BY-
    *  CREATED_BY rollup over saved dashboards. Per author:
    *  dashboard_count, total_widgets (Σ widgets.length), distinct_
@@ -10353,6 +10384,41 @@ export function makeApp(deps: AppDeps = {}) {
         require('./scoring_preset_multiplier_histogram') as
         typeof import('./scoring_preset_multiplier_histogram');
       const out = buildPresetMultiplierHistogram(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/scoring/presets/indicator-index (T6 M6.17) — INVERTED
+   *  cross-reference over the M6.3 library: for each indicator in the
+   *  catalog (+ any drifted ids from preset maps), list which presets
+   *  reference it + at what multiplier + direction (boost/dampen/
+   *  identity). Per-indicator {indicator_id, indicator_name,
+   *  indicator_vertical, catalog_weight, references[] sorted by
+   *  preset_id asc, boost_count, dampen_count, identity_count,
+   *  has_references}. Envelope: total_indicators, total_presets,
+   *  total_referenced_indicators + total_orphan_indicators (partition
+   *  invariant), indicators[] sorted by references.length desc +
+   *  indicator_id asc tie-break, most_referenced_indicator (canonical
+   *  tie-break; null when no preset references anything), drift_
+   *  indicators[] (preset map ids missing from catalog — should be
+   *  empty), orphan_indicators[] (catalog ids no preset overrides;
+   *  presets fall through to catalog default). Mirror of M4.11 / M10.13
+   *  / M5.15 reverse-cross-reference pattern for the scoring-preset
+   *  surface. Platform-static. Mounted BEFORE catch-all `/:preset_id`
+   *  so the literal `/indicator-index` segment isn't captured. */
+  app.get(
+    '/v1/scoring/presets/indicator-index',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScoringPresetIndicatorIndex } =
+        require('./scoring_preset_indicator_index') as
+        typeof import('./scoring_preset_indicator_index');
+      const out = buildScoringPresetIndicatorIndex(
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(out, ctx));
     },
   );
