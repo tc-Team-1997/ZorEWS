@@ -61,6 +61,16 @@ import { defaultBus, NotificationBus } from './notifications/bus';
 import { openSse } from './notifications/sse';
 import type { NotificationLevel } from './notifications/types';
 import { defaultWebhookStore, makeWebhookStore, type IWebhookStore } from './webhooks/store';
+import {
+  getDefaultRecoveryStore,
+  type RecoveryStore,
+} from './recovery/store';
+import {
+  registerRecoveryAdapter,
+  listRecoveryAdapters,
+  invokeRestore,
+} from './recovery/adapters';
+import { RecoveryError, RestoreConflictError } from './recovery/types';
 import { WebhookDispatcher } from './webhooks/dispatcher';
 import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
@@ -946,6 +956,7 @@ export interface AppDeps {
    * BFF_PG_URL is set.
    */
   webhookStore?: IWebhookStore;
+  recoveryStore?: RecoveryStore;
   /**
    * Override for tests — webhook dispatcher. Tests inject a custom
    * fetch + zero retry-delays so they don't hang for 21s on an HTTP
@@ -1153,6 +1164,41 @@ export function makeApp(deps: AppDeps = {}) {
   const webhookStore = deps.webhookStore ?? defaultWebhookStore;
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
   const scenarioStore = deps.scenarioStore ?? new InMemoryScenarioStore();
+  const recoveryStore = deps.recoveryStore ?? getDefaultRecoveryStore();
+  // Register recovery adapters for the two services wired in Phase 1.
+  // Closures over webhookStore + scenarioStore so the restore handler
+  // operates on the LIVE store instance per makeApp() call.
+  // Wrapped in try/catch since registerRecoveryAdapter throws on
+  // duplicate registration — multiple makeApp() calls (tests) would
+  // otherwise blow up; silently skip if already registered.
+  try {
+    registerRecoveryAdapter({
+      entity_type: 'webhook_subscription',
+      display_name: 'Webhook subscription',
+      module: 'bff',
+      original_table: 'app_bff.webhook_subscriptions',
+      restore: async (record) => {
+        const ok = webhookStore.restore(record.payload as never);
+        if (!ok) throw new RestoreConflictError('webhook_subscription', record.original_id);
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    registerRecoveryAdapter({
+      entity_type: 'saved_scenario',
+      display_name: 'Saved scenario',
+      module: 'bff',
+      original_table: 'app_scenario.saved_scenarios',
+      restore: async (record) => {
+        const ok = scenarioStore.restore(record.payload as never);
+        if (!ok) throw new RestoreConflictError('saved_scenario', record.original_id);
+      },
+    });
+  } catch {
+    /* already registered */
+  }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
   const requireTenantMw = requireTenant(tenantLookup, jwtVerifier);
@@ -6212,7 +6258,7 @@ export function makeApp(deps: AppDeps = {}) {
     }
   });
 
-  app.delete('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+  app.delete('/v1/scenarios/:id', requireTenantMw, requireRole('customers:read_risk_profile'), async (req: Request, res: Response) => {
     const env = extractCtx(req, now);
     const tenant_id = req.tenant!.tenant_id;
     const s = scenarioStore.get(req.params.id, tenant_id);
@@ -6224,6 +6270,23 @@ export function makeApp(deps: AppDeps = {}) {
           env,
         ),
       );
+    }
+    try {
+      await recoveryStore.archive({
+        tenant_id,
+        module: 'bff',
+        entity_type: 'saved_scenario',
+        original_id: s.id,
+        original_table: 'app_scenario.saved_scenarios',
+        payload: s as unknown as Record<string, unknown>,
+        deleted_by:
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+          callerUsername(req) ||
+          'admin',
+        source_action: 'user_initiated',
+      });
+    } catch (err) {
+      console.error('[recovery] archive failed for scenario', s.id, err);
     }
     scenarioStore.delete(req.params.id, tenant_id);
     res.status(204).end();
@@ -8760,6 +8823,40 @@ export function makeApp(deps: AppDeps = {}) {
         filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
       }
       const out = makerCheckerEngine.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/cases/maker-checker/reviewer-rollup (T6 M9.16) — PER-
+   *  CHECKER pivot over M9.3 sensitive case actions. Counts only
+   *  decided actions (approved + rejected). Per checker:
+   *  {checker_username, total_decisions, approved_count, rejected_count,
+   *  approval_rate (null when 0), distinct_cases + case_ids[] sorted
+   *  asc cap 50, by_action_type (every SensitiveActionType at 0 when
+   *  absent: case.close / case.escalate / case.override_decision),
+   *  most_recent_at}. Envelope: most_active_reviewer (top by
+   *  total_decisions + canonical username asc tie-break; null on
+   *  empty), rubber_stamp_reviewers[] (approval_rate=1.0 AND >=3
+   *  decisions — surfaces checkers who haven't rejected any sensitive
+   *  case action). Mirror of M7.16 (AI promotion reviewer rollup) +
+   *  M2.15 / M13.16 / M15.8 / M9.14 / M11.15 per-actor pattern for the
+   *  case maker-checker surface. Drives BIL compliance segregation-
+   *  of-duties quarterly review. Mounted BEFORE /:action_id so the
+   *  literal /reviewer-rollup segment isn't captured. */
+  app.get(
+    '/v1/cases/maker-checker/reviewer-rollup',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeMakerCheckerReviewerActivity } =
+        require('./case_maker_checker_reviewer_rollup') as
+        typeof import('./case_maker_checker_reviewer_rollup');
+      const out = summarizeMakerCheckerReviewerActivity(
+        makerCheckerEngine,
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(out, ctx));
     },
   );
@@ -17501,14 +17598,40 @@ export function makeApp(deps: AppDeps = {}) {
     res.status(201).json(wrapResponse(created, ctx, { code: 'EWS_201', message: 'Created' }));
   });
 
-  app.delete('/v1/webhooks/:id', requireTenantMw, requireRole('webhooks:manage'), (req: Request, res: Response) => {
+  app.delete('/v1/webhooks/:id', requireTenantMw, requireRole('webhooks:manage'), async (req: Request, res: Response) => {
     const ctx = extractCtx(req, now);
-    const ok = webhookStore.delete(req.params.id, req.tenant!.tenant_id);
-    if (!ok) {
+    const id = req.params.id;
+    const tenant_id = req.tenant!.tenant_id;
+    // Archive BEFORE delete so the row is recoverable from /admin/recycle-bin.
+    // Capture a snapshot (publicView strips the secret — but recovery
+    // needs the FULL row to restore HMAC). Use internalGet for that.
+    const fullRow = (webhookStore as IWebhookStore & {
+      internalGet?: (id: string) => unknown;
+    }).internalGet?.(id) as Record<string, unknown> | undefined;
+    const existing = webhookStore.get(id, tenant_id);
+    if (!existing || !fullRow) {
       return res.status(404).json(
         wrapError({ code: 'EWS_404', message: 'subscription not found', severity: 'LOW' }, ctx),
       );
     }
+    try {
+      await recoveryStore.archive({
+        tenant_id,
+        module: 'bff',
+        entity_type: 'webhook_subscription',
+        original_id: id,
+        original_table: 'app_bff.webhook_subscriptions',
+        payload: fullRow,
+        deleted_by:
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+        source_action: 'user_initiated',
+        prior_status: existing.active ? 'active' : 'inactive',
+      });
+    } catch (err) {
+      // Archive failure should not block delete — log + continue
+      console.error('[recovery] archive failed for webhook', id, err);
+    }
+    webhookStore.delete(id, tenant_id);
     res.status(204).end();
   });
 
@@ -20744,6 +20867,148 @@ export function makeApp(deps: AppDeps = {}) {
       );
     }
     res.json(wrapResponse(performanceFor(rule, now()), ctx));
+  });
+
+  // ── Recovery Center (centralised soft-delete + restore) ─────────────
+  // Backed by app_recovery.deleted_records. Currently sources from 2
+  // adopters (webhook_subscription + saved_scenario); future tickets
+  // register more adapters with registerRecoveryAdapter(). See
+  // docs/recovery-center.md for the adoption pattern.
+
+  /** GET /v1/recovery — list deleted records (tenant-scoped, admin-only). */
+  app.get('/v1/recovery', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tenant_id = req.tenant!.tenant_id;
+    const q = req.query as Record<string, string | undefined>;
+    const status = (q.status as 'archived' | 'restored' | 'purged' | undefined) ?? 'archived';
+    if (!['archived', 'restored', 'purged'].includes(status)) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400', message: `invalid status: ${status}`, severity: 'LOW' }, ctx),
+      );
+    }
+    const result = await recoveryStore.list({
+      tenant_id,
+      module: q.module as never,
+      entity_type: q.entity_type,
+      deleted_by: q.deleted_by,
+      status,
+      since: q.since,
+      until: q.until,
+      page: q.page ? Math.max(1, Number(q.page) || 1) : 1,
+      page_size: q.page_size ? Math.min(200, Math.max(1, Number(q.page_size) || 50)) : 50,
+    });
+    res.json(wrapResponse(result, ctx));
+  });
+
+  /** GET /v1/recovery/stats — summary tile for the SPA page header. */
+  app.get('/v1/recovery/stats', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const stats = await recoveryStore.stats(req.tenant!.tenant_id);
+    res.json(
+      wrapResponse(
+        {
+          ...stats,
+          adapters: listRecoveryAdapters().map((a) => ({
+            entity_type: a.entity_type,
+            display_name: a.display_name,
+            module: a.module,
+          })),
+        },
+        ctx,
+      ),
+    );
+  });
+
+  /** GET /v1/recovery/:recovery_id — single record (with full payload). */
+  app.get('/v1/recovery/:recovery_id', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const rec = await recoveryStore.get(req.tenant!.tenant_id, req.params.recovery_id);
+    if (!rec) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404', message: 'recovery record not found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(wrapResponse(rec, ctx));
+  });
+
+  /** POST /v1/recovery/:recovery_id/restore — re-insert with original ID.
+   *  Admin only. Returns 409 if the original_id already exists (cache or
+   *  pg). Returns 404 if recovery_id not found or already restored/purged. */
+  app.post('/v1/recovery/:recovery_id/restore', requireTenantMw, requireRole('recovery:restore'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tenant_id = req.tenant!.tenant_id;
+    const recovery_id = req.params.recovery_id;
+    const actor =
+      ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+    let record;
+    try {
+      record = await recoveryStore.get(tenant_id, recovery_id);
+      if (!record) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404', message: 'recovery record not found', severity: 'LOW' }, ctx),
+        );
+      }
+      if (record.status !== 'archived') {
+        return res.status(409).json(
+          wrapError(
+            {
+              code: record.status === 'restored' ? 'EWS_409_already_restored' : 'EWS_409_already_purged',
+              message: `record already ${record.status}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      await invokeRestore(record);
+      const updated = await recoveryStore.markRestored(tenant_id, recovery_id, actor);
+      res.json(wrapResponse(updated, ctx));
+    } catch (err) {
+      if (err instanceof RecoveryError) {
+        const status = err.code === 'unknown_record'
+          ? 404
+          : err.code === 'no_adapter'
+            ? 501
+            : err.code === 'restore_conflict' || err.code === 'already_restored' || err.code === 'already_purged'
+              ? 409
+              : 400;
+        return res.status(status).json(
+          wrapError(
+            { code: `EWS_${status}_${err.code}`, message: err.message, severity: status >= 500 ? 'HIGH' : 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      console.error('[recovery] restore failed', err);
+      return res.status(500).json(
+        wrapError({ code: 'EWS_500', message: 'restore failed', severity: 'HIGH' }, ctx),
+      );
+    }
+  });
+
+  /** DELETE /v1/recovery/:recovery_id — permanent purge. Admin only.
+   *  Marks purged_at/_by; the row stays for audit but is no longer
+   *  restorable. A future scheduled job hard-deletes rows older than
+   *  30 days where purged_at IS NOT NULL. */
+  app.delete('/v1/recovery/:recovery_id', requireTenantMw, requireRole('recovery:purge'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const actor =
+      ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+    try {
+      await recoveryStore.markPurged(req.tenant!.tenant_id, req.params.recovery_id, actor);
+      res.status(204).end();
+    } catch (err) {
+      if (err instanceof RecoveryError) {
+        const status = err.code === 'unknown_record' ? 404 : 409;
+        return res.status(status).json(
+          wrapError(
+            { code: `EWS_${status}_${err.code}`, message: err.message, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      throw err;
+    }
   });
 
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
