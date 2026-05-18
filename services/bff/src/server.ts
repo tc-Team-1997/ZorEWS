@@ -2630,6 +2630,59 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/daily-volume?days=N (T6 M8.15) — TREND-LINE view
+   *  over the M8.6 alert routing ledger. Per UTC calendar day across
+   *  N days (default 30, [1, 365]): {date, total, by_class (every
+   *  BilAlertClass key at 0 when absent), acked_count, open_count,
+   *  monitor_only_count}. Every day always emitted at 0 — stable
+   *  SPA chart axis. Envelope: peak_day (earliest-day-wins tie-break
+   *  via strict >; null on empty), peak_count, mean_per_day (rounded),
+   *  growth_rate (second-half mean − first-half mean / first-half
+   *  mean; null when first-half=0 OR days<2), busiest_class (highest
+   *  total across window + canonical tie-break red > orange > yellow
+   *  > green; null on empty). Drains the routing ledger via the
+   *  RoutingLedger.list interface. Mirror of M12.13 / M15.11 / M10.15
+   *  / M1.9 daily-volume pattern for the alerts surface. Distinct
+   *  from M8.6 (window aggregate not time-bucketed). */
+  app.get(
+    '/v1/alerts/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let days = 30;
+      if (typeof q.days === 'string' && q.days) {
+        const parsed = Number.parseInt(q.days, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be an integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      // Drain the entire ledger (cap = CAP_PER_TENANT = 200 records).
+      const records = routingLedger.list(req.tenant!.tenant_id, 200);
+      const { summarizeAlertRoutingDailyVolume } =
+        require('./alert_routing_daily_volume') as
+        typeof import('./alert_routing_daily_volume');
+      const out = summarizeAlertRoutingDailyVolume(
+        req.tenant!.tenant_id,
+        records,
+        days,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   // ── Alert auto-ack threshold rules (T6 M8.4) ─────────────────────────
   //
   // Tenant-scoped policy: which alerts get auto-acked at receipt
