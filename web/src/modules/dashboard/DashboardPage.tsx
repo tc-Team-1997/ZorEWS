@@ -33,6 +33,7 @@ import {
   TrendWeekDrilldown,
 } from '@/components/dashboard/AlertDrilldown';
 import { AlertAnalyticsSection } from '@/components/dashboard/AlertAnalyticsSection';
+import { RecoveryStatsCard } from '@/components/dashboard/RecoveryStatsCard';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -344,6 +345,12 @@ export function DashboardPage() {
       </div>
 
       {sla.data && <SlaPanel summary={sla.data} />}
+
+      {/* Recovery Center summary — admin-only; renders null otherwise so
+          non-admin dashboards are unchanged. */}
+      <div className="mt-4">
+        <RecoveryStatsCard />
+      </div>
     </div>
   );
 }
