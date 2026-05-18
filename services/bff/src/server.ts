@@ -12402,6 +12402,64 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/completion-timeline?days=N (T6 M2.16) —
+   *  TREND-LINE view: across all tenants in the registry, count step
+   *  completions per UTC calendar day. Per-day {date, total
+   *  (completed + skipped), completed_count, skipped_count,
+   *  distinct_tenants}. Envelope: peak_day (earliest-day-wins
+   *  tie-break), mean_per_day, growth_rate. Mirror of M1.9 / M8.15 /
+   *  M10.15 / M12.13 / M15.11 daily-volume pattern. Async because
+   *  tenantLookup.all() may be async. */
+  app.get(
+    '/v1/tenants/onboarding/completion-timeline',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let days = 30;
+      if (typeof q.days === 'string' && q.days) {
+        const parsed = Number.parseInt(q.days, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be an integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const fleet = tenants.map((t) => ({
+        tenant_id: t.tenant_id,
+        steps: onboardingStore.get(t.tenant_id).steps,
+      }));
+      const { summarizeOnboardingCompletionTimeline } =
+        require('./tenant_onboarding_completion_timeline') as
+        typeof import('./tenant_onboarding_completion_timeline');
+      const out = summarizeOnboardingCompletionTimeline(fleet, days, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/onboarding/actor-fleet (T6 M2.15) — fleet-wide
    *  per-actor onboarding contribution. Distinct from M2.10 (per-tenant
    *  actor summary) by aggregating across ALL tenants in the registry.
@@ -15576,6 +15634,79 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/admin/api-keys/lifecycle-distribution (T6 M1.10) —
+   *  per-key lifecycle stage classification. 7 canonical stages in
+   *  priority order: revoked > expired > expiring_soon >
+   *  idle_never_used > dormant > fresh > mature_active. Each key
+   *  classified into exactly ONE stage (first-match-wins for
+   *  overlapping flags). Per-stage {count, sample_key_ids (cap 5
+   *  sorted asc), sample_names}. Envelope: peak_stage (canonical
+   *  iteration tie-break) + empty_stages + attention_stages[]
+   *  (subset that needs ops action: expired + expiring_soon +
+   *  idle_never_used + dormant). Mirror of M9.11 / M4.15 / M7.15
+   *  bucketing pattern. Drives "how many keys need rotation? how
+   *  many are dormant?" view. Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/lifecycle-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { summarizeApiKeyLifecycleDistribution } =
+        require('./api_key_lifecycle_distribution') as
+        typeof import('./api_key_lifecycle_distribution');
+      const summary = summarizeApiKeyLifecycleDistribution(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/admin/api-keys/creator-lifecycle-matrix (T6 M1.11) —
+   *  2D cross-tab combining M1.10 lifecycle stages × M1.6 creators.
+   *  Rows = creators (open set, sorted by total_keys desc + username
+   *  asc tie-break) × cols = 7 canonical lifecycle stages. Per-row
+   *  {created_by, total_keys, by_stage (every stage at 0),
+   *  stages_without[], attention_count (sum of expired + expiring_
+   *  soon + idle_never_used + dormant)}. Per-col {stage, total,
+   *  top_creators[] cap 10, distinct_creators}. Envelope: peak_cell +
+   *  top_attention_creator (most rotation/cleanup work). Mirror of
+   *  M14.28 / M12.14 / M3.14 / M15.14 / M8.14 matrix pattern.
+   *  Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/creator-lifecycle-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyCreatorLifecycleMatrix } =
+        require('./api_key_creator_lifecycle_matrix') as
+        typeof import('./api_key_creator_lifecycle_matrix');
+      const summary = buildApiKeyCreatorLifecycleMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
     },
   );
 
