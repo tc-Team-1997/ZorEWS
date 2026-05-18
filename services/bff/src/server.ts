@@ -18007,6 +18007,42 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/recipient-distribution (T6 M12.16) —
+   *  per-recipient pivot over the M12.2 schedule store. Per email:
+   *  {recipient, total_schedules, enabled_schedules, disabled_schedules,
+   *  by_cadence (every ScheduleCadence at 0 when absent), by_format
+   *  (every ReportFormat at 0), report_ids[] sorted asc,
+   *  earliest_next_run_at (across enabled schedules; null when none),
+   *  schedule_names[] sorted asc cap 20}. Envelope:
+   *  most_subscribed_recipient (highest total_schedules + canonical
+   *  email asc tie-break; null on empty), flooded_recipients[]
+   *  (total_schedules >= 5; surfaces over-emailed addresses).
+   *  Mirror of M14.27 / M5.16 / M11.11 / M3.13 1D distribution
+   *  pattern for the report-schedule recipient axis. Drives quarterly
+   *  recipient hygiene + "who's getting flooded?" view. Mounted
+   *  BEFORE /:schedule_id so the literal /recipient-distribution
+   *  segment isn't captured. */
+  app.get(
+    '/v1/reports/schedules/recipient-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain all schedules from the store. The store caps at 50
+      // schedules/tenant via M12.2 so a single 1000-row page is plenty.
+      const page = reportScheduleStore.list(req.tenant!.tenant_id, 1, 1000);
+      const { summarizeScheduleRecipientDistribution } =
+        require('./report_schedule_recipient_distribution') as
+        typeof import('./report_schedule_recipient_distribution');
+      const out = summarizeScheduleRecipientDistribution(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/schedules/cadence-stats (T6 M12.9) — cadence-
    *  pivoted rollup over the M12.2 schedule store. Per-cadence:
    *  total_count, enabled/disabled split, next_run_within_24h_count,
