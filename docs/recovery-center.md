@@ -205,7 +205,7 @@ archive. (b) is the cleanest centralisation — keep one
 | ~~Auto-purge after 30 days~~ | **Shipped 2026-05-19**: `POST /v1/recovery/purge-expired?days=N` (admin only, tenant-scoped, idempotent). No in-process timer — operators wire to an external scheduler (k8s CronJob / pg_cron / GitHub Actions). Default 30 days; bounds [0, 3650]. Response: `{removed, cutoff, days, tenant_id}`. See "Auto-purge scheduling" below. |
 | Cross-tenant restore | Restoring restores into the row's original tenant; cross-tenant copies not supported. |
 | Cascade restore | If a parent record had child rows that were also deleted, restoring the parent alone won't bring back the children. Each entity must register its own adapter and the SPA user restores them in order. |
-| Audit-event cross-reference | The Recovery row does NOT auto-write to `app_iam.audit_events`. A future ticket can wire `recoveryStore.archive()` to ALSO emit an audit event with `event_type='record_archived'`. |
+| ~~Audit-event cross-reference~~ | **Shipped 2026-05-19**: every archive / restore / purge writes a `recovery.archive` / `recovery.restore` / `recovery.purge` event to `app_iam.audit_events` via the M15.1 audit trail store. `resource_type='system'`, severity `info` for archive/restore and `warning` for purge. Metadata: `{entity_type, original_id, original_table, module, deleted_by, deleted_at, restored_at?, restored_by?, purged_at?, purged_by?}`. Best-effort — audit failures never block the recovery op. Visible in `/admin/audit-log` + M15.x analytics. |
 
 ## Auto-purge scheduling
 

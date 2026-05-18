@@ -9,22 +9,25 @@ import { StubRiskProfileSource } from '../src/risk_profile';
 import { UnavailableCaseActionSink } from '../src/case_action';
 import { InMemoryRecoveryStore } from '../src/recovery/store';
 import { _resetRecoveryAdapters } from '../src/recovery/adapters';
+import { InMemoryAuditTrailStore } from '../src/audit_trail';
 
 const NOW = new Date('2026-05-18T12:00:00.000Z');
 
 function makeRecoveryApp(role: 'admin' | 'risk_analyst' = 'admin') {
   _resetRecoveryAdapters();
   const recoveryStore = new InMemoryRecoveryStore();
+  const auditTrailStore = new InMemoryAuditTrailStore();
   const app = makeApp({
     source: new StaticSource([]),
     evaluator: new StubEvaluator(),
     riskProfile: new StubRiskProfileSource(),
     caseAction: new UnavailableCaseActionSink(),
     recoveryStore,
+    auditTrailStore,
     now: () => NOW,
     getRole: () => role,
   }).app;
-  return { app, recoveryStore };
+  return { app, recoveryStore, auditTrailStore };
 }
 
 const HEADERS = {
@@ -340,6 +343,114 @@ describe('purge', () => {
     // Try to purge
     const p = await request(app).delete(`/v1/recovery/${recovery_id}`).set(HEADERS);
     expect(p.status).toBe(409);
+  });
+});
+
+describe('audit fan-out — recovery lifecycle → app_iam.audit_events', () => {
+  it('archive emits recovery.archive audit event', async () => {
+    const { app, auditTrailStore } = makeRecoveryApp();
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'audited', url: 'https://example.com/h', events: ['alert.created'] });
+    const id = create.body.body.id;
+    await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+
+    const audit = auditTrailStore.list('BANK_DEMO', {});
+    const archive = audit.items.find((e) => e.action === 'recovery.archive');
+    expect(archive).toBeDefined();
+    expect(archive!.actor_username).toBe('alice.admin');
+    expect(archive!.actor_role).toBe('admin');
+    expect(archive!.resource_type).toBe('system');
+    expect(archive!.outcome).toBe('success');
+    expect(archive!.severity).toBe('info');
+    expect(archive!.metadata).toMatchObject({
+      entity_type: 'webhook_subscription',
+      original_id: id,
+      original_table: 'app_bff.webhook_subscriptions',
+    });
+  });
+
+  it('restore emits recovery.restore audit event', async () => {
+    const { app, recoveryStore, auditTrailStore } = makeRecoveryApp();
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'audited-2', url: 'https://example.com/h', events: ['alert.created'] });
+    const id = create.body.body.id;
+    await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    const recovery_id = list.items[0].recovery_id;
+
+    await request(app).post(`/v1/recovery/${recovery_id}/restore`).set(HEADERS);
+
+    const audit = auditTrailStore.list('BANK_DEMO', {});
+    const restore = audit.items.find((e) => e.action === 'recovery.restore');
+    expect(restore).toBeDefined();
+    expect(restore!.resource_id).toBe(recovery_id);
+    expect(restore!.metadata).toMatchObject({
+      entity_type: 'webhook_subscription',
+      original_id: id,
+    });
+    expect(restore!.metadata.restored_by).toBe('alice.admin');
+    expect(restore!.metadata.restored_at).toBeTruthy();
+  });
+
+  it('purge emits recovery.purge audit event with warning severity', async () => {
+    const { app, recoveryStore, auditTrailStore } = makeRecoveryApp();
+    const recovery_id = await recoveryStore.archive(
+      {
+        tenant_id: 'BANK_DEMO',
+        module: 'bff',
+        entity_type: 'webhook_subscription',
+        original_id: 'wh-x',
+        original_table: 't',
+        payload: {},
+        deleted_by: 'alice',
+      },
+      NOW,
+    );
+    await request(app).delete(`/v1/recovery/${recovery_id}`).set(HEADERS);
+
+    const audit = auditTrailStore.list('BANK_DEMO', {});
+    const purge = audit.items.find((e) => e.action === 'recovery.purge');
+    expect(purge).toBeDefined();
+    expect(purge!.severity).toBe('warning');
+    expect(purge!.metadata.purged_by).toBe('alice.admin');
+    expect(purge!.metadata.purged_at).toBeTruthy();
+  });
+
+  it('audit failures do NOT block the recovery operation', async () => {
+    // Build an audit store that throws on record() — proves try/catch isolation
+    const recoveryStore = new InMemoryRecoveryStore();
+    const exploding: typeof import('../src/audit_trail').InMemoryAuditTrailStore.prototype = {
+      record: () => {
+        throw new Error('audit pipeline down');
+      },
+    } as never;
+    _resetRecoveryAdapters();
+    const app = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      recoveryStore,
+      auditTrailStore: exploding as never,
+      now: () => NOW,
+      getRole: () => 'admin',
+    }).app;
+
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'iso', url: 'https://example.com/h', events: ['alert.created'] });
+    const id = create.body.body.id;
+    // The DELETE should still succeed (204) even though audit throws.
+    const del = await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+    expect(del.status).toBe(204);
+    // And the recovery archive STILL happened
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    expect(list.total).toBe(1);
   });
 });
 
