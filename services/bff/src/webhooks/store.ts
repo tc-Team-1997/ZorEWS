@@ -114,6 +114,16 @@ export class WebhookSubscriptionStore {
     return this.subs.delete(id);
   }
 
+  /** Re-insert a previously-archived subscription with its original
+   *  ID. Used by the recovery adapter to restore from soft-delete.
+   *  Returns false when the ID is already taken (the recovery route
+   *  surfaces this as a 409 RestoreConflictError). */
+  restore(sub: WebhookSubscription): boolean {
+    if (this.subs.has(sub.id)) return false;
+    this.subs.set(sub.id, { ...sub });
+    return true;
+  }
+
   /**
    * All active subscriptions in the given tenant that listen for the
    * given event_type. Tenant-scoped — events fired in tenant A never

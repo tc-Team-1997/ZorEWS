@@ -232,6 +232,37 @@ export class PgWebhookSubscriptionStore {
     return true;
   }
 
+  /** Re-insert a previously-archived subscription with its original ID.
+   *  Called by the recovery adapter. Returns false on cache conflict.
+   *  PG INSERT uses ON CONFLICT DO NOTHING for defence-in-depth. */
+  restore(sub: WebhookSubscription): boolean {
+    this.assertInit();
+    if (this.subs.has(sub.id)) return false;
+    this.subs.set(sub.id, { ...sub });
+    void this.pool
+      .query(
+        `INSERT INTO app_bff.webhook_subscriptions
+           (subscription_id, tenant_id, name, url, secret, events, active,
+            created_at, last_delivery_at, last_delivery_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (subscription_id) DO NOTHING`,
+        [
+          sub.id,
+          sub.tenant_id,
+          sub.name,
+          sub.url,
+          sub.secret,
+          sub.events,
+          sub.active,
+          sub.created_at,
+          sub.last_delivery_at,
+          sub.last_delivery_status,
+        ],
+      )
+      .catch((err) => this.logger(`failed to restore subscription ${sub.id}`, err));
+    return true;
+  }
+
   recordDelivery(d: WebhookDelivery): void {
     this.assertInit();
     // Update cache (with cap)

@@ -16028,6 +16028,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/correlation-duration-histogram (T6 M15.16) —
+   *  duration distribution over the M15.10 correlation rollup. 5
+   *  canonical buckets: instant (<1s) / fast (<1m) / medium (<1h) /
+   *  slow (<1d) / day_plus. Per-bucket: count + has_failure_count +
+   *  sample_correlation_ids (cap 3, longest-first). Envelope: peak_bucket
+   *  (canonical iteration tie-break), mean/median/p95 across full
+   *  duration distribution, longest_correlation (id + duration_ms),
+   *  failed_correlations[] (has_failure=true subset; sorted duration
+   *  desc + asc). Mirror of M7.15 / M8.12 / M9.11 histogram pattern
+   *  for the audit-correlation surface. Drives "how long do our
+   *  workflows take? are slow correlations failing more?" view. */
+  app.get(
+    '/v1/audit/correlation-duration-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { buildAuditCorrelationDurationHistogram } =
+        require('./audit_correlation_duration_histogram') as
+        typeof import('./audit_correlation_duration_histogram');
+      const out = buildAuditCorrelationDurationHistogram(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/audit/severity-outcome-matrix (T6 M15.15) — 2D cross-tab
    *  over the audit chain combining severity × outcome. Rows = 3
    *  AuditSeverity (canonical critical → warning → info) × cols = 3

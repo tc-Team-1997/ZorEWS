@@ -93,6 +93,80 @@ interface MockWebhookDelivery {
 }
 const _mockWebhookSubs: MockWebhookSub[] = [];
 const _mockWebhookDeliveries: MockWebhookDelivery[] = [];
+
+// Recovery Center mock state. Seeded with 2 examples so the SPA renders
+// out of the box; deletion paths in MSW for webhooks/scenarios push new
+// records here (see http.delete('/v1/webhooks/:id') etc.).
+interface MockDeletedRecord {
+  recovery_id: string;
+  tenant_id: string;
+  module: 'bff' | 'auth-svc' | 'cases-svc' | 'alerts-svc' | 'rules-svc';
+  entity_type: string;
+  original_id: string;
+  original_table: string;
+  payload: Record<string, unknown>;
+  deleted_by: string;
+  deleted_at: string;
+  deletion_reason: string | null;
+  source_action: string | null;
+  prior_status: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
+  purged_at: string | null;
+  purged_by: string | null;
+  status: 'archived' | 'restored' | 'purged';
+}
+const _mockDeletedRecords: MockDeletedRecord[] = [
+  {
+    recovery_id: 'rec-seed-1',
+    tenant_id: 'BANK_DEMO',
+    module: 'bff',
+    entity_type: 'webhook_subscription',
+    original_id: 'wh-demo01',
+    original_table: 'app_bff.webhook_subscriptions',
+    payload: {
+      id: 'wh-demo01',
+      name: 'Slack #risk-alerts (deprecated)',
+      url: 'https://hooks.slack.com/services/T0000/B0000/old',
+      events: ['alert.created'],
+      active: false,
+    },
+    deleted_by: 'alice.admin',
+    deleted_at: new Date(Date.now() - 86400 * 1000 * 2).toISOString(),
+    deletion_reason: 'replaced by PagerDuty integration',
+    source_action: 'user_initiated',
+    prior_status: 'inactive',
+    restored_at: null,
+    restored_by: null,
+    purged_at: null,
+    purged_by: null,
+    status: 'archived',
+  },
+  {
+    recovery_id: 'rec-seed-2',
+    tenant_id: 'BANK_DEMO',
+    module: 'bff',
+    entity_type: 'saved_scenario',
+    original_id: 's-2026-q1-stress',
+    original_table: 'app_scenario.saved_scenarios',
+    payload: {
+      id: 's-2026-q1-stress',
+      name: 'Q1 stress test (legacy)',
+      inputs: { gdp: -2, rate: 200, fx: 8 },
+      result: { portfolio_pd: 0.08 },
+    },
+    deleted_by: 'ravi.risk',
+    deleted_at: new Date(Date.now() - 86400 * 1000 * 5).toISOString(),
+    deletion_reason: null,
+    source_action: 'user_initiated',
+    prior_status: null,
+    restored_at: null,
+    restored_by: null,
+    purged_at: null,
+    purged_by: null,
+    status: 'archived',
+  },
+];
 const _validWebhookEvents = [
   'alert.created',
   'alert.updated',
@@ -3241,6 +3315,123 @@ export const handlers = [
     }
     const items = _mockWebhookSubs.map(({ secret: _secret, ...rest }) => rest);
     return HttpResponse.json({ items });
+  }),
+
+  // ── Recovery Center (Phase 1) — in-memory MSW mocks ─────────────
+  // Mirrors /v1/recovery* on the real BFF. Production envelope-wraps
+  // every response; tests + MSW use the body directly via api.ts wrappers.
+
+  http.get('/v1/recovery', ({ request }) => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const url = new URL(request.url);
+    const status = (url.searchParams.get('status') ?? 'archived') as 'archived' | 'restored' | 'purged';
+    const module = url.searchParams.get('module');
+    const entity_type = url.searchParams.get('entity_type');
+    const items = _mockDeletedRecords
+      .filter((r) => r.status === status)
+      .filter((r) => !module || r.module === module)
+      .filter((r) => !entity_type || r.entity_type === entity_type)
+      .sort((a, b) => (a.deleted_at < b.deleted_at ? 1 : -1));
+    return HttpResponse.json({
+      header: { status: 'SUCCESS', requestId: 'r-mock', timestamp: new Date().toISOString() },
+      body: { items, total: items.length },
+    });
+  }),
+
+  http.get('/v1/recovery/stats', () => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const by_status = { archived: 0, restored: 0, purged: 0 };
+    const by_module: Record<string, number> = {};
+    const by_entity_type: Record<string, number> = {};
+    let most_recent_at: string | null = null;
+    for (const r of _mockDeletedRecords) {
+      by_status[r.status] += 1;
+      by_module[r.module] = (by_module[r.module] ?? 0) + 1;
+      by_entity_type[r.entity_type] = (by_entity_type[r.entity_type] ?? 0) + 1;
+      if (!most_recent_at || r.deleted_at > most_recent_at) most_recent_at = r.deleted_at;
+    }
+    return HttpResponse.json({
+      header: { status: 'SUCCESS', requestId: 'r-mock', timestamp: new Date().toISOString() },
+      body: {
+        total: _mockDeletedRecords.length,
+        by_status,
+        by_module,
+        by_entity_type,
+        most_recent_at,
+        adapters: [
+          { entity_type: 'webhook_subscription', display_name: 'Webhook subscription', module: 'bff' },
+          { entity_type: 'saved_scenario', display_name: 'Saved scenario', module: 'bff' },
+        ],
+      },
+    });
+  }),
+
+  http.get('/v1/recovery/:id', ({ params }) => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const r = _mockDeletedRecords.find((x) => x.recovery_id === params.id);
+    if (!r) {
+      return HttpResponse.json(
+        { error: { code: 'EWS_404', message: 'not found' } },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json({
+      header: { status: 'SUCCESS', requestId: 'r-mock', timestamp: new Date().toISOString() },
+      body: r,
+    });
+  }),
+
+  http.post('/v1/recovery/:id/restore', ({ params }) => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const idx = _mockDeletedRecords.findIndex((x) => x.recovery_id === params.id);
+    if (idx < 0) return HttpResponse.json({ error: { code: 'EWS_404' } }, { status: 404 });
+    const r = _mockDeletedRecords[idx];
+    if (r.status !== 'archived') {
+      return HttpResponse.json(
+        { error: { code: `EWS_409_already_${r.status}`, message: `already ${r.status}` } },
+        { status: 409 },
+      );
+    }
+    _mockDeletedRecords[idx] = {
+      ...r,
+      restored_at: new Date().toISOString(),
+      restored_by: 'admin',
+      status: 'restored',
+    };
+    return HttpResponse.json({
+      header: { status: 'SUCCESS', requestId: 'r-mock', timestamp: new Date().toISOString() },
+      body: _mockDeletedRecords[idx],
+    });
+  }),
+
+  http.delete('/v1/recovery/:id', ({ params }) => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const idx = _mockDeletedRecords.findIndex((x) => x.recovery_id === params.id);
+    if (idx < 0) return HttpResponse.json({ error: { code: 'EWS_404' } }, { status: 404 });
+    const r = _mockDeletedRecords[idx];
+    if (r.status === 'restored') {
+      return HttpResponse.json(
+        { error: { code: 'EWS_409_invalid_status_transition' } },
+        { status: 409 },
+      );
+    }
+    _mockDeletedRecords[idx] = {
+      ...r,
+      purged_at: new Date().toISOString(),
+      purged_by: 'admin',
+      status: 'purged',
+    };
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.post('/v1/webhooks', async ({ request }) => {

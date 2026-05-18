@@ -60,6 +60,9 @@
 
     "audit:read":                   ["admin", "supervisor"],
     "webhooks:manage":              ["admin"],
+    "recovery:list":                ["admin"],
+    "recovery:restore":             ["admin"],
+    "recovery:purge":               ["admin"],
     "copilot:use":                  ["admin", "risk_analyst", "supervisor"],
 
     "dashboard:sla_breach_matrix:read":        ["admin", "supervisor", "risk_analyst"],

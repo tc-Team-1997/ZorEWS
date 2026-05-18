@@ -1,0 +1,294 @@
+// Integration tests for /v1/recovery routes + the archive-before-delete
+// path on /v1/webhooks/:id and /v1/scenarios/:id.
+
+import request from 'supertest';
+import { makeApp } from '../src/server';
+import { StaticSource } from '../src/source';
+import { StubEvaluator } from '../src/score';
+import { StubRiskProfileSource } from '../src/risk_profile';
+import { UnavailableCaseActionSink } from '../src/case_action';
+import { InMemoryRecoveryStore } from '../src/recovery/store';
+import { _resetRecoveryAdapters } from '../src/recovery/adapters';
+
+const NOW = new Date('2026-05-18T12:00:00.000Z');
+
+function makeRecoveryApp(role: 'admin' | 'risk_analyst' = 'admin') {
+  _resetRecoveryAdapters();
+  const recoveryStore = new InMemoryRecoveryStore();
+  const app = makeApp({
+    source: new StaticSource([]),
+    evaluator: new StubEvaluator(),
+    riskProfile: new StubRiskProfileSource(),
+    caseAction: new UnavailableCaseActionSink(),
+    recoveryStore,
+    now: () => NOW,
+    getRole: () => role,
+  }).app;
+  return { app, recoveryStore };
+}
+
+const HEADERS = {
+  'x-tenant-id': 'BANK_DEMO',
+  'x-channel': 'API',
+  'x-source-system': 'test',
+  'x-apex-user': 'alice.admin',
+};
+
+describe('/v1/recovery — empty store', () => {
+  it('GET /v1/recovery returns empty list', async () => {
+    const { app } = makeRecoveryApp();
+    const res = await request(app).get('/v1/recovery').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.items).toEqual([]);
+    expect(res.body.body.total).toBe(0);
+  });
+
+  it('GET /v1/recovery/stats returns zero counts + adapter list', async () => {
+    const { app } = makeRecoveryApp();
+    const res = await request(app).get('/v1/recovery/stats').set(HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body.body.total).toBe(0);
+    expect(res.body.body.by_status).toEqual({ archived: 0, restored: 0, purged: 0 });
+    // Webhook + saved-scenario adapters auto-registered by makeApp
+    const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
+    expect(types).toEqual(['saved_scenario', 'webhook_subscription']);
+  });
+
+  it('GET /v1/recovery returns 403 for non-admin', async () => {
+    const { app } = makeRecoveryApp('risk_analyst');
+    const res = await request(app).get('/v1/recovery').set(HEADERS);
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /v1/recovery rejects bad status filter', async () => {
+    const { app } = makeRecoveryApp();
+    const res = await request(app).get('/v1/recovery?status=bogus').set(HEADERS);
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /v1/recovery/:id returns 404 for unknown', async () => {
+    const { app } = makeRecoveryApp();
+    const res = await request(app).get('/v1/recovery/does-not-exist').set(HEADERS);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('archive-before-delete: webhook subscription', () => {
+  it('DELETE /v1/webhooks/:id archives the row into recovery first', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    // Create a webhook
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'test', url: 'https://example.com/hook', events: ['alert.created'] });
+    expect(create.status).toBe(201);
+    const id = create.body.body.id;
+
+    // Delete it — should archive first
+    const del = await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+    expect(del.status).toBe(204);
+
+    // Recovery store should now have a record
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    expect(list.total).toBe(1);
+    expect(list.items[0].entity_type).toBe('webhook_subscription');
+    expect(list.items[0].original_id).toBe(id);
+    expect(list.items[0].deleted_by).toBe('alice.admin');
+    expect((list.items[0].payload as { name: string }).name).toBe('test');
+    // Secret IS preserved in payload (needed to restore HMAC signing)
+    expect((list.items[0].payload as { secret: string }).secret).toBeTruthy();
+  });
+
+  it('restore re-creates the webhook with its original ID', async () => {
+    const { app } = makeRecoveryApp();
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'r-test', url: 'https://example.com/h', events: ['alert.created'] });
+    const id = create.body.body.id;
+    const originalSecret = (
+      await request(app).get('/v1/webhooks').set(HEADERS)
+    ).body.body.items.find((s: { id: string }) => s.id === id);
+    expect(originalSecret).toBeDefined();
+
+    // Delete
+    await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+    expect(
+      (await request(app).get('/v1/webhooks').set(HEADERS)).body.body.items.find(
+        (s: { id: string }) => s.id === id,
+      ),
+    ).toBeUndefined();
+
+    // Find the recovery_id from the list
+    const recovery = (await request(app).get('/v1/recovery').set(HEADERS)).body.body
+      .items[0];
+    expect(recovery.entity_type).toBe('webhook_subscription');
+
+    // Restore
+    const restore = await request(app)
+      .post(`/v1/recovery/${recovery.recovery_id}/restore`)
+      .set(HEADERS);
+    expect(restore.status).toBe(200);
+    expect(restore.body.body.status).toBe('restored');
+    expect(restore.body.body.restored_by).toBe('alice.admin');
+
+    // Webhook is back with the same ID
+    const after = (
+      await request(app).get('/v1/webhooks').set(HEADERS)
+    ).body.body.items.find((s: { id: string }) => s.id === id);
+    expect(after).toBeDefined();
+    expect(after.name).toBe('r-test');
+  });
+
+  it('restore returns 409 when the original_id already exists', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    // Create + delete a webhook
+    const create = await request(app)
+      .post('/v1/webhooks')
+      .set(HEADERS)
+      .send({ name: 'x', url: 'https://example.com/h', events: ['alert.created'] });
+    const id = create.body.body.id;
+    await request(app).delete(`/v1/webhooks/${id}`).set(HEADERS);
+
+    // Manually re-create a webhook with the SAME id by inserting straight
+    // into recovery. The simulated conflict: someone else made an entity
+    // with the same id between delete + restore. Real life this would
+    // happen if id is deterministic from input + retry. We force it by
+    // archiving twice + restoring once, then trying to restore again.
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    const recovery_id = list.items[0].recovery_id;
+    // First restore succeeds
+    const r1 = await request(app)
+      .post(`/v1/recovery/${recovery_id}/restore`)
+      .set(HEADERS);
+    expect(r1.status).toBe(200);
+    // Archive a SECOND copy with same original_id; restoring should now 409
+    // because the webhook is back in the live store.
+    await recoveryStore.archive({
+      tenant_id: 'BANK_DEMO',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: id,
+      original_table: 'app_bff.webhook_subscriptions',
+      payload: { id, name: 'x', url: 'h', events: [], active: true, secret: 's' } as never,
+      deleted_by: 'alice.admin',
+    });
+    const list2 = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    const newRecoveryId = list2.items[0].recovery_id;
+
+    const r2 = await request(app)
+      .post(`/v1/recovery/${newRecoveryId}/restore`)
+      .set(HEADERS);
+    expect(r2.status).toBe(409);
+  });
+});
+
+describe('archive-before-delete: saved scenario', () => {
+  it('DELETE /v1/scenarios/:id archives the row', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    const save = await request(app)
+      .post('/v1/scenarios')
+      .set(HEADERS)
+      .send({
+        id: 'sc-test-1',
+        name: 'My scenario',
+        inputs: { gdp: -1, rate: 100, fx: 5 },
+        result: { portfolio_pd: 0.05 },
+      });
+    expect([200, 201]).toContain(save.status);
+
+    const del = await request(app).delete('/v1/scenarios/sc-test-1').set(HEADERS);
+    expect(del.status).toBe(204);
+
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    expect(list.total).toBe(1);
+    expect(list.items[0].entity_type).toBe('saved_scenario');
+    expect(list.items[0].original_id).toBe('sc-test-1');
+  });
+});
+
+describe('purge', () => {
+  it('DELETE /v1/recovery/:id marks the record as purged', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    const recovery_id = await recoveryStore.archive({
+      tenant_id: 'BANK_DEMO',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: 'wh-purgeme',
+      original_table: 't',
+      payload: {},
+      deleted_by: 'alice',
+    });
+    const del = await request(app).delete(`/v1/recovery/${recovery_id}`).set(HEADERS);
+    expect(del.status).toBe(204);
+    const r = await recoveryStore.get('BANK_DEMO', recovery_id);
+    expect(r?.status).toBe('purged');
+  });
+
+  it('purge is 403 for non-admin', async () => {
+    const { app, recoveryStore } = makeRecoveryApp('risk_analyst');
+    const recovery_id = await recoveryStore.archive({
+      tenant_id: 'BANK_DEMO',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: 'x',
+      original_table: 't',
+      payload: {},
+      deleted_by: 'alice',
+    });
+    const del = await request(app).delete(`/v1/recovery/${recovery_id}`).set(HEADERS);
+    expect(del.status).toBe(403);
+  });
+
+  it('cannot purge an already-restored record', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    const recovery_id = await recoveryStore.archive({
+      tenant_id: 'BANK_DEMO',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: 'wh-restored',
+      original_table: 'app_bff.webhook_subscriptions',
+      payload: { id: 'wh-restored', name: 'x', url: 'h', events: [], active: true, secret: 's' } as never,
+      deleted_by: 'alice',
+    });
+    // Restore first
+    const r = await request(app)
+      .post(`/v1/recovery/${recovery_id}/restore`)
+      .set(HEADERS);
+    expect(r.status).toBe(200);
+    // Try to purge
+    const p = await request(app).delete(`/v1/recovery/${recovery_id}`).set(HEADERS);
+    expect(p.status).toBe(409);
+  });
+});
+
+describe('tenant isolation', () => {
+  it('a tenant cannot see another tenant\'s recovery records', async () => {
+    const { app, recoveryStore } = makeRecoveryApp();
+    await recoveryStore.archive({
+      tenant_id: 'BANK_DEMO',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: 'wh-1',
+      original_table: 't',
+      payload: {},
+      deleted_by: 'alice',
+    });
+    await recoveryStore.archive({
+      tenant_id: 'BIL',
+      module: 'bff',
+      entity_type: 'webhook_subscription',
+      original_id: 'wh-2',
+      original_table: 't',
+      payload: {},
+      deleted_by: 'bob',
+    });
+    const bank = await request(app).get('/v1/recovery').set(HEADERS);
+    expect(bank.body.body.total).toBe(1);
+    expect(bank.body.body.items[0].original_id).toBe('wh-1');
+
+    const bil = await request(app).get('/v1/recovery').set({ ...HEADERS, 'x-tenant-id': 'BIL' });
+    expect(bil.body.body.total).toBe(1);
+    expect(bil.body.body.items[0].original_id).toBe('wh-2');
+  });
+});

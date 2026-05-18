@@ -995,6 +995,36 @@ export const api = {
   tenantDelete: (tenant_id: string) =>
     http.delete(`/v1/tenants/${encodeURIComponent(tenant_id)}`).then(() => undefined),
 
+  // ── Recovery Center (centralised soft-delete archive) ─────────────
+
+  recoveryList: (params: RecoveryListParams = {}) =>
+    http
+      .get<EnvelopeBody<{ items: DeletedRecord[]; total: number }>>(
+        '/v1/recovery',
+        { params },
+      )
+      .then((r) => r.data),
+
+  recoveryStats: () =>
+    http
+      .get<EnvelopeBody<RecoveryStats>>('/v1/recovery/stats')
+      .then((r) => r.data),
+
+  recoveryGet: (recovery_id: string) =>
+    http
+      .get<EnvelopeBody<DeletedRecord>>(`/v1/recovery/${encodeURIComponent(recovery_id)}`)
+      .then((r) => r.data),
+
+  recoveryRestore: (recovery_id: string) =>
+    http
+      .post<EnvelopeBody<DeletedRecord>>(`/v1/recovery/${encodeURIComponent(recovery_id)}/restore`)
+      .then((r) => r.data),
+
+  recoveryPurge: (recovery_id: string) =>
+    http
+      .delete(`/v1/recovery/${encodeURIComponent(recovery_id)}`)
+      .then(() => undefined),
+
   // ── User Access Override (BAC §3.1.6/§3.1.7) ──────────────────────
 
   uaoList: (params: {
@@ -2085,4 +2115,58 @@ export interface TenantPatch {
   name?: string;
   channels_allowed?: string[];
   active?: boolean;
+}
+
+// ── Recovery Center types ─────────────────────────────────────────────
+
+export type RecoveryStatus = 'archived' | 'restored' | 'purged';
+export type RecoveryModule =
+  | 'bff'
+  | 'auth-svc'
+  | 'cases-svc'
+  | 'alerts-svc'
+  | 'rules-svc';
+
+export interface DeletedRecord {
+  recovery_id: string;
+  tenant_id: string;
+  module: RecoveryModule;
+  entity_type: string;
+  original_id: string;
+  original_table: string;
+  payload: Record<string, unknown>;
+  deleted_by: string;
+  deleted_at: string;
+  deletion_reason: string | null;
+  source_action: string | null;
+  prior_status: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
+  purged_at: string | null;
+  purged_by: string | null;
+  status: RecoveryStatus;
+}
+
+export interface RecoveryListParams {
+  module?: RecoveryModule;
+  entity_type?: string;
+  deleted_by?: string;
+  status?: RecoveryStatus;
+  since?: string;
+  until?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface RecoveryStats {
+  total: number;
+  by_status: Record<RecoveryStatus, number>;
+  by_module: Record<string, number>;
+  by_entity_type: Record<string, number>;
+  most_recent_at: string | null;
+  adapters: Array<{
+    entity_type: string;
+    display_name: string;
+    module: RecoveryModule;
+  }>;
 }

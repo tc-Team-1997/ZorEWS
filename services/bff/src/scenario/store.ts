@@ -46,6 +46,10 @@ export interface IScenarioStore {
     result: ScenarioResult;
   }): SavedScenario;
   delete(id: string, tenant_id: string): boolean;
+  /** Re-insert a previously-archived scenario with its original ID +
+   *  saved_at + saved_by. Used by the recovery adapter. Returns false
+   *  when the id is already taken (route maps to 409). */
+  restore(scenario: SavedScenario): boolean;
   /** Test-only — wipe everything. */
   reset(): Promise<void> | void;
 }
@@ -105,6 +109,12 @@ export class InMemoryScenarioStore implements IScenarioStore {
     const s = this.byId.get(id);
     if (!s || s.tenant_id !== tenant_id) return false;
     return this.byId.delete(id);
+  }
+
+  restore(scenario: SavedScenario): boolean {
+    if (this.byId.has(scenario.id)) return false;
+    this.byId.set(scenario.id, { ...scenario });
+    return true;
   }
 
   reset(): void {
@@ -234,6 +244,34 @@ export class PgScenarioStore implements IScenarioStore {
     void this.pool
       .query(`DELETE FROM app_scenario.saved_scenarios WHERE scenario_id = $1`, [id])
       .catch((err) => this.logger(`failed to delete scenario ${id}`, err));
+    return true;
+  }
+
+  /** Re-insert a previously-archived scenario with its original ID +
+   *  saved_at + saved_by. Cache + pg sync. ON CONFLICT DO NOTHING for
+   *  defence-in-depth against cache/pg drift. */
+  restore(scenario: SavedScenario): boolean {
+    if (this.byId.has(scenario.id)) return false;
+    this.byId.set(scenario.id, { ...scenario });
+    void this.pool
+      .query(
+        `INSERT INTO app_scenario.saved_scenarios
+           (scenario_id, tenant_id, name, saved_by, saved_at, gdp, rate, fx, result)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (scenario_id) DO NOTHING`,
+        [
+          scenario.id,
+          scenario.tenant_id,
+          scenario.name,
+          scenario.saved_by,
+          new Date(scenario.saved_at),
+          scenario.inputs.gdp,
+          scenario.inputs.rate,
+          scenario.inputs.fx,
+          JSON.stringify(scenario.result),
+        ],
+      )
+      .catch((err) => this.logger(`failed to restore scenario ${scenario.id}`, err));
     return true;
   }
 

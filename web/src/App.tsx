@@ -44,6 +44,7 @@ import { NotificationDispatchesPage } from '@/modules/admin/notificationTemplate
 import { EscalationMatrixPage } from '@/modules/admin/escalationMatrix/EscalationMatrixPage';
 import { EscalationWorkerPage } from '@/modules/admin/escalationWorker/EscalationWorkerPage';
 import { CaseScenariosPage } from '@/modules/admin/caseScenarios/CaseScenariosPage';
+import { RecycleBinPage } from '@/modules/admin/RecycleBinPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -117,6 +118,7 @@ export function App() {
             <Route path="admin/escalation-matrix" element={<EscalationMatrixPage />} />
             <Route path="admin/escalation-worker" element={<EscalationWorkerPage />} />
             <Route path="admin/case-scenarios" element={<CaseScenariosPage />} />
+            <Route path="admin/recycle-bin" element={<RecycleBinPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
