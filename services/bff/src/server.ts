@@ -10423,6 +10423,41 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scoring/presets/family-matrix (T6 M6.18) — 2D cross-tab
+   *  combining 6 library presets × 9 indicator families (FIN / BEH /
+   *  TXN / CRD banking + POL / CUS-INS / AGT / CLM / OPS insurance).
+   *  Cells = how many indicators in that family have an EXPLICIT
+   *  multiplier (deviation from default 1.0) in that preset. Per-row
+   *  {preset_id, preset_name, mode, vertical, total_overrides,
+   *  by_family (9 keys at 0 when absent — stable grid), families_without
+   *  (canonical order), distinct_families}. Per-col {family,
+   *  total_overrides (Σ across presets), by_preset (compact),
+   *  presets_without (canonical preset_id order), distinct_presets}.
+   *  Envelope: peak_cell (canonical iteration tie-break; null on no
+   *  overrides), most_focused_preset (highest distinct_families +
+   *  canonical preset_id asc tie-break; null on empty), most_overridden_family
+   *  (highest distinct_presets + canonical family-order tie-break; null
+   *  on empty), unused_families[] (zero-override families across whole
+   *  library; canonical order). Distinct from M6.17 indicator-index
+   *  (inverted view per-indicator) — M6.18 is the FAMILY-aggregated
+   *  matrix view. Mirror of M1.11 / M14.28 / M12.14 / M3.14 matrix
+   *  pattern. Platform-static — same response per tenant. Mounted
+   *  BEFORE catch-all `/:preset_id` so the literal `/family-matrix`
+   *  segment isn't captured. */
+  app.get(
+    '/v1/scoring/presets/family-matrix',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScoringPresetFamilyMatrix } =
+        require('./scoring_preset_family_matrix') as
+        typeof import('./scoring_preset_family_matrix');
+      const out = buildScoringPresetFamilyMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scoring/presets/inventory (T6 M6.15) — 2D cross-tab
    *  inventory: 3 modes × 2 verticals with per-cell library + custom
    *  counts. Per-cell: library_count, custom_count, total_count,
