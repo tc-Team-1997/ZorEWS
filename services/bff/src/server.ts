@@ -2676,6 +2676,58 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/sla-compliance-by-class?window=N (T6 M8.16) —
+   *  PER-CLASS SLA compliance rate over the M8.6 routing ledger.
+   *  Distinct from M8.11 (worst-offender row list) by being aggregate
+   *  rate-per-class. Per-class: {class, total, sla_eligible_count
+   *  (excludes monitor_only + sla_hours=null), on_time_count
+   *  (acked-within-SLA + open-within-SLA), late_count (acked past
+   *  SLA), open_breached_count (open past SLA), total_breach_count
+   *  (late + open_breached), compliance_rate (on_time / eligible),
+   *  breach_rate (total_breach / eligible)}. Envelope: total_records,
+   *  total_sla_eligible, total_breaches, overall_compliance_rate,
+   *  worst_class + best_class (canonical worst-first tie-break;
+   *  null when zero eligible). Mirror of M14.26 SLA budget for the
+   *  alert surface. Drives "what's our SLA compliance per class?
+   *  is red dropping below 90%?" view. */
+  app.get(
+    '/v1/alerts/sla-compliance-by-class',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query as Record<string, string | undefined>;
+      let window = 50;
+      if (typeof q.window === 'string' && q.window) {
+        const parsed = Number.parseInt(q.window, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'window must be an integer in [1, 200]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        window = parsed;
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { summarizeAlertSlaComplianceByClass } =
+        require('./alert_sla_compliance_by_class') as
+        typeof import('./alert_sla_compliance_by_class');
+      const out = summarizeAlertSlaComplianceByClass(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/daily-volume?days=N (T6 M8.15) — TREND-LINE view
    *  over the M8.6 alert routing ledger. Per UTC calendar day across
    *  N days (default 30, [1, 365]): {date, total, by_class (every
