@@ -477,6 +477,27 @@ describe('saved filters', () => {
     expect(await store.list('BANK_DEMO', 'taniya', 'cases')).toHaveLength(0);
   });
 
+  test('restore() re-inserts with original ID + returns false on conflict', async () => {
+    const store = new InMemorySavedFilterStore();
+    const created = await store.create(
+      'BANK_DEMO',
+      'taniya',
+      validateCreate({ report_type: 'cases', name: 'orig', filters: {} }),
+      NOW,
+    );
+    // Snapshot, delete, restore
+    const snapshot = (await store.get('BANK_DEMO', created.filter_id))!;
+    await store.delete('BANK_DEMO', created.filter_id, 'taniya');
+    expect(await store.get('BANK_DEMO', created.filter_id)).toBeNull();
+
+    const ok = await store.restore(snapshot);
+    expect(ok).toBe(true);
+    expect((await store.get('BANK_DEMO', created.filter_id))?.name).toBe('orig');
+
+    // Second restore returns false (already exists)
+    expect(await store.restore(snapshot)).toBe(false);
+  });
+
   test('only one is_default per (owner, report_type) — older one is cleared', async () => {
     const store = new InMemorySavedFilterStore();
     const a = await store.create(

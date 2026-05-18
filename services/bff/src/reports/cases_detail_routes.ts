@@ -45,6 +45,22 @@ export interface CasesDetailRouterDeps {
   savedFilterStore: SavedFilterStore;
   /** Optional: when present, every export writes one row here. */
   auditPool?: Pool | null;
+  /** Optional: when present, DELETE /v1/reports/cases/filters/:id
+   *  archives the row into app_recovery.deleted_records first via
+   *  this store. When undefined, hard-delete (legacy behaviour) —
+   *  kept for tests that don't wire the Recovery Center. */
+  recoveryStore?: {
+    archive: (input: {
+      tenant_id: string;
+      module: 'bff';
+      entity_type: string;
+      original_id: string;
+      original_table: string;
+      payload: Record<string, unknown>;
+      deleted_by: string;
+      source_action?: string | null;
+    }) => Promise<string>;
+  };
   requireTenantMw: RequestHandler;
   requireRole: (op: string) => RequestHandler;
   now?: () => Date;
@@ -407,9 +423,36 @@ export function makeCasesDetailRouter(deps: CasesDetailRouterDeps): RouterType {
     deps.requireRole('reports:cases:view'),
     wrap(async (req, res) => {
       const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const filter_id = req.params.id;
+      // Archive before delete so the row is recoverable via Recovery
+      // Center. Archive failure is non-blocking — the store.delete
+      // call below stays the source-of-truth for 404/403 outcomes.
+      if (deps.recoveryStore) {
+        try {
+          const existing = await deps.savedFilterStore.get(tenant_id, filter_id);
+          if (existing) {
+            await deps.recoveryStore.archive({
+              tenant_id,
+              module: 'bff',
+              entity_type: 'saved_report_filter',
+              original_id: filter_id,
+              original_table: 'app_admin.saved_report_filters',
+              payload: existing as unknown as Record<string, unknown>,
+              deleted_by:
+                ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+                ownerOf(req) ||
+                'admin',
+              source_action: 'user_initiated',
+            });
+          }
+        } catch (err) {
+          console.error('[recovery] archive failed for saved_report_filter', filter_id, err);
+        }
+      }
       await deps.savedFilterStore.delete(
-        req.tenant!.tenant_id,
-        req.params.id,
+        tenant_id,
+        filter_id,
         ownerOf(req),
       );
       res.json(wrapResponse({ deleted: true }, ctx));

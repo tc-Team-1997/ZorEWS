@@ -106,6 +106,10 @@ export interface SavedFilterStore {
   create(tenant_id: string, owner_id: string, input: CreateSavedFilterInput, now: Date): Promise<SavedReportFilter>;
   update(tenant_id: string, filter_id: string, owner_id: string, patch: UpdateSavedFilterInput, now: Date): Promise<SavedReportFilter>;
   delete(tenant_id: string, filter_id: string, owner_id: string): Promise<void>;
+  /** Re-insert a previously-archived saved filter with its original ID.
+   *  Used by the Recovery Center adapter. Returns false on PK conflict
+   *  (route surfaces as 409 RestoreConflictError). */
+  restore(row: SavedReportFilter): Promise<boolean>;
 }
 
 // ── In-memory implementation ────────────────────────────────────────
@@ -198,6 +202,18 @@ export class InMemorySavedFilterStore implements SavedFilterStore {
       throw new SavedFilterError(403, 'EWS_403_not_owner', 'only the owner can delete a saved filter');
     }
     this.rows.splice(idx, 1);
+  }
+
+  /** Recovery Center adapter calls this to re-insert an archived row.
+   *  Returns false if a filter with the same (tenant_id, filter_id)
+   *  already exists. */
+  async restore(row: SavedReportFilter): Promise<boolean> {
+    const existing = this.rows.find(
+      (x) => x.tenant_id === row.tenant_id && x.filter_id === row.filter_id,
+    );
+    if (existing) return false;
+    this.rows.push({ ...row });
+    return true;
   }
 
   private clearDefault(tenant_id: string, owner_id: string, report_type: ReportType): void {
@@ -351,6 +367,32 @@ export class PgSavedFilterStore implements SavedFilterStore {
       `DELETE FROM app_admin.saved_report_filters WHERE tenant_id=$1 AND filter_id=$2`,
       [tenant_id, filter_id],
     );
+  }
+
+  /** Recovery Center adapter calls this to re-insert an archived row.
+   *  ON CONFLICT DO NOTHING is the conflict guard at the DB level.
+   *  Returns false if the row was already there (rowCount === 0). */
+  async restore(row: SavedReportFilter): Promise<boolean> {
+    const res = await this.pool.query(
+      `INSERT INTO app_admin.saved_report_filters
+         (filter_id, tenant_id, owner_id, report_type, name,
+          filters, is_shared, is_default, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (filter_id) DO NOTHING`,
+      [
+        row.filter_id,
+        row.tenant_id,
+        row.owner_id,
+        row.report_type,
+        row.name,
+        JSON.stringify(row.filters),
+        row.is_shared,
+        row.is_default,
+        row.created_at,
+        row.updated_at,
+      ],
+    );
+    return (res.rowCount ?? 0) > 0;
   }
 }
 

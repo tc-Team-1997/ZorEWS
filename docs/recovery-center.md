@@ -1,8 +1,16 @@
 # Recovery Center — Architecture + Adoption Guide
 
-**Status:** Phase 1 shipped 2026-05-18.
-**Wired services:** webhooks · saved scenarios
-**Deferred:** 21 other DELETE routes (one ticket per service — see backlog below)
+**Status:** Phase 1 shipped 2026-05-18; saved_report_filter adopted 2026-05-19.
+**Wired services:** webhooks · saved scenarios · saved report filters
+**Deferred:** 7 candidate services (auth-svc + regulatory-svc + tenant) — see audit below
+
+> **Attribution note (one-time):** Phase 1's 17 files (this doc included)
+> were swept into commit `cc7cd61 feat(audit): T6 M15.16 — correlation
+> duration histogram` by a parallel CC session running `git add .` at
+> the moment I was about to commit. The work IS on `origin/main`; only
+> the commit title is misleading. Verify with
+> `git show cc7cd61 --stat | grep -E "recovery|RecycleBin"`. Subsequent
+> Recovery Center adoptions land in their own commits.
 
 ## What this is
 
@@ -151,23 +159,44 @@ entity_types (filter chips render from the live `adapters` list).
 
 ## Backlog (services NOT yet wired)
 
+**Audited 2026-05-19** — only 6 services actually hard-delete and would
+benefit from Recovery Center. The 4 BFF admin stores below all have
+their OWN per-table soft-delete via `deleted_at` + status=ARCHIVED and
+expose a "Show archived" toggle on their SPA admin page. Adding
+Recovery Center on top would duplicate the same archive in two
+places. Cross-reference: see the `archive()` method on each.
+
+### Already self-soft-deletes (no Recovery Center needed)
+
+| Service | Why it's covered |
+|---|---|
+| `services/bff/src/admin/notification_templates_store.ts` | `deleted_at` + `status=ARCHIVED`; SPA shows archived under filter |
+| `services/bff/src/admin/escalation_matrix_store.ts` | `archive()` method; SPA shows archived rules |
+| `services/bff/src/admin/sla_config_store.ts` | `archive()` only (no DELETE at all by design) |
+| `services/bff/src/admin/case_scenarios_store.ts` | `deleted_at` + restore via STATE_TRANSITION |
+
+### Still hard-deletes — Recovery Center candidates
+
 Each requires a separate ticket so the change can be reviewed in isolation.
 Roughly in order of complexity:
 
 | Service | Entity types | Notes |
 |---|---|---|
-| `services/bff/src/admin/notification_templates_store.ts` | `notification_template` | Simple PG row; straightforward |
-| `services/bff/src/admin/escalation_matrix_store.ts` | `escalation_matrix_rule` | Simple PG row |
-| `services/bff/src/admin/sla_config_store.ts` | `sla_config` | Simple PG row |
-| `services/bff/src/admin/case_scenarios_store.ts` | `case_scenario` | Has child rows (history); restore may need cascade |
-| `services/bff/src/reports/saved_filters_store.ts` | `saved_report_filter` | Simple PG row |
-| `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | Hierarchy; restore must handle members |
-| `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | Per-role array; care needed |
-| `services/auth-svc/src/service_clients.ts` | `service_client` | Has secret hash — restore can re-introduce a revoked client; security review needed |
-| `services/auth-svc/src/pg_user_store.ts` | `user` | High blast radius (FK to sessions, audit, teams); restore semantics need design |
-| `services/regulatory-svc/cases/...` | `case` + cascade | Big — cases own actions, notes, attachments, CAS, CAP |
-| `services/regulatory-svc/alerts/...` | `alert` + `queue_assignment` | Cascade implications |
+| ✅ `services/bff/src/reports/saved_filters_store.ts` | `saved_report_filter` | **Adopted 2026-05-19** (commit follows this doc) |
+| `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | Hierarchy; restore must handle members. Cross-service: needs auth-svc to either own its own RecoveryStore OR call BFF's via HTTP. |
+| `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | Per-role array; care needed. Cross-service. |
+| `services/auth-svc/src/service_clients.ts` | `service_client` | Has secret hash — restore re-introduces a revoked OAuth client. Security review needed. Cross-service. |
+| `services/auth-svc/src/pg_user_store.ts` | `user` | High blast radius (FK to sessions, audit, teams); restore semantics need design. Cross-service. |
+| `services/regulatory-svc/cases/...` | `case` + cascade | Big — cases own actions, notes, attachments, CAS, CAP. Cross-service. |
+| `services/regulatory-svc/alerts/...` | `alert` + `queue_assignment` | Cascade implications. Cross-service. |
 | `tenants` (bff) | `tenant` | Cascades to EVERYTHING; restore would need ordered re-insert of dependent rows |
+
+The 5 auth-svc + 2 regulatory-svc entries need architectural work first:
+Recovery Center lives in BFF. Either (a) each service gets its own
+local Recovery Center + a unified "view all" endpoint that aggregates,
+or (b) the BFF exposes an internal API that other services call to
+archive. (b) is the cleanest centralisation — keep one
+`app_recovery.deleted_records` table for the platform.
 
 ## Known limitations (Phase 1)
 

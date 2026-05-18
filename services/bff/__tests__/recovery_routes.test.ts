@@ -207,6 +207,87 @@ describe('archive-before-delete: saved scenario', () => {
   });
 });
 
+describe('archive-before-delete: saved report filter (3rd adopter)', () => {
+  // Use InMemorySavedFilterStore directly + wire it into makeApp through
+  // the casesDetailSource/savedFilterStore deps so the sub-router mounts.
+  const {
+    InMemorySavedFilterStore,
+  } = require('../src/reports/saved_filters_store') as typeof import('../src/reports/saved_filters_store');
+
+  function makeAppWithFilters() {
+    _resetRecoveryAdapters();
+    const recoveryStore = new InMemoryRecoveryStore();
+    const savedFilterStore = new InMemorySavedFilterStore();
+    // Minimal cases-detail source stub — only needs to exist so the
+    // sub-router mounts. We're not exercising the detail/export paths
+    // in this test; only the saved-filter delete + restore.
+    const casesDetailSource = {
+      run: async () => ({
+        rows: [],
+        total: 0,
+        kpis: {
+          total: 0,
+          breached: 0,
+          breached_pct: 0,
+          avg_age_hours: 0,
+          oldest_age_hours: 0,
+        },
+        sort: { column: 'age_hours', desc: true },
+        page: 1,
+        page_size: 50,
+      }),
+    };
+    const app = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      recoveryStore,
+      casesDetailSource: casesDetailSource as never,
+      savedFilterStore,
+      now: () => NOW,
+      getRole: () => 'admin',
+    }).app;
+    return { app, recoveryStore, savedFilterStore };
+  }
+
+  it('DELETE /v1/reports/cases/filters/:id archives + then restore re-creates with same ID', async () => {
+    const { app, recoveryStore, savedFilterStore } = makeAppWithFilters();
+    // Create a filter via the store directly
+    const created = await savedFilterStore.create(
+      'BANK_DEMO',
+      'alice.admin',
+      { report_type: 'cases', name: 'Breached this week', filters: { breached: true } },
+      NOW,
+    );
+
+    // Delete via HTTP — triggers archive-first
+    const del = await request(app)
+      .delete(`/v1/reports/cases/filters/${created.filter_id}`)
+      .set(HEADERS);
+    expect(del.status).toBe(200);
+
+    // Recovery store has the archive
+    const list = await recoveryStore.list({ tenant_id: 'BANK_DEMO' });
+    expect(list.total).toBe(1);
+    expect(list.items[0].entity_type).toBe('saved_report_filter');
+    expect(list.items[0].original_id).toBe(created.filter_id);
+
+    // Store has no row
+    expect(await savedFilterStore.get('BANK_DEMO', created.filter_id)).toBeNull();
+
+    // Restore via /v1/recovery/:id/restore
+    const restore = await request(app)
+      .post(`/v1/recovery/${list.items[0].recovery_id}/restore`)
+      .set(HEADERS);
+    expect(restore.status).toBe(200);
+
+    // Row is back in the store with the same ID + same name
+    const restored = await savedFilterStore.get('BANK_DEMO', created.filter_id);
+    expect(restored?.name).toBe('Breached this week');
+  });
+});
+
 describe('purge', () => {
   it('DELETE /v1/recovery/:id marks the record as purged', async () => {
     const { app, recoveryStore } = makeRecoveryApp();
