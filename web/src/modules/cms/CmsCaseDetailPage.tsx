@@ -5,6 +5,7 @@ import { Pencil } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { SetCategoryModal } from './SetCategoryModal';
 import { CaseTrackingTimeline } from './CaseTrackingTimeline';
+import { CaseActivityTimeline } from '@/components/cms/CaseActivityTimeline';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -25,7 +26,11 @@ import {
   type CmsResolutionCategory,
 } from './api';
 
-const TABS = ['Overview', 'Investigation', 'Timeline', 'Related'] as const;
+// "Activity" added 2026-05-18 — chronologically grouped feed with filter
+// chips + expandable detail rows. Lives alongside "Timeline" (per-event
+// card view); both read the same cmsApi.tracking() query via React Query
+// dedup, so no extra network call.
+const TABS = ['Overview', 'Investigation', 'Timeline', 'Activity', 'Related'] as const;
 type Tab = (typeof TABS)[number];
 
 export function CmsCaseDetailPage() {
@@ -273,6 +278,17 @@ export function CmsCaseDetailPage() {
                 // visible. The note_id stays on the URL (?note=...) so
                 // InvestigationTab's scroll-and-flash effect catches it.
                 setTab('Investigation');
+              }}
+            />
+          ) : null}
+
+          {tab === 'Activity' ? (
+            <CaseActivityTimeline
+              caseId={id}
+              creationSeed={{
+                case_id: c.case_id,
+                created_by: c.created_by,
+                created_at: c.created_at,
               }}
             />
           ) : null}
