@@ -15767,6 +15767,45 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/scope-creator-matrix (T6 M1.12) — 2D
+   *  cross-tab combining 7 closed ApiKeyScope × N creators (open).
+   *  A key with [alerts:read, audit:read] on alice → 2 cell
+   *  contributions (one per scope, both keyed to alice). Per-row
+   *  {scope, total_bindings, by_creator (compact — only present
+   *  creators), distinct_creators, top_creators[] cap 3}. Per-col
+   *  {created_by, total_bindings, total_keys, by_scope (every scope
+   *  at 0), scopes_without[], distinct_scopes}. Envelope: peak_cell
+   *  + most_versatile_creator (highest distinct_scopes) +
+   *  unused_scopes[] (zero-binding subset — operator hygiene flag).
+   *  Defensive intra-key scope dedup + closed-enum filter. Mirror of
+   *  M1.11 / M14.28 / M12.14 / M3.14 / M15.14 / M8.14 matrix pattern.
+   *  Drives "who has webhooks:dispatch?" governance question. Mounted
+   *  BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/scope-creator-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyScopeCreatorMatrix } =
+        require('./api_key_scope_creator_matrix') as
+        typeof import('./api_key_scope_creator_matrix');
+      const summary = buildApiKeyScopeCreatorMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-lifecycle-matrix (T6 M1.11) —
    *  2D cross-tab combining M1.10 lifecycle stages × M1.6 creators.
    *  Rows = creators (open set, sorted by total_keys desc + username
