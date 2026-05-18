@@ -54,14 +54,14 @@ function key(overrides: Partial<ApiKeyEntry> = {}): ApiKeyEntry {
 // ─── Pure resolver tests ─────────────────────────────────────────────
 
 describe('M1.12 — empty input', () => {
-  test('zero keys → empty rows + 7 cols at 0 + null peak', () => {
+  test('zero keys → empty rows + N cols at 0 + null peak (N=VALID_SCOPES.length)', () => {
     const s = buildApiKeyCreatorScopeMatrix('BIL', [], NOW);
     expect(s.total_active_keys).toBe(0);
     expect(s.total_creators).toBe(0);
-    expect(s.total_scopes).toBe(7);
+    expect(s.total_scopes).toBe(VALID_SCOPES.length);
     expect(s.total_permissions).toBe(0);
     expect(s.rows).toEqual([]);
-    expect(s.columns.length).toBe(7);
+    expect(s.columns.length).toBe(VALID_SCOPES.length);
     for (const c of s.columns) {
       expect(c.total).toBe(0);
       expect(c.top_creators).toEqual([]);
@@ -91,7 +91,7 @@ describe('M1.12 — single key single scope', () => {
     expect(s.rows[0].by_scope['cases:read']).toBe(0);
     expect(s.rows[0].total_permissions).toBe(1);
     expect(s.rows[0].distinct_scopes).toBe(1);
-    expect(s.rows[0].scopes_without).toHaveLength(6);
+    expect(s.rows[0].scopes_without).toHaveLength(VALID_SCOPES.length - 1);
     const alertsCol = s.columns.find((c) => c.scope === 'alerts:read')!;
     expect(alertsCol.total).toBe(1);
     expect(alertsCol.distinct_creators).toBe(1);
@@ -387,7 +387,7 @@ describe('M1.12 — GET /v1/admin/api-keys/creator-scope-matrix', () => {
       .set(TH_BIL);
     expect(r.status).toBe(200);
     expect(r.body.body.total_active_keys).toBe(0);
-    expect(r.body.body.columns.length).toBe(7);
+    expect(r.body.body.columns.length).toBe(VALID_SCOPES.length);
     expect(r.body.body.rows).toEqual([]);
     expect(r.body.body.broadest_grant_creator).toBeNull();
   });

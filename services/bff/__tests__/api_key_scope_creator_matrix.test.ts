@@ -53,13 +53,13 @@ function key(overrides: Partial<ApiKeyEntry> = {}): ApiKeyEntry {
 // ─── Pure resolver tests ─────────────────────────────────────────────
 
 describe('M1.12 — empty input', () => {
-  test('zero keys → 7 zero rows + empty columns + null peak', () => {
+  test('zero keys → N zero rows + empty columns + null peak (N=VALID_SCOPES.length)', () => {
     const s = buildApiKeyScopeCreatorMatrix('BIL', [], NOW);
     expect(s.total_keys).toBe(0);
     expect(s.total_creators).toBe(0);
-    expect(s.total_scopes).toBe(7);
+    expect(s.total_scopes).toBe(VALID_SCOPES.length);
     expect(s.total_bindings).toBe(0);
-    expect(s.rows.length).toBe(7);
+    expect(s.rows.length).toBe(VALID_SCOPES.length);
     for (const r of s.rows) {
       expect(r.total_bindings).toBe(0);
       expect(r.distinct_creators).toBe(0);
@@ -153,23 +153,23 @@ describe('M1.12 — multi-creator cohort', () => {
 });
 
 describe('M1.12 — every by_scope key present', () => {
-  test('col.by_scope carries all 7 scope keys', () => {
+  test('col.by_scope carries all VALID_SCOPES keys', () => {
     const k = key({ created_by: 'alice', scopes: ['alerts:read'] });
     const s = buildApiKeyScopeCreatorMatrix('BIL', [k], NOW);
     const col = s.columns[0];
     for (const scope of VALID_SCOPES) {
       expect(col.by_scope[scope]).toBeGreaterThanOrEqual(0);
     }
-    expect(Object.keys(col.by_scope).length).toBe(7);
+    expect(Object.keys(col.by_scope).length).toBe(VALID_SCOPES.length);
   });
 });
 
 describe('M1.12 — scopes_without per column', () => {
-  test('alice using only alerts:read → other 6 scopes in scopes_without', () => {
+  test('alice using only alerts:read → other VALID_SCOPES.length-1 scopes in scopes_without', () => {
     const k = key({ created_by: 'alice', scopes: ['alerts:read'] });
     const s = buildApiKeyScopeCreatorMatrix('BIL', [k], NOW);
     const col = s.columns[0];
-    expect(col.scopes_without.length).toBe(6);
+    expect(col.scopes_without.length).toBe(VALID_SCOPES.length - 1);
     expect(col.scopes_without).not.toContain('alerts:read');
   });
 });
@@ -267,7 +267,7 @@ describe('M1.12 — unused_scopes', () => {
   test('zero-binding scopes surface in canonical order', () => {
     const k = key({ created_by: 'alice', scopes: ['alerts:read'] });
     const s = buildApiKeyScopeCreatorMatrix('BIL', [k], NOW);
-    expect(s.unused_scopes.length).toBe(6);
+    expect(s.unused_scopes.length).toBe(VALID_SCOPES.length - 1);
     expect(s.unused_scopes).not.toContain('alerts:read');
     // canonical order — first is cases:read
     expect(s.unused_scopes[0]).toBe('cases:read');
@@ -367,7 +367,7 @@ describe('M1.12 — GET /v1/admin/api-keys/scope-creator-matrix', () => {
       .set(TH_BIL);
     expect(r.status).toBe(200);
     expect(r.body.body.total_keys).toBe(0);
-    expect(r.body.body.rows.length).toBe(7);
+    expect(r.body.body.rows.length).toBe(VALID_SCOPES.length);
     expect(r.body.body.columns).toEqual([]);
   });
 

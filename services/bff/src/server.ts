@@ -19206,6 +19206,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/indicator-count-histogram (T6 M5.18) —
+   *  histogram bucketing every M5.1 template by its supporting_indicators
+   *  array length into 5 canonical buckets: minimal (1) / low (2-3) /
+   *  medium (4-6) / high (7-10) / comprehensive (>10). Per-bucket
+   *  {count, by_category (5 keys at 0 when absent), by_vertical (3
+   *  keys at 0 when absent), sample_template_ids cap 3 sorted asc}.
+   *  Envelope: peak_bucket (canonical iteration tie-break; null on
+   *  empty catalog), mean_indicators (rounded 2 decimals; null on
+   *  empty), min/max_indicators across catalog, empty_buckets[] in
+   *  canonical order. Mirror of M4.15 / M9.11 / M8.12 histogram pattern
+   *  for the rule template surface. Platform-static — same response
+   *  across tenants. Mounted BEFORE catch-all `/:id`. Drives "is our
+   *  template library too narrow (single-indicator predicates) or too
+   *  broad (10+ indicators)? where's the coverage gap?". */
+  app.get(
+    '/v1/rules/templates/indicator-count-histogram',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildRuleTemplateIndicatorCountHistogram } =
+        require('./rule_template_indicator_count_histogram') as
+        typeof import('./rule_template_indicator_count_histogram');
+      const out = buildRuleTemplateIndicatorCountHistogram(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/categories — distinct template categories. */
   app.get(
     '/v1/rules/templates/categories',
