@@ -12127,6 +12127,52 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/actor-fleet (T6 M2.15) — fleet-wide
+   *  per-actor onboarding contribution. Distinct from M2.10 (per-tenant
+   *  actor summary) by aggregating across ALL tenants in the registry.
+   *  Per-actor row: {actor_username, total_actions (completed +
+   *  skipped), distinct_tenants, tenant_ids[] sorted asc cap 50,
+   *  distinct_steps, completed_count, skipped_count, most_recent_at}.
+   *  Envelope: most_prolific_actor (highest total_actions; canonical
+   *  username asc tie-break; null on empty), most_broad_actor (highest
+   *  distinct_tenants — surfaces operators touching many tenants for
+   *  cross-tenant access review; canonical username asc tie-break;
+   *  null on empty). Drives ops recognition + quarterly access review
+   *  ("alice has touched 8 tenants — does that match her scope?").
+   *  Async because tenantLookup.all() may be async. Mounted BEFORE
+   *  /v1/tenants/:tenant_id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/tenants/onboarding/actor-fleet',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const fleet = tenants.map((t) => ({
+        tenant_id: t.tenant_id,
+        steps: onboardingStore.get(t.tenant_id).steps,
+      }));
+      const { summarizeOnboardingFleetActors } =
+        require('./tenant_onboarding_actor_fleet') as
+        typeof import('./tenant_onboarding_actor_fleet');
+      const out = summarizeOnboardingFleetActors(fleet, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding — caller's tenant onboarding state. */
   app.get(
     '/v1/tenants/me/onboarding',
