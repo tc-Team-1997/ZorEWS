@@ -46,8 +46,13 @@ const KPI_LINKS = {
   customersAll: '/customers',
   customersHighRisk: '/customers?level=High&pdMin=0.5',
   alertsActive: '/alerts',
-  casesOpen: '/cases?state=open,assigned,in_action,monitored',
-  casesSlaBreach: '/cases?sla=breached,approaching',
+  // Cases-legacy nav was retired — these KPIs now land in the CMS
+  // Case Management page. `breached=true` is the only param the CMS
+  // page recognises (matches SLABreachMatrix's deep-link); the
+  // legacy `state=` vocabulary doesn't translate so the casesOpen
+  // card lands unfiltered (user filters from within CMS).
+  casesOpen: '/cms/cases',
+  casesSlaBreach: '/cms/cases?breached=true',
 } as const;
 
 const RANGE_LABEL: Record<TimeRangeKey, string> = {

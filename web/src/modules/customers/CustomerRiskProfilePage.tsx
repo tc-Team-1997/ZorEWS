@@ -270,7 +270,7 @@ function LinkedCasesPanel({ customerId }: { customerId: string }) {
       title="Linked cases"
       action={
         <Link
-          to="/cases"
+          to="/cms/cases"
           className="text-2xs text-action hover:underline focus:outline-none focus:ring-2 focus:ring-brand-blue/40 rounded"
         >
           Open case queue →

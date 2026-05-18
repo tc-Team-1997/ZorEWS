@@ -26,11 +26,12 @@ describe('Dashboard KPI cards — clickable nav', () => {
       '/customers?level=High&pdMin=0.5',
     );
     expect(screen.getByTestId('kpi-active-alerts').getAttribute('href')).toBe('/alerts');
-    expect(screen.getByTestId('kpi-cases-open').getAttribute('href')).toBe(
-      '/cases?state=open,assigned,in_action,monitored',
-    );
+    // Cases-legacy retired → both cards now land in CMS Case Management.
+    // casesOpen lands unfiltered (legacy state vocabulary doesn't map);
+    // casesSlaBreach preserves the breach filter via ?breached=true.
+    expect(screen.getByTestId('kpi-cases-open').getAttribute('href')).toBe('/cms/cases');
     expect(screen.getByTestId('kpi-sla-breaches').getAttribute('href')).toBe(
-      '/cases?sla=breached,approaching',
+      '/cms/cases?breached=true',
     );
   });
 

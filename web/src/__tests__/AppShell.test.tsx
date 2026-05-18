@@ -26,7 +26,8 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: /alerts/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /customers/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /rules/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /cases/i })).toBeInTheDocument();
+    // Legacy "Cases" nav was retired — Case Management is the sole entry now.
+    expect(screen.getByRole('link', { name: /case management/i })).toBeInTheDocument();
     // Disambiguated from /admin/case-scenarios admin entry (M14.21)
     expect(screen.getByRole('link', { name: /^scenario/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();

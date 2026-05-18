@@ -24,8 +24,6 @@ import { CmsCaseKanbanPage } from '@/modules/cms/CmsCaseKanbanPage';
 import { CmsCaseDetailPage } from '@/modules/cms/CmsCaseDetailPage';
 import { CaseCausalAnalysisPage } from '@/modules/cms/CaseCausalAnalysisPage';
 import { CaseCapPage } from '@/modules/cms/CaseCapPage';
-import { CaseListPage } from '@/modules/cases/CaseListPage';
-import { CaseDetailPage } from '@/modules/cases/CaseDetailPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
 import { ReportsPage } from '@/modules/reports/ReportsPage';
 import { CasesDetailReportPage } from '@/modules/reports/CasesDetailReportPage';
@@ -94,8 +92,6 @@ export function App() {
             <Route path="cms/cases/:id" element={<CmsCaseDetailPage />} />
             <Route path="cms/cases/:id/causal-analysis" element={<CaseCausalAnalysisPage />} />
             <Route path="cms/cases/:id/cap" element={<CaseCapPage />} />
-            <Route path="cases" element={<CaseListPage />} />
-            <Route path="cases/:id" element={<CaseDetailPage />} />
             <Route path="scenario" element={<ScenarioPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="reports/cases-detail" element={<CasesDetailReportPage />} />
