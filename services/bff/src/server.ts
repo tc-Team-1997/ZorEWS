@@ -16840,6 +16840,52 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/action-resource-matrix (T6 M15.17) — 2D cross-tab
+   *  over the audit chain combining action × resource_type. Action
+   *  axis is OPEN (any action verb from observed events); resource_type
+   *  axis is CLOSED (10 canonical AuditResourceTypes). Each event
+   *  lives in exactly one (action, resource_type) cell. Per-row
+   *  {action, total, by_resource_type (10 keys at 0 when absent —
+   *  stable grid), resource_types_without (canonical order),
+   *  distinct_resource_types}. Per-col {resource_type, total, by_action
+   *  (compact), actions_without (asc), distinct_actions}. Envelope:
+   *  peak_cell (canonical iteration tie-break: actions asc × types
+   *  canonical; null on empty), most_versatile_action (highest
+   *  distinct_resource_types + canonical action asc tie-break; null
+   *  on empty), most_diverse_resource_type (highest distinct_actions
+   *  + canonical type-order tie-break; null on empty), empty_cells[]
+   *  in canonical action × resource_type row-major order. Mirror of
+   *  M1.11 / M14.28 / M12.14 / M3.14 matrix pattern but with OPEN
+   *  action axis (N can grow) × CLOSED resource_type axis. */
+  app.get(
+    '/v1/audit/action-resource-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain entire audit chain for this tenant.
+      const out: import('./audit_trail').AuditEvent[] = [];
+      const PAGE = 1000;
+      for (let page = 1; page <= 200; page++) {
+        const result = auditTrailStore.list(req.tenant!.tenant_id, {
+          page,
+          page_size: PAGE,
+        });
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildAuditActionResourceMatrix } =
+        require('./audit_action_resource_matrix') as
+        typeof import('./audit_action_resource_matrix');
+      const summary = buildAuditActionResourceMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/audit/severity-outcome-matrix (T6 M15.15) — 2D cross-tab
    *  over the audit chain combining severity × outcome. Rows = 3
    *  AuditSeverity (canonical critical → warning → info) × cols = 3
