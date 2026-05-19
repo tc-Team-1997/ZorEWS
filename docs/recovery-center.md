@@ -253,28 +253,57 @@ only the redacted prefix.
 
 ### Caller pattern (auth-svc example)
 
+Use the typed `RecoveryArchiveClient` helper at
+[`services/bff/src/recovery/archive_client.ts`](../services/bff/src/recovery/archive_client.ts) —
+adopters copy this 240-line zero-dep file into their own `src/`. It
+wraps the raw fetch with:
+
+- type-safe `ArchiveRequest` shape so misspelled fields are caught at compile time
+- client-side validation (catches typos before the round-trip)
+- error mapping to typed `RecoveryArchiveError` (`invalid_input` / `invalid_api_key` / `missing_scope` / `server_error` / `network_error`)
+- auto-retry on 502/503/504 + network errors (default 2 retries, back-off 100ms/400ms)
+- per-request timeout (default 5s) via AbortController
+
 ```ts
-// auth-svc: archive a team row before DELETE
+import { RecoveryArchiveClient, RecoveryArchiveError } from './recovery/archive_client';
+
+// One-time setup at boot.
+const recovery = new RecoveryArchiveClient({
+  baseUrl: process.env.BFF_BASE_URL!,           // 'https://bff.bil.local'
+  apiKey:  process.env.BFF_RECOVERY_API_KEY!,   // 'apex_<prefix>.<secret>'
+});
+
+// In the delete path:
 const team = await store.get(team_id);
-await fetch(`${BFF_BASE}/v1/svc/recovery/archive`, {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${BFF_RECOVERY_API_KEY}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
+try {
+  await recovery.archive({
     module: 'auth-svc',
     entity_type: 'user_team',
     original_id: team.team_id,
     original_table: 'app_iam.user_teams',
-    payload: team,                  // full row snapshot
+    payload: team,                  // full row snapshot for restore
     deleted_by: actor_username,
     source_action: 'user_initiated',
-  }),
-});
-// then proceed with the local DELETE
+  });
+} catch (err) {
+  // Best-effort: log + proceed. Archive failure shouldn't block the
+  // user's delete. The Recovery Center silently loses this row, which
+  // operators see in the archive count vs. expected mismatch.
+  if (err instanceof RecoveryArchiveError) {
+    console.warn(`[teams] archive failed (${err.code}): ${err.message}`);
+  } else {
+    console.warn('[teams] archive failed', err);
+  }
+}
+// Proceed with local delete.
 await store.delete(team_id);
 ```
+
+Raw `fetch` works too if the source service doesn't want the dependency
+— see `services/bff/src/recovery/archive_client.ts` for the exact wire
+format (`POST /v1/svc/recovery/archive` with `Authorization: Bearer
+apex_<prefix>.<secret>` + JSON body matching the `ArchiveRequest`
+shape).
 
 ### Restore for cross-service entities
 

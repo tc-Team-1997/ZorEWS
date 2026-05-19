@@ -4645,6 +4645,80 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/promotions/daily-volume?days=N (T6 M7.17) — fleet-
+   *  wide TREND view across the trailing-N-day window over the M7.2
+   *  promotion engine (default 30; bounds [1, 365]). Per UTC calendar
+   *  day: {date, total, by_status (every PromotionRequestStatus at 0:
+   *  pending/approved/rejected/cancelled), distinct_models (per-day
+   *  Set-dedup), distinct_requesters (Set-dedup)}. Envelope:
+   *  total_requests_in_window + total_requests_observed (latter
+   *  includes requests outside window — gap signal), peak_day (highest
+   *  total; earliest-day-wins tie-break; null on empty), mean_per_day,
+   *  growth_rate (second-half vs first-half; null when first-half=0
+   *  OR days<2), busiest_status (canonical tie-break: pending >
+   *  approved > rejected > cancelled at tied; null on empty). Distinct
+   *  from M7.10 (per-model timeline — chronological ladder per model)
+   *  and M7.15 (latency histogram — bucketed by decision duration) by
+   *  being the fleet DAILY volume trend over requested_at. Mirror of
+   *  M1.9 / M8.15 / M10.15 / M12.13 / M15.11 / M3.17 daily-volume
+   *  pattern. Mounted BEFORE /:request_id wildcard. 400 EWS_400_invalid_input
+   *  on out-of-range days. */
+  app.get(
+    '/v1/ai/promotions/daily-volume',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const {
+        buildPromotionDailyVolume,
+        PromotionDailyVolumeError,
+        DEFAULT_PROMOTION_DAILY_WINDOW,
+      } = require('./ai_promotion_daily_volume') as
+        typeof import('./ai_promotion_daily_volume');
+      const daysParam = req.query.days;
+      let days: number = DEFAULT_PROMOTION_DAILY_WINDOW;
+      if (daysParam !== undefined) {
+        const n = Number(daysParam);
+        if (!Number.isInteger(n) || n < 1) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be a positive integer',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = n;
+      }
+      try {
+        const out = buildPromotionDailyVolume(
+          promotionEngine,
+          req.tenant!.tenant_id,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof PromotionDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: `EWS_400_${e.code}`,
+                message: e.message,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ai/promotions/reviewer-rollup (T6 M7.16) — PER-REVIEWER
    *  pivot over M7.2 promotion requests. Counts only decided requests
    *  (approved + rejected); skips pending + cancelled. Per reviewer:
