@@ -11,6 +11,15 @@
 > the commit title is misleading. Verify with
 > `git show cc7cd61 --stat | grep -E "recovery|RecycleBin"`. Subsequent
 > Recovery Center adoptions land in their own commits.
+>
+> **Phase 2b attribution (one-time, 2026-05-19):** The
+> `RecoveryArchiveClient` helper + 26 unit/e2e tests + the §"Caller
+> pattern" doc update were similarly swept into commit `9c90b90
+> feat(ai): T6 M7.17 — promotion request daily volume timeline` by
+> the same parallel-`git add .` race. The work IS on `origin/main`;
+> verify with `git show 9c90b90 --stat | grep -E "archive_client|recovery-center"`.
+> (Phase 2a — the BFF endpoint itself — shipped cleanly in commit
+> `445089b feat(recovery): Phase 2a — cross-service archive endpoint`.)
 
 ## What this is
 
