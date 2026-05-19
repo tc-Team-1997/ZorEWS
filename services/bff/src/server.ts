@@ -14817,6 +14817,45 @@ export function makeApp(deps: AppDeps = {}) {
   // All routes are admin-only (audit:read) — config is sensitive ops
   // surface, not analyst-level.
 
+  /** GET /v1/admin/config/category-actor-matrix (T6 M13.17) — 2D
+   *  cross-tab combining the M13.12 category axis (CLOSED — 5
+   *  canonical: alerts/notifications/reporting/scoring/features) ×
+   *  the M13.16 actor axis (OPEN — any updated_by seen on an override).
+   *  Each override lives in exactly one (category, actor) cell.
+   *  Per-row {category, total_overrides, by_actor (compact), distinct_actors,
+   *  top_actors[] cap 3 with canonical asc tie-break}. Per-col
+   *  {actor_username, total_overrides, by_category (every category at
+   *  0 — stable 5-key grid), categories_without[] canonical,
+   *  distinct_categories (0..5)}. Envelope: peak_cell (canonical
+   *  iteration tie-break: categories canonical × actors asc; null on
+   *  empty), most_versatile_actor (highest distinct_categories +
+   *  canonical asc tie-break; null on empty), most_active_category
+   *  (highest distinct_actors + canonical category-order tie-break;
+   *  null on empty), empty_cells[] in canonical category × actor
+   *  row-major order. Default entries (is_default=true) excluded —
+   *  only actual overrides contribute. Defensive null updated_by
+   *  skipped. Mirror of M1.11 / M14.28 / M12.14 / M3.14 / M15.14 /
+   *  M15.17 matrix pattern combining CLOSED × OPEN axes. Mounted
+   *  BEFORE catch-all `/v1/admin/config/:key`. */
+  app.get(
+    '/v1/admin/config/category-actor-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entries = configStore.list(req.tenant!.tenant_id);
+      const { buildConfigCategoryActorMatrix } =
+        require('./admin_config_category_actor_matrix') as
+        typeof import('./admin_config_category_actor_matrix');
+      const summary = buildConfigCategoryActorMatrix(
+        req.tenant!.tenant_id,
+        entries,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/actor-rollup (T6 M13.16) — per-actor pivot
    *  over the M13.1 config store. M13.11 pivots overrides by AGE;
    *  M13.12 by CATEGORY; M13.16 pivots by `updated_by` (the actor
