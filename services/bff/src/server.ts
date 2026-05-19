@@ -17025,6 +17025,77 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/run-volume/daily?days=N (T6 M3.17) — fleet-
+   *  wide TREND view across the trailing-N-day window (default 30,
+   *  bounds [1, 365]). Per UTC calendar day: total + by_status
+   *  (success/failure/partial/running with every key emitted at 0) +
+   *  distinct_connectors (per-day Set-dedup). Envelope: peak_day
+   *  (earliest-day-wins tie-break; null on empty), mean_per_day
+   *  (rounded Σ/days), growth_rate (second-half mean vs first-half;
+   *  null when first-half=0 OR days<2), busiest_status (canonical
+   *  tie-break: success > failure > partial > running at tied; null
+   *  on empty), total_runs_in_window + total_runs_observed (latter
+   *  includes runs OUTSIDE the window — surfaces "runs falling outside
+   *  the window?" gap). Distinct from M3.12 (hourly cyclic — intraday
+   *  pattern) by being the LINEAR trend view. Mirror of M1.9 / M8.15
+   *  / M10.15 / M12.13 / M15.11 daily-volume pattern. 400 EWS_400_invalid_input
+   *  on out-of-range days. Pulls up to 200 runs per connector. */
+  app.get(
+    '/v1/ingestion/run-volume/daily',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const {
+        buildConnectorRunDailyVolume,
+        ConnectorRunDailyVolumeError,
+        DEFAULT_RUN_DAILY_WINDOW,
+      } = require('./connector_run_daily_volume') as
+        typeof import('./connector_run_daily_volume');
+      const daysParam = req.query.days;
+      let days: number = DEFAULT_RUN_DAILY_WINDOW;
+      if (daysParam !== undefined) {
+        const n = Number(daysParam);
+        if (!Number.isInteger(n) || n < 1) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be a positive integer',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = n;
+      }
+      try {
+        const out = buildConnectorRunDailyVolume(
+          ingestionRegistry,
+          req.tenant!.tenant_id,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ConnectorRunDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: `EWS_400_${e.code}`,
+                message: e.message,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ingestion/connectors — list every connector. */
   app.get(
     '/v1/ingestion/connectors',
