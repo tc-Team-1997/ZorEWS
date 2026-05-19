@@ -46,7 +46,8 @@ export type ApiKeyScope =
   | 'reports:read'
   | 'notifications:send'
   | 'webhooks:dispatch'
-  | 'integrations:read';
+  | 'integrations:read'
+  | 'recovery:archive_internal';
 
 export const VALID_SCOPES: readonly ApiKeyScope[] = [
   'alerts:read',
@@ -56,6 +57,12 @@ export const VALID_SCOPES: readonly ApiKeyScope[] = [
   'notifications:send',
   'webhooks:dispatch',
   'integrations:read',
+  // Service-to-service: lets a non-BFF process (auth-svc /
+  // regulatory-svc) write into the central app_recovery.deleted_records
+  // table via POST /v1/svc/recovery/archive. Tenant binding comes
+  // from the key — caller cannot spoof X-Tenant-ID over this route.
+  // Adopters: see docs/recovery-center.md "Cross-service adoption".
+  'recovery:archive_internal',
 ] as const;
 
 export type ApiKeyStatus = 'active' | 'revoked';

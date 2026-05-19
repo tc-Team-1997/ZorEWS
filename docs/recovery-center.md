@@ -198,6 +198,102 @@ or (b) the BFF exposes an internal API that other services call to
 archive. (b) is the cleanest centralisation — keep one
 `app_recovery.deleted_records` table for the platform.
 
+## Cross-service adoption (Phase 2a, 2026-05-19)
+
+**Shipped:** the option-(b) write-side foundation — non-BFF services can
+now archive into the central table over HTTP.
+
+### Endpoint
+
+```
+POST /v1/svc/recovery/archive
+```
+
+- Auth: api-key bearer (`Authorization: Bearer apex_<prefix>.<secret>`).
+- Required scope: `recovery:archive_internal` (M1.2 scope catalogue).
+- Tenant: bound to the verified key. `X-Tenant-ID` override is ignored
+  by api-key auth — a key issued to BIL cannot write into BANK_DEMO.
+- Body (raw or `{header, body: …}` enveloped):
+  ```json
+  {
+    "module": "auth-svc",      // 'auth-svc' | 'cases-svc' | 'alerts-svc' | 'rules-svc'
+    "entity_type": "user_team",
+    "original_id": "team-123",
+    "original_table": "app_iam.user_teams",
+    "payload": { "team_id": "team-123", "name": "Legal Mumbai", ... },
+    "deleted_by": "svc:auth-svc",
+    "deletion_reason": "team leader left",   // optional
+    "source_action": "user_initiated",       // optional
+    "prior_status": "active"                 // optional
+  }
+  ```
+- `module: 'bff'` is **rejected** — in-process callers must call
+  `recoveryStore.archive()` directly to save an HTTP loopback + keep
+  audit attribution unambiguous.
+- Response: `201 { recovery_id, archived: DeletedRecord }`. Every
+  successful archive writes one `recovery.archive` event to the M15.1
+  audit trail with `actor_role: 'service:<module>'` so audit filters
+  can separate machine-driven archives from operator-driven.
+
+### Provisioning a key
+
+Admin mints a service-account key with the new scope:
+
+```bash
+curl -sS -X POST https://bff.example.com/v1/admin/api-keys \
+  -H "Authorization: Bearer <admin_jwt>" \
+  -H "X-Tenant-ID: BANK_DEMO" -H "X-Channel: API" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"auth-svc archive","scopes":["recovery:archive_internal"]}'
+```
+
+The plaintext key is returned **once** in the create response; store
+it in the source service's secret manager. Subsequent reads return
+only the redacted prefix.
+
+### Caller pattern (auth-svc example)
+
+```ts
+// auth-svc: archive a team row before DELETE
+const team = await store.get(team_id);
+await fetch(`${BFF_BASE}/v1/svc/recovery/archive`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${BFF_RECOVERY_API_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    module: 'auth-svc',
+    entity_type: 'user_team',
+    original_id: team.team_id,
+    original_table: 'app_iam.user_teams',
+    payload: team,                  // full row snapshot
+    deleted_by: actor_username,
+    source_action: 'user_initiated',
+  }),
+});
+// then proceed with the local DELETE
+await store.delete(team_id);
+```
+
+### Restore for cross-service entities
+
+The archive side is now plumbed. **Restore still requires a per-entity
+adapter** registered in BFF that HTTP-calls back to the source
+service's restore endpoint. Each remaining adopter ticket includes:
+
+1. Source service: add a `restore(payload)` method to its store
+2. Source service: expose `POST /<resource>/restore` (api-key gated
+   with a matching `recovery:restore_internal` scope — to ship in
+   Phase 2b)
+3. BFF: register a `RecoveryAdapter` for the entity_type that fetches
+   the source service over HTTP and invokes the restore endpoint
+
+Tickets in order: `auth-svc/teams` (smallest cascade) →
+`auth-svc/dashboard_widgets` → `auth-svc/service_clients` (security
+review required) → `auth-svc/pg_user_store` →
+`regulatory-svc/cases` → `regulatory-svc/alerts` → `tenants`.
+
 ## Known limitations (Phase 1)
 
 | | |

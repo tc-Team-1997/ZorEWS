@@ -16236,6 +16236,181 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /**
+   * POST /v1/svc/recovery/archive — Recovery Center Phase 2a.
+   *
+   * Service-to-service entry point that lets non-BFF processes
+   * (auth-svc / cases-svc / alerts-svc / rules-svc) archive into the
+   * central app_recovery.deleted_records table BEFORE they delete
+   * from their own tables. Implements option (b) from
+   * docs/recovery-center.md §"Backlog" — one table for the platform.
+   *
+   * Auth: api-key bearer + `recovery:archive_internal` scope.
+   * Tenant: bound to the verified key. The caller cannot override
+   * via X-Tenant-ID (api-key auth ignores that header by design —
+   * see services/bff/src/api_key_auth.ts).
+   *
+   * Body (raw or enveloped):
+   *   {
+   *     module:          'auth-svc' | 'cases-svc' | 'alerts-svc' | 'rules-svc',
+   *     entity_type:     string, // 'user_team' / 'case' / 'alert' / 'rule'
+   *     original_id:     string, // stringified PK of the original row
+   *     original_table:  string, // 'app_iam.user_teams' / etc.
+   *     payload:         object, // full row snapshot for restore
+   *     deleted_by:      string,
+   *     deletion_reason?: string,
+   *     source_action?:   string,
+   *     prior_status?:    string
+   *   }
+   *
+   * 'bff' is rejected — in-process callers must call recoveryStore
+   *   directly rather than HTTP-loopback. Saves a round-trip and
+   *   avoids ambiguous audit attribution.
+   *
+   * Restore for cross-service entities happens via per-entity_type
+   * adapters registered in BFF that HTTP-call back to the source
+   * service's restore endpoint. The archive endpoint is the
+   * write-side foundation; restore plumbing lands per-adopter.
+   *
+   * Response: 201 { recovery_id, archived: DeletedRecord }.
+   */
+  app.post(
+    '/v1/svc/recovery/archive',
+    apiKeyMw,
+    requireKeyMw,
+    requireScope('recovery:archive_internal', now),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Tenant comes from the verified key — non-spoofable.
+      const tenant_id = req.apiKey!.entry.tenant_id;
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'request body required (object)', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const body = inner as Record<string, unknown>;
+
+      // Closed enum: 'bff' deliberately excluded — BFF-local code must
+      // call recoveryStore.archive directly. Mirrors RecoveryModule
+      // minus 'bff'. Keep in sync with recovery/types.ts.
+      const ALLOWED_MODULES = ['auth-svc', 'cases-svc', 'alerts-svc', 'rules-svc'] as const;
+      const moduleVal = body.module;
+      if (typeof moduleVal !== 'string' || !ALLOWED_MODULES.includes(moduleVal as never)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_module',
+              message: `module must be one of ${ALLOWED_MODULES.join(' | ')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+
+      // Required string fields.
+      const requireNonEmptyString = (key: string): string | undefined => {
+        const v = body[key];
+        return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
+      };
+      const entity_type = requireNonEmptyString('entity_type');
+      const original_id = requireNonEmptyString('original_id');
+      const original_table = requireNonEmptyString('original_table');
+      const deleted_by = requireNonEmptyString('deleted_by');
+      const missing: string[] = [];
+      if (!entity_type) missing.push('entity_type');
+      if (!original_id) missing.push('original_id');
+      if (!original_table) missing.push('original_table');
+      if (!deleted_by) missing.push('deleted_by');
+      if (missing.length > 0) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: `missing or empty required fields: ${missing.join(', ')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+
+      // Payload must be an object (the snapshot to restore later).
+      if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'payload must be an object',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+
+      // Optional string fields — accept null, undefined, or trimmed string.
+      const optionalString = (key: string): string | null | undefined => {
+        const v = body[key];
+        if (v === undefined || v === null) return v as null | undefined;
+        if (typeof v !== 'string') return undefined; // silently drop wrong types
+        const t = v.trim();
+        return t.length > 0 ? t : null;
+      };
+
+      try {
+        const recovery_id = await recoveryStore.archive({
+          tenant_id,
+          module: moduleVal as 'auth-svc' | 'cases-svc' | 'alerts-svc' | 'rules-svc',
+          entity_type: entity_type!,
+          original_id: original_id!,
+          original_table: original_table!,
+          payload: body.payload as Record<string, unknown>,
+          deleted_by: deleted_by!,
+          deletion_reason: optionalString('deletion_reason') ?? null,
+          source_action: optionalString('source_action') ?? null,
+          prior_status: optionalString('prior_status') ?? null,
+        });
+        const archived = await recoveryStore.get(tenant_id, recovery_id);
+        if (archived) {
+          recordRecoveryAudit(
+            {
+              auditTrailStore,
+              tenant_id,
+              actor_username: deleted_by!,
+              // Service-account role marker. Distinct from human roles
+              // (admin / supervisor / etc.) so audit filters can
+              // separate machine-driven archives from operator-driven.
+              actor_role: `service:${moduleVal}`,
+              now: now(),
+            },
+            archived,
+          );
+        }
+        return res.status(201).json(
+          wrapResponse({ recovery_id, archived }, ctx),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[recovery] cross-service archive failed', err);
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: 'archive failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   // ── BIL Audit & Compliance trail (T6 M15.1) ─────────────────────────
   //
   // Per-tenant structured audit log with filters tuned for RBI/IRDAI
