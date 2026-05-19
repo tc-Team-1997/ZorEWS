@@ -12502,6 +12502,59 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/stage-vertical-matrix (T6 M2.17) —
+   *  2D cross-tab over the tenant fleet combining M2.11 milestone
+   *  stage × tenant vertical. 5 OnboardingStage rows (canonical
+   *  starting → in_progress → near_done → final_review → complete)
+   *  × 2 TenantVertical cols (banking → insurance) = 10 cells. Each
+   *  tenant lives in exactly one (stage, vertical) cell. Per-row
+   *  {stage, label, total, by_vertical (every vertical at 0 — stable
+   *  grid), verticals_without[] canonical}. Per-col {vertical, total,
+   *  by_stage (every stage at 0), stages_without[] canonical,
+   *  mean_completeness_score (across tenants in this vertical;
+   *  rounded; null when zero), tenant_ids[] sorted asc}. Envelope:
+   *  peak_cell (canonical iteration tie-break: stages × verticals
+   *  canonical; null on empty), fastest_vertical (highest
+   *  mean_completeness; canonical-order tie-break; null when zero
+   *  data in either), slowest_vertical (lowest mean; null on empty),
+   *  empty_cells[] in canonical stage × vertical row-major order.
+   *  Distinct from M2.14 (step × vertical — granular per-step
+   *  coverage) by aggregating into the higher-level milestone stage.
+   *  Async since tenantLookup.all() may be async. Drives SaaS admin
+   *  "where do banking tenants stall vs insurance?" governance view.
+   *  Mounted BEFORE /v1/tenants/:tenant_id catch-all. */
+  app.get(
+    '/v1/tenants/onboarding/stage-vertical-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { buildOnboardingStageVerticalMatrix } =
+        require('./tenant_onboarding_stage_vertical_matrix') as
+        typeof import('./tenant_onboarding_stage_vertical_matrix');
+      const out = await buildOnboardingStageVerticalMatrix(
+        tenants,
+        (id: string) => onboardingStore.get(id),
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/onboarding/step-vertical-matrix (T6 M2.14) —
    *  2D cross-tab over the tenant fleet combining onboarding step ×
    *  tenant vertical. Rows = 8 ONBOARDING_STEPS (canonical step.order
