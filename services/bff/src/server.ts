@@ -15802,6 +15802,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/usage-recency-histogram (T6 M1.13) —
+   *  pure time-based recency histogram over the M1.2 ApiKeyEntry list.
+   *  Orthogonal to M1.10 (rule-based first-match lifecycle stages).
+   *  6 canonical buckets in priority order: revoked / never_used /
+   *  used_within_7d / used_within_30d / used_within_90d / stale (90d+).
+   *  Per-bucket {count, by_scope (every VALID_SCOPES at 0; multi-scope
+   *  keys contribute to each), distinct_creators (Set-deduped),
+   *  sample_key_ids cap 5 sorted asc}. Envelope: peak_bucket (canonical
+   *  iteration tie-break: revoked wins at tied count; null on empty),
+   *  unused_buckets[], total_active_used_recently_count (used_within_*
+   *  buckets), total_active_stale_or_never_count (never_used + stale —
+   *  attention surface). Mirror of M9.11 / M8.12 / M7.15 / M4.15 / M5.18
+   *  histogram pattern. Drives "what fraction of active keys are
+   *  ACTUALLY being used recently?" governance view. Mounted BEFORE
+   *  /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/usage-recency-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyUsageRecencyHistogram } =
+        require('./api_key_usage_recency_histogram') as
+        typeof import('./api_key_usage_recency_histogram');
+      const summary = buildApiKeyUsageRecencyHistogram(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/scope-creator-matrix (T6 M1.12) — 2D
    *  cross-tab combining 7 closed ApiKeyScope × N creators (open).
    *  A key with [alerts:read, audit:read] on alice → 2 cell
