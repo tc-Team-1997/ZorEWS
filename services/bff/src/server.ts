@@ -9219,6 +9219,42 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/cases/events/transition-matrix (T6 M9.17) — FLEET state-
+   *  transition cross-tab over the M9.4 case event journal. For every
+   *  state_change event with payload {from, to}, pivot into a 2D
+   *  matrix of from-state × to-state. Per-cell: count + distinct_cases
+   *  (Set-deduped at the (case, to-state) granularity for rows /
+   *  case-only for columns). States are AUTO-DISCOVERED from observed
+   *  payload values — works across CmsCaseState + InvestigationStatus
+   *  without branching. Envelope: peak_cell (canonical iteration
+   *  tie-break: state names asc; null on empty), most_common_destination
+   *  + most_common_source (canonical tie-break by state name asc),
+   *  dead_ends[] (states seen as destinations but never as sources —
+   *  terminal-only; sorted asc), origins[] (states seen as sources but
+   *  never as destinations — entry-only), self_transition_count
+   *  (sanity check; should be near-zero with proper state machines).
+   *  Distinct from M9.6 (per-case chronological ladder) by being
+   *  fleet-wide cross-tab. MUST be registered BEFORE `/:event_id`
+   *  wildcard. */
+  app.get(
+    '/v1/cases/events/transition-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = caseEventStore.fetchSince(req.tenant!.tenant_id, 0, 100000);
+      const { buildCaseTransitionMatrix } =
+        require('./case_state_transition_matrix') as
+        typeof import('./case_state_transition_matrix');
+      const out = buildCaseTransitionMatrix(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/cases/events/action-distribution (T6 M9.15) — PIVOT-BY-
    *  ACTION 1D rollup over the M9.4 case event journal. 9 canonical
    *  actions (opened / state_change / closed / escalated /
