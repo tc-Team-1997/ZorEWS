@@ -192,7 +192,7 @@ Roughly in order of complexity:
 | Service | Entity types | Notes |
 |---|---|---|
 | ✅ `services/bff/src/reports/saved_filters_store.ts` | `saved_report_filter` | **Adopted 2026-05-19** (commit follows this doc) |
-| `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | Hierarchy; restore must handle members. Cross-service: needs auth-svc to either own its own RecoveryStore OR call BFF's via HTTP. |
+| ✅ `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | **Archive-side adopted 2026-05-19** (Phase 2c, first cross-service adopter). Copies `recovery_archive_client.ts` into auth-svc src/. Both `DELETE /auth/teams/:team_id` and `.../members/:user_id` archive before deleting; best-effort posture (archive failure logs + proceeds). 10 new tests in `teams_recovery.test.ts` with a stub `RecoveryArchiver`. **Restore-side still pending** — BFF needs adapters for `user_team` + `user_team_member` that HTTP-call back to a future `POST /auth/teams/:id/restore` route. |
 | `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | Per-role array; care needed. Cross-service. |
 | `services/auth-svc/src/service_clients.ts` | `service_client` | Has secret hash — restore re-introduces a revoked OAuth client. Security review needed. Cross-service. |
 | `services/auth-svc/src/pg_user_store.ts` | `user` | High blast radius (FK to sessions, audit, teams); restore semantics need design. Cross-service. |

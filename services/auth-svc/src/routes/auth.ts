@@ -29,6 +29,11 @@ import {
 import { type ITeamStore } from "../teams.js";
 import { type ILeaveCoverStore } from "../leave_covers.js";
 import { ALL_ROLES as DASHBOARD_WIDGET_ROLES, type IDashboardWidgetsStore, type Role as DashboardRole } from "../dashboard_widgets.js";
+import {
+  makeRecoveryArchiverFromEnv,
+  RecoveryArchiveError,
+  type RecoveryArchiver,
+} from "../recovery_archive_client.js";
 
 interface AuthState {
   users: IUserStore;
@@ -42,6 +47,11 @@ interface AuthState {
   dashboardWidgets: IDashboardWidgetsStore;
   captcha: CaptchaStore;
   loginFailures: FailureCounter;
+  /** Recovery Center cross-service archiver (Phase 2c). When null,
+   *  delete-archiving is a no-op (env vars not configured — fine for
+   *  dev + tests). Production wires this via BFF_BASE_URL +
+   *  BFF_RECOVERY_API_KEY. */
+  recoveryArchiver: RecoveryArchiver | null;
 }
 
 let state: AuthState | undefined;
@@ -62,8 +72,23 @@ async function getState(): Promise<AuthState> {
     dashboardWidgets: stores.dashboardWidgets,
     captcha: new CaptchaStore(),
     loginFailures: new FailureCounter(),
+    // Phase 2c: pick up cross-service archiver from env if configured.
+    // Tests override via __setRecoveryArchiverForTests below.
+    recoveryArchiver: testRecoveryArchiver ?? makeRecoveryArchiverFromEnv(),
   };
   return state;
+}
+
+/** Test-only: pin a RecoveryArchiver stub for the next getState() init.
+ *  Tests typically call __resetAuthStateForTests() + then
+ *  __setRecoveryArchiverForTests(stub) before the request that should
+ *  observe the stub. Pass null to fall back to env-driven init. */
+let testRecoveryArchiver: RecoveryArchiver | null = null;
+export function __setRecoveryArchiverForTests(arch: RecoveryArchiver | null): void {
+  testRecoveryArchiver = arch;
+  // Also patch the live state so an already-cached state picks up the
+  // change without forcing the caller to reset everything else.
+  if (state) state.recoveryArchiver = arch ?? makeRecoveryArchiverFromEnv();
 }
 
 /** Best-effort caller user-agent. Falls back to "unknown" so the
@@ -78,6 +103,59 @@ function callerUserAgent(req: FastifyRequest): string {
  *  so they don't inherit hits from earlier tests. */
 export function __resetAuthStateForTests(): void {
   state = undefined;
+  testRecoveryArchiver = null;
+}
+
+/** Resolve the caller's USERNAME for recovery `deleted_by`. The Bearer
+ *  access token's `sub` claim is the user_id (auth-svc convention,
+ *  see jwt.ts); we look up the username from the user store so the
+ *  Recycle Bin shows operator names instead of opaque `u-001`-style
+ *  ids. Falls back to the raw sub (or "admin") on lookup failure so
+ *  the Recovery row still records a non-empty actor. Called AFTER
+ *  requireAdmin has already validated the token — this is a parse +
+ *  store-lookup, not an auth check. */
+async function extractCallerUsername(
+  req: FastifyRequest,
+  signer: Signer,
+  users: IUserStore,
+): Promise<string> {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return "admin";
+  try {
+    const { payload } = await verifyToken(signer, auth.slice(7));
+    const sub = payload.sub;
+    if (typeof sub !== "string" || sub.length === 0) return "admin";
+    const user = users.findById(sub);
+    return user?.username ?? sub;
+  } catch {
+    return "admin";
+  }
+}
+
+/** Best-effort archive helper. Calls archiver.archive() in a try/catch
+ *  + logs failures via the fastify request logger. Never throws — the
+ *  Recovery Center is a write-side audit trail, not a hard dependency
+ *  of the user's delete request. Same posture as the BFF in-process
+ *  adopters at services/bff/src/server.ts (webhooks + scenarios). */
+async function archiveBeforeDelete(
+  archiver: RecoveryArchiver | null,
+  log: { warn(obj: object, msg?: string): void },
+  req: import("../recovery_archive_client.js").ArchiveRequest,
+): Promise<void> {
+  if (!archiver) return; // no archiver configured (dev/test default)
+  try {
+    await archiver.archive(req);
+  } catch (err) {
+    log.warn(
+      {
+        err: err instanceof Error ? { name: err.name, message: err.message } : err,
+        entity_type: req.entity_type,
+        original_id: req.original_id,
+        code: err instanceof RecoveryArchiveError ? err.code : "unknown",
+      },
+      "recovery archive failed; proceeding with local delete",
+    );
+  }
 }
 
 /** Best-effort caller IP. Falls back to "unknown" so the limiter still
@@ -1174,10 +1252,36 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   app.delete<{ Params: { team_id: string; user_id: string } }>(
     "/auth/teams/:team_id/members/:user_id",
     async (req, reply) => {
-      const { signer, teams } = await getState();
+      const { signer, teams, recoveryArchiver, users } = await getState();
       if (!(await requireAdmin(req, reply, signer))) return;
       const team = teams.get(req.params.team_id);
       if (!team) return reply.code(404).send({ error: "team_not_found" });
+      // Pre-checks BEFORE archive: don't archive a no-op (would
+      // pollute the Recycle Bin). The store ALSO throws on leader-
+      // removal — we surface that as 409 inline to skip the archive.
+      if (!team.members.includes(req.params.user_id)) {
+        return reply.code(404).send({ error: "member_not_found" });
+      }
+      if (team.team_leader === req.params.user_id) {
+        return reply
+          .code(409)
+          .send({ error: "cannot_remove_team_leader" });
+      }
+      // Phase 2c: archive the membership row before delete. Best-effort —
+      // log + proceed if archive fails so a transient BFF outage doesn't
+      // block ops work. Same posture as the existing in-BFF adopters
+      // (webhooks, saved scenarios, saved report filters).
+      const actor = await extractCallerUsername(req, signer, users);
+      await archiveBeforeDelete(recoveryArchiver, req.log, {
+        module: "auth-svc",
+        entity_type: "user_team_member",
+        original_id: `${req.params.team_id}:${req.params.user_id}`,
+        original_table: "app_iam.user_team_members",
+        payload: { team_id: req.params.team_id, user_id: req.params.user_id },
+        deleted_by: actor,
+        source_action: "user_initiated",
+        prior_status: "active",
+      });
       try {
         const removed = teams.removeMember(req.params.team_id, req.params.user_id);
         if (!removed) return reply.code(404).send({ error: "member_not_found" });
@@ -1195,12 +1299,34 @@ export function registerAuthRoutes(app: FastifyInstance): void {
    *
    * Hard-deletes a team. CASCADE on the FK takes care of the membership
    * rows. 404 when the team doesn't exist.
+   *
+   * Phase 2c: archives the full team row (including members[] so the
+   * SPA Recycle Bin restore can re-establish the membership join in
+   * one shot) BEFORE the delete. Restore-side plumbing follows in a
+   * later ticket (each cross-service adopter registers a BFF adapter
+   * that HTTP-calls back to a future POST /auth/teams/restore route).
    */
   app.delete<{ Params: { team_id: string } }>(
     "/auth/teams/:team_id",
     async (req, reply) => {
-      const { signer, teams } = await getState();
+      const { signer, teams, recoveryArchiver, users } = await getState();
       if (!(await requireAdmin(req, reply, signer))) return;
+      const team = teams.get(req.params.team_id);
+      if (!team) return reply.code(404).send({ error: "team_not_found" });
+      // Archive the full team row + its membership list FIRST. Restore
+      // adapters in BFF will use this payload to recreate both the
+      // team row and re-link members in one transaction.
+      const actor = await extractCallerUsername(req, signer, users);
+      await archiveBeforeDelete(recoveryArchiver, req.log, {
+        module: "auth-svc",
+        entity_type: "user_team",
+        original_id: team.team_id,
+        original_table: "app_iam.user_teams",
+        payload: team as unknown as Record<string, unknown>,
+        deleted_by: actor,
+        source_action: "user_initiated",
+        prior_status: "active",
+      });
       const ok = teams.delete(req.params.team_id);
       if (!ok) return reply.code(404).send({ error: "team_not_found" });
       return reply.code(204).send();
