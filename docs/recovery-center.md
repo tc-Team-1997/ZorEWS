@@ -99,7 +99,7 @@ Mutually exclusive — enforced by CHECK constraint.
 |---|---|---|
 | `GET` | `/v1/recovery?status=&module=&entity_type=&deleted_by=&since=&until=&page=&page_size=` | List deleted records (tenant-scoped) |
 | `GET` | `/v1/recovery/stats` | Summary tile for SPA header (totals + by-status + adapter list) |
-| `GET` | `/v1/recovery/analytics?days=N` | **Phase 3 (2026-05-21).** Operator analytics over a trailing N-day window (default 30, bounds [1, 365]): daily archive/restore/purge volume timeline, top actors, per-entity_type rollup with `outstanding_delta` (archives − restores), per-module rollup, cohort-based `restore_rate` + `purge_rate`, mean/p50/p95 time-to-restore. 37 tests. |
+| `GET` | `/v1/recovery/analytics?days=N` | **Phase 3 (2026-05-21).** Operator analytics over a trailing N-day window (default 30, bounds [1, 365]): daily archive/restore/purge volume timeline, top actors, per-entity_type rollup with `outstanding_delta` (archives − restores), per-module rollup, cohort-based `restore_rate` + `purge_rate`, mean/p50/p95 time-to-restore. 37 tests. SPA dashboard at `/admin/recovery-analytics` (admin-only, linked from Recycle Bin header) renders the full view with 7/30/90-day window picker, KPI strip, recharts daily-volume chart, cohort tile, top-actors / by-entity / by-module tables. 9 SPA tests. |
 | `GET` | `/v1/recovery/:recovery_id` | Single record with full payload |
 | `POST` | `/v1/recovery/:recovery_id/restore` | Restore — re-insert with original ID. 409 on conflict. |
 | `DELETE` | `/v1/recovery/:recovery_id` | Permanent purge (irreversible) |
