@@ -1280,6 +1280,30 @@ export function makeApp(deps: AppDeps = {}) {
     } catch {
       /* already registered */
     }
+    try {
+      // Phase 2f: OAuth service-client (M1.2). CONSERVATIVE RESTORE —
+      // auth-svc always re-inserts the row with active=false regardless
+      // of the archived `active` flag. Eliminates the "restoring
+      // re-grants access via the preserved hash" security concern.
+      // Operator workflow: restore (audit-historic copy comes back as
+      // inactive) → mint a NEW secret via the create endpoint → the
+      // new credential authenticates, the restored row stays dormant.
+      registerRecoveryAdapter({
+        entity_type: 'service_client',
+        display_name: 'OAuth service client',
+        module: 'auth-svc',
+        original_table: 'app_iam.service_clients',
+        restore: async (record) => {
+          await authSvcRestoreClient.restore({
+            entity_type: 'service_client',
+            original_id: record.original_id,
+            payload: record.payload,
+          });
+        },
+      });
+    } catch {
+      /* already registered */
+    }
   }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
@@ -11571,6 +11595,43 @@ export function makeApp(deps: AppDeps = {}) {
       const { summarizeIndicatorCatalog } = require('./indicator_catalog_stats') as
         typeof import('./indicator_catalog_stats');
       const out = summarizeIndicatorCatalog(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/indicators/overrides/vertical-family-matrix (T6 M4.17)
+   *  — 2D cross-tab over the M4.4 per-tenant threshold override store
+   *  combining ScoringVertical × IndicatorFamily. Both CLOSED axes —
+   *  2 verticals × 9 families = 18 cells. Same axes as M4.16 but over
+   *  the OVERRIDE surface (vs M4.16's platform CATALOG). Per-row
+   *  {vertical, total_overrides, by_family (9 keys at 0 — stable grid),
+   *  families_without[] canonical, indicator_ids[] sorted asc,
+   *  distinct_families}. Per-col {family, total_overrides, by_vertical
+   *  (2 keys at 0), verticals_without[] canonical, indicator_ids[]
+   *  sorted asc, distinct_verticals}. Envelope: peak_cell (canonical
+   *  iteration tie-break: ALL_INDICATOR_VERTICALS × ALL_INDICATOR_FAMILIES;
+   *  null on empty), most_overridden_family (most distinct verticals;
+   *  canonical family-order tie-break; null on empty), most_active_vertical
+   *  (most distinct families; canonical vertical-order tie-break; null
+   *  on empty), empty_cells[] canonical row-major, unknown_families[]
+   *  (indicator_ids with family NOT in ALL_INDICATOR_FAMILIES — drift
+   *  detector). Mirror of M4.16 for the override surface. Drives BIL
+   *  ops "which (vertical, family) combinations do operators most often
+   *  override?" governance view. */
+  app.get(
+    '/v1/indicators/overrides/vertical-family-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorOverrideVerticalFamilyMatrixFromStore } =
+        require('./indicator_override_vertical_family_matrix') as
+        typeof import('./indicator_override_vertical_family_matrix');
+      const out = buildIndicatorOverrideVerticalFamilyMatrixFromStore(
+        thresholdOverrideStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(out, ctx));
     },
   );
