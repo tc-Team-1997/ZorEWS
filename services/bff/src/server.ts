@@ -1304,6 +1304,32 @@ export function makeApp(deps: AppDeps = {}) {
     } catch {
       /* already registered */
     }
+    try {
+      // Phase 2g: human user account. CONSERVATIVE RESTORE — auth-svc
+      // re-inserts the row with locked=true + must_change_password=true
+      // regardless of the archived flags. Preserved password hash is
+      // audit-historic; admin must reset the password before the user
+      // can log in. Cascade limitation: child rows (sessions, team
+      // memberships, leave_covers, password_reset tokens) were
+      // CASCADE-deleted from pg and are NOT restored. Operators
+      // rebuild memberships via the existing team-management routes
+      // after restoring the user.
+      registerRecoveryAdapter({
+        entity_type: 'user',
+        display_name: 'User account',
+        module: 'auth-svc',
+        original_table: 'app_iam.users',
+        restore: async (record) => {
+          await authSvcRestoreClient.restore({
+            entity_type: 'user',
+            original_id: record.original_id,
+            payload: record.payload,
+          });
+        },
+      });
+    } catch {
+      /* already registered */
+    }
   }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
@@ -16202,6 +16228,51 @@ export function makeApp(deps: AppDeps = {}) {
         require('./api_key_lifecycle_distribution') as
         typeof import('./api_key_lifecycle_distribution');
       const summary = summarizeApiKeyLifecycleDistribution(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
+   *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
+   *  axis (active / revoked). Each key in exactly one cell. Per-row
+   *  {created_by, total_keys, by_status (2 keys at 0 — stable grid),
+   *  revocation_rate (revoked/total in [0,1]; null only when total=0),
+   *  key_ids[] cap 50 sorted asc}. Per-col {status, total, by_creator
+   *  (compact — only creators with > 0 keys in this status), distinct_creators,
+   *  top_creators[] cap 3 with canonical asc tie-break}. Envelope:
+   *  peak_cell (canonical iteration tie-break: creators asc × statuses
+   *  canonical; null on empty), most_revoked_creator (highest revoked
+   *  count + canonical username asc tie-break; null when zero
+   *  revocations), highest_revocation_rate_creator (highest revocation_rate
+   *  + canonical asc tie-break; null when no creator has > 0
+   *  revocations), creators_with_zero_revocations[] (subset sorted asc
+   *  — clean ops surface), empty_cells[] in canonical creator × status
+   *  row-major order. Distinct from M1.6 (by-creator 1D), M1.8 (scope ×
+   *  status matrix), M1.11 (creator × lifecycle), M1.12 (scope ×
+   *  creator) by axis combination. Mirror of M15.17 / M9.17 / M1.11
+   *  OPEN × CLOSED matrix pattern. Drives BIL audit "which creators
+   *  have highest revocation rates?" governance views. */
+  app.get(
+    '/v1/admin/api-keys/creator-status-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyCreatorStatusMatrix } =
+        require('./api_key_creator_status_matrix') as
+        typeof import('./api_key_creator_status_matrix');
+      const summary = buildApiKeyCreatorStatusMatrix(
         req.tenant!.tenant_id,
         out,
         now(),
