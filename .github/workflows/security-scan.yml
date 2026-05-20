@@ -1,0 +1,183 @@
+name: security-scan
+
+# X.3 — IaC + container scan in CI.
+#
+# Two jobs:
+#   1. iac-scan: Trivy + Checkov against infra/terraform/** for misconfigs.
+#   2. container-scan: Trivy filesystem scan of services/** for dependency
+#      vulnerabilities (catches transitive npm + python).
+#
+# Findings stream to GitHub Security tab via SARIF upload — visible per PR
+# + queryable historically via the code-scanning API. CI fails on any
+# CRITICAL severity; HIGH severity warns but doesn't fail (per
+# docs/pentest-remediation-playbook.md §1 SLA matrix — High has 14-day patch
+# SLA, not a merge blocker).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+      - 'services/**'
+      - 'web/**'
+      - '.github/workflows/security-scan.yml'
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+      - 'services/**'
+      - 'web/**'
+      - '.github/workflows/security-scan.yml'
+
+permissions:
+  contents: read
+  security-events: write  # SARIF upload to Security tab
+
+jobs:
+  # ─── IaC scan ────────────────────────────────────────────────────────
+  #
+  # Trivy IaC mode covers Terraform misconfigurations (AWS best practices,
+  # CIS benchmarks, encryption gaps). Checkov adds policy-as-code checks
+  # (compliance frameworks: SOC2, NIST, HIPAA-relevant patterns).
+  iac-scan:
+    name: IaC scan (Trivy + Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Trivy IaC scan. Fails on CRITICAL only.
+      - name: Run Trivy IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          format: sarif
+          output: trivy-iac.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: '0'  # Don't fail on CI; rely on SARIF gate below.
+
+      - name: Trivy IaC critical-only gate
+        run: |
+          # Fail only on CRITICAL severity per docs/pentest-remediation-playbook.md
+          # §1 SLA matrix — Critical has 3-day patch SLA + war-room; merging
+          # NEW Critical findings would breach that.
+          set -euo pipefail
+          if [ ! -f trivy-iac.sarif ]; then
+            echo "::error::trivy-iac.sarif missing — Trivy step failed silently."
+            exit 1
+          fi
+          crit=$(jq '[.runs[].results[]? | select(.level == "error")] | length' trivy-iac.sarif)
+          echo "Trivy IaC CRITICAL count: $crit"
+          if [ "$crit" -gt 0 ]; then
+            echo "::error::Trivy IaC found $crit CRITICAL issue(s). Fix or formally risk-accept per docs/pentest-remediation-playbook.md §1."
+            exit 1
+          fi
+
+      - name: Upload Trivy IaC SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+      # Checkov — policy-as-code over Terraform.
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra/terraform
+          framework: terraform
+          output_format: sarif
+          output_file_path: .
+          soft_fail: true  # Don't block; just report via SARIF.
+          quiet: true
+
+      - name: Upload Checkov SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results_sarif.sarif
+          category: checkov-iac
+
+  # ─── Container / dependency scan ─────────────────────────────────────
+  #
+  # Trivy filesystem scan of every service workspace + the SPA. Catches
+  # transitive npm + python dependency CVEs. Same critical-only gate as IaC.
+  container-scan:
+    name: Container + dependency scan (Trivy)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path:
+          - services/bff
+          - services/auth-svc
+          - services/audit-svc
+          - services/regulatory-svc/cases
+          - services/regulatory-svc/alerts
+          - services/regulatory-svc/rules
+          - services/regulatory-svc/indicators
+          - services/collection-adapter
+          - services/notification-svc
+          - services/pipeline-svc
+          - services/ai-copilot-svc
+          - web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ matrix.path }}
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          # Ignore unfixed: noisy + already covered by quarterly vendor
+          # security review per docs/bau-runbook.md §5.
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Trivy filesystem critical-only gate
+        run: |
+          set -euo pipefail
+          if [ ! -f trivy-fs.sarif ]; then
+            echo "::error::trivy-fs.sarif missing — Trivy step failed silently for ${{ matrix.path }}."
+            exit 1
+          fi
+          crit=$(jq '[.runs[].results[]? | select(.level == "error")] | length' trivy-fs.sarif)
+          echo "Trivy fs CRITICAL count for ${{ matrix.path }}: $crit"
+          if [ "$crit" -gt 0 ]; then
+            echo "::error::Trivy fs scan found $crit CRITICAL issue(s) in ${{ matrix.path }}."
+            exit 1
+          fi
+
+      - name: Upload Trivy fs SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          # Category includes the workspace so findings don't collide across
+          # the matrix (SARIF uploads dedupe by category).
+          category: trivy-fs-${{ matrix.path }}
+
+  # ─── Summary job ─────────────────────────────────────────────────────
+  #
+  # Aggregates the two jobs above for branch-protection rules to pin to a
+  # single check name. Required-status-check on `security-scan / summary`.
+  summary:
+    name: summary
+    runs-on: ubuntu-latest
+    needs: [iac-scan, container-scan]
+    if: always()
+    steps:
+      - name: Verify upstream jobs
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.iac-scan.result }}" != "success" ]; then
+            echo "::error::iac-scan failed."
+            exit 1
+          fi
+          if [ "${{ needs.container-scan.result }}" != "success" ]; then
+            echo "::error::container-scan failed."
+            exit 1
+          fi
+          echo "All security scans clean."
