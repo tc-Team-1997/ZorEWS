@@ -1,0 +1,272 @@
+# T4.4 — Horizontal Pod Autoscalers for ZorEWS services
+#
+# autoscaling/v2 metric-driven HPAs. Each spec keeps an
+# `apex-ews.io/component` label for Grafana panel grouping.
+#
+# Scaling targets:
+#   * platform-tier (auth-svc, notification-svc, audit-svc): cheap to scale,
+#     CPU 70% + memory 75% targets, min 2 max 12.
+#   * data + analytics (pipeline-svc, analytics-svc): bursty batch workload,
+#     CPU 60% target, min 1 max 8.
+#   * regulatory-svc: hot path for alerts; tighter CPU 60% memory 70%, min 3
+#     max 16.
+#   * ai-copilot-svc: GPU-tainted node group; min 0 + max 4 with CPU 50%
+#     since scoring is the cost driver (under-utilised → scale to 0 on the
+#     `ai` taint).
+#
+# Companion to:
+#   * `infra/terraform/20-eks/karpenter.tf` — provisions just-in-time nodes
+#     when pod requests exceed capacity.
+#   * `infra/terraform/30-data/autoscale.tf` — Aurora reader pool follows
+#     load via Application Auto Scaling.
+#
+# Activation: applied via `kubectl apply -f infra/k8s/hpa.yaml` AFTER the
+# corresponding Deployments are running. Production rollout sequence:
+#   1. Deployments exist + healthy.
+#   2. metrics-server installed (`kubectl get apiservices | grep metrics`).
+#   3. Apply this file.
+#   4. Verify via `kubectl get hpa -A`.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-svc
+  namespace: platform
+  labels:
+    app: auth-svc
+    apex-ews.io/component: identity
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-svc
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: audit-svc
+  namespace: platform
+  labels:
+    app: audit-svc
+    apex-ews.io/component: audit
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: audit-svc
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 0
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: notification-svc
+  namespace: platform
+  labels:
+    app: notification-svc
+    apex-ews.io/component: notify
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: notification-svc
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 30
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pipeline-svc
+  namespace: data
+  labels:
+    app: pipeline-svc
+    apex-ews.io/component: data
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pipeline-svc
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    # Batch workload — slower scale-down to avoid pod-thrash between jobs.
+    scaleDown:
+      stabilizationWindowSeconds: 600
+    scaleUp:
+      stabilizationWindowSeconds: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: analytics-svc
+  namespace: analytics
+  labels:
+    app: analytics-svc
+    apex-ews.io/component: analytics
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: analytics-svc
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+    scaleUp:
+      stabilizationWindowSeconds: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: regulatory-svc
+  namespace: regulatory
+  labels:
+    app: regulatory-svc
+    apex-ews.io/component: regulatory
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: regulatory-svc
+  # Hot path for alert evaluation — tighter floor + ceiling + faster
+  # scale-out than the platform tier.
+  minReplicas: 3
+  maxReplicas: 16
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 20
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 6
+          periodSeconds: 15
+      selectPolicy: Max
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-copilot-svc
+  namespace: ai
+  labels:
+    app: ai-copilot-svc
+    apex-ews.io/component: ai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-copilot-svc
+  # GPU-tainted node group — under-utilised + cold-startable. Scale to 0
+  # when nothing is scoring.
+  minReplicas: 0
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleDown:
+      # Wait 10 min before scaling down to amortise GPU node cold-start cost.
+      stabilizationWindowSeconds: 600
+    scaleUp:
+      stabilizationWindowSeconds: 0

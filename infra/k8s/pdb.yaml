@@ -1,0 +1,68 @@
+# T4.4 — PodDisruptionBudgets
+#
+# Pairs with `infra/k8s/hpa.yaml`. HPAs scale on load; PDBs constrain how
+# many pods can be voluntarily disrupted simultaneously (Karpenter
+# consolidation, node drains, cluster upgrades).
+#
+# Pattern: keep at least 1 pod of every tier always available. For the
+# hot path (regulatory-svc) keep ≥ 2 since it's the alert-eval critical
+# path. For batch tiers (pipeline-svc, analytics-svc) tolerate full drain
+# during maintenance windows.
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-svc
+  namespace: platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: auth-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: audit-svc
+  namespace: platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: audit-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: notification-svc
+  namespace: platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: notification-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: regulatory-svc
+  namespace: regulatory
+spec:
+  # Hot path — keep ≥ 2 pods serving during any voluntary disruption.
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: regulatory-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-copilot-svc
+  namespace: ai
+spec:
+  # GPU node — typically only 1-2 pods; allow full drain during nightly
+  # maintenance window since scoring is non-blocking + the SPA caches.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ai-copilot-svc

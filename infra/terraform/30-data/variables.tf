@@ -97,3 +97,25 @@ variable "msk_mm2_plugin_revision" {
   type        = number
   default     = null
 }
+
+###############################################################################
+# T4.4 — Aurora reader autoscale + RDS Proxy
+###############################################################################
+
+variable "enable_aurora_autoscale" {
+  description = "Enable Application Auto Scaling on the Aurora reader pool + provision an RDS Proxy for connection pooling. Set true once a 30-day baseline is observed."
+  type        = bool
+  default     = false
+}
+
+variable "aurora_reader_min" {
+  description = "Minimum reader replica count when autoscaling is enabled."
+  type        = number
+  default     = 2
+}
+
+variable "aurora_reader_max" {
+  description = "Maximum reader replica count when autoscaling is enabled."
+  type        = number
+  default     = 8
+}

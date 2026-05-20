@@ -56,3 +56,13 @@ variable "service_accounts" {
     "analytics-svc"    = "analytics"
   }
 }
+
+###############################################################################
+# T4.4 — Karpenter (just-in-time node provisioning)
+###############################################################################
+
+variable "enable_karpenter" {
+  description = "Enable Karpenter just-in-time node provisioning (replaces manual node group scaling). Requires Helm + kubectl bootstrap in infra/k8s/karpenter/."
+  type        = bool
+  default     = false
+}

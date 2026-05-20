@@ -83,3 +83,22 @@ output "msk_mm2_log_group" {
   description = "CloudWatch log group receiving MM2 worker logs."
   value       = aws_cloudwatch_log_group.msk_mm2.name
 }
+
+###############################################################################
+# T4.4 — Aurora autoscale + RDS Proxy outputs
+###############################################################################
+
+output "rds_proxy_endpoint" {
+  description = "RDS Proxy endpoint — applications connect here instead of the cluster writer when proxy is enabled."
+  value       = var.enable_aurora_autoscale ? aws_db_proxy.aurora[0].endpoint : null
+}
+
+output "rds_proxy_arn" {
+  description = "ARN of the RDS Proxy resource."
+  value       = var.enable_aurora_autoscale ? aws_db_proxy.aurora[0].arn : null
+}
+
+output "aurora_reader_autoscale_target_arn" {
+  description = "ARN of the Application Auto Scaling target on the Aurora reader pool."
+  value       = var.enable_aurora_autoscale ? aws_appautoscaling_target.aurora_reader[0].arn : null
+}

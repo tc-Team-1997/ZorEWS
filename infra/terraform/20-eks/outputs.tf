@@ -19,3 +19,22 @@ output "irsa_role_arns" {
   description = "Map of service-account name -> IRSA role ARN."
   value       = { for k, v in aws_iam_role.irsa : k => v.arn }
 }
+
+###############################################################################
+# T4.4 — Karpenter outputs (consumed by infra/k8s/karpenter/ Helm bootstrap)
+###############################################################################
+
+output "karpenter_controller_role_arn" {
+  description = "ARN of the IRSA role the Karpenter controller pod assumes."
+  value       = var.enable_karpenter ? aws_iam_role.karpenter_controller[0].arn : null
+}
+
+output "karpenter_node_instance_profile" {
+  description = "Instance profile attached to nodes Karpenter launches."
+  value       = var.enable_karpenter ? aws_iam_instance_profile.karpenter_node[0].name : null
+}
+
+output "karpenter_interruption_queue" {
+  description = "SQS queue URL Karpenter polls for spot-interruption + ASG re-balance events."
+  value       = var.enable_karpenter ? aws_sqs_queue.karpenter_interruption[0].url : null
+}
