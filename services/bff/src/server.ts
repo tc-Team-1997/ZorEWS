@@ -135,6 +135,7 @@ import {
   buildStrSummary,
   type StrReportStore,
 } from './aml/str_reporting';
+import { buildAmlDashboard } from './aml/aml_dashboard';
 import {
   defaultDqStore,
   DqError,
@@ -18308,6 +18309,38 @@ export function makeApp(deps: AppDeps = {}) {
   // ready_for_review → submitted → acknowledged/rejected. Per RBI
   // segregation of duties: maker can't be checker on submit. All
   // routes audit:read admin-only.
+
+  // ── Phase C.2 — AML Dashboard rollup (composer) ─────────────────────
+  //
+  // PDF §11 AML Integration item 5. Combines Phase C.1 STR summary +
+  // Phase B.1 PEP roster + Phase A.2 sanctioned countries + the M14.3
+  // AML adapter into one read endpoint the SPA renders as the AML
+  // homepage. Adapter activity stays null when the wired adapter doesn't
+  // expose a fleet-level listAll() — the dashboard renders the rest of
+  // the rollup regardless.
+
+  /** GET /v1/aml/dashboard — composite rollup. */
+  app.get(
+    '/v1/aml/dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // M14.3 AML adapter exposes per-customer screenCustomer / list
+      // /get / updateStatus but no fleet-wide enumeration; without
+      // that we keep adapter_activity=null. A future M14.3 patch can
+      // add `listAllMatches(tenant)` and wire it here.
+      const rollup = buildAmlDashboard(
+        req.tenant!.tenant_id,
+        customerMasterStore,
+        geographyMasterStore,
+        strReportStore,
+        null,
+        now(),
+      );
+      return res.json(wrapResponse(rollup, ctx));
+    },
+  );
 
   /** GET /v1/aml/str-reports/taxonomy — closed enums. */
   app.get(
