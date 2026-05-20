@@ -89,6 +89,18 @@ import {
   type GeographyMasterStore,
 } from './master/geography_master';
 import {
+  defaultDqStore,
+  DqError,
+  ALL_DQ_RULE_KINDS,
+  ALL_DQ_SEVERITIES,
+  buildDqDashboard,
+  runDqRule,
+  isDqRuleKind,
+  isDqSeverity,
+  type DqStore,
+  type DqExecutionStatus,
+} from './dq/dq_engine';
+import {
   AuthSvcRestoreClient,
   makeAuthSvcRestoreClientFromEnv,
 } from './recovery/auth_svc_restore_client';
@@ -984,6 +996,9 @@ export interface AppDeps {
   /** Phase A.2 (2026-05-21) — Geography & Risk Region Master Setup
    *  store. Defaults to a singleton InMemoryGeographyMasterStore. */
   geographyMasterStore?: GeographyMasterStore;
+  /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
+   *  Defaults to a singleton InMemoryDqStore. */
+  dqStore?: DqStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1211,6 +1226,8 @@ export function makeApp(deps: AppDeps = {}) {
   // A.1; default singleton reused across makeApp() calls; tests inject.
   const geographyMasterStore =
     deps.geographyMasterStore ?? defaultGeographyMasterStore;
+  // Phase A.3 — DQ Engine. Single store carries rules + executions.
+  const dqStore = deps.dqStore ?? defaultDqStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1465,6 +1482,26 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = geographyMasterStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('geography_master', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase A.3 — dq_rule adapter. Re-insert via the DQ store's
+    // restoreRule() method. Executions are append-only history and not
+    // part of the Recovery surface (deletes happen on the RULE, exec
+    // rows survive as audit trail).
+    registerRecoveryAdapter({
+      entity_type: 'dq_rule',
+      display_name: 'Data Quality rule',
+      module: 'bff',
+      original_table: 'app_dq.rules',
+      restore: async (record) => {
+        const ok = dqStore.restoreRule(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('dq_rule', record.original_id);
         }
       },
     });
@@ -16875,6 +16912,405 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase A.3 — Data Quality (DQ) Engine ────────────────────────────
+  //
+  // PDF §6 Ecosystem item E5. Operator-visible runtime for declarative
+  // data-quality rules. dbt covers build-time tests; this is the
+  // runtime CRUD + execution + dashboard surface admins can use to
+  // monitor production data quality. 6 rule kinds, soft-delete +
+  // Recovery, audit:read admin-only.
+
+  /** GET /v1/dq/rule-kinds — closed enum + severity options. */
+  app.get(
+    '/v1/dq/rule-kinds',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            kinds: [...ALL_DQ_RULE_KINDS],
+            severities: [...ALL_DQ_SEVERITIES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/dq/rules?kind=&severity=&include_deleted= */
+  app.get(
+    '/v1/dq/rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const kindRaw = req.query.kind;
+      const sevRaw = req.query.severity;
+      if (kindRaw !== undefined && !isDqRuleKind(kindRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_kind', message: `kind must be one of: ${ALL_DQ_RULE_KINDS.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (sevRaw !== undefined && !isDqSeverity(sevRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_severity', message: `severity must be one of: ${ALL_DQ_SEVERITIES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = dqStore.listRules(req.tenant!.tenant_id, {
+        include_deleted,
+        kind: kindRaw as never,
+        severity: sevRaw as never,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/dq/rules/:rule_id. */
+  app.get(
+    '/v1/dq/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entry = dqStore.getRule(req.tenant!.tenant_id, req.params.rule_id ?? '');
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_rule', message: `unknown rule_id: ${req.params.rule_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/dq/rules. */
+  app.post(
+    '/v1/dq/rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = dqStore.createRule(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof DqError) {
+          if (e.code === 'duplicate_rule_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_rule_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/dq/rules/:rule_id. */
+  app.patch(
+    '/v1/dq/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = dqStore.updateRule(
+          req.tenant!.tenant_id,
+          req.params.rule_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof DqError) {
+          if (e.code === 'unknown_rule') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_rule', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/dq/rules/:rule_id — soft-delete + archive. */
+  app.delete(
+    '/v1/dq/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const rule_id = req.params.rule_id ?? '';
+      try {
+        const tombstoned = dqStore.softDeleteRule(
+          req.tenant!.tenant_id,
+          rule_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'dq_rule',
+            original_id: rule_id,
+            original_table: 'app_dq.rules',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/dq/rules/:rule_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof DqError) {
+          if (e.code === 'unknown_rule') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_rule', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/dq/rules/:rule_id/run — execute now against caller-supplied
+   *  record set. Returns the recorded DqExecution.
+   *
+   *  Body: { records: any[], id_field?: string }
+   *  triggered_by is read from X-APEX-USER. */
+  app.post(
+    '/v1/dq/rules/:rule_id/run',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const body = (inner ?? {}) as { records?: unknown; id_field?: unknown };
+      try {
+        const execution = runDqRule(
+          dqStore,
+          req.tenant!.tenant_id,
+          {
+            rule_id: req.params.rule_id ?? '',
+            records: Array.isArray(body.records) ? (body.records as Array<Record<string, unknown>>) : [],
+            id_field: typeof body.id_field === 'string' ? body.id_field : undefined,
+            triggered_by: actor,
+          },
+          now(),
+        );
+        return res.json(wrapResponse(execution, ctx));
+      } catch (e) {
+        if (e instanceof DqError) {
+          if (e.code === 'unknown_rule') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_rule', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'rule_inactive') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_rule_inactive', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'run failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/dq/executions?rule_id=&status=&limit= */
+  app.get(
+    '/v1/dq/executions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const rule_id = req.query.rule_id as string | undefined;
+      const statusRaw = req.query.status as string | undefined;
+      const limit = Math.max(1, Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500));
+      if (statusRaw !== undefined && !['running', 'passed', 'failed', 'error'].includes(statusRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: 'status must be running|passed|failed|error', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = dqStore.listExecutions(req.tenant!.tenant_id, {
+        rule_id,
+        status: statusRaw as DqExecutionStatus | undefined,
+        limit,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/dq/executions/:execution_id. */
+  app.get(
+    '/v1/dq/executions/:execution_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const e = dqStore.getExecution(req.tenant!.tenant_id, req.params.execution_id ?? '');
+      if (!e) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_execution', message: `unknown execution_id: ${req.params.execution_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(e, ctx));
+    },
+  );
+
+  /** GET /v1/dq/dashboard — pre-computed rollup. */
+  app.get(
+    '/v1/dq/dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildDqDashboard(dqStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
   // ── Service-account API keys (T6 M1.2) ──────────────────────────────
   //
   // Provisioning + revocation surface for machine-identity API keys.
@@ -20052,6 +20488,73 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(src, ctx));
+    },
+  );
+
+  /** POST /v1/reports/builder/preview (T4.6.2) — compile a report
+   *  definition (filters + group_by + metrics + sort) into a safe
+   *  parameterised SQL preview. Returns sql + params + projection +
+   *  is_aggregate + param_count. Does NOT execute against the mart —
+   *  T4.6.4 ships the execution engine. Validation errors routed to
+   *  400 with code-specific EWS_400_<code> envelopes; unknown_source
+   *  → 404 EWS_404_unknown_source. Tenant-id always injected from
+   *  the JWT/header context — body.tenant_id ignored if supplied. */
+  app.post(
+    '/v1/reports/builder/preview',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      try {
+        const { compileReportDefinition } =
+          require('./reports/builder_filter') as typeof import('./reports/builder_filter');
+        const out = compileReportDefinition(
+          inner as never,
+          { tenant_id: req.tenant!.tenant_id },
+        );
+        const responseBody = {
+          source_id: out.source.source_id,
+          sql: out.sql,
+          params: out.params,
+          projection: out.projection,
+          param_count: out.param_count,
+          is_aggregate: out.is_aggregate,
+        };
+        return res.json(wrapResponse(responseBody, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'FilterCompilerError' && e?.name !== 'ReportCatalogError') {
+          throw err;
+        }
+        if (e.code === 'unknown_source') {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_source',
+                message: e.message ?? 'unknown source',
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        const code = `EWS_400_${e.code ?? 'invalid_input'}`;
+        return res.status(400).json(
+          wrapError(
+            {
+              code,
+              message: e.message ?? 'invalid filter definition',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
     },
   );
 

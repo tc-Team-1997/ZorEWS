@@ -9,15 +9,15 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial (2026-05-20) | After Phase A.1 | After Phase A.2 (2026-05-21) |
-|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~75% | **~76%** |
-| PDF surfaces fully shipped (✅) | 24 / 49 | 25 / 49 | **26 / 49** |
-| PDF surfaces partially shipped (⚠️) | 19 / 49 | 18 / 49 | 17 / 49 |
-| PDF surfaces not shipped (❌) | 6 / 49 | 5 / 49 | **4 / 49** |
-| Net-new screens needed to close | ~22 SPA pages | ~21 | ~20 (Geography + Sector master SPA pages still pending — only BFF surface shipped) |
-| Net-new backend modules needed | 2 modules (DQ Engine, Reconciliation) | unchanged | unchanged |
-| New tables required | 5 master-data tables | 4 | **3** (Sectors + Geographies landed) |
+| Metric | Initial (2026-05-20) | After A.1 | After A.2 | After A.3 (2026-05-21) |
+|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | **~80%** |
+| PDF surfaces fully shipped (✅) | 24 / 49 | 25 / 49 | 26 / 49 | **27 / 49** |
+| PDF surfaces partially shipped (⚠️) | 19 / 49 | 18 / 49 | 17 / 49 | 17 / 49 |
+| PDF surfaces not shipped (❌) | 6 / 49 | 5 / 49 | 4 / 49 | **3 / 49** |
+| Net-new screens needed to close | ~22 SPA pages | ~21 | ~20 | ~17 (Sector + Geography + DQ master pages still pending — BFF surface shipped) |
+| Net-new backend modules needed | 2 modules (DQ Engine, Reconciliation) | unchanged | unchanged | **1** (Reconciliation only) |
+| New tables required | 5 master-data tables | 4 | 3 | **1** (DQ rules + executions + Sectors + Geographies landed; Reconciliation still pending) |
 
 **Headline:** The system's *runtime* — rule evaluation, scoring, alerts, cases, workflow, audit, notifications — is heavily shipped (90%+). The gap is concentrated in **admin master-data UIs** (Customer / Account / Product / Sector / Geography / Bureau setup screens) and **two greenfield modules** (Data Quality Engine, Reconciliation & Controls). The backend data models for most master-setup items either already exist in `mart.*` or `app_iam.tenants`; what's missing is the **CRUD admin SPA + a thin master-data table layer for the 5 lookup-style entities**.
 
