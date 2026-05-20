@@ -101,6 +101,15 @@ import {
   type CustomerMasterStore,
 } from './master/customer_master';
 import {
+  defaultBureauMasterStore,
+  BureauMasterError,
+  ALL_BUREAU_TYPES,
+  ALL_BUREAU_REFRESH_CADENCES,
+  isBureauType,
+  computeBureauWeightOverlay,
+  type BureauMasterStore,
+} from './master/bureau_master';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1023,6 +1032,8 @@ export interface AppDeps {
   /** Phase B.1 (2026-05-21) — Customer Master Setup store. Defaults to
    *  a singleton InMemoryCustomerMasterStore. */
   customerMasterStore?: CustomerMasterStore;
+  /** Phase B.2 (2026-05-21) — External Bureau Master Setup store. */
+  bureauMasterStore?: BureauMasterStore;
   /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
    *  Defaults to a singleton InMemoryDqStore. */
   dqStore?: DqStore;
@@ -1260,6 +1271,10 @@ export function makeApp(deps: AppDeps = {}) {
   // overlay on top of the existing mart.customer_360 dataset.
   const customerMasterStore =
     deps.customerMasterStore ?? defaultCustomerMasterStore;
+  // Phase B.2 — External Bureau Master Setup. Per-tenant config of
+  // CIBIL/CRIF/EXPERIAN/EQUIFAX with score weights for M6.x overlay.
+  const bureauMasterStore =
+    deps.bureauMasterStore ?? defaultBureauMasterStore;
   // Phase A.3 — DQ Engine. Single store carries rules + executions.
   const dqStore = deps.dqStore ?? defaultDqStore;
   // Phase A.4 — Reconciliation Engine. Single store carries
@@ -1576,6 +1591,25 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = customerMasterStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('customer_master', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase B.2 — bureau_master adapter. Bureau config rows carry the
+    // contract_ref (might reference an external SLA doc) but no
+    // credentials themselves; plain re-insert.
+    registerRecoveryAdapter({
+      entity_type: 'bureau_master',
+      display_name: 'Bureau master config',
+      module: 'bff',
+      original_table: 'app_master.bureaus',
+      restore: async (record) => {
+        const ok = bureauMasterStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('bureau_master', record.original_id);
         }
       },
     });
@@ -21635,6 +21669,171 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.status(204).send();
+    },
+  );
+
+  // ── Report execution + CSV export (T4.6.4) ────────────────────────
+  //
+  // Both /run + /export.csv compile + execute the supplied definition
+  // (or the saved.definition for /saved/:id/run). Compiled SQL +
+  // params surface to admin callers only; non-admin gets the
+  // result envelope without those fields (information-leak guard).
+
+  function scrubAdminFields<T extends { sql?: string; params?: unknown }>(
+    result: T,
+    role: string,
+  ): T {
+    if (role === 'admin') return result;
+    const { sql, params, ...rest } = result as T & { sql?: unknown; params?: unknown };
+    return rest as T;
+  }
+
+  function executeError400(
+    res: Response,
+    ctx: ReturnType<typeof extractCtx>,
+    err: { code?: string; message?: string },
+  ) {
+    const code = `EWS_400_${err.code ?? 'invalid_input'}`;
+    return res.status(400).json(
+      wrapError(
+        {
+          code,
+          message: err.message ?? 'invalid report definition',
+          severity: 'MEDIUM',
+        },
+        ctx,
+      ),
+    );
+  }
+
+  /** POST /v1/reports/builder/run (T4.6.4) — execute an ad-hoc
+   *  ReportDefinition. Returns rows + projection + aggregates +
+   *  duration_ms. Admin response includes compiled sql + params;
+   *  non-admin gets the same envelope minus those two fields. */
+  app.post(
+    '/v1/reports/builder/run',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      const role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+      try {
+        const { executeReport } =
+          require('./reports/builder_execute') as typeof import('./reports/builder_execute');
+        const result = executeReport(
+          inner as never,
+          { tenant_id: req.tenant!.tenant_id, role, now: now() },
+        );
+        return res.json(wrapResponse(scrubAdminFields(result, role), ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (
+          e?.name !== 'ReportExecutionError' &&
+          e?.name !== 'FilterCompilerError' &&
+          e?.name !== 'ReportCatalogError'
+        ) {
+          throw err;
+        }
+        return executeError400(res, ctx, e);
+      }
+    },
+  );
+
+  /** POST /v1/reports/builder/saved/:report_id/run (T4.6.4) — run a
+   *  saved report. Tenant + visibility checked (cross-tenant or
+   *  not-visible-to-caller → 404). */
+  app.post(
+    '/v1/reports/builder/saved/:report_id/run',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+      const store = reportStoreModule.defaultSavedReportStore();
+      const saved = store.get(req.params.report_id, req.tenant!.tenant_id);
+      if (!saved) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_report',
+              message: `unknown report: ${req.params.report_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const viewer = readApexUser(req, 'admin');
+      if (!store.visibleTo(saved, viewer, role)) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_report',
+              message: `unknown report: ${req.params.report_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const { executeReport } =
+          require('./reports/builder_execute') as typeof import('./reports/builder_execute');
+        const result = executeReport(saved.definition, {
+          tenant_id: req.tenant!.tenant_id,
+          role,
+          now: now(),
+        });
+        return res.json(wrapResponse(scrubAdminFields(result, role), ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        return executeError400(res, ctx, e);
+      }
+    },
+  );
+
+  /** POST /v1/reports/builder/export.csv (T4.6.4) — execute + render
+   *  as RFC 4180 CSV with attachment Content-Disposition. */
+  app.post(
+    '/v1/reports/builder/export.csv',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      const role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+      try {
+        const { executeReport, reportResultToCsv } =
+          require('./reports/builder_execute') as typeof import('./reports/builder_execute');
+        const result = executeReport(
+          inner as never,
+          { tenant_id: req.tenant!.tenant_id, role, now: now() },
+        );
+        const csv = reportResultToCsv(result);
+        const filename = `report-${result.source_id.replace(/\W+/g, '_')}-${result.generated_at.slice(0, 10)}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(csv);
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (
+          e?.name !== 'ReportExecutionError' &&
+          e?.name !== 'FilterCompilerError' &&
+          e?.name !== 'ReportCatalogError'
+        ) {
+          throw err;
+        }
+        return executeError400(res, ctx, e);
+      }
     },
   );
 
