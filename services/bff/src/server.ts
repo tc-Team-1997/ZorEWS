@@ -10634,6 +10634,44 @@ export function makeApp(deps: AppDeps = {}) {
   // M6.2 catalog defaults. Pure-data — no store, no tenant overrides
   // here; M6.4 will land custom presets.
 
+  /** GET /v1/scoring/presets/custom/multiplier-histogram (T6 M6.19)
+   *  — same shape as M6.16 but over the M6.4 per-tenant CUSTOM weight
+   *  preset store (vs M6.16's platform-static library). Same 4-bucket
+   *  classification (strong_dampen < 0.5 / mild_dampen [0.5, 1) /
+   *  mild_boost (1, 1.5] / strong_boost > 1.5; exact 1.0 a no-op).
+   *  Per-row {preset_id, name, mode, vertical, total_multipliers,
+   *  by_bucket (4 keys at 0), min/mean/max_multiplier, boost_count,
+   *  dampen_count}. Envelope: total_presets, total_multipliers,
+   *  rows[] sorted by preset_id asc, most_active_preset (highest
+   *  total_multipliers + canonical preset_id asc tie-break; null when
+   *  zero customs), most_boosted_preset (highest boost_count; canonical
+   *  tie-break; null when no boosts), most_dampened_preset (highest
+   *  dampen_count; canonical tie-break; null when no dampens),
+   *  highest_multiplier ({preset_id, indicator_id, value}; canonical
+   *  tie-break; null on empty), lowest_multiplier (same shape; null on
+   *  empty), by_bucket_totals (marginal totals). Distinct from M6.16
+   *  (library-static) by being TENANT-SCOPED. Drives "are operators
+   *  creating AGGRESSIVE customs vs balanced ones?" governance view.
+   *  Mounted BEFORE catch-all `/v1/scoring/presets/custom/:preset_id`
+   *  so the literal `/multiplier-histogram` segment isn't captured. */
+  app.get(
+    '/v1/scoring/presets/custom/multiplier-histogram',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildCustomPresetMultiplierHistogramFromStore } =
+        require('./scoring_preset_custom_multiplier_histogram') as
+        typeof import('./scoring_preset_custom_multiplier_histogram');
+      const out = buildCustomPresetMultiplierHistogramFromStore(
+        customWeightPresetStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scoring/presets/multiplier-histogram (T6 M6.16) —
    *  per-library-preset histogram of explicit weight_multipliers
    *  bucketed strong_dampen (< 0.5) / mild_dampen [0.5, 1.0) /
