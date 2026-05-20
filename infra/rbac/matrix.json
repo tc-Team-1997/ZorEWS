@@ -60,6 +60,7 @@
 
     "audit:read":                   ["admin", "supervisor"],
     "webhooks:manage":              ["admin"],
+    "reports:share":                ["admin", "supervisor"],
     "recovery:list":                ["admin"],
     "recovery:restore":             ["admin"],
     "recovery:purge":               ["admin"],

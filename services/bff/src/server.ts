@@ -89,6 +89,18 @@ import {
   type GeographyMasterStore,
 } from './master/geography_master';
 import {
+  defaultCustomerMasterStore,
+  CustomerMasterError,
+  ALL_CUSTOMER_TYPES,
+  ALL_KYC_STATUSES,
+  ALL_RISK_CATEGORIES,
+  isCustomerType,
+  isKycStatus,
+  isRiskCategory,
+  listKycExpiringCustomers,
+  type CustomerMasterStore,
+} from './master/customer_master';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1008,6 +1020,9 @@ export interface AppDeps {
   /** Phase A.2 (2026-05-21) — Geography & Risk Region Master Setup
    *  store. Defaults to a singleton InMemoryGeographyMasterStore. */
   geographyMasterStore?: GeographyMasterStore;
+  /** Phase B.1 (2026-05-21) — Customer Master Setup store. Defaults to
+   *  a singleton InMemoryCustomerMasterStore. */
+  customerMasterStore?: CustomerMasterStore;
   /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
    *  Defaults to a singleton InMemoryDqStore. */
   dqStore?: DqStore;
@@ -1241,6 +1256,10 @@ export function makeApp(deps: AppDeps = {}) {
   // A.1; default singleton reused across makeApp() calls; tests inject.
   const geographyMasterStore =
     deps.geographyMasterStore ?? defaultGeographyMasterStore;
+  // Phase B.1 — Customer Master Setup. KYC + PEP + risk_category
+  // overlay on top of the existing mart.customer_360 dataset.
+  const customerMasterStore =
+    deps.customerMasterStore ?? defaultCustomerMasterStore;
   // Phase A.3 — DQ Engine. Single store carries rules + executions.
   const dqStore = deps.dqStore ?? defaultDqStore;
   // Phase A.4 — Reconciliation Engine. Single store carries
@@ -1538,6 +1557,25 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = reconStore.restoreDefinition(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('recon_definition', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase B.1 — customer_master adapter. Customer master rows carry
+    // PEP + KYC overlay, no credentials — plain re-insert via the
+    // store's restore() method.
+    registerRecoveryAdapter({
+      entity_type: 'customer_master',
+      display_name: 'Customer master entry',
+      module: 'bff',
+      original_table: 'app_master.customers',
+      restore: async (record) => {
+        const ok = customerMasterStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('customer_master', record.original_id);
         }
       },
     });
@@ -20987,6 +21025,272 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── Saved reports (T4.6.3) ────────────────────────────────────────
+  //
+  // CRUD + role-scoped visibility over the SavedReportStore. Pattern
+  // mirrors T4.18 saved scenarios + T4.13 webhook subscriptions.
+  // Visibility = 'role' requires the `reports:share` RBAC scope
+  // (supervisor + admin only).
+
+  const reportStoreModule =
+    require('./reports/builder_store') as typeof import('./reports/builder_store');
+
+  function readApexUser(req: Request, fallback = 'spa'): string {
+    const raw = (req.headers['x-apex-user'] as string | undefined) ?? '';
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : fallback;
+  }
+
+  function reportStoreError400(
+    res: Response,
+    ctx: ReturnType<typeof extractCtx>,
+    err: { code?: string; message?: string },
+  ) {
+    const code = `EWS_400_${err.code ?? 'invalid_input'}`;
+    return res.status(400).json(
+      wrapError(
+        {
+          code,
+          message: err.message ?? 'invalid saved report input',
+          severity: 'MEDIUM',
+        },
+        ctx,
+      ),
+    );
+  }
+
+  /** POST /v1/reports/builder/saved (T4.6.3) — create a saved report.
+   *  visibility='role' additionally requires reports:share scope. */
+  app.post(
+    '/v1/reports/builder/saved',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+
+      // visibility=role requires reports:share — enforce before validation
+      // so a caller without the scope can't probe definition correctness.
+      const visibility = inner?.visibility;
+      if (visibility === 'role') {
+        const role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+        const { can } =
+          require('../../../infra/rbac/lib/dist/src/index') as typeof import('../../../infra/rbac/lib/dist/src/index');
+        if (!can(role, 'reports:share')) {
+          return res.status(403).json(
+            wrapError(
+              {
+                code: 'EWS_403_missing_scope',
+                message: 'reports:share required for visibility=role',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+      }
+
+      const created_by = readApexUser(req, 'admin');
+      try {
+        const store = reportStoreModule.defaultSavedReportStore();
+        const saved = store.create(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            name: typeof inner?.name === 'string' ? inner.name : '',
+            description: typeof inner?.description === 'string' ? inner.description : undefined,
+            definition: inner?.definition as never,
+            created_by,
+            visibility: visibility as never,
+            visible_to_roles: Array.isArray(inner?.visible_to_roles)
+              ? (inner.visible_to_roles as string[])
+              : undefined,
+            tags: Array.isArray(inner?.tags) ? (inner.tags as string[]) : undefined,
+          },
+          now(),
+        );
+        return res.status(201).json(wrapResponse(saved, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'SavedReportError') throw err;
+        return reportStoreError400(res, ctx, e);
+      }
+    },
+  );
+
+  /** GET /v1/reports/builder/saved (T4.6.3) — list visible reports
+   *  for the caller. Filters: ?visibility=&source_id=&created_by=&tag=. */
+  app.get(
+    '/v1/reports/builder/saved',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const viewer = readApexUser(req, 'admin');
+      const viewer_role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+      const store = reportStoreModule.defaultSavedReportStore();
+      const rows = store.list(req.tenant!.tenant_id, {
+        visibility: req.query.visibility as never,
+        source_id: req.query.source_id as never,
+        created_by: req.query.created_by as never,
+        tag: req.query.tag as never,
+      });
+      const visible = rows.filter((r) => store.visibleTo(r, viewer, viewer_role));
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            total: visible.length,
+            reports: visible,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/reports/builder/saved/:report_id — single report;
+   *  404 if not visible OR cross-tenant. */
+  app.get(
+    '/v1/reports/builder/saved/:report_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = reportStoreModule.defaultSavedReportStore();
+      const report = store.get(req.params.report_id, req.tenant!.tenant_id);
+      if (!report) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_report',
+              message: `unknown report: ${req.params.report_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const viewer = readApexUser(req, 'admin');
+      const viewer_role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+      if (!store.visibleTo(report, viewer, viewer_role)) {
+        // 404 (not 403) so callers can't probe report-existence by id.
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_report',
+              message: `unknown report: ${req.params.report_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(report, ctx));
+    },
+  );
+
+  /** PATCH /v1/reports/builder/saved/:report_id — update mutable
+   *  fields. visibility transitions to 'role' require reports:share. */
+  app.patch(
+    '/v1/reports/builder/saved/:report_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+
+      if (inner?.visibility === 'role') {
+        const role = (deps.getRole ?? defaultGetRole)(req) ?? '';
+        const { can } =
+          require('../../../infra/rbac/lib/dist/src/index') as typeof import('../../../infra/rbac/lib/dist/src/index');
+        if (!can(role, 'reports:share')) {
+          return res.status(403).json(
+            wrapError(
+              {
+                code: 'EWS_403_missing_scope',
+                message: 'reports:share required for visibility=role',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+      }
+
+      const actor = readApexUser(req, 'admin');
+      try {
+        const store = reportStoreModule.defaultSavedReportStore();
+        const updated = store.update(
+          req.params.report_id,
+          req.tenant!.tenant_id,
+          {
+            name: inner?.name as never,
+            description: inner?.description as never,
+            definition: inner?.definition as never,
+            visibility: inner?.visibility as never,
+            visible_to_roles: Array.isArray(inner?.visible_to_roles)
+              ? (inner.visible_to_roles as string[])
+              : undefined,
+            tags: Array.isArray(inner?.tags) ? (inner.tags as string[]) : undefined,
+          },
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(updated, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'SavedReportError') throw err;
+        if (e.code === 'unknown_report') {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_report',
+                message: e.message ?? 'unknown report',
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        return reportStoreError400(res, ctx, e);
+      }
+    },
+  );
+
+  /** DELETE /v1/reports/builder/saved/:report_id — 204 on success,
+   *  404 on miss or cross-tenant. */
+  app.delete(
+    '/v1/reports/builder/saved/:report_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = reportStoreModule.defaultSavedReportStore();
+      const ok = store.delete(req.params.report_id, req.tenant!.tenant_id);
+      if (!ok) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_report',
+              message: `unknown report: ${req.params.report_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.status(204).send();
     },
   );
 
