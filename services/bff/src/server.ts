@@ -16986,6 +16986,350 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase B.1 — Customer Master Setup ──────────────────────────────
+  //
+  // PDF §3 Master Setup item 1. Tenant-scoped admin overlay carrying
+  // KYC + PEP + risk_category attributes per customer_id. Distinct
+  // from mart.customer_360 (which is the data layer); this is the
+  // compliance-grade master that ops admins maintain manually.
+  // Soft-delete + Recovery + audit:read admin-only.
+
+  /** GET /v1/master/customers/types — closed enums for SPA pickers. */
+  app.get(
+    '/v1/master/customers/types',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            customer_types: [...ALL_CUSTOMER_TYPES],
+            kyc_statuses: [...ALL_KYC_STATUSES],
+            risk_categories: [...ALL_RISK_CATEGORIES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/customers/kyc-expiring?lookahead_days= — compliance
+   *  hot-list: customers whose KYC is within N days of expiry OR
+   *  already expired. Drives the "KYC re-verification queue" SPA tile. */
+  app.get(
+    '/v1/master/customers/kyc-expiring',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const rawDays = req.query.lookahead_days;
+      let lookahead_days = 30;
+      if (rawDays !== undefined) {
+        const n = parseInt(String(rawDays), 10);
+        if (!Number.isFinite(n) || n < 0 || n > 365) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_lookahead_days', message: 'lookahead_days must be 0..365', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        lookahead_days = n;
+      }
+      const items = listKycExpiringCustomers(
+        customerMasterStore,
+        req.tenant!.tenant_id,
+        now(),
+        lookahead_days,
+      );
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            lookahead_days,
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/customers — tenant-scoped list with filters. */
+  app.get(
+    '/v1/master/customers',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const ctRaw = req.query.customer_type;
+      const ksRaw = req.query.kyc_status;
+      const rcRaw = req.query.risk_category;
+      const pepRaw = req.query.pep_flag;
+      const countryRaw = req.query.country;
+
+      if (ctRaw !== undefined && !isCustomerType(ctRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_type', message: `customer_type must be one of: ${ALL_CUSTOMER_TYPES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (ksRaw !== undefined && !isKycStatus(ksRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_kyc_status', message: `kyc_status must be one of: ${ALL_KYC_STATUSES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (rcRaw !== undefined && !isRiskCategory(rcRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_risk_category', message: `risk_category must be one of: ${ALL_RISK_CATEGORIES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      let pep_flag: boolean | undefined;
+      if (pepRaw !== undefined) {
+        if (pepRaw === 'true') pep_flag = true;
+        else if (pepRaw === 'false') pep_flag = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_pep_flag', message: 'pep_flag must be true|false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      if (countryRaw !== undefined && (typeof countryRaw !== 'string' || !/^[A-Z]{2}$/.test(countryRaw))) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_country', message: 'country must be ISO 3166-1 alpha-2', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = customerMasterStore.list(req.tenant!.tenant_id, {
+        include_deleted,
+        customer_type: ctRaw as never,
+        kyc_status: ksRaw as never,
+        risk_category: rcRaw as never,
+        pep_flag,
+        country: countryRaw as string | undefined,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/customers/:customer_id. */
+  app.get(
+    '/v1/master/customers/:customer_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entry = customerMasterStore.get(req.tenant!.tenant_id, req.params.customer_id ?? '');
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_customer', message: `unknown customer_id: ${req.params.customer_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/master/customers. */
+  app.post(
+    '/v1/master/customers',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = customerMasterStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof CustomerMasterError) {
+          if (e.code === 'duplicate_customer_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_customer_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/master/customers/:customer_id. */
+  app.patch(
+    '/v1/master/customers/:customer_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = customerMasterStore.update(
+          req.tenant!.tenant_id,
+          req.params.customer_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof CustomerMasterError) {
+          if (e.code === 'unknown_customer') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_customer', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/master/customers/:customer_id — soft-delete + archive. */
+  app.delete(
+    '/v1/master/customers/:customer_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const customer_id = req.params.customer_id ?? '';
+      try {
+        const tombstoned = customerMasterStore.softDelete(
+          req.tenant!.tenant_id,
+          customer_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'customer_master',
+            original_id: customer_id,
+            original_table: 'app_master.customers',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/master/customers/:customer_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof CustomerMasterError) {
+          if (e.code === 'unknown_customer') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_customer', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   // ── Phase A.3 — Data Quality (DQ) Engine ────────────────────────────
   //
   // PDF §6 Ecosystem item E5. Operator-visible runtime for declarative

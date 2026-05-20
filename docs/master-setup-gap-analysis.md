@@ -9,17 +9,14 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A.1 | A.2 | A.3 | After A.4 (2026-05-21) |
-|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | ~80% | **~84%** |
-| PDF surfaces fully shipped (✅) | 24 / 49 | 25 / 49 | 26 / 49 | 27 / 49 | **28 / 49** |
-| PDF surfaces partially shipped (⚠️) | 19 / 49 | 18 / 49 | 17 / 49 | 17 / 49 | 17 / 49 |
-| PDF surfaces not shipped (❌) | 6 / 49 | 5 / 49 | 4 / 49 | 3 / 49 | **2 / 49** |
-| Net-new screens needed to close | ~22 SPA | ~21 | ~20 | ~17 | ~14 (every greenfield Phase A item now has BFF surface; SPA pages bulk deferred to Phase B) |
-| Net-new backend modules needed | 2 (DQ + Reconciliation) | unchanged | unchanged | **1** (Reconciliation only) | **0 — ALL GREENFIELD MODULES SHIPPED** |
-| New tables required | 5 master-data tables | 4 | 3 | 1 | **0 — all 4 Phase A SQL migrations landed (024–027)** |
-| BFF route count delta | — | +6 | +12 | +22 | **+33** (Recon adds 11 more) |
-| BFF test suite | 8087 | 8129 | 8175 | 8286 | **8333** ✅ clean run |
+| Metric | Initial | A.1 | A.2 | A.3 | A.4 | After B.1 (2026-05-21) |
+|---|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | ~80% | ~84% | **~86%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 25/49 | 26/49 | 27/49 | 28/49 | **29/49** |
+| PDF surfaces partially shipped (⚠️) | 19/49 | 18/49 | 17/49 | 17/49 | 17/49 | 17/49 |
+| PDF surfaces not shipped (❌) | 6/49 | 5/49 | 4/49 | 3/49 | 2/49 | 2/49 |
+| BFF route count delta | — | +6 | +12 | +22 | +33 | **+41** (Customer master adds 8 more) |
+| BFF test suite | 8087 | 8129 | 8175 | 8286 | 8333 | **8392** ✅ |
 
 ## Phase A — COMPLETE ✅
 
