@@ -9,22 +9,22 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A done | B done | C done | D.1 done | D.2 done | D.3 done (2026-05-21) |
-|---|---|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~95% | ~96% | ~97% | **~97.5%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 35/49 | 36/49 | 37/49 | **38/49** |
-| BFF route count delta | — | +33 | +61 | +71 | +72 | +78 | **+85** (Audit retention adds 7) |
-| BFF test suite | 8087 | 8333 | 8606 | 8718 | 8749 | 8839 | **8887** ✅ |
+| Metric | Initial | A done | B done | C done | D done (2026-05-21) |
+|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~95% | **~98%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 35/49 | **39/49** |
+| BFF route count delta | — | +33 | +61 | +71 | **+90** (Lineage adds 5) |
+| BFF test suite | 8087 | 8333 | 8606 | 8718 | **8968** ✅ |
 
-## Phase D — IN PROGRESS 🚧
+## Phase D — COMPLETE ✅
 
 | Sub-phase | Module | Routes | Tests |
 |---|---|---|---|
 | D.1 System Monitoring | `system/monitoring_dashboard.ts` (composer) | 1 | 27 |
 | D.2 Field-Level Masking | `security/field_masking.ts` (store + resolver) | 6 | 56 |
 | D.3 Audit Admin retention | `audit/retention_policy.ts` (store) | 7 | 48 |
-| D.4 Metadata / Lineage | _pending_ | — | — |
-| **Running total** | **3 modules** | **14 routes** | **131 tests** |
+| D.4 Metadata / Lineage | `metadata/lineage.ts` (catalog + traversal) | 5 | 42 |
+| **Total** | **4 modules** | **19 routes** | **173 tests** |
 
 ## Phase C — COMPLETE ✅
 

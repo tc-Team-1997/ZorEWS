@@ -157,6 +157,18 @@ import {
   type AuditRetentionPolicyStore,
 } from './audit/retention_policy';
 import {
+  LINEAGE_DATASETS,
+  LINEAGE_EDGES,
+  ALL_LINEAGE_LAYERS,
+  ALL_DATASET_KINDS,
+  getDataset as getLineageDataset,
+  traverseUpstream as lineageUpstream,
+  traverseDownstream as lineageDownstream,
+  impactAnalysis as lineageImpactAnalysis,
+  summariseCatalog as summariseLineageCatalog,
+  LineageError,
+} from './metadata/lineage';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -16679,6 +16691,219 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(500).json(
           wrapError(
             { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase D.4 — Metadata / Data Lineage (read-only catalog) ──────────
+  //
+  // PDF §X.2. Programmatic mirror of docs/data-lineage.md so the SPA
+  // can render an interactive lineage graph + impact-analysis tree.
+  // Platform-static catalog (same response across tenants). Admin-
+  // only (audit:read). No mutation surface — lineage edits go through
+  // the markdown doc + PR review per X.2 cadence.
+
+  /** GET /v1/metadata/lineage/catalog — full catalog + summary. */
+  app.get(
+    '/v1/metadata/lineage/catalog',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const summary = summariseLineageCatalog();
+      return res.json(
+        wrapResponse(
+          {
+            generated_at: now().toISOString(),
+            layers: [...ALL_LINEAGE_LAYERS],
+            kinds: [...ALL_DATASET_KINDS],
+            datasets: [...LINEAGE_DATASETS],
+            edges: [...LINEAGE_EDGES],
+            summary,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/metadata/lineage/datasets/:dataset_id — single dataset. */
+  app.get(
+    '/v1/metadata/lineage/datasets/:dataset_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dataset_id = req.params.dataset_id ?? '';
+      const ds = getLineageDataset(dataset_id);
+      if (!ds) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_dataset',
+              message: `unknown dataset_id: ${dataset_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(ds, ctx));
+    },
+  );
+
+  /** GET /v1/metadata/lineage/datasets/:dataset_id/upstream?depth=N */
+  app.get(
+    '/v1/metadata/lineage/datasets/:dataset_id/upstream',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dataset_id = req.params.dataset_id ?? '';
+      const depthRaw = req.query.depth as string | undefined;
+      // Default 3 levels — deep enough for most SPA tooltips; full
+      // ancestry available via ?depth=999.
+      const depth =
+        depthRaw === undefined ? 3 : Number.isFinite(Number(depthRaw)) ? Number(depthRaw) : NaN;
+      if (!Number.isFinite(depth) || depth < 0 || !Number.isInteger(depth)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_depth',
+              message: 'depth must be a non-negative integer',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const out = lineageUpstream(dataset_id, depth);
+        return res.json(
+          wrapResponse(
+            { origin_id: dataset_id, depth, ...out },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof LineageError) {
+          if (e.code === 'unknown_dataset') {
+            return res.status(404).json(
+              wrapError(
+                {
+                  code: 'EWS_404_unknown_dataset',
+                  message: e.message,
+                  severity: 'LOW',
+                },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'upstream failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/metadata/lineage/datasets/:dataset_id/downstream?depth=N */
+  app.get(
+    '/v1/metadata/lineage/datasets/:dataset_id/downstream',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dataset_id = req.params.dataset_id ?? '';
+      const depthRaw = req.query.depth as string | undefined;
+      const depth =
+        depthRaw === undefined ? 3 : Number.isFinite(Number(depthRaw)) ? Number(depthRaw) : NaN;
+      if (!Number.isFinite(depth) || depth < 0 || !Number.isInteger(depth)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_depth',
+              message: 'depth must be a non-negative integer',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const out = lineageDownstream(dataset_id, depth);
+        return res.json(
+          wrapResponse(
+            { origin_id: dataset_id, depth, ...out },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof LineageError) {
+          if (e.code === 'unknown_dataset') {
+            return res.status(404).json(
+              wrapError(
+                {
+                  code: 'EWS_404_unknown_dataset',
+                  message: e.message,
+                  severity: 'LOW',
+                },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'downstream failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/metadata/lineage/datasets/:dataset_id/impact — full impact analysis. */
+  app.get(
+    '/v1/metadata/lineage/datasets/:dataset_id/impact',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dataset_id = req.params.dataset_id ?? '';
+      try {
+        const out = lineageImpactAnalysis(dataset_id);
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof LineageError && e.code === 'unknown_dataset') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_dataset', message: e.message, severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'impact failed', severity: 'HIGH' },
             ctx,
           ),
         );
