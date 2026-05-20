@@ -67,6 +67,7 @@ describe('/v1/recovery — empty store', () => {
     //   Phase B.3: account_master (BFF-local, always registered)
     //   Phase B.4: policy_master (BFF-local, always registered)
     //   Phase C.1: str_report (BFF-local, always registered)
+    //   Phase D.2: field_masking_policy (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
@@ -74,6 +75,7 @@ describe('/v1/recovery — empty store', () => {
       'cms_case_attachment',
       'customer_master',
       'dq_rule',
+      'field_masking_policy',
       'geography_master',
       'policy_master',
       'recon_definition',

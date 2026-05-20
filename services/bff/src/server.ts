@@ -144,6 +144,12 @@ import {
   FRAUD_SEED_RULE_IDS,
 } from './fraud/fraud_dashboard';
 import {
+  defaultFieldMaskingStore,
+  FieldMaskingError,
+  ALL_MASKING_STRATEGIES,
+  type FieldMaskingStore,
+} from './security/field_masking';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1080,6 +1086,8 @@ export interface AppDeps {
   /** Phase A.4 (2026-05-21) — Reconciliation Engine store (definitions
    *  + runs). Defaults to a singleton InMemoryReconStore. */
   reconStore?: ReconStore;
+  /** Phase D.2 (2026-05-21) — Field-Level Masking policy store. */
+  fieldMaskingStore?: FieldMaskingStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1332,6 +1340,8 @@ export function makeApp(deps: AppDeps = {}) {
   // Phase A.4 — Reconciliation Engine. Single store carries
   // definitions + run history.
   const reconStore = deps.reconStore ?? defaultReconStore;
+  // Phase D.2 — Field-Level Masking policy store.
+  const fieldMaskingStore = deps.fieldMaskingStore ?? defaultFieldMaskingStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1624,6 +1634,26 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = reconStore.restoreDefinition(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('recon_definition', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase D.2 — field_masking_policy adapter. Security-sensitive
+    // master row: refuses to restore over a live policy (would
+    // silently re-enable a masking rule someone may have intentionally
+    // removed). Same restore semantics as the sector/recon adapters.
+    registerRecoveryAdapter({
+      entity_type: 'field_masking_policy',
+      display_name: 'Field-level masking policy',
+      module: 'bff',
+      original_table: 'app_admin.field_masking_policies',
+      restore: async (record) => {
+        const ok = fieldMaskingStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('field_masking_policy', record.original_id);
         }
       },
     });
@@ -3021,6 +3051,131 @@ export function makeApp(deps: AppDeps = {}) {
       const records = routingLedger.list(req.tenant!.tenant_id, window);
       const analytics = aggregateRoutingAnalytics(records, now());
       return res.json(wrapResponse({ window, analytics }, ctx));
+    },
+  );
+
+  // ── T2.12.1 — Streaming indicator-event latency telemetry ──────────
+  //
+  // The measurement-layer half of T2.12 ("real-time alert path"). The
+  // producer (Kafka consumer / file outbox / test harness) POSTs every
+  // observed indicator-update event; the BFF records ingest /
+  // processing / total latency vs `observed_at` and rolls them up
+  // into a p50/p95 + count_under_60s view that proves the EWS.docx
+  // §3.5 / docs/slos.md tier-1 "p95 < 60s" budget. Upstream Kafka
+  // producer wire-up remains Year-2 Theme D — the contract here
+  // doesn't depend on the transport.
+  const {
+    processStreamingEvent: _processStreamingEvent,
+    summarizeStreamingLatency: _summarizeStreamingLatency,
+    defaultStreamingLedger: _defaultStreamingLedger,
+  } = require('./streaming_alert_path') as typeof import('./streaming_alert_path');
+  const streamingLedger = _defaultStreamingLedger();
+  let _streamingSeq = 0;
+
+  /** POST /v1/streaming/indicator-events — body `{events: [...]}` or
+   *  a single event. Per-event record written to the streaming ledger
+   *  with latencies computed against `observed_at`. */
+  app.post(
+    '/v1/streaming/indicator-events',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      const events = Array.isArray(inner?.events) ? (inner.events as unknown[]) : [inner];
+      if (events.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'events[] must be a non-empty array',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const recorded: Array<ReturnType<typeof _processStreamingEvent>> = [];
+      try {
+        for (const e of events) {
+          _streamingSeq += 1;
+          const rec = _processStreamingEvent(e as never, {
+            tenant_id: req.tenant!.tenant_id,
+            now: now(),
+            seq: _streamingSeq,
+          });
+          streamingLedger.record(rec);
+          recorded.push(rec);
+        }
+        return res.status(201).json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              recorded_count: recorded.length,
+              events: recorded,
+            },
+            ctx,
+          ),
+        );
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'StreamingLedgerError') throw err;
+        return res.status(400).json(
+          wrapError(
+            {
+              code: `EWS_400_${e.code ?? 'invalid_input'}`,
+              message: e.message ?? 'invalid input',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/streaming/latency?limit=N — p50/p95/max + count_under_60s
+   *  + by_indicator rollup over the recent ledger. */
+  app.get(
+    '/v1/streaming/latency',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit as string | undefined;
+      const limit =
+        limitRaw === undefined ? undefined : Math.max(1, Math.min(1000, Number(limitRaw) || 0));
+      const records = streamingLedger.list(req.tenant!.tenant_id, limit);
+      const summary = _summarizeStreamingLatency(req.tenant!.tenant_id, records, now());
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/streaming/events?limit=N — newest-first recent records. */
+  app.get(
+    '/v1/streaming/events',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit as string | undefined;
+      const limit =
+        limitRaw === undefined ? 50 : Math.max(1, Math.min(1000, Number(limitRaw) || 50));
+      const records = streamingLedger.list(req.tenant!.tenant_id, limit);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            total: records.length,
+            events: records,
+          },
+          ctx,
+        ),
+      );
     },
   );
 
@@ -15745,6 +15900,245 @@ export function makeApp(deps: AppDeps = {}) {
         nowDate,
       );
       return res.json(wrapResponse(report, ctx));
+    },
+  );
+
+  // ── Phase D.2 — Field-Level Masking admin (CRUD + recovery) ──────────
+  //
+  // PDF §A2 Access Control — Field-Level Masking. Config-driven PII
+  // masking driven by a per-(tenant, role, field_path) policy table.
+  // Admin-only (audit:read). Soft-delete + Recovery Center registered.
+
+  /** GET /v1/admin/field-masking/strategies — closed enum for SPA filter. */
+  app.get(
+    '/v1/admin/field-masking/strategies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse({ strategies: [...ALL_MASKING_STRATEGIES] }, ctx),
+      );
+    },
+  );
+
+  /** GET /v1/admin/field-masking?role=&include_deleted= — list. */
+  app.get(
+    '/v1/admin/field-masking',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const role = req.query.role !== undefined ? String(req.query.role) : undefined;
+      const items = fieldMaskingStore.list(req.tenant!.tenant_id, {
+        role,
+        include_deleted,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/admin/field-masking/:policy_id — single. 404 unknown. */
+  app.get(
+    '/v1/admin/field-masking/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const policy_id = req.params.policy_id ?? '';
+      const entry = fieldMaskingStore.get(req.tenant!.tenant_id, policy_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_policy', message: `unknown policy_id: ${policy_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/admin/field-masking — create. 201 on success. */
+  app.post(
+    '/v1/admin/field-masking',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = fieldMaskingStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof FieldMaskingError) {
+          if (e.code === 'duplicate_policy_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_policy_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/admin/field-masking/:policy_id — partial update. */
+  app.patch(
+    '/v1/admin/field-masking/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const policy_id = req.params.policy_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = fieldMaskingStore.update(
+          req.tenant!.tenant_id,
+          policy_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof FieldMaskingError) {
+          if (e.code === 'unknown_policy') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_policy', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/admin/field-masking/:policy_id — soft-delete + archive. */
+  app.delete(
+    '/v1/admin/field-masking/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const policy_id = req.params.policy_id ?? '';
+      try {
+        const tombstoned = fieldMaskingStore.softDelete(
+          req.tenant!.tenant_id,
+          policy_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'field_masking_policy',
+            original_id: policy_id,
+            original_table: 'app_admin.field_masking_policies',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/admin/field-masking/:policy_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof FieldMaskingError) {
+          if (e.code === 'unknown_policy') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_policy', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 
