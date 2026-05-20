@@ -345,6 +345,53 @@ export class PgUserStore {
     return true;
   }
 
+  /** Recovery Center Phase 2g — see UserStore.restoreUser for the
+   *  semantic. Always locked=true + must_change_password=true. */
+  restoreUser(user: User): boolean {
+    if (this.byUsername.has(user.username)) return false;
+    if (this.findById(user.id)) return false;
+    const restored: User = {
+      ...user,
+      locked: true,
+      must_change_password: true,
+      failed_login_count: 0,
+      lockout_until_ms: null,
+      password_history: [...user.password_history],
+    };
+    this.byUsername.set(restored.username, restored);
+    // Write-through fire-and-forget. ON CONFLICT DO NOTHING is
+    // defensive (the byUsername check above would normally have
+    // bailed first, but a concurrent re-INSERT shouldn't crash).
+    void this.pool
+      .query(
+        `INSERT INTO app_iam.users
+           (user_id, username, email, role, display_name, tenant_id,
+            password_hash, locked, failed_login_count, lockout_until_ms,
+            must_change_password, terms_accepted_at, password_history)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, 0, NULL, true, $8, $9)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [
+          restored.id,
+          restored.username,
+          restored.email,
+          restored.role,
+          restored.display_name,
+          restored.tenant_id,
+          restored.passwordHash,
+          restored.terms_accepted_at,
+          restored.password_history,
+        ],
+      )
+      .catch((err) => this.logger(`failed to restore user ${restored.id}`, err));
+    return true;
+  }
+
+  /** Recovery Center Phase 2g — raw lookup for archive snapshot.
+   *  Internal-only — not exposed via HTTP. */
+  getInternalByUsername(username: string): User | undefined {
+    return this.byUsername.get(username);
+  }
+
   async setPassword(user: User, newPassword: string): Promise<void> {
     if (!newPassword || passwordTooWeak(newPassword)) {
       throw new RegisterFailure(

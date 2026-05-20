@@ -50,7 +50,8 @@ export interface AuthSvcRestoreRequest {
     | 'user_team'
     | 'user_team_member'
     | 'role_dashboard_widget'
-    | 'service_client';
+    | 'service_client'
+    | 'user';
   original_id: string;
   payload: Record<string, unknown>;
 }

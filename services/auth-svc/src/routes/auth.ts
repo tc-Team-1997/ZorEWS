@@ -776,7 +776,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
    * yourself out by deleting your own admin account). 404 if unknown.
    */
   app.delete<{ Params: { username: string } }>("/auth/users/:username", async (req, reply) => {
-    const { signer, users, audit } = await getState();
+    const { signer, users, audit, recoveryArchiver } = await getState();
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });
     let callerSub: string | undefined;
@@ -800,6 +800,32 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         .send({ error: "cannot_delete_self", message: "you cannot delete your own account" });
     }
     const actor = callerSub ? users.findById(callerSub) : undefined;
+    // Phase 2g: archive the full user row (including passwordHash +
+    // password_history) BEFORE delete so admins can roll back via
+    // the Recycle Bin. Best-effort posture — same as the other auth-svc
+    // adopters (teams, dashboard_widgets, service_clients). Cascade
+    // limitation documented in users.ts.restoreUser JSDoc: child rows
+    // (sessions, team memberships, leave_covers, password_reset
+    // tokens) are CASCADE-deleted from pg and cannot be restored;
+    // operators rebuild memberships via the team-management routes.
+    await archiveBeforeDelete(recoveryArchiver, req.log, {
+      module: "auth-svc",
+      entity_type: "user",
+      original_id: target.id,
+      original_table: "app_iam.users",
+      // Full row, including hash + history. Same trust-boundary
+      // analysis as service_clients (Phase 2f): the archive table
+      // lives in admin-only RBAC, same as app_iam.users itself.
+      // Restore forces locked=true + must_change_password=true so the
+      // preserved hash cannot grant access.
+      payload: target as unknown as Record<string, unknown>,
+      deleted_by: actor?.username ?? "admin",
+      source_action: "user_initiated",
+      // Capture the actual lock state — distinguishes restoring a
+      // previously-active account from restoring one that was
+      // already disabled.
+      prior_status: target.locked ? "locked" : "active",
+    });
     users.deleteByUsername(target.username);
     audit.append({
       type: "user_deleted",
@@ -1387,7 +1413,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         .send({ error: "invalid_input", message: "entity_type, original_id, payload required" });
     }
 
-    const { teams, dashboardWidgets } = await getState();
+    const { teams, dashboardWidgets, users } = await getState();
 
     if (entity_type === "user_team") {
       const team = payload as {
@@ -1536,6 +1562,81 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           .code(status)
           .send({ error: err instanceof Error ? err.message : "restore_failed" });
       }
+    }
+
+    if (entity_type === "user") {
+      const p = payload as {
+        id?: string;
+        username?: string;
+        email?: string;
+        passwordHash?: string;
+        role?: string;
+        display_name?: string;
+        tenant_id?: string;
+        locked?: boolean;
+        failed_login_count?: number;
+        lockout_until_ms?: number | null;
+        password_history?: string[];
+        must_change_password?: boolean;
+        terms_accepted_at?: string | null;
+      };
+      // Defensive validation — Recovery payloads may be months old, so
+      // we re-check the required shape rather than trust the wire.
+      // ALL_ROLES check ensures the role hasn't been deprecated in the
+      // meantime; if it has, the restore is rejected so admin can
+      // manually re-create with a current role.
+      const { ALL_ROLES: USERS_ROLES } = await import("../users.js");
+      if (
+        !p.id ||
+        p.id !== original_id ||
+        !p.username ||
+        !p.email ||
+        !p.passwordHash ||
+        !p.role ||
+        !(USERS_ROLES as readonly string[]).includes(p.role) ||
+        !p.display_name ||
+        !p.tenant_id ||
+        !Array.isArray(p.password_history)
+      ) {
+        return reply.code(400).send({
+          error: "invalid_payload",
+          message:
+            "user payload missing required fields or carries an unknown role",
+        });
+      }
+      const restoredUser = {
+        id: p.id,
+        username: p.username,
+        email: p.email,
+        passwordHash: p.passwordHash,
+        role: p.role as "admin" | "risk_analyst" | "supervisor" | "collection_officer" | "field_officer",
+        display_name: p.display_name,
+        tenant_id: p.tenant_id,
+        locked: !!p.locked, // restoreUser() forces true anyway
+        failed_login_count: 0,
+        lockout_until_ms: null,
+        password_history: p.password_history,
+        must_change_password: true, // restoreUser() forces true anyway
+        terms_accepted_at: p.terms_accepted_at ?? null,
+      };
+      const ok = users.restoreUser(restoredUser);
+      if (!ok) {
+        return reply.code(409).send({
+          error: "user_exists",
+          username: p.username,
+          id: p.id,
+        });
+      }
+      return reply.code(201).send({
+        entity_type,
+        original_id,
+        restored: true,
+        // SPA shows these so operators understand the conservative
+        // semantic — they need to reset the password before the user
+        // can log in.
+        locked_after_restore: true,
+        must_change_password_after_restore: true,
+      });
     }
 
     if (entity_type === "service_client") {

@@ -16436,6 +16436,75 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/revocation-daily-volume?days=N (T6 M1.15)
+   *  — TREND-LINE over `revoked_at` (vs M1.9's `created_at`). Same
+   *  window mechanics (default 30, [1, 365]). Per UTC day: {date,
+   *  total_revocations, by_scope (7 keys at 0 — multi-scope key
+   *  contributes to each; defensive intra-key dedup), distinct_revokers
+   *  (per-day Set-dedup of revoked_by)}. Envelope: peak_day (earliest-
+   *  day-wins tie-break) + mean_per_day + growth_rate (second-half vs
+   *  first-half; null when first-half=0 OR days<2) + most_revoked_scope
+   *  (canonical VALID_SCOPES tie-break) + total_revocations_in_window
+   *  + total_revocations_observed (incl. outside-window — gap signal).
+   *  Distinct from M1.9 (creation timeline) by surface — answers "are
+   *  we revoking faster than creating? has revocation activity spiked?".
+   *  Mirror of M1.9 / M3.17 / M7.17 / M8.15 daily-volume pattern. 400
+   *  EWS_400_invalid_input on out-of-range days. */
+  app.get(
+    '/v1/admin/api-keys/revocation-daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const {
+        buildApiKeyRevocationDailyVolume,
+        ApiKeyRevocationDailyVolumeError,
+        DEFAULT_REVOCATION_DAILY_WINDOW,
+      } = require('./api_key_revocation_daily_volume') as
+        typeof import('./api_key_revocation_daily_volume');
+      const daysParam = req.query.days;
+      let days: number = DEFAULT_REVOCATION_DAILY_WINDOW;
+      if (daysParam !== undefined) {
+        const n = Number(daysParam);
+        if (!Number.isInteger(n) || n < 1) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'days must be a positive integer', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        days = n;
+      }
+      const PAGE = 100;
+      const entries: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        entries.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      try {
+        const out = buildApiKeyRevocationDailyVolume(
+          req.tenant!.tenant_id,
+          entries,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ApiKeyRevocationDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/api-keys/daily-volume?days=N (T6 M1.9) — TREND-
    *  LINE view of API key creations across the last N UTC days.
    *  Per-day bucket {date, total, by_status (active + revoked at 0

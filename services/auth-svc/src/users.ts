@@ -316,6 +316,44 @@ export class UserStore {
   }
 
   /**
+   * Recovery Center Phase 2g — restore a previously deleted user with
+   * their ORIGINAL id + username. Conservative semantic (matches the
+   * Phase 2f service_client design): regardless of the archive's
+   * flags, restored users ALWAYS come back with locked=true +
+   * must_change_password=true. The preserved passwordHash is
+   * audit-historic — admin must reset the password before the user
+   * can log in. Returns false on username conflict.
+   *
+   * Cascade limitation: sessions / team memberships / leave_covers
+   * were CASCADE-deleted from pg when the user was deleted. Restore
+   * brings back the user row alone — operators rebuild memberships
+   * via the existing team-management routes after restoring.
+   */
+  restoreUser(user: User): boolean {
+    if (this.byUsername.has(user.username)) return false;
+    if (this.findById(user.id)) return false; // id conflict
+    const restored: User = {
+      ...user,
+      locked: true,
+      must_change_password: true,
+      failed_login_count: 0,
+      lockout_until_ms: null,
+      // Deep-copy the history array so caller's reference can't bleed in.
+      password_history: [...user.password_history],
+    };
+    this.byUsername.set(restored.username, restored);
+    return true;
+  }
+
+  /** Recovery Center Phase 2g — raw lookup for archive snapshot. Same
+   *  shape as findByUsername but explicit name flags the internal-
+   *  only use (not exposed via HTTP; used only by the DELETE route
+   *  to capture the row before delete). */
+  getInternalByUsername(username: string): User | undefined {
+    return this.byUsername.get(username);
+  }
+
+  /**
    * Replace `user.passwordHash` with the argon2id hash of `newPassword`.
    * Throws RegisterFailure("password_too_weak") if the new password fails
    * the complexity gate, or "password_reused" if it matches the current
