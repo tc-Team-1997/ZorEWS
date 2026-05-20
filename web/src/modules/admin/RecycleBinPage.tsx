@@ -1,9 +1,12 @@
 // web/src/modules/admin/RecycleBinPage.tsx
 //
 // Recovery Center — centralised view of every soft-deleted record
-// across all adopting services. Today: webhook_subscription +
-// saved_scenario (Phase 1). Future: case, alert, user, etc. as each
-// service adopts the pattern (see docs/recovery-center.md).
+// across all adopting services. As of 2026-05-20 Phase 2 rollout:
+//   - BFF-local: webhook_subscription, saved_scenario,
+//     saved_report_filter, cms_case_attachment, tenant
+//   - Cross-service (auth-svc): user_team, user_team_member,
+//     role_dashboard_widget, service_client, user
+// See docs/recovery-center.md for the full adoption matrix.
 //
 // UX:
 //   - Header with stats tile (total / by status / most recent)

@@ -3362,9 +3362,22 @@ export const handlers = [
         by_module,
         by_entity_type,
         most_recent_at,
+        // Phase 2 wired all 10 adopters (5 BFF-local + 5 cross-service
+        // via auth-svc). Listed in the same order as recovery-center.md
+        // so dev-mode UX matches production exactly.
         adapters: [
+          // BFF-local
           { entity_type: 'webhook_subscription', display_name: 'Webhook subscription', module: 'bff' },
           { entity_type: 'saved_scenario', display_name: 'Saved scenario', module: 'bff' },
+          { entity_type: 'saved_report_filter', display_name: 'Saved report filter', module: 'bff' },
+          { entity_type: 'cms_case_attachment', display_name: 'CMS case attachment', module: 'bff' },
+          { entity_type: 'tenant', display_name: 'Tenant', module: 'bff' },
+          // Cross-service (auth-svc, via the BFF→auth-svc shared-secret restore endpoint)
+          { entity_type: 'user_team', display_name: 'Team (Issue Owner Group)', module: 'auth-svc' },
+          { entity_type: 'user_team_member', display_name: 'Team member', module: 'auth-svc' },
+          { entity_type: 'role_dashboard_widget', display_name: 'Dashboard widget layout (per role)', module: 'auth-svc' },
+          { entity_type: 'service_client', display_name: 'OAuth service client', module: 'auth-svc' },
+          { entity_type: 'user', display_name: 'User account', module: 'auth-svc' },
         ],
       },
     });
