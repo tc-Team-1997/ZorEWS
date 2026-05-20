@@ -6,7 +6,7 @@
 // main now and follow-on commits can fill them in one-by-one.
 
 import { useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bar,
@@ -22,9 +22,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertTriangle, BarChart3, GitBranch, LineChart as LineIcon } from 'lucide-react';
+import { AlertTriangle, BarChart3, GitBranch, LineChart as LineIcon, Wrench } from 'lucide-react';
 import { MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { useAuth } from '@/store/auth';
 import { color } from '@/styles/tokens';
 import {
   api,
@@ -53,6 +54,12 @@ function isTabKey(s: string | null): s is TabKey {
 
 export function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  // T4.6.7 cross-link — only analyst+ get the Open Report Builder CTA.
+  // Select the stable user reference (NOT a fresh `?? []` array each render —
+  // that selector identity churn drives React into an infinite update loop).
+  const user = useAuth((s) => s.user);
+  const canAccessBuilder =
+    user?.roles.some((r) => ['admin', 'supervisor', 'risk_analyst'].includes(r)) ?? false;
   const tab: TabKey = isTabKey(searchParams.get('tab')) ? (searchParams.get('tab') as TabKey) : 'alert-resolution';
 
   const setTab = (next: TabKey) => {
@@ -66,6 +73,18 @@ export function AnalyticsPage() {
       <PageHeader
         title="Analytics Dashboard"
         subtitle="Risk insights across the portfolio · T4.1 / EWS.docx §5.5"
+        actions={
+          canAccessBuilder ? (
+            <Link
+              to="/reports/builder"
+              data-testid="analytics-builder-cta"
+              className="inline-flex items-center gap-1.5 rounded-md border border-divider bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-action hover:text-action transition-colors"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              Build a custom report
+            </Link>
+          ) : null
+        }
       />
 
       <Panel>

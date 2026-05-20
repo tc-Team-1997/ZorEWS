@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Download, FileSpreadsheet, FileText, FileType, RefreshCw } from 'lucide-react';
+import { ChevronDown, Download, FileSpreadsheet, FileText, FileType, RefreshCw, Wrench } from 'lucide-react';
+import { useAuth } from '@/store/auth';
 import {
   Bar,
   BarChart,
@@ -81,6 +83,13 @@ export function ReportsPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useChatContext({ page: 'reports' });
+  // T4.6.7 cross-link — only analyst+ get the Open Report Builder CTA;
+  // matches the AppShell nav-gate for /reports/builder. Select user
+  // directly (not `?? []`) to keep the selector reference stable —
+  // a fresh array each render triggers a zustand infinite re-render.
+  const user = useAuth((s) => s.user);
+  const canAccessBuilder =
+    user?.roles.some((r) => ['admin', 'supervisor', 'risk_analyst'].includes(r)) ?? false;
 
   const query = useQuery({
     queryKey: ['report', type, period],
@@ -130,6 +139,18 @@ export function ReportsPage() {
       <PageHeader
         title="Reports & Analytics"
         subtitle="Pre-built risk reports · regulatory summaries · CSV export"
+        actions={
+          canAccessBuilder ? (
+            <Link
+              to="/reports/builder"
+              data-testid="reports-builder-cta"
+              className="inline-flex items-center gap-1.5 rounded-md border border-divider bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-action hover:text-action transition-colors"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              Open Report Builder
+            </Link>
+          ) : null
+        }
       />
 
       <Panel title="Report selector" className="mb-4">

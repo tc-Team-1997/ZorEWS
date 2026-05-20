@@ -1,0 +1,390 @@
+{
+  "info": {
+    "name": "ZorEWS \u2014 Self-Service Reports Builder",
+    "description": "Postman collection covering the 10 BFF routes under /v1/reports/builder/* (T4.6.1\u2013T4.6.4) plus a guided quickstart that runs the full ad-hoc + saved flow end-to-end. RBAC: most routes accept analyst+; saved-report mutation requires audit:read for visibility=role and the new reports:share scope (admin or supervisor).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001"
+    },
+    {
+      "key": "tenantId",
+      "value": "BANK_DEMO"
+    },
+    {
+      "key": "channel",
+      "value": "API"
+    },
+    {
+      "key": "apexUser",
+      "value": "alice.admin"
+    },
+    {
+      "key": "apexRole",
+      "value": "admin"
+    },
+    {
+      "key": "sourceId",
+      "value": "mart.customer_360"
+    },
+    {
+      "key": "savedReportId",
+      "value": "REPLACE_AFTER_SAVE"
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "1. List data sources",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/sources",
+        "description": "Catalog of every queryable surface (mart + app_* + audit). Analyst+ allowed."
+      }
+    },
+    {
+      "name": "2. Get one source detail",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/sources/{{sourceId}}",
+        "description": "Single source with full field schema + drill_targets[]. 404 EWS_404_unknown_source on miss."
+      }
+    },
+    {
+      "name": "3. Preview compile (filter only, no execution)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/preview",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source_id\": \"mart.customer_360\",\n  \"filters\": {\n    \"children\": [\n      {\n        \"field\": \"risk_level\",\n        \"op\": \"eq\",\n        \"value\": \"High\"\n      },\n      {\n        \"field\": \"pd_score\",\n        \"op\": \"gt\",\n        \"value\": 0.5\n      }\n    ],\n    \"op\": \"AND\"\n  },\n  \"limit\": 50\n}"
+        },
+        "description": "Returns the compiled SQL + ParamBag without executing. Admin sees sql+params; non-admin gets the result scrubbed via scrubAdminFields (T4.6.4 info-leak guard)."
+      }
+    },
+    {
+      "name": "4. Run ad-hoc report (no save)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/run",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source_id\": \"mart.customer_360\",\n  \"filters\": {\n    \"op\": \"AND\",\n    \"children\": [\n      {\n        \"op\": \"eq\",\n        \"field\": \"risk_level\",\n        \"value\": \"High\"\n      }\n    ]\n  },\n  \"limit\": 20\n}"
+        },
+        "description": "Synthesises deterministic rows via FNV-1a + Mulberry32 on (tenant, source, day, definition-hash). Returns rows + aggregates + projection + duration_ms + candidate_rows."
+      }
+    },
+    {
+      "name": "5. Save a private report",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"High-risk customers (daily)\",\n  \"description\": \"PD > 0.5 + risk_level=High on customer_360\",\n  \"visibility\": \"private\",\n  \"definition\": {\n    \"source_id\": \"mart.customer_360\",\n    \"filters\": {\n      \"children\": [\n        {\n          \"field\": \"risk_level\",\n          \"op\": \"eq\",\n          \"value\": \"High\"\n        },\n        {\n          \"field\": \"pd_score\",\n          \"op\": \"gt\",\n          \"value\": 0.5\n        }\n      ],\n      \"op\": \"AND\"\n    },\n    \"limit\": 100\n  },\n  \"tags\": [\n    \"risk\",\n    \"daily\"\n  ]\n}"
+        },
+        "description": "201 with the persisted SavedReport. Capture report_id from the response into {{savedReportId}}. visibility=role requires the new reports:share RBAC scope (admin or supervisor); analyst can save private or tenant."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const env = pm.response.json();",
+              "  const reportId = env.body?.report?.report_id ?? env.body?.report_id ?? env.report?.report_id;",
+              "  if (reportId) pm.collectionVariables.set('savedReportId', reportId);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. List saved reports",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved",
+        "description": "Lists reports visible to the caller. Admin sees all tenant rows; non-admin sees private (own) + role (matching roles) + tenant (all in tenant)."
+      }
+    },
+    {
+      "name": "7. Get single saved report",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}",
+        "description": "404 returned (not 403) when caller lacks visibility \u2014 prevents existence-probing."
+      }
+    },
+    {
+      "name": "8. Patch saved report",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"High-risk customers (renamed)\",\n  \"tags\": [\n    \"risk\",\n    \"daily\",\n    \"watchlist\"\n  ]\n}"
+        },
+        "description": "Partial update \u2014 name / description / definition / visibility / visible_to_roles / tags can be patched. Transitioning to visibility=role requires the reports:share scope."
+      }
+    },
+    {
+      "name": "9. Run saved report",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}/run",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "description": "Executes the persisted definition. Tenant visibility checked \u2014 cross-tenant or not-visible-to-caller returns 404 not 403."
+      }
+    },
+    {
+      "name": "10. Export ad-hoc CSV",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/export.csv",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source_id\": \"mart.customer_360\",\n  \"filters\": {\n    \"op\": \"AND\",\n    \"children\": [\n      {\n        \"op\": \"eq\",\n        \"field\": \"risk_level\",\n        \"value\": \"High\"\n      }\n    ]\n  },\n  \"limit\": 100\n}"
+        },
+        "description": "Streams text/csv with Content-Disposition: attachment; filename=\"report-<source>-<date>.csv\". RFC 4180 escaped."
+      }
+    },
+    {
+      "name": "11. Delete saved report",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Tenant-ID",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "X-Channel",
+            "value": "{{channel}}"
+          },
+          {
+            "key": "x-apex-role",
+            "value": "{{apexRole}}"
+          },
+          {
+            "key": "X-APEX-USER",
+            "value": "{{apexUser}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}",
+        "description": "204 on success; 404 EWS_404_unknown_report on miss or cross-tenant."
+      }
+    }
+  ]
+}
