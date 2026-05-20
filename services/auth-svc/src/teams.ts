@@ -47,6 +47,11 @@ export interface ITeamStore {
   delete(team_id: string): boolean;
   addMember(team_id: string, user_id: string): boolean;
   removeMember(team_id: string, user_id: string): boolean;
+  /** Recovery Center restore (Phase 2d) — re-insert a previously
+   *  deleted team with its ORIGINAL team_id + members. Returns false
+   *  when team_id already exists (the SPA Recycle Bin's
+   *  restore-confirmation should refuse, not silently overwrite). */
+  restore(team: UserTeam): boolean;
   /** Test-only — wipe both tables. */
   reset(): Promise<void> | void;
 }
@@ -115,6 +120,15 @@ export class InMemoryTeamStore implements ITeamStore {
 
   delete(team_id: string): boolean {
     return this.byId.delete(team_id);
+  }
+
+  restore(team: UserTeam): boolean {
+    if (this.byId.has(team.team_id)) return false;
+    // Deep-copy the members array — the caller may keep a reference
+    // to the original (from the archive payload), and we don't want
+    // their mutations to bleed into our store.
+    this.byId.set(team.team_id, { ...team, members: [...team.members] });
+    return true;
   }
 
   addMember(team_id: string, user_id: string): boolean {
@@ -278,6 +292,51 @@ export class PgTeamStore implements ITeamStore {
     void this.pool
       .query(`DELETE FROM app_iam.user_teams WHERE team_id = $1`, [team_id])
       .catch((err) => this.logger(`failed to delete team ${team_id}`, err));
+    return true;
+  }
+
+  restore(team: UserTeam): boolean {
+    if (this.byId.has(team.team_id)) return false;
+    this.byId.set(team.team_id, { ...team, members: [...team.members] });
+    // Re-insert into pg. INSERT … ON CONFLICT DO NOTHING on both
+    // tables — defensive: if the original DELETE somehow didn't
+    // cascade (manual ops?), we don't double-insert.
+    void this.pool
+      .query(
+        `INSERT INTO app_iam.user_teams
+           (team_id, name, branch, role, team_leader, email, description, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (team_id) DO NOTHING`,
+        [
+          team.team_id,
+          team.name,
+          team.branch,
+          team.role,
+          team.team_leader,
+          team.email,
+          team.description,
+          team.created_at,
+        ],
+      )
+      .then(async () => {
+        // Re-link members AFTER the parent row exists (FK).
+        for (const userId of team.members) {
+          await this.pool
+            .query(
+              `INSERT INTO app_iam.user_team_members (team_id, user_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (team_id, user_id) DO NOTHING`,
+              [team.team_id, userId],
+            )
+            .catch((err) =>
+              this.logger(
+                `failed to restore team member ${team.team_id}/${userId}`,
+                err,
+              ),
+            );
+        }
+      })
+      .catch((err) => this.logger(`failed to restore team ${team.team_id}`, err));
     return true;
   }
 

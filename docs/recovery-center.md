@@ -192,7 +192,7 @@ Roughly in order of complexity:
 | Service | Entity types | Notes |
 |---|---|---|
 | ✅ `services/bff/src/reports/saved_filters_store.ts` | `saved_report_filter` | **Adopted 2026-05-19** (commit follows this doc) |
-| ✅ `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | **Archive-side adopted 2026-05-19** (Phase 2c, first cross-service adopter). Copies `recovery_archive_client.ts` into auth-svc src/. Both `DELETE /auth/teams/:team_id` and `.../members/:user_id` archive before deleting; best-effort posture (archive failure logs + proceeds). 10 new tests in `teams_recovery.test.ts` with a stub `RecoveryArchiver`. **Restore-side still pending** — BFF needs adapters for `user_team` + `user_team_member` that HTTP-call back to a future `POST /auth/teams/:id/restore` route. |
+| ✅ `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | **Archive (Phase 2c, 2026-05-19) + Restore (Phase 2d, 2026-05-20) both shipped — first end-to-end cross-service adopter.** Archive: `recovery_archive_client.ts` copy in auth-svc src/; both DELETE routes archive before deleting (best-effort posture). Restore: shared-secret-authed `POST /auth/recovery/restore` on auth-svc + BFF registers adapters that HTTP-call through `auth_svc_restore_client.ts`. Cascade limitation: restoring a member whose parent team is gone returns 409 (operator must restore the team first). 43 new tests total (10 archive + 15 auth-svc restore + 18 BFF adapter). |
 | `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | Per-role array; care needed. Cross-service. |
 | `services/auth-svc/src/service_clients.ts` | `service_client` | Has secret hash — restore re-introduces a revoked OAuth client. Security review needed. Cross-service. |
 | `services/auth-svc/src/pg_user_store.ts` | `user` | High blast radius (FK to sessions, audit, teams); restore semantics need design. Cross-service. |
@@ -313,6 +313,49 @@ Raw `fetch` works too if the source service doesn't want the dependency
 format (`POST /v1/svc/recovery/archive` with `Authorization: Bearer
 apex_<prefix>.<secret>` + JSON body matching the `ArchiveRequest`
 shape).
+
+### Restore callback (Phase 2d, 2026-05-20)
+
+The opposite direction — BFF → source service for restore — uses a
+shared-secret env var instead of api-keys. Rationale: auth-svc would
+otherwise need to mint+verify a BFF api-key of its own (round-trip
+back to BFF for every restore), and the BFF is already the trust
+anchor (it verified the operator's admin role via the M1.2
+`recovery:restore` RBAC scope before invoking the adapter).
+
+**Source-service side (auth-svc reference impl):**
+
+1. Expose `POST /auth/recovery/restore` accepting
+   `{entity_type, original_id, payload}` with `X-Recovery-Restore-Key`
+   header verified against `AUTH_SVC_RECOVERY_RESTORE_KEY` env. When
+   the env is unset, refuse all calls with 503 (fail-closed).
+2. Dispatch by `entity_type` to per-entity restore handlers. Each
+   handler:
+   - 201 on success.
+   - 409 on conflict (entity already exists in source store).
+   - 404 when a parent record is missing (e.g. restoring a member
+     when the team is gone — operator must restore the team first).
+   - 400 on payload validation failure.
+   - 400 with `error: 'unknown_entity_type'` when this service
+     doesn't handle the requested entity_type.
+
+**BFF side:**
+
+1. Configure env vars `AUTH_SVC_BASE_URL` + `AUTH_SVC_RECOVERY_RESTORE_KEY`
+   (the latter must match the source service's value).
+2. `makeApp` auto-instantiates an `AuthSvcRestoreClient` from env and
+   registers a `RecoveryAdapter` per entity_type that the source
+   service handles. Each adapter HTTP-calls the source service's
+   restore endpoint via the client.
+3. When the env vars are unset, no adapters are registered. The SPA
+   Restore button returns 501 `no_adapter` — the correct fail-closed
+   posture for a misconfigured environment.
+
+**Cascade limitation:** restore is one-row-at-a-time. If a deleted
+parent had child rows that were also archived (team + members), the
+operator restores them in dependency order. Member restore against a
+missing team returns 409 `restore_conflict` with `parent_team_id` in
+the error detail so the SPA can highlight the team to restore first.
 
 ### Restore for cross-service entities
 

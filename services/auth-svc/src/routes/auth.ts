@@ -1333,6 +1333,152 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     },
   );
 
+  // ─── Recovery Center cross-service restore callback (Phase 2d) ──────────
+  //
+  // POST /auth/recovery/restore
+  // Headers: X-Recovery-Restore-Key (must match AUTH_SVC_RECOVERY_RESTORE_KEY env)
+  // Body:    { entity_type, original_id, payload }
+  //
+  // Called BY the BFF when an admin clicks "Restore" on a Recycle Bin
+  // row that belongs to auth-svc. Shared-secret auth, NOT user-JWT:
+  // this is a service-to-service path, and the BFF is the trust
+  // anchor (it already verified the operator's admin role via M1.2
+  // RBAC on /v1/recovery/:id/restore).
+  //
+  // Dispatches by entity_type — adding a future auth-svc entity type
+  // (dashboard_widget / service_client / user) is one switch case.
+  //
+  // When AUTH_SVC_RECOVERY_RESTORE_KEY is unset the endpoint refuses
+  // ALL calls with 503 (disabled by config) — failing closed beats
+  // accidentally accepting unauthenticated restore calls in a
+  // misconfigured environment.
+  app.post<{
+    Body: { entity_type?: string; original_id?: string; payload?: unknown };
+  }>("/auth/recovery/restore", async (req, reply) => {
+    const expectedKey = process.env.AUTH_SVC_RECOVERY_RESTORE_KEY;
+    if (!expectedKey) {
+      return reply
+        .code(503)
+        .send({ error: "restore_disabled", message: "AUTH_SVC_RECOVERY_RESTORE_KEY not configured" });
+    }
+    const presentedKey = req.headers["x-recovery-restore-key"];
+    // Constant-time-ish compare: lengths first, then char-by-char via
+    // Buffer.equals. Node 18+ has timingSafeEqual on Buffer.
+    if (typeof presentedKey !== "string" || presentedKey.length !== expectedKey.length) {
+      return reply.code(401).send({ error: "invalid_restore_key" });
+    }
+    const a = Buffer.from(presentedKey);
+    const b = Buffer.from(expectedKey);
+    const { timingSafeEqual } = await import("node:crypto");
+    if (!timingSafeEqual(a, b)) {
+      return reply.code(401).send({ error: "invalid_restore_key" });
+    }
+
+    const { entity_type, original_id, payload } = req.body ?? {};
+    if (
+      typeof entity_type !== "string" ||
+      typeof original_id !== "string" ||
+      !payload ||
+      typeof payload !== "object" ||
+      Array.isArray(payload)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: "invalid_input", message: "entity_type, original_id, payload required" });
+    }
+
+    const { teams } = await getState();
+
+    if (entity_type === "user_team") {
+      const team = payload as {
+        team_id?: string;
+        name?: string;
+        branch?: string;
+        role?: string;
+        team_leader?: string;
+        email?: string | null;
+        description?: string | null;
+        created_at?: string;
+        members?: string[];
+      };
+      // Defensive validation — the BFF may forward the archive's full
+      // snapshot, but we re-check the required fields rather than
+      // trust the wire blindly. Mirrors the shape produced by
+      // InMemoryTeamStore.create + the DB DDL.
+      if (
+        !team.team_id ||
+        team.team_id !== original_id ||
+        !team.name ||
+        !team.branch ||
+        !team.role ||
+        !team.team_leader ||
+        !team.created_at ||
+        !Array.isArray(team.members)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_payload", message: "team payload missing required fields" });
+      }
+      const ok = teams.restore({
+        team_id: team.team_id,
+        name: team.name,
+        branch: team.branch,
+        role: team.role,
+        team_leader: team.team_leader,
+        email: team.email ?? null,
+        description: team.description ?? null,
+        created_at: team.created_at,
+        members: team.members,
+      });
+      if (!ok) {
+        return reply.code(409).send({ error: "team_exists", team_id: team.team_id });
+      }
+      return reply.code(201).send({ entity_type, original_id, restored: true });
+    }
+
+    if (entity_type === "user_team_member") {
+      const m = payload as { team_id?: string; user_id?: string };
+      if (!m.team_id || !m.user_id) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_payload", message: "member payload needs team_id + user_id" });
+      }
+      // Composite original_id is "<team_id>:<user_id>" — defensive
+      // cross-check so a bug in the BFF adapter can't quietly add
+      // members to the wrong team.
+      if (original_id !== `${m.team_id}:${m.user_id}`) {
+        return reply
+          .code(400)
+          .send({
+            error: "invalid_payload",
+            message: `original_id "${original_id}" doesn't match team_id+user_id`,
+          });
+      }
+      if (!teams.get(m.team_id)) {
+        // Member restore depends on the parent team existing. Operator
+        // must restore the team FIRST. Cascade restore isn't supported
+        // — see docs/recovery-center.md "Known limitations".
+        return reply
+          .code(404)
+          .send({ error: "team_not_found", team_id: m.team_id });
+      }
+      const added = teams.addMember(m.team_id, m.user_id);
+      if (!added) {
+        return reply
+          .code(409)
+          .send({ error: "member_exists", team_id: m.team_id, user_id: m.user_id });
+      }
+      return reply.code(201).send({ entity_type, original_id, restored: true });
+    }
+
+    return reply
+      .code(400)
+      .send({
+        error: "unknown_entity_type",
+        message: `auth-svc cannot restore entity_type "${entity_type}"`,
+      });
+  });
+
   // ─── Leave covers (T4.22, BAC-A §3.1.9.1.3) ─────────────────────────────
   // Operators delegate their tasks for a date range to a coverer. Any
   // signed-in user can create+list+cancel their OWN covers; admin can
