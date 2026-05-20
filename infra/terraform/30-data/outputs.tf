@@ -54,3 +54,32 @@ output "glue_schema_arns" {
   description = "Topic-name → Glue schema ARN map."
   value       = { for k, v in aws_glue_schema.topics : k => v.arn }
 }
+
+###############################################################################
+# T5.2 — multi-region DR outputs
+###############################################################################
+
+output "aurora_global_cluster_arn" {
+  description = "ARN of the Aurora Global Cluster — consumed by the secondary-region 30-data application as global_cluster_identifier."
+  value       = aws_rds_global_cluster.this.arn
+}
+
+output "aurora_global_cluster_identifier" {
+  description = "Identifier (not ARN) of the Aurora Global Cluster."
+  value       = aws_rds_global_cluster.this.global_cluster_identifier
+}
+
+output "s3_crr_iam_role_arn" {
+  description = "IAM role assumed by S3 for cross-region replication."
+  value       = aws_iam_role.s3_crr.arn
+}
+
+output "msk_mm2_iam_role_arn" {
+  description = "IAM role assumed by MSK Connect for MirrorMaker 2 — kafkaconnect.amazonaws.com trust."
+  value       = aws_iam_role.msk_mm2.arn
+}
+
+output "msk_mm2_log_group" {
+  description = "CloudWatch log group receiving MM2 worker logs."
+  value       = aws_cloudwatch_log_group.msk_mm2.name
+}
