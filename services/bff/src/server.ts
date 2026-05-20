@@ -3705,6 +3705,61 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   /**
+  /** POST /v1/copilot/nl-to-sql (T2.9) — Natural-language → SQL stub.
+   *  Pattern-matches the question against ~10 known analytics intents
+   *  (high-risk customers, alerts by severity, avg DPD by product,
+   *  utilization > N, alert count last N days, etc.) and returns a
+   *  safe parameterised SELECT against the mart.* schema with
+   *  explanation + confidence + `requires_review: true`. Unmatched
+   *  questions surface as `intent: 'unknown'` with a fallback comment
+   *  listing the available tables + example prompts. Production swap
+   *  = Claude API call satisfying the same return shape. */
+  app.post(
+    '/v1/copilot/nl-to-sql',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      try {
+        const { translateNlToSql } =
+          require('./copilot/nl_to_sql') as typeof import('./copilot/nl_to_sql');
+        const out = translateNlToSql({
+          question: typeof inner?.question === 'string' ? inner.question : '',
+          // Header-injected tenant always wins; caller-supplied body
+          // tenant_id is ignored (per route security model).
+          tenant_id: req.tenant!.tenant_id,
+          limit: typeof inner?.limit === 'number' ? inner.limit : undefined,
+        });
+        return res.json(wrapResponse(out, env));
+      } catch (err) {
+        const e = err as { code?: string; message?: string };
+        if (e && e.code === 'invalid_input') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: e.message ?? 'invalid input', severity: 'MEDIUM' },
+              env,
+            ),
+          );
+        }
+        if (e && e.code === 'unsafe_query') {
+          return res.status(500).json(
+            wrapError(
+              { code: 'EWS_500_unsafe_query', message: 'generated SQL failed safety check', severity: 'HIGH' },
+              env,
+            ),
+          );
+        }
+        throw err;
+      }
+    },
+  );
+
+  /**
    * POST /v1/copilot/chat — T4.24 envelope + tenant.
    * body: { message, context?: { page?, entity?, role? } }
    * Templated context-aware brain — see services/bff/src/copilot/chat.ts.
