@@ -9,12 +9,22 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A done | B done | C done (2026-05-21) |
-|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | **~95%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | **35/49** |
-| BFF route count delta | — | +33 | +61 | **+71** (Fraud dashboard adds 1) |
-| BFF test suite | 8087 | 8333 | 8606 | **8718** ✅ |
+| Metric | Initial | A done | B done | C done | D.1 done (2026-05-21) |
+|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~95% | **~96%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 35/49 | **36/49** |
+| BFF route count delta | — | +33 | +61 | +71 | **+72** (System Monitoring adds 1) |
+| BFF test suite | 8087 | 8333 | 8606 | 8718 | **8749** ✅ |
+
+## Phase D — IN PROGRESS 🚧
+
+| Sub-phase | Module | Routes | Tests |
+|---|---|---|---|
+| D.1 System Monitoring | `system/monitoring_dashboard.ts` (composer) | 1 | 27 |
+| D.2 Field-Level Masking | _pending_ | — | — |
+| D.3 Audit Admin retention | _pending_ | — | — |
+| D.4 Metadata / Lineage | _pending_ | — | — |
+| **Running total** | **1 module** | **1 route** | **27 tests** |
 
 ## Phase C — COMPLETE ✅
 

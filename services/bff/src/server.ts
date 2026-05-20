@@ -15704,6 +15704,50 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase D.1 — System Monitoring dashboard (composer) ──────────────
+  //
+  // PDF §A4. Rolls up the 3 existing probe surfaces — external upstream
+  // pings, M14 adapter fleet, M3.1 ingestion fleet — into a single ops
+  // dashboard payload. Pure composer; reads from existing probes only.
+  app.get(
+    '/v1/system/monitoring',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenantId = req.tenant!.tenant_id;
+      const nowDate = now();
+      const { buildSystemMonitoringReport } = require('./system/monitoring_dashboard') as
+        typeof import('./system/monitoring_dashboard');
+      // Run the 3 input probes; each isolated in try/catch so a single
+      // probe failure doesn't take the whole dashboard down (panel-level
+      // degradation matches M11.6 customer-360 pattern).
+      let upstream: Awaited<ReturnType<typeof pingIntegrations>> | null = null;
+      let adapters: Awaited<ReturnType<typeof runFleetHealth>> | null = null;
+      let ingestion: ReturnType<typeof ingestionRegistry.health> | null = null;
+      try {
+        upstream = await pingIntegrations({ fetcher: deps.integrationsFetcher, now });
+      } catch {
+        upstream = null;
+      }
+      try {
+        adapters = await runFleetHealth(tenantId, nowDate, fleetForHealth);
+      } catch {
+        adapters = null;
+      }
+      try {
+        ingestion = ingestionRegistry.health(tenantId);
+      } catch {
+        ingestion = null;
+      }
+      const report = buildSystemMonitoringReport(
+        { tenant_id: tenantId, upstream, adapters, ingestion },
+        nowDate,
+      );
+      return res.json(wrapResponse(report, ctx));
+    },
+  );
+
   // ── Admin Configuration registry (T6 M13.1) ──────────────────────────
   //
   // Tenant-scoped key-value config store. The schema is platform-wide
