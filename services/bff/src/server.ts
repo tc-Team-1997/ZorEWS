@@ -15249,6 +15249,30 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/adoption-metrics (X.4) — per-tenant adoption-funnel
+   *  rollup answering "how engaged is this tenant?". Covers DAU/WAU/MAU
+   *  engagement, alert funnel (total → acked → with_case → decided)
+   *  with ratio rates, authorship counts (custom rules / scenarios /
+   *  dashboards / checklists / scoring presets), workflow (onboarding
+   *  pct / API keys / webhooks / 2FA), and a composite adoption_score
+   *  (0..100) bucketed into at_risk / warming_up / engaged / power_user.
+   *  Drives the SaaS-admin "is this tenant going to renew?" leading
+   *  indicator. Production swap = real telemetry from app_iam.sessions
+   *  for DAU + app_alerts/app_cases for funnel + app_iam.tenants for
+   *  days_since_provisioned; resolver interface stays stable. */
+  app.get(
+    '/v1/admin/adoption-metrics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdoptionMetrics } =
+        require('./adoption_metrics') as typeof import('./adoption_metrics');
+      const out = buildAdoptionMetrics(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/finops/dashboard (T5.5) — monthly cloud spend allocation
    *  + cost-per-alert + cost-per-customer efficiency metrics per
    *  tenant. Deterministic per (tenant, month). 10-service breakdown
