@@ -110,6 +110,14 @@ import {
   type BureauMasterStore,
 } from './master/bureau_master';
 import {
+  defaultAccountMasterStore,
+  AccountMasterError,
+  ALL_ACCOUNT_CATEGORIES,
+  ALL_REPAYMENT_FREQUENCIES,
+  isAccountCategory,
+  type AccountMasterStore,
+} from './master/account_master';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1034,6 +1042,8 @@ export interface AppDeps {
   customerMasterStore?: CustomerMasterStore;
   /** Phase B.2 (2026-05-21) — External Bureau Master Setup store. */
   bureauMasterStore?: BureauMasterStore;
+  /** Phase B.3 (2026-05-21) — Account & Exposure Master Setup store. */
+  accountMasterStore?: AccountMasterStore;
   /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
    *  Defaults to a singleton InMemoryDqStore. */
   dqStore?: DqStore;
@@ -1275,6 +1285,10 @@ export function makeApp(deps: AppDeps = {}) {
   // CIBIL/CRIF/EXPERIAN/EQUIFAX with score weights for M6.x overlay.
   const bureauMasterStore =
     deps.bureauMasterStore ?? defaultBureauMasterStore;
+  // Phase B.3 — Account & Exposure Master Setup. Per-tenant catalog of
+  // account_types + loan_types + default credit limits + exposure caps.
+  const accountMasterStore =
+    deps.accountMasterStore ?? defaultAccountMasterStore;
   // Phase A.3 — DQ Engine. Single store carries rules + executions.
   const dqStore = deps.dqStore ?? defaultDqStore;
   // Phase A.4 — Reconciliation Engine. Single store carries
@@ -1610,6 +1624,24 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = bureauMasterStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('bureau_master', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase B.3 — account_master adapter. Account-type catalog rows;
+    // plain re-insert.
+    registerRecoveryAdapter({
+      entity_type: 'account_master',
+      display_name: 'Account-type master entry',
+      module: 'bff',
+      original_table: 'app_master.accounts',
+      restore: async (record) => {
+        const ok = accountMasterStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('account_master', record.original_id);
         }
       },
     });
@@ -17638,6 +17670,276 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_bureau', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase B.3 — Account & Exposure Master Setup ─────────────────────
+  //
+  // PDF §4 Master Setup item 2. Per-tenant catalog of account_type +
+  // loan_type with default credit limits + exposure caps. SPA's
+  // "create account" picker reads from this; M11.6 Customer 360 uses
+  // exposure caps as alert thresholds.
+
+  /** GET /v1/master/accounts/categories — closed enums. */
+  app.get(
+    '/v1/master/accounts/categories',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            categories: [...ALL_ACCOUNT_CATEGORIES],
+            repayment_frequencies: [...ALL_REPAYMENT_FREQUENCIES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/accounts?category=&active=&include_deleted= */
+  app.get(
+    '/v1/master/accounts',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const catRaw = req.query.category;
+      const actRaw = req.query.active;
+      if (catRaw !== undefined && !isAccountCategory(catRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_category', message: `category must be one of: ${ALL_ACCOUNT_CATEGORIES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      let active: boolean | undefined;
+      if (actRaw !== undefined) {
+        if (actRaw === 'true') active = true;
+        else if (actRaw === 'false') active = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_active', message: 'active must be true|false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      const items = accountMasterStore.list(req.tenant!.tenant_id, {
+        include_deleted,
+        category: catRaw as never,
+        active,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/accounts/:account_type_id. */
+  app.get(
+    '/v1/master/accounts/:account_type_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entry = accountMasterStore.get(
+        req.tenant!.tenant_id,
+        req.params.account_type_id ?? '',
+      );
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_account_type', message: `unknown account_type_id: ${req.params.account_type_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/master/accounts. */
+  app.post(
+    '/v1/master/accounts',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = accountMasterStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof AccountMasterError) {
+          if (e.code === 'duplicate_account_type_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_account_type_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/master/accounts/:account_type_id. */
+  app.patch(
+    '/v1/master/accounts/:account_type_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = accountMasterStore.update(
+          req.tenant!.tenant_id,
+          req.params.account_type_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof AccountMasterError) {
+          if (e.code === 'unknown_account_type') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_account_type', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/master/accounts/:account_type_id — soft-delete + archive. */
+  app.delete(
+    '/v1/master/accounts/:account_type_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const account_type_id = req.params.account_type_id ?? '';
+      try {
+        const tombstoned = accountMasterStore.softDelete(
+          req.tenant!.tenant_id,
+          account_type_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'account_master',
+            original_id: account_type_id,
+            original_table: 'app_master.accounts',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/master/accounts/:account_type_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof AccountMasterError) {
+          if (e.code === 'unknown_account_type') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_account_type', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );
