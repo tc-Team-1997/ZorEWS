@@ -46,7 +46,10 @@ export interface AuthSvcRestoreClientOptions {
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 export interface AuthSvcRestoreRequest {
-  entity_type: 'user_team' | 'user_team_member';
+  entity_type:
+    | 'user_team'
+    | 'user_team_member'
+    | 'role_dashboard_widget';
   original_id: string;
   payload: Record<string, unknown>;
 }

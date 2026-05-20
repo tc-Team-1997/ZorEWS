@@ -1387,7 +1387,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         .send({ error: "invalid_input", message: "entity_type, original_id, payload required" });
     }
 
-    const { teams } = await getState();
+    const { teams, dashboardWidgets } = await getState();
 
     if (entity_type === "user_team") {
       const team = payload as {
@@ -1469,6 +1469,73 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           .send({ error: "member_exists", team_id: m.team_id, user_id: m.user_id });
       }
       return reply.code(201).send({ entity_type, original_id, restored: true });
+    }
+
+    if (entity_type === "role_dashboard_widget") {
+      const p = payload as {
+        role?: string;
+        widgets?: Array<{ widget_id?: string; sort_order?: number; is_visible?: boolean }>;
+      };
+      if (
+        !p.role ||
+        p.role !== original_id ||
+        !Array.isArray(p.widgets) ||
+        !DASHBOARD_WIDGET_ROLES.includes(p.role as DashboardRole)
+      ) {
+        return reply
+          .code(400)
+          .send({
+            error: "invalid_payload",
+            message: "role + widgets[] required; role must match original_id",
+          });
+      }
+      // Validate every widget row before we touch the store. Same
+      // rules as the PUT handler — be defensive about wire data.
+      const widgets: Array<{ widget_id: string; sort_order: number; is_visible: boolean }> = [];
+      for (const w of p.widgets) {
+        if (
+          !w ||
+          typeof w.widget_id !== "string" ||
+          !w.widget_id.trim() ||
+          typeof w.sort_order !== "number" ||
+          !Number.isFinite(w.sort_order) ||
+          typeof w.is_visible !== "boolean"
+        ) {
+          return reply
+            .code(400)
+            .send({
+              error: "invalid_payload",
+              message: "every widget needs widget_id + numeric sort_order + boolean is_visible",
+            });
+        }
+        widgets.push({
+          widget_id: w.widget_id.trim(),
+          sort_order: w.sort_order,
+          is_visible: w.is_visible,
+        });
+      }
+      // Restore = atomic replace. The CURRENT layout (whatever it is)
+      // gets overwritten — operators must accept this; the SPA's
+      // restore-confirmation dialog warns. We do NOT archive the
+      // overwritten layout here (would loop: restore → archive → user
+      // restores the archive → ...). Operators who want the
+      // overwritten state back can grab the most-recent older
+      // snapshot from the Recycle Bin.
+      try {
+        const stored = dashboardWidgets.replaceForRole({
+          role: p.role as DashboardRole,
+          widgets,
+          updated_by: "recovery:restore",
+        });
+        return reply
+          .code(201)
+          .send({ entity_type, original_id, restored: true, widget_count: stored.length });
+      } catch (err) {
+        const status = (err as { status?: number }).status ?? 500;
+        return reply
+          .code(status)
+          .send({ error: err instanceof Error ? err.message : "restore_failed" });
+      }
     }
 
     return reply
@@ -1769,11 +1836,35 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       });
     }
     const actor = callerSub ? users.findById(callerSub) : undefined;
+    const actorName = actor?.username ?? "admin";
+    // Phase 2e: archive the PRIOR layout BEFORE the replace, so admins
+    // can roll back any layout change. Treats PUT-replacement as a
+    // "soft delete of the prior snapshot" — matches Recovery Center
+    // semantics. Skipped when the prior layout is empty (no-op = no
+    // archive). Best-effort: archive failure logs + proceeds, so the
+    // operator's save isn't blocked by a BFF outage.
+    const { recoveryArchiver } = await getState();
+    const priorLayout = dashboardWidgets.forRole(targetRole as DashboardRole);
+    if (priorLayout.length > 0) {
+      await archiveBeforeDelete(recoveryArchiver, req.log, {
+        module: "auth-svc",
+        entity_type: "role_dashboard_widget",
+        // original_id = role name. There's at most ONE active layout
+        // per role in the store; multiple archived snapshots over
+        // time accumulate in the Recycle Bin.
+        original_id: targetRole,
+        original_table: "app_iam.role_dashboard_widgets",
+        payload: { role: targetRole, widgets: priorLayout },
+        deleted_by: actorName,
+        source_action: "user_initiated",
+        prior_status: "active",
+      });
+    }
     try {
       const stored = dashboardWidgets.replaceForRole({
         role: targetRole as DashboardRole,
         widgets,
-        updated_by: actor?.username ?? "admin",
+        updated_by: actorName,
       });
       return reply.send({ role: targetRole, widgets: stored });
     } catch (err) {

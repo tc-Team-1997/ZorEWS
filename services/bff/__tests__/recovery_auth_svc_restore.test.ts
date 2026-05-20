@@ -437,6 +437,94 @@ describe('Phase 2d end-to-end: user_team_member with missing parent team', () =>
   });
 });
 
+// ─── Phase 2e: role_dashboard_widget end-to-end ──────────────────────
+
+describe('Phase 2e end-to-end: archive → restore for role_dashboard_widget', () => {
+  test('admin clicks Restore on a layout snapshot → BFF adapter forwards to auth-svc with role payload', async () => {
+    _resetRecoveryAdapters();
+    const apiKeyStore = new InMemoryApiKeyStore();
+    const recoveryStore = new InMemoryRecoveryStore();
+    const apiKey = apiKeyStore.create(
+      'BANK_DEMO',
+      { name: 'auth-svc', scopes: ['recovery:archive_internal'] },
+      'admin',
+      NOW,
+    ).key;
+    const stubFetches: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const authSvcRestoreClient = new AuthSvcRestoreClient({
+      baseUrl: 'http://auth-svc.test',
+      restoreKey: 'k',
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(((init as RequestInit).body as string) ?? '{}');
+        stubFetches.push({ url: String(url), body });
+        return new Response(
+          JSON.stringify({
+            entity_type: body.entity_type,
+            original_id: body.original_id,
+            restored: true,
+            widget_count: (body.payload as { widgets: unknown[] }).widgets.length,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    const { app } = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      apiKeyStore,
+      recoveryStore,
+      authSvcRestoreClient,
+      now: () => NOW,
+      getRole: () => 'admin',
+    });
+    // 1. auth-svc archives a prior layout (Phase 2e flow).
+    const archive = await request(app)
+      .post('/v1/svc/recovery/archive')
+      .set('Authorization', `Bearer ${apiKey}`)
+      .send({
+        module: 'auth-svc',
+        entity_type: 'role_dashboard_widget',
+        original_id: 'field_officer',
+        original_table: 'app_iam.role_dashboard_widgets',
+        payload: {
+          role: 'field_officer',
+          widgets: [
+            { widget_id: 'w1', sort_order: 1, is_visible: true },
+            { widget_id: 'w2', sort_order: 2, is_visible: false },
+          ],
+        },
+        deleted_by: 'alice.admin',
+      });
+    expect(archive.status).toBe(201);
+    const recovery_id = archive.body.body.recovery_id;
+
+    // 2. Admin clicks Restore.
+    const restore = await request(app)
+      .post(`/v1/recovery/${recovery_id}/restore`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .set('x-apex-user', 'alice.admin');
+    expect(restore.status).toBe(200);
+
+    // 3. Adapter forwarded with the role-keyed payload.
+    expect(stubFetches.length).toBe(1);
+    expect(stubFetches[0]!.body.entity_type).toBe('role_dashboard_widget');
+    expect(stubFetches[0]!.body.original_id).toBe('field_officer');
+    const payload = stubFetches[0]!.body.payload as {
+      role: string;
+      widgets: Array<{ widget_id: string }>;
+    };
+    expect(payload.role).toBe('field_officer');
+    expect(payload.widgets.map((w) => w.widget_id).sort()).toEqual(['w1', 'w2']);
+
+    // 4. Recovery row is restored.
+    const rec = await recoveryStore.get('BANK_DEMO', recovery_id);
+    expect(rec!.status).toBe('restored');
+  });
+});
+
 describe('Phase 2d wiring: no auth-svc client → no adapters', () => {
   test('when no authSvcRestoreClient is configured, restoring user_team returns 501 no_adapter', async () => {
     _resetRecoveryAdapters();

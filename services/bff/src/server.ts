@@ -1259,6 +1259,27 @@ export function makeApp(deps: AppDeps = {}) {
     } catch {
       /* already registered */
     }
+    try {
+      // Phase 2e: dashboard widget layout snapshot. Archive happens on
+      // every PUT /auth/dashboard-widgets/:role that replaces a
+      // non-empty prior layout — operators get a rollback path for
+      // any layout edit, not just delete-style operations.
+      registerRecoveryAdapter({
+        entity_type: 'role_dashboard_widget',
+        display_name: 'Dashboard widget layout (per role)',
+        module: 'auth-svc',
+        original_table: 'app_iam.role_dashboard_widgets',
+        restore: async (record) => {
+          await authSvcRestoreClient.restore({
+            entity_type: 'role_dashboard_widget',
+            original_id: record.original_id,
+            payload: record.payload,
+          });
+        },
+      });
+    } catch {
+      /* already registered */
+    }
   }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
@@ -19310,6 +19331,41 @@ export function makeApp(deps: AppDeps = {}) {
       const page = req.query.page ? Math.max(1, Number(req.query.page) || 1) : 1;
       const page_size = req.query.page_size ? Math.max(1, Math.min(100, Number(req.query.page_size) || 20)) : 20;
       const out = reportScheduleStore.list(req.tenant!.tenant_id, page, page_size);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/reports/schedules/cadence-format-matrix (T6 M12.17) —
+   *  2D cross-tab over the M12.2 schedule store combining 5
+   *  ScheduleCadence × 4 ReportFormat = 20 cells. Each schedule lives
+   *  in exactly one (cadence, format) cell. Per-row {cadence, total,
+   *  by_format (4 keys at 0 — stable grid), formats_without[] canonical,
+   *  schedule_ids[] sorted asc, enabled_count, disabled_count}. Per-col
+   *  {format, total, by_cadence (5 keys at 0), cadences_without[]
+   *  canonical, schedule_ids[] sorted asc, enabled_count, disabled_count}.
+   *  Envelope: peak_cell (canonical iteration tie-break: cadences in
+   *  VALID_CADENCES order × formats in ALL_REPORT_FORMATS order; null
+   *  on empty), most_versatile_cadence (most distinct formats; canonical
+   *  tie-break; null on empty), most_universal_format (most distinct
+   *  cadences; canonical tie-break; null on empty), empty_cells[] in
+   *  canonical cadence × format row-major order. Mirror of M12.14 /
+   *  M3.14 / M15.14 / M14.28 / M5.17 / M13.15 matrix pattern for the
+   *  recurring schedule surface. Drives BIL ops "do we have daily PDF
+   *  schedules? are quarterly schedules always xlsx?" coverage view. */
+  app.get(
+    '/v1/reports/schedules/cadence-format-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportScheduleCadenceFormatMatrixFromStore } =
+        require('./report_schedule_cadence_format_matrix') as
+        typeof import('./report_schedule_cadence_format_matrix');
+      const out = buildReportScheduleCadenceFormatMatrixFromStore(
+        reportScheduleStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(out, ctx));
     },
   );
