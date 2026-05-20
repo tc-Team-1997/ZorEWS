@@ -17364,6 +17364,301 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase B.2 — External Bureau Master Setup ────────────────────────
+  //
+  // PDF §8 Master Setup item 6. Per-tenant config for CIBIL/CRIF/
+  // EXPERIAN/EQUIFAX. Distinct from M14.5 BureauAdapter (read-side
+  // per-customer report fetcher); this is the WEIGHT/CONFIG layer
+  // that M6.x scoring can opt-in to as an overlay.
+
+  /** GET /v1/master/bureaus/types — closed enums. */
+  app.get(
+    '/v1/master/bureaus/types',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            bureau_types: [...ALL_BUREAU_TYPES],
+            refresh_cadences: [...ALL_BUREAU_REFRESH_CADENCES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/bureaus/weight-overlay — computed normalised weight
+   *  map for the M6.x scoring overlay; SPA shows the effective
+   *  contribution per bureau. */
+  app.get(
+    '/v1/master/bureaus/weight-overlay',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const overlay = computeBureauWeightOverlay(bureauMasterStore, req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            ...overlay,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/bureaus?enabled=&include_deleted= */
+  app.get(
+    '/v1/master/bureaus',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const enRaw = req.query.enabled;
+      let enabled: boolean | undefined;
+      if (enRaw !== undefined) {
+        if (enRaw === 'true') enabled = true;
+        else if (enRaw === 'false') enabled = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_enabled', message: 'enabled must be true|false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      const items = bureauMasterStore.list(req.tenant!.tenant_id, { include_deleted, enabled });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/bureaus/:bureau_id (path-param uppercased). */
+  app.get(
+    '/v1/master/bureaus/:bureau_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const bRaw = (req.params.bureau_id ?? '').toUpperCase();
+      if (!isBureauType(bRaw)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_bureau', message: `unknown bureau_id: ${req.params.bureau_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const entry = bureauMasterStore.get(req.tenant!.tenant_id, bRaw);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_bureau', message: `bureau ${bRaw} not configured`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/master/bureaus. */
+  app.post(
+    '/v1/master/bureaus',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = bureauMasterStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof BureauMasterError) {
+          if (e.code === 'duplicate_bureau') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_bureau', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/master/bureaus/:bureau_id. */
+  app.patch(
+    '/v1/master/bureaus/:bureau_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const bRaw = (req.params.bureau_id ?? '').toUpperCase();
+      if (!isBureauType(bRaw)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_bureau', message: `unknown bureau_id: ${req.params.bureau_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = bureauMasterStore.update(
+          req.tenant!.tenant_id,
+          bRaw,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof BureauMasterError) {
+          if (e.code === 'unknown_bureau') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_bureau', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/master/bureaus/:bureau_id — soft-delete + archive. */
+  app.delete(
+    '/v1/master/bureaus/:bureau_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const bRaw = (req.params.bureau_id ?? '').toUpperCase();
+      if (!isBureauType(bRaw)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_bureau', message: `unknown bureau_id: ${req.params.bureau_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const tombstoned = bureauMasterStore.softDelete(
+          req.tenant!.tenant_id,
+          bRaw,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'bureau_master',
+            original_id: bRaw,
+            original_table: 'app_master.bureaus',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/master/bureaus/:bureau_id',
+            prior_status: tombstoned.enabled ? 'enabled' : 'disabled',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof BureauMasterError) {
+          if (e.code === 'unknown_bureau') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_bureau', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   // ── Phase A.3 — Data Quality (DQ) Engine ────────────────────────────
   //
   // PDF §6 Ecosystem item E5. Operator-visible runtime for declarative

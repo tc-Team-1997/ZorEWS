@@ -9,14 +9,12 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A.1 | A.2 | A.3 | A.4 | After B.1 (2026-05-21) |
-|---|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | ~80% | ~84% | **~86%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 25/49 | 26/49 | 27/49 | 28/49 | **29/49** |
-| PDF surfaces partially shipped (⚠️) | 19/49 | 18/49 | 17/49 | 17/49 | 17/49 | 17/49 |
-| PDF surfaces not shipped (❌) | 6/49 | 5/49 | 4/49 | 3/49 | 2/49 | 2/49 |
-| BFF route count delta | — | +6 | +12 | +22 | +33 | **+41** (Customer master adds 8 more) |
-| BFF test suite | 8087 | 8129 | 8175 | 8286 | 8333 | **8392** ✅ |
+| Metric | Initial | A.1 | A.2 | A.3 | A.4 | B.1 | After B.2 (2026-05-21) |
+|---|---|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | ~80% | ~84% | ~86% | **~88%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 25/49 | 26/49 | 27/49 | 28/49 | 29/49 | **30/49** |
+| BFF route count delta | — | +6 | +12 | +22 | +33 | +41 | **+49** (Bureau master adds 8) |
+| BFF test suite | 8087 | 8129 | 8175 | 8286 | 8333 | 8392 | **8441** ✅ clean run |
 
 ## Phase A — COMPLETE ✅
 
