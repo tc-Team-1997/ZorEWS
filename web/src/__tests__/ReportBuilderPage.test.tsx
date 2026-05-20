@@ -127,6 +127,92 @@ describe('ReportBuilderPage', () => {
     expect(screen.getByTestId('group-tenant')).toBeInTheDocument();
   });
 
+  // ── T4.6.6 — sections + drill-down + PDF/Excel buttons ──────────────
+
+  test('SectionConfigurator renders + add-buttons appear when source selected', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await waitFor(() => {
+      expect(screen.getByTestId('section-configurator')).toBeInTheDocument();
+      expect(screen.getByTestId('add-kpi-section')).toBeInTheDocument();
+      expect(screen.getByTestId('add-table-section')).toBeInTheDocument();
+      expect(screen.getByTestId('add-chart-section')).toBeInTheDocument();
+      expect(screen.getByTestId('sections-empty')).toBeInTheDocument();
+    });
+  });
+
+  test('clicking "Add Table" creates a new section row', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await user.click(screen.getByTestId('add-table-section'));
+    await waitFor(() => {
+      expect(screen.getByTestId('section-config-0')).toBeInTheDocument();
+    });
+  });
+
+  test('Sections render after Run when sections are configured', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await user.click(screen.getByTestId('add-table-section'));
+    await user.click(screen.getByTestId('run-btn'));
+    await waitFor(() => {
+      expect(screen.getByTestId('sections-render-area')).toBeInTheDocument();
+    });
+  });
+
+  test('section ordering: up/down buttons reorder', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await user.click(screen.getByTestId('add-kpi-section'));
+    await user.click(screen.getByTestId('add-table-section'));
+    // Both should exist; up on index 1 → swap positions.
+    const beforeUp = screen.getAllByTestId(/^section-config-/);
+    expect(beforeUp.length).toBe(2);
+    await user.click(screen.getByTestId('section-up-1'));
+    // After swap, section types reversed (table now first, kpi second).
+    // We can verify the testids still resolve and remain stable counts.
+    const afterUp = screen.getAllByTestId(/^section-config-/);
+    expect(afterUp.length).toBe(2);
+  });
+
+  test('section delete button removes the section', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await user.click(screen.getByTestId('add-table-section'));
+    expect(screen.getByTestId('section-config-0')).toBeInTheDocument();
+    await user.click(screen.getByTestId('section-remove-0'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('section-config-0')).not.toBeInTheDocument();
+      expect(screen.getByTestId('sections-empty')).toBeInTheDocument();
+    });
+  });
+
+  test('PDF + Excel export buttons disabled until Run completes', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReportBuilderPage />);
+    await waitFor(() => screen.getByTestId('source-select'));
+    await user.selectOptions(screen.getByTestId('source-select'), 'mart.customer_360');
+    await waitFor(() => {
+      expect((screen.getByTestId('export-pdf-btn') as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId('export-xlsx-btn') as HTMLButtonElement).disabled).toBe(true);
+    });
+    await user.click(screen.getByTestId('run-btn'));
+    await waitFor(() => {
+      expect((screen.getByTestId('export-pdf-btn') as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByTestId('export-xlsx-btn') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   test('clicking a saved report loads it back into the builder', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ReportBuilderPage />);

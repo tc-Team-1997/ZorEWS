@@ -1,22 +1,25 @@
 // web/src/modules/reports/builder/ReportBuilderPage.tsx
 //
-// T4.6.5 — Self-service report builder page. Three-pane layout:
+// T4.6.5 + T4.6.6 — Self-service report builder page. Three-pane layout:
 //   - Left: saved-reports list (collapsible by visibility tier).
-//   - Middle: source picker + filter tree + group_by + metrics.
-//   - Right: preview pane showing compiled SQL (admin) + projection +
-//     "Run report" CTA.
+//   - Middle: source picker + filter tree + group_by + metrics +
+//             section configurator.
+//   - Right: run + preview pane with admin SQL drawer + section
+//             renderers + PDF/Excel/CSV export.
 //
-// T4.6.6 (next session) wires the section configurator (chart/table/
-// grid) + drill-down + PDF/Excel export buttons. This commit ships the
-// foundation + an inline raw-table preview so the page is usable today.
+// T4.6.6 added: section configurator (chart/table/kpi/grid), drill-
+// down navigation across drill_targets[], PDF + Excel export reusing
+// jspdf/jspdf-autotable/write-excel-file already in the bundle.
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Save, RefreshCw, Database, FileDown } from 'lucide-react';
+import { Save, RefreshCw, Database, FileDown, FileText, Sheet } from 'lucide-react';
 import { Button, Input, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SavedReportsList } from './SavedReportsList';
 import { FilterTreeBuilder } from './FilterTreeBuilder';
+import { SectionConfigurator, SectionRenderer } from './ReportSections';
+import { downloadBuilderReportPdf, downloadBuilderReportXlsx } from './builderExport';
 import {
   reportsBuilderApi,
   type CreateSavedReportInput,
@@ -24,6 +27,7 @@ import {
   type ReportDataSource,
   type ReportDefinition,
   type ReportResult,
+  type ReportSection,
   type ReportVisibility,
   type SavedReport,
 } from './api';
@@ -38,6 +42,8 @@ export function ReportBuilderPage(): JSX.Element {
   const [visibility, setVisibility] = useState<ReportVisibility>('private');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [sections, setSections] = useState<ReportSection[]>([]);
+  const [selectedSavedDef, setSelectedSavedDef] = useState<SavedReport | null>(null);
 
   // Catalog (platform-static — fetch once).
   const catalogQuery = useQuery({
@@ -65,8 +71,9 @@ export function ReportBuilderPage(): JSX.Element {
       source_id: selectedSourceId,
       filters,
       limit,
+      sections,
     };
-  }, [selectedSourceId, filters, limit]);
+  }, [selectedSourceId, filters, limit, sections]);
 
   // Run mutation.
   const runMutation = useMutation({
@@ -116,9 +123,11 @@ export function ReportBuilderPage(): JSX.Element {
   // Load saved definition into the builder state.
   const handleSelectSaved = (saved: SavedReport) => {
     setSelectedReportId(saved.report_id);
+    setSelectedSavedDef(saved);
     setSelectedSourceId(saved.definition.source_id);
     setFilters(saved.definition.filters);
     setLimit(saved.definition.limit ?? 100);
+    setSections(saved.definition.sections ?? []);
     setReportName(saved.name);
     setReportDescription(saved.description);
     setVisibility(saved.visibility);
@@ -129,14 +138,50 @@ export function ReportBuilderPage(): JSX.Element {
   // Reset to blank.
   const handleNewReport = () => {
     setSelectedReportId(null);
+    setSelectedSavedDef(null);
     setSelectedSourceId(null);
     setFilters(undefined);
     setLimit(100);
+    setSections([]);
     setReportName('');
     setReportDescription('');
     setVisibility('private');
     setRunError(null);
     runMutation.reset();
+  };
+
+  // Drill-down: filter THIS source's view by the clicked value's
+  // counterpart on the target source. Simplest UX: switch to the
+  // target source + pre-populate a filter on via_field.
+  const handleDrillDown = (target_source_id: string, via_field: string, value: unknown) => {
+    handleNewReport();
+    setSelectedSourceId(target_source_id);
+    setFilters({
+      op: 'AND',
+      children: [
+        {
+          op: 'eq',
+          field: via_field,
+          value: value as never,
+        },
+      ],
+    });
+    setReportName(`Drill-down: ${via_field}=${String(value)}`);
+  };
+
+  // PDF + Excel exports.
+  const handleExportPdf = () => {
+    if (!runMutation.data) return;
+    downloadBuilderReportPdf(runMutation.data, selectedSavedDef);
+  };
+
+  const handleExportXlsx = async () => {
+    if (!runMutation.data) return;
+    try {
+      await downloadBuilderReportXlsx(runMutation.data, selectedSavedDef);
+    } catch (err) {
+      setRunError((err as Error).message || 'Excel export failed');
+    }
   };
 
   const handleSave = () => {
@@ -230,6 +275,15 @@ export function ReportBuilderPage(): JSX.Element {
           )}
 
           {selectedSource && (
+            <SectionConfigurator
+              source={selectedSource}
+              result={result ?? null}
+              sections={sections}
+              onChange={setSections}
+            />
+          )}
+
+          {selectedSource && (
             <Panel data-testid="save-panel">
               <h2 className="text-sm font-semibold text-ink mb-3">Save report</h2>
               <div className="space-y-2">
@@ -317,6 +371,26 @@ export function ReportBuilderPage(): JSX.Element {
                   <FileDown className="h-3 w-3 mr-1" aria-hidden />
                   CSV
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleExportPdf}
+                  disabled={!result}
+                  data-testid="export-pdf-btn"
+                >
+                  <FileText className="h-3 w-3 mr-1" aria-hidden />
+                  PDF
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleExportXlsx}
+                  disabled={!result}
+                  data-testid="export-xlsx-btn"
+                >
+                  <Sheet className="h-3 w-3 mr-1" aria-hidden />
+                  Excel
+                </Button>
               </div>
             </div>
 
@@ -384,6 +458,21 @@ export function ReportBuilderPage(): JSX.Element {
               </div>
             )}
           </Panel>
+
+          {/* Configured sections render below the run preview. */}
+          {result && selectedSource && sections.length > 0 && (
+            <div className="space-y-3" data-testid="sections-render-area">
+              {sections.map((s) => (
+                <SectionRenderer
+                  key={s.section_id}
+                  section={s}
+                  source={selectedSource}
+                  result={result}
+                  onDrillDown={handleDrillDown}
+                />
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>
