@@ -9,12 +9,21 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A done | B done | C.1 | After C.2 |
-|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~93% | **~94%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 33/49 | **34/49** |
-| BFF route count delta | — | +33 | +61 | +69 | **+70** (AML dashboard adds 1) |
-| BFF test suite | 8087 | 8333 | 8606 | 8666 | **8687** ✅ |
+| Metric | Initial | A done | B done | C done (2026-05-21) |
+|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | **~95%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | **35/49** |
+| BFF route count delta | — | +33 | +61 | **+71** (Fraud dashboard adds 1) |
+| BFF test suite | 8087 | 8333 | 8606 | **8718** ✅ |
+
+## Phase C — COMPLETE ✅
+
+| Sub-phase | Module | Routes | Tests |
+|---|---|---|---|
+| C.1 STR Reporting | `aml/str_reporting.ts` | 8 | 60 |
+| C.2 AML Dashboard | `aml/aml_dashboard.ts` (composer) | 1 | 21 |
+| C.3 Fraud Dashboard | `fraud/fraud_dashboard.ts` (composer) | 1 | 31 |
+| **Total** | **3 modules** | **10 routes** | **112 tests** |
 
 ## Phase B — COMPLETE ✅
 

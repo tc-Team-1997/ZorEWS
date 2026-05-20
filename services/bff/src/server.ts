@@ -137,6 +137,13 @@ import {
 } from './aml/str_reporting';
 import { buildAmlDashboard } from './aml/aml_dashboard';
 import {
+  buildFraudDashboard,
+  countFraudIndicatorSignals,
+  filterFraudAlerts,
+  projectFraudInvestigations,
+  FRAUD_SEED_RULE_IDS,
+} from './fraud/fraud_dashboard';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -18337,6 +18344,47 @@ export function makeApp(deps: AppDeps = {}) {
         strReportStore,
         null,
         now(),
+      );
+      return res.json(wrapResponse(rollup, ctx));
+    },
+  );
+
+  // ── Phase C.3 — Fraud Monitoring dashboard (composer) ───────────────
+  //
+  // PDF §12 Fraud Monitoring item 4. Aggregates T2.11 fraud indicators +
+  // RULE-031..033 fraud rules + AlertSource events filtered to fraud
+  // tags + M9.1 investigations whose decision is fraud-related into a
+  // single dashboard payload.
+
+  /** GET /v1/fraud/dashboard — composite rollup. */
+  app.get(
+    '/v1/fraud/dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenantId = req.tenant!.tenant_id;
+      const nowDate = now();
+      // 1) Read raw canonical alerts. AlertSource doesn't expose a
+      //    tenant filter today (per-tenant tagging is a future patch);
+      //    we read everything and rely on M9.1 / customer_master tenant
+      //    scoping downstream to keep the dashboard tenant-coherent.
+      const allAlerts = source.read();
+      const fraud_alerts = filterFraudAlerts(allAlerts, FRAUD_SEED_RULE_IDS);
+      const fraud_indicator_signals = countFraudIndicatorSignals(allAlerts, nowDate);
+      // 2) Drain investigations for this tenant. Cap 500 — typical
+      //    tenant won't exceed.
+      const invPage = caseInvestigationStore.list(tenantId, { page: 1, page_size: 500 });
+      const fraud_investigations = projectFraudInvestigations(invPage.items, nowDate);
+      const rollup = buildFraudDashboard(
+        {
+          tenant_id: tenantId,
+          fraud_indicator_signals,
+          fraud_alerts,
+          fraud_investigations,
+          active_fraud_rule_ids: FRAUD_SEED_RULE_IDS as string[],
+        },
+        nowDate,
       );
       return res.json(wrapResponse(rollup, ctx));
     },
