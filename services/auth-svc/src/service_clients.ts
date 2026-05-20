@@ -77,6 +77,24 @@ export interface IServiceClientStore {
   list?: (tenantId?: string) => ServiceClientView[];
   create?: (input: CreateServiceClientInput) => Promise<ServiceClientWithSecret>;
   delete?: (tenantId: string, clientId: string) => boolean;
+  /**
+   * Recovery Center Phase 2f — read the raw ServiceClient INCLUDING the
+   * inactive ones + the secret hash. Used by the DELETE route to
+   * snapshot the row into app_recovery.deleted_records before the
+   * destructive op. NOT exposed via any HTTP route — internal-only.
+   */
+  getInternal?: (tenantId: string, clientId: string) => ServiceClient | undefined;
+  /**
+   * Recovery Center Phase 2f — re-insert a previously archived row.
+   * Returns false on conflict (client_id already exists in tenant).
+   * CONSERVATIVE SEMANTIC: regardless of the archive's `active` flag,
+   * restored clients ALWAYS come back with active=false. This
+   * eliminates the "restore re-introduces a working credential"
+   * security concern: the hash is preserved (audit-historic-record
+   * intact), but the row won't authenticate until an admin
+   * explicitly re-activates by minting a new secret via create().
+   */
+  restore?: (client: ServiceClient) => boolean;
 }
 
 const SEED_CLIENTS: Array<{
@@ -162,6 +180,21 @@ export class InMemoryServiceClientStore implements IServiceClientStore {
 
   delete(tenantId: string, clientId: string): boolean {
     return this.clients.delete(key(tenantId, clientId));
+  }
+
+  getInternal(tenantId: string, clientId: string): ServiceClient | undefined {
+    // Bypasses the active filter in find(). Used only by the DELETE
+    // route to snapshot the row pre-delete; not exposed externally.
+    return this.clients.get(key(tenantId, clientId));
+  }
+
+  restore(client: ServiceClient): boolean {
+    const k = key(client.tenant_id, client.client_id);
+    if (this.clients.has(k)) return false;
+    // FORCE active=false on restore. See interface JSDoc for the
+    // security rationale.
+    this.clients.set(k, { ...client, active: false });
+    return true;
   }
 }
 
@@ -290,6 +323,44 @@ export class PgServiceClientStore implements IServiceClientStore {
       .catch((err) =>
         // eslint-disable-next-line no-console
         console.warn(`[pg-service-client-store] failed to delete ${tenantId}/${clientId}`, err),
+      );
+    return true;
+  }
+
+  getInternal(tenantId: string, clientId: string): ServiceClient | undefined {
+    return this.cache.get(key(tenantId, clientId));
+  }
+
+  restore(client: ServiceClient): boolean {
+    const k = key(client.tenant_id, client.client_id);
+    if (this.cache.has(k)) return false;
+    // FORCE active=false on restore. See interface JSDoc.
+    const restored: ServiceClient = { ...client, active: false };
+    this.cache.set(k, restored);
+    // Write-through fire-and-forget — same pattern as other Pg stores
+    // in this codebase. ON CONFLICT DO NOTHING is defensive: if a
+    // race re-inserts the row, the cache stays consistent because we
+    // already set it above.
+    void this.pool
+      .query(
+        `INSERT INTO app_iam.service_clients
+           (client_id, tenant_id, client_secret_hash, display_name, scopes, active)
+         VALUES ($1, $2, $3, $4, $5, false)
+         ON CONFLICT (tenant_id, client_id) DO NOTHING`,
+        [
+          restored.client_id,
+          restored.tenant_id,
+          restored.client_secret_hash,
+          restored.display_name,
+          restored.scopes,
+        ],
+      )
+      .catch((err) =>
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[pg-service-client-store] failed to restore ${restored.tenant_id}/${restored.client_id}`,
+          err,
+        ),
       );
     return true;
   }

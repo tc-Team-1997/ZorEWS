@@ -1538,6 +1538,71 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       }
     }
 
+    if (entity_type === "service_client") {
+      const p = payload as {
+        tenant_id?: string;
+        client_id?: string;
+        display_name?: string;
+        scopes?: string[];
+        client_secret_hash?: string;
+        active?: boolean;
+      };
+      if (
+        !p.tenant_id ||
+        !p.client_id ||
+        !p.display_name ||
+        !Array.isArray(p.scopes) ||
+        !p.client_secret_hash
+      ) {
+        return reply.code(400).send({
+          error: "invalid_payload",
+          message:
+            "service_client payload needs tenant_id + client_id + display_name + scopes[] + client_secret_hash",
+        });
+      }
+      // Composite original_id cross-check — same defensive pattern as
+      // user_team_member; refuses a bug in the BFF adapter quietly
+      // restoring into the wrong tenant.
+      if (original_id !== `${p.tenant_id}:${p.client_id}`) {
+        return reply.code(400).send({
+          error: "invalid_payload",
+          message: `original_id "${original_id}" doesn't match tenant_id+client_id`,
+        });
+      }
+      const store = await getServiceClientStore();
+      if (!store.restore) {
+        return reply.code(501).send({
+          error: "not_implemented",
+          message: "service-client store does not support restore",
+        });
+      }
+      // restore() forces active=false in the store impl — operator must
+      // mint a new secret via POST /auth/service-clients to make the
+      // credential authenticate again. See store JSDoc for rationale.
+      const ok = store.restore({
+        client_id: p.client_id,
+        tenant_id: p.tenant_id,
+        display_name: p.display_name,
+        scopes: p.scopes,
+        client_secret_hash: p.client_secret_hash,
+        active: !!p.active, // ignored by restore() but kept on the type
+      });
+      if (!ok) {
+        return reply.code(409).send({
+          error: "client_exists",
+          tenant_id: p.tenant_id,
+          client_id: p.client_id,
+        });
+      }
+      return reply.code(201).send({
+        entity_type,
+        original_id,
+        restored: true,
+        // SPA shows this to confirm the conservative semantic to the operator.
+        active_after_restore: false,
+      });
+    }
+
     return reply
       .code(400)
       .send({
@@ -2118,13 +2183,43 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   app.delete<{ Params: { tenant_id: string; client_id: string } }>(
     "/auth/service-clients/:tenant_id/:client_id",
     async (req, reply) => {
-      const { signer, audit } = await getState();
+      const { signer, audit, users, recoveryArchiver } = await getState();
       if (!(await requireAdmin(req, reply, signer))) return;
       const store = await getServiceClientStore();
       if (!store.delete) {
         return reply.code(501).send({
           error: "not_implemented",
           message: "service-client store does not support deletion",
+        });
+      }
+      // Phase 2f: snapshot the row BEFORE delete so the Recovery Center
+      // can re-insert later. getInternal() bypasses the active filter
+      // so we archive inactive clients too. Skipped when the store
+      // doesn't expose getInternal (older impls) — we just don't
+      // archive and proceed with the delete. Same best-effort posture
+      // as the teams adopter: archive failure logs + the delete still
+      // succeeds.
+      const snapshot = store.getInternal?.(
+        req.params.tenant_id,
+        req.params.client_id,
+      );
+      if (snapshot) {
+        const actor = await extractCallerUsername(req, signer, users);
+        await archiveBeforeDelete(recoveryArchiver, req.log, {
+          module: "auth-svc",
+          entity_type: "service_client",
+          // Composite original_id since (tenant_id, client_id) is the PK.
+          original_id: `${snapshot.tenant_id}:${snapshot.client_id}`,
+          original_table: "app_iam.service_clients",
+          // Full row — including the secret hash. The Recovery Center
+          // table already lives in admin-only RBAC space, same trust
+          // boundary as app_iam.service_clients itself. Restore
+          // forces active=false anyway so the hash being preserved
+          // doesn't grant access.
+          payload: snapshot as unknown as Record<string, unknown>,
+          deleted_by: actor,
+          source_action: "user_initiated",
+          prior_status: snapshot.active ? "active" : "inactive",
         });
       }
       const ok = store.delete(req.params.tenant_id, req.params.client_id);

@@ -49,7 +49,8 @@ export interface AuthSvcRestoreRequest {
   entity_type:
     | 'user_team'
     | 'user_team_member'
-    | 'role_dashboard_widget';
+    | 'role_dashboard_widget'
+    | 'service_client';
   original_id: string;
   payload: Record<string, unknown>;
 }

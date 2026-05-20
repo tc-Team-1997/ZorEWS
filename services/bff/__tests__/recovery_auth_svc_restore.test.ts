@@ -525,6 +525,90 @@ describe('Phase 2e end-to-end: archive → restore for role_dashboard_widget', (
   });
 });
 
+// ─── Phase 2f: service_client end-to-end ────────────────────────────
+
+describe('Phase 2f end-to-end: archive → restore for service_client', () => {
+  test('admin clicks Restore on a service_client snapshot → BFF adapter forwards to auth-svc', async () => {
+    _resetRecoveryAdapters();
+    const apiKeyStore = new InMemoryApiKeyStore();
+    const recoveryStore = new InMemoryRecoveryStore();
+    const apiKey = apiKeyStore.create(
+      'BANK_DEMO',
+      { name: 'auth-svc', scopes: ['recovery:archive_internal'] },
+      'admin',
+      NOW,
+    ).key;
+    const stubFetches: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const authSvcRestoreClient = new AuthSvcRestoreClient({
+      baseUrl: 'http://auth-svc.test',
+      restoreKey: 'k',
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(((init as RequestInit).body as string) ?? '{}');
+        stubFetches.push({ url: String(url), body });
+        return new Response(
+          JSON.stringify({
+            entity_type: body.entity_type,
+            original_id: body.original_id,
+            restored: true,
+            active_after_restore: false, // auth-svc always restores inactive
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    const { app } = makeApp({
+      source: new StaticSource([]),
+      evaluator: new StubEvaluator(),
+      riskProfile: new StubRiskProfileSource(),
+      caseAction: new UnavailableCaseActionSink(),
+      apiKeyStore,
+      recoveryStore,
+      authSvcRestoreClient,
+      now: () => NOW,
+      getRole: () => 'admin',
+    });
+    const archive = await request(app)
+      .post('/v1/svc/recovery/archive')
+      .set('Authorization', `Bearer ${apiKey}`)
+      .send({
+        module: 'auth-svc',
+        entity_type: 'service_client',
+        original_id: 'BANK_DEMO:test-client',
+        original_table: 'app_iam.service_clients',
+        payload: {
+          tenant_id: 'BANK_DEMO',
+          client_id: 'test-client',
+          display_name: 'Test',
+          scopes: ['alerts:read'],
+          client_secret_hash: '$argon2id$mock-hash',
+          active: true,
+        },
+        deleted_by: 'alice.admin',
+      });
+    expect(archive.status).toBe(201);
+    const recovery_id = archive.body.body.recovery_id;
+    const restore = await request(app)
+      .post(`/v1/recovery/${recovery_id}/restore`)
+      .set('X-Tenant-ID', 'BANK_DEMO')
+      .set('X-Channel', 'API')
+      .set('x-apex-user', 'alice.admin');
+    expect(restore.status).toBe(200);
+
+    // Adapter forwarded the request with the composite original_id +
+    // full row payload (including hash) intact.
+    expect(stubFetches.length).toBe(1);
+    expect(stubFetches[0]!.body.entity_type).toBe('service_client');
+    expect(stubFetches[0]!.body.original_id).toBe('BANK_DEMO:test-client');
+    const fwd = stubFetches[0]!.body.payload as { client_id: string; client_secret_hash: string };
+    expect(fwd.client_id).toBe('test-client');
+    expect(fwd.client_secret_hash).toBe('$argon2id$mock-hash');
+
+    // Recovery row marked restored.
+    const rec = await recoveryStore.get('BANK_DEMO', recovery_id);
+    expect(rec!.status).toBe('restored');
+  });
+});
+
 describe('Phase 2d wiring: no auth-svc client → no adapters', () => {
   test('when no authSvcRestoreClient is configured, restoring user_team returns 501 no_adapter', async () => {
     _resetRecoveryAdapters();
