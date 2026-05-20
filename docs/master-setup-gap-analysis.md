@@ -9,12 +9,33 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A.x done | B.1 | B.2 | After B.3 (2026-05-21) |
-|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~86% | ~88% | **~90%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 29/49 | 30/49 | **31/49** |
-| BFF route count delta | — | +33 | +41 | +49 | **+55** (Account master adds 6) |
-| BFF test suite | 8087 | 8333 | 8392 | 8441 | **8564** ✅ clean run |
+| Metric | Initial | A done | B.1 | B.2 | B.3 | After B.4 (2026-05-21) |
+|---|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~86% | ~88% | ~90% | **~92%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 29/49 | 30/49 | 31/49 | **32/49** |
+| BFF route count delta | — | +33 | +41 | +49 | +55 | **+61** (Policy master adds 6) |
+| BFF test suite | 8087 | 8333 | 8392 | 8441 | 8564 | **8606** ✅ |
+
+## Phase B — COMPLETE ✅
+
+All 4 master-data CRUD items shipped end-to-end:
+
+| Sub-phase | Module | Routes | Tests | Schema |
+|---|---|---|---|---|
+| B.1 (Customer) | `customer_master.ts` | 8 | 59 | `028_master_customers.sql` |
+| B.2 (Bureau) | `bureau_master.ts` | 8 | 49 | `030_master_bureaus.sql` |
+| B.3 (Account) | `account_master.ts` | 6 | 41 | `031_master_accounts.sql` |
+| B.4 (Policy) | `policy_master.ts` | 6 | 42 | `032_master_policies.sql` |
+| **Total** | **4 modules** | **28 routes** | **191 tests** | **4 migrations** |
+
+Combined with Phase A (4 greenfield modules + 33 routes + 200 tests + 4 migrations), the entire backend gap for PDF master setup is now closed:
+- **8 new BFF modules** under `services/bff/src/master/` + `src/dq/` + `src/recon/`
+- **61 new routes** (all enveloped, audit:read admin-only)
+- **391 new jest tests** (all passing)
+- **8 new SQL migrations** in dedicated schemas (`app_master`, `app_dq`, `app_recon`)
+- **8 new Recovery Center adapters** registered
+- Overall PDF coverage 74% → **92%**
+- Zero changes to shipped runtime (M3/M4/M6/M11/M14.x/dbt all untouched)
 
 ## Phase A — COMPLETE ✅
 

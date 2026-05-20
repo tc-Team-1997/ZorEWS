@@ -65,6 +65,7 @@ describe('/v1/recovery — empty store', () => {
     //   Phase B.1: customer_master (BFF-local, always registered)
     //   Phase B.2: bureau_master (BFF-local, always registered)
     //   Phase B.3: account_master (BFF-local, always registered)
+    //   Phase B.4: policy_master (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
@@ -73,6 +74,7 @@ describe('/v1/recovery — empty store', () => {
       'customer_master',
       'dq_rule',
       'geography_master',
+      'policy_master',
       'recon_definition',
       'saved_scenario',
       'sector_master',
