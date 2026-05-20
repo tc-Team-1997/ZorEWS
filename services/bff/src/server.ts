@@ -72,6 +72,10 @@ import {
 } from './recovery/adapters';
 import { RecoveryError, RestoreConflictError } from './recovery/types';
 import { recordRecoveryAudit } from './recovery/audit';
+import {
+  AuthSvcRestoreClient,
+  makeAuthSvcRestoreClientFromEnv,
+} from './recovery/auth_svc_restore_client';
 import { WebhookDispatcher } from './webhooks/dispatcher';
 import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
@@ -959,6 +963,16 @@ export interface AppDeps {
   webhookStore?: IWebhookStore;
   recoveryStore?: RecoveryStore;
   /**
+   * Phase 2d cross-service restore client (BFF → auth-svc). When
+   * provided, makeApp registers RecoveryAdapter entries for
+   * `user_team` + `user_team_member` that HTTP-call back through
+   * this client. When undefined, falls back to env-driven init
+   * (AUTH_SVC_BASE_URL + AUTH_SVC_RECOVERY_RESTORE_KEY); when those
+   * are unset too, no adapters are registered and Restore on an
+   * auth-svc row returns 501 no_adapter (fail-closed).
+   */
+  authSvcRestoreClient?: AuthSvcRestoreClient;
+  /**
    * Override for tests — webhook dispatcher. Tests inject a custom
    * fetch + zero retry-delays so they don't hang for 21s on an HTTP
    * failure path.
@@ -1199,6 +1213,52 @@ export function makeApp(deps: AppDeps = {}) {
     });
   } catch {
     /* already registered */
+  }
+  // Phase 2d: cross-service restore adapters. Each entity_type
+  // archived by a non-BFF service needs an adapter here that
+  // HTTP-calls the source service's restore endpoint. Registered
+  // ONLY when an AuthSvcRestoreClient is wired (deps override or env
+  // vars set) — without a client, the adapters would always throw
+  // misconfigured, polluting the SPA Restore UX. Fail-closed: no
+  // adapter → 501 no_adapter, which the SPA shows as "restore not
+  // available in this environment".
+  const authSvcRestoreClient =
+    deps.authSvcRestoreClient ?? makeAuthSvcRestoreClientFromEnv();
+  if (authSvcRestoreClient) {
+    try {
+      registerRecoveryAdapter({
+        entity_type: 'user_team',
+        display_name: 'Team (Issue Owner Group)',
+        module: 'auth-svc',
+        original_table: 'app_iam.user_teams',
+        restore: async (record) => {
+          await authSvcRestoreClient.restore({
+            entity_type: 'user_team',
+            original_id: record.original_id,
+            payload: record.payload,
+          });
+        },
+      });
+    } catch {
+      /* already registered */
+    }
+    try {
+      registerRecoveryAdapter({
+        entity_type: 'user_team_member',
+        display_name: 'Team member',
+        module: 'auth-svc',
+        original_table: 'app_iam.user_team_members',
+        restore: async (record) => {
+          await authSvcRestoreClient.restore({
+            entity_type: 'user_team_member',
+            original_id: record.original_id,
+            payload: record.payload,
+          });
+        },
+      });
+    } catch {
+      /* already registered */
+    }
   }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
@@ -2697,6 +2757,67 @@ export function makeApp(deps: AppDeps = {}) {
         now(),
       );
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/alerts/dow-hour-heatmap?window=N (T6 M8.17) — CYCLIC
+   *  INTRADAY heatmap over the M8.6 routing ledger. For each routed
+   *  alert in the window (newest-first), bucket created_at UTC into
+   *  a 7-day × 24-hour grid (ISO Mon=0..Sun=6 × hour 0..23 = 168
+   *  cells). Per cell {dow, hour, count, by_class (4 keys at 0:
+   *  red/orange/yellow/green)}. Marginals: by_dow[7] + by_hour[24]
+   *  each with total + by_class. Envelope: peak_cell (canonical dow
+   *  asc × hour asc tie-break), peak_dow (Mon-first tie-break),
+   *  peak_hour (earliest-hour-wins tie-break), most_active_class
+   *  (canonical BIL_CLASS_ORDER tie-break: red wins). Distinct from
+   *  M8.15 (linear N-day trend) by being cyclic intraday pattern.
+   *  Mirror of M14.22 / M15.7 dow×hour heatmap pattern. Same window
+   *  semantics as M8.6 family (default 50, max 200). */
+  app.get(
+    '/v1/alerts/dow-hour-heatmap',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const {
+        summarizeAlertRoutingDowHourFromLedger,
+        AlertRoutingDowHourHeatmapError,
+        DEFAULT_ALERT_DOW_HOUR_WINDOW,
+      } = require('./alert_routing_dow_hour_heatmap') as
+        typeof import('./alert_routing_dow_hour_heatmap');
+      const windowParam = req.query.window;
+      let window: number = DEFAULT_ALERT_DOW_HOUR_WINDOW;
+      if (windowParam !== undefined) {
+        const n = Number(windowParam);
+        if (!Number.isInteger(n) || n < 1) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'window must be a positive integer', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        window = n;
+      }
+      try {
+        const out = summarizeAlertRoutingDowHourFromLedger(
+          routingLedger,
+          req.tenant!.tenant_id,
+          window,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AlertRoutingDowHourHeatmapError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
     },
   );
 
@@ -10494,41 +10615,6 @@ export function makeApp(deps: AppDeps = {}) {
         require('./scoring_preset_multiplier_histogram') as
         typeof import('./scoring_preset_multiplier_histogram');
       const out = buildPresetMultiplierHistogram(now());
-      return res.json(wrapResponse(out, ctx));
-    },
-  );
-
-  /** GET /v1/scoring/presets/indicator-index (T6 M6.17) — INVERTED
-   *  cross-reference over the M6.3 library: for each indicator in the
-   *  catalog (+ any drifted ids from preset maps), list which presets
-   *  reference it + at what multiplier + direction (boost/dampen/
-   *  identity). Per-indicator {indicator_id, indicator_name,
-   *  indicator_vertical, catalog_weight, references[] sorted by
-   *  preset_id asc, boost_count, dampen_count, identity_count,
-   *  has_references}. Envelope: total_indicators, total_presets,
-   *  total_referenced_indicators + total_orphan_indicators (partition
-   *  invariant), indicators[] sorted by references.length desc +
-   *  indicator_id asc tie-break, most_referenced_indicator (canonical
-   *  tie-break; null when no preset references anything), drift_
-   *  indicators[] (preset map ids missing from catalog — should be
-   *  empty), orphan_indicators[] (catalog ids no preset overrides;
-   *  presets fall through to catalog default). Mirror of M4.11 / M10.13
-   *  / M5.15 reverse-cross-reference pattern for the scoring-preset
-   *  surface. Platform-static. Mounted BEFORE catch-all `/:preset_id`
-   *  so the literal `/indicator-index` segment isn't captured. */
-  app.get(
-    '/v1/scoring/presets/indicator-index',
-    requireTenantMw,
-    requireRole('customers:read_risk_profile'),
-    (req: Request, res: Response) => {
-      const ctx = extractCtx(req, now);
-      const { buildScoringPresetIndicatorIndex } =
-        require('./scoring_preset_indicator_index') as
-        typeof import('./scoring_preset_indicator_index');
-      const out = buildScoringPresetIndicatorIndex(
-        req.tenant!.tenant_id,
-        now(),
-      );
       return res.json(wrapResponse(out, ctx));
     },
   );
