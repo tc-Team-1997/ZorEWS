@@ -72,6 +72,7 @@ import {
 } from './recovery/adapters';
 import { RecoveryError, RestoreConflictError } from './recovery/types';
 import { recordRecoveryAudit } from './recovery/audit';
+import { summarizeRecoveryActivity } from './recovery/analytics';
 import {
   AuthSvcRestoreClient,
   makeAuthSvcRestoreClientFromEnv,
@@ -15248,6 +15249,27 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/finops/dashboard (T5.5) — monthly cloud spend allocation
+   *  + cost-per-alert + cost-per-customer efficiency metrics per
+   *  tenant. Deterministic per (tenant, month). 10-service breakdown
+   *  in canonical ALL_FINOPS_SERVICES order with trend (up/flat/down
+   *  vs prior month at ±5% bands) + delta_pct. optimisation_candidate
+   *  highlights highest-cost service with up-trend + |delta_pct| ≥
+   *  5%. Production swap = AWS Cost Explorer query satisfying the
+   *  same shape; resolver interface stays stable. */
+  app.get(
+    '/v1/finops/dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildFinOpsDashboard } =
+        require('./finops_dashboard') as typeof import('./finops_dashboard');
+      const out = buildFinOpsDashboard(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/health — probe all 8 in parallel. */
   app.get(
     '/v1/integrations/adapters/health',
@@ -22599,6 +22621,61 @@ export function makeApp(deps: AppDeps = {}) {
         ctx,
       ),
     );
+  });
+
+  /** GET /v1/recovery/analytics?days=N — operator-actionable stats:
+   *  daily archive/restore/purge volume timeline, top actors,
+   *  per-entity_type rollup, restore-vs-purge rates, time-to-restore
+   *  percentiles. Drains the recovery store across all 3 statuses
+   *  then feeds the pure summarizeRecoveryActivity resolver.
+   *
+   *  Mounted BEFORE /v1/recovery/:recovery_id so the literal
+   *  `/analytics` segment isn't captured by the param wildcard. */
+  app.get('/v1/recovery/analytics', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tenant_id = req.tenant!.tenant_id;
+    const daysRaw = (req.query.days as string | undefined) ?? '30';
+    const days = Number.parseInt(daysRaw, 10);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      return res.status(400).json(
+        wrapError(
+          {
+            code: 'EWS_400_invalid_days',
+            message: 'days must be an integer in [1, 365]',
+            severity: 'MEDIUM',
+          },
+          ctx,
+        ),
+      );
+    }
+    // Drain every record for the tenant across all 3 statuses. The
+    // resolver re-filters into in-window archives / restores / purges
+    // using the deleted_at / restored_at / purged_at timestamps on
+    // each row. Pagination cap of 200 (max page_size); for tenants
+    // with > 200 records per status we loop until exhausted.
+    const allRecords = [];
+    for (const status of ['archived', 'restored', 'purged'] as const) {
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { items } = await recoveryStore.list({
+          tenant_id,
+          status,
+          page,
+          page_size: 200,
+        });
+        allRecords.push(...items);
+        if (items.length < 200) break;
+        page += 1;
+        if (page > 50) break; // hard cap: 10k records per status
+      }
+    }
+    const result = summarizeRecoveryActivity(allRecords, {
+      tenant_id,
+      days,
+      now: now(),
+    });
+    res.json(wrapResponse(result, ctx));
   });
 
   /** GET /v1/recovery/:recovery_id — single record (with full payload). */
