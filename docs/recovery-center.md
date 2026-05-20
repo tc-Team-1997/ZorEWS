@@ -20,6 +20,16 @@
 > verify with `git show 9c90b90 --stat | grep -E "archive_client|recovery-center"`.
 > (Phase 2a — the BFF endpoint itself — shipped cleanly in commit
 > `445089b feat(recovery): Phase 2a — cross-service archive endpoint`.)
+>
+> **Phase 2e attribution (one-time, 2026-05-20):** The dashboard_widgets
+> adoption (archive-on-PUT + restore dispatch + BFF adapter + 14
+> auth-svc tests + 1 BFF e2e test) was swept into commit `980ec80
+> feat(reports): T6 M12.17 — schedule cadence × format cross-tab
+> matrix` by the same parallel-`git add .` race. The work IS on
+> `origin/main`; verify with `git show 980ec80 --stat | grep -E "recovery|dashboard_widgets|auth_svc_restore"`.
+> Earlier-phase commits in the same series: 2a/clean `445089b`, 2b/swept
+> `9c90b90`, 2c/clean `e73e1e0`, 2d/swept-server.ts `21794bf` (full
+> Phase 2d commit `b0f0557`).
 
 ## What this is
 
