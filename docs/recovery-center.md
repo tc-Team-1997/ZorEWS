@@ -178,12 +178,13 @@ entity_types (filter chips render from the live `adapters` list).
 
 ## Backlog (services NOT yet wired)
 
-**Audited 2026-05-19** — only 6 services actually hard-delete and would
-benefit from Recovery Center. The 4 BFF admin stores below all have
-their OWN per-table soft-delete via `deleted_at` + status=ARCHIVED and
-expose a "Show archived" toggle on their SPA admin page. Adding
-Recovery Center on top would duplicate the same archive in two
-places. Cross-reference: see the `archive()` method on each.
+**Re-audited 2026-05-20** at the close of Phase 2. Two services
+originally flagged as candidates (`regulatory-svc/cases`,
+`regulatory-svc/alerts`) were re-classified into the "already
+self-soft-deletes" category after investigating their actual delete
+paths — see notes below. The Recovery Center pattern targets entities
+that VANISH from the live store; entities that transition to a
+terminal state but stay queryable are already soft-deleted by design.
 
 ### Already self-soft-deletes (no Recovery Center needed)
 
@@ -193,6 +194,8 @@ places. Cross-reference: see the `archive()` method on each.
 | `services/bff/src/admin/escalation_matrix_store.ts` | `archive()` method; SPA shows archived rules |
 | `services/bff/src/admin/sla_config_store.ts` | `archive()` only (no DELETE at all by design) |
 | `services/bff/src/admin/case_scenarios_store.ts` | `deleted_at` + restore via STATE_TRANSITION |
+| `services/regulatory-svc/cases/*` | **Re-classified 2026-05-20.** State-machine soft-delete via the close lifecycle (`open → assigned → in_action → monitored → closed`). Closed cases stay in the store with `state='closed'` + a resolution category — fully queryable, no row disappears. The Recovery Center pattern doesn't apply. Operators "un-close" via the existing case lifecycle, not via the Recycle Bin. |
+| `services/regulatory-svc/alerts/*` | **Re-classified 2026-05-20.** Same architectural pattern as cases: alerts transition `open → acked → closed` via the queue's state machine. There is no `DELETE` route, no `queue.delete()` method, and no path that removes a row from `app_alerts.alerts`. Queue assignments cascade via FK only when the parent alert is removed, which never happens. |
 
 ### Still hard-deletes — Recovery Center candidates
 
@@ -207,16 +210,27 @@ Roughly in order of complexity:
 | ✅ `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | **Adopted 2026-05-20 (Phase 2e).** Semantic twist: no DELETE endpoint exists; the destructive op is `PUT /auth/dashboard-widgets/:role` which atomically replaces a role's layout. Adoption archives the PRIOR non-empty layout before each replace (treats layout snapshots as "soft deletes" — gives admins a rollback path for any layout edit, not just clears). Restore re-applies via `replaceForRole` and deliberately does NOT archive the overwrite (avoids Recycle Bin loops). 15 new tests (14 archive + 1 BFF adapter). |
 | ✅ `services/auth-svc/src/service_clients.ts` | `service_client` | **Adopted 2026-05-20 (Phase 2f).** Security concern addressed via CONSERVATIVE restore semantic: regardless of the archive's `active` flag, restored clients ALWAYS come back with `active=false`. The preserved hash is audit-historic only — `find()` short-circuits on inactive so the credential cannot authenticate. Operators who want re-activation: delete the restored inactive row + re-create with the same id (new secret minted). 11 new auth-svc tests + 1 BFF e2e test. |
 | ✅ `services/auth-svc/src/pg_user_store.ts` | `user` | **Adopted 2026-05-20 (Phase 2g).** Conservative restore mirroring Phase 2f: restored users always come back with `locked=true` + `must_change_password=true` regardless of the archived flags. The preserved password hash is audit-historic — admin must reset the password before the user can log in. **Cascade limitation:** sessions, team memberships, leave_covers, and password_reset tokens were CASCADE-deleted from pg and are NOT restored — operators rebuild memberships via the existing team-management routes after restoring. 13 new auth-svc tests. |
-| `services/regulatory-svc/cases/...` | `case` + cascade | Big — cases own actions, notes, attachments, CAS, CAP. Cross-service. |
-| `services/regulatory-svc/alerts/...` | `alert` + `queue_assignment` | Cascade implications. Cross-service. |
-| `tenants` (bff) | `tenant` | Cascades to EVERYTHING; restore would need ordered re-insert of dependent rows |
+| ✅ `tenants` (bff) | `tenant` | **Adopted 2026-05-20 (Phase 2i).** BFF-local; `DELETE /v1/tenants/:tenant_id` archives the tenant config row before removing it from the in-memory registry. CONSERVATIVE SEMANTIC: restored tenants come back with `active=false` regardless of the archived flag — operators must `PATCH active=true` to bring the tenant back online (second-confirm gate for a high-blast-radius op). System-protected tenants (BANK_DEMO) are still refused before any archive happens, so they never appear in the Recycle Bin. Cascade-from-pg concern doesn't apply in the prototype: tenants live in the in-memory tenantLookup, not in pg with FKs from operational tables. Recovery rows live under the CALLER's tenant (a BANK_DEMO admin deleting BIL finds the recovery row in the BANK_DEMO Recycle Bin). 10 new tests. |
 
-The 5 auth-svc + 2 regulatory-svc entries need architectural work first:
-Recovery Center lives in BFF. Either (a) each service gets its own
-local Recovery Center + a unified "view all" endpoint that aggregates,
-or (b) the BFF exposes an internal API that other services call to
-archive. (b) is the cleanest centralisation — keep one
-`app_recovery.deleted_records` table for the platform.
+**Phase 2 is substantively complete.** All 10 adopters that actually
+benefit from Recovery Center are wired:
+
+- **5 BFF-local**: `webhook_subscription`, `saved_scenario`,
+  `saved_report_filter`, `cms_case_attachment`, `tenant`
+- **5 cross-service via BFF→auth-svc**: `user_team`, `user_team_member`,
+  `role_dashboard_widget`, `service_client`, `user`
+
+The cross-service architecture chose option (b) from the design
+discussion: one `app_recovery.deleted_records` table for the platform.
+Source services write to it via `POST /v1/svc/recovery/archive` with
+an api-key scope (`recovery:archive_internal`); restore HTTP-calls
+back via a shared-secret-authed `POST /auth/recovery/restore`
+endpoint (env var `AUTH_SVC_RECOVERY_RESTORE_KEY` on both sides).
+Conservative-restore-as-inert is the platform pattern for entities
+with security implications (`service_client`, `user`, `tenant`):
+restoration brings the row's audit-historic state back but the row
+won't authenticate / accept traffic until an explicit admin action
+flips it active again.
 
 ## Cross-service adoption (Phase 2a, 2026-05-19)
 

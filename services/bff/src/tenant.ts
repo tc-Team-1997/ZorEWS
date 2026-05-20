@@ -72,6 +72,18 @@ export interface TenantLookup {
     patch: TenantUpdatePatch,
   ) => Tenant | undefined | Promise<Tenant | undefined>;
   delete?: (tenant_id: string) => boolean | 'system_protected' | Promise<boolean | 'system_protected'>;
+  /**
+   * Recovery Center Phase 2i — re-insert a previously deleted tenant
+   * with its ORIGINAL tenant_id. Returns false on conflict (an active
+   * tenant with that id already exists).
+   *
+   * CONSERVATIVE SEMANTIC (mirrors Phase 2f/2g): restored tenants
+   * ALWAYS come back with `active: false` regardless of the archived
+   * flag. Operators must explicitly PATCH active=true after restore
+   * to bring the tenant back online — gives a second-confirm gate
+   * for a high-blast-radius operation.
+   */
+  restore?: (tenant: Tenant) => boolean;
 }
 
 export interface TenantCreateInput {
@@ -148,6 +160,19 @@ export function defaultTenantLookup(): TenantLookup {
   lookup.delete = (tenant_id) => {
     if (SYSTEM_TENANTS.has(tenant_id)) return 'system_protected';
     return byId.delete(tenant_id);
+  };
+  lookup.restore = (tenant) => {
+    if (byId.has(tenant.tenant_id)) return false;
+    // FORCE active=false on restore. Operators must PATCH active=true
+    // to bring the tenant back online — see TenantLookup.restore JSDoc.
+    byId.set(tenant.tenant_id, {
+      tenant_id: tenant.tenant_id,
+      name: tenant.name,
+      vertical: tenant.vertical,
+      channels_allowed: [...tenant.channels_allowed],
+      active: false,
+    });
+    return true;
   };
   return lookup;
 }

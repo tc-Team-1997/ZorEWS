@@ -57,8 +57,14 @@ describe('/v1/recovery — empty store', () => {
     //   Phase 1+: saved_report_filter (only when savedFilterStore is
     //             configured; not configured in this test)
     //   Phase 2h: cms_case_attachment (BFF-local, always registered)
+    //   Phase 2i: tenant (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
-    expect(types).toEqual(['cms_case_attachment', 'saved_scenario', 'webhook_subscription']);
+    expect(types).toEqual([
+      'cms_case_attachment',
+      'saved_scenario',
+      'tenant',
+      'webhook_subscription',
+    ]);
   });
 
   it('GET /v1/recovery returns 403 for non-admin', async () => {
