@@ -58,10 +58,12 @@ describe('/v1/recovery — empty store', () => {
     //             configured; not configured in this test)
     //   Phase 2h: cms_case_attachment (BFF-local, always registered)
     //   Phase 2i: tenant (BFF-local, always registered)
+    //   Phase A.1: sector_master (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'cms_case_attachment',
       'saved_scenario',
+      'sector_master',
       'tenant',
       'webhook_subscription',
     ]);

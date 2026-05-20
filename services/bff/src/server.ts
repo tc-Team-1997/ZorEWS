@@ -74,6 +74,13 @@ import { RecoveryError, RestoreConflictError } from './recovery/types';
 import { recordRecoveryAudit } from './recovery/audit';
 import { summarizeRecoveryActivity } from './recovery/analytics';
 import {
+  defaultSectorMasterStore,
+  InMemorySectorMasterStore,
+  SectorMasterError,
+  ALL_REGULATORY_CATEGORIES,
+  type SectorMasterStore,
+} from './master/sector_master';
+import {
   AuthSvcRestoreClient,
   makeAuthSvcRestoreClientFromEnv,
 } from './recovery/auth_svc_restore_client';
@@ -963,6 +970,9 @@ export interface AppDeps {
    */
   webhookStore?: IWebhookStore;
   recoveryStore?: RecoveryStore;
+  /** Phase A.1 (2026-05-21) — Sector & Industry Master Setup store.
+   *  Defaults to a singleton InMemorySectorMasterStore. */
+  sectorMasterStore?: SectorMasterStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1181,6 +1191,11 @@ export function makeApp(deps: AppDeps = {}) {
   const webhookDispatcher = deps.webhookDispatcher ?? new WebhookDispatcher(webhookStore);
   const scenarioStore = deps.scenarioStore ?? new InMemoryScenarioStore();
   const recoveryStore = deps.recoveryStore ?? getDefaultRecoveryStore();
+  // Phase A.1 — Sector & Industry Master Setup. Tenant-scoped CRUD over
+  // an in-memory store; pg-backed swap deferred. Default singleton is
+  // reused across makeApp() calls; tests inject a fresh store.
+  const sectorMasterStore =
+    deps.sectorMasterStore ?? defaultSectorMasterStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1396,6 +1411,26 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = tenantLookup.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('tenant', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase A.1 — sector_master adapter. Plain re-insert via the store's
+    // restore() method. No conservative semantic flip needed — sector
+    // master data carries no credentials, no cross-FK cascades. If a
+    // live row already holds the id, restore() returns false → 409.
+    registerRecoveryAdapter({
+      entity_type: 'sector_master',
+      display_name: 'Sector master entry',
+      module: 'bff',
+      original_table: 'app_master.sectors',
+      restore: async (record) => {
+        const ok = sectorMasterStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('sector_master', record.original_id);
         }
       },
     });
@@ -16291,6 +16326,249 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase A.1 — Sector & Industry Master Setup ──────────────────────
+  //
+  // PDF §6 Master Setup item 4. Tenant-scoped CRUD over an in-memory
+  // store (pg-backed swap deferred — IStore interface stable). All
+  // routes audit:read (admin-only). Soft-delete + Recovery Center
+  // adapter wired so deleted rows can be restored from the Recycle Bin.
+
+  /** GET /v1/master/sectors/categories — closed enum for SPA filter. */
+  app.get(
+    '/v1/master/sectors/categories',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse({ categories: [...ALL_REGULATORY_CATEGORIES] }, ctx),
+      );
+    },
+  );
+
+  /** GET /v1/master/sectors?include_deleted= — tenant-scoped list. */
+  app.get(
+    '/v1/master/sectors',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const items = sectorMasterStore.list(req.tenant!.tenant_id, { include_deleted });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/sectors/:sector_id — single. 404 unknown_sector. */
+  app.get(
+    '/v1/master/sectors/:sector_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sector_id = req.params.sector_id ?? '';
+      const entry = sectorMasterStore.get(req.tenant!.tenant_id, sector_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_sector', message: `unknown sector_id: ${sector_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/master/sectors body: SectorMasterCreateInput → 201. */
+  app.post(
+    '/v1/master/sectors',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = sectorMasterStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof SectorMasterError) {
+          if (e.code === 'duplicate_sector_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_sector_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/master/sectors/:sector_id body: SectorMasterUpdateInput. */
+  app.patch(
+    '/v1/master/sectors/:sector_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const sector_id = req.params.sector_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = sectorMasterStore.update(
+          req.tenant!.tenant_id,
+          sector_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof SectorMasterError) {
+          if (e.code === 'unknown_sector') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_sector', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/master/sectors/:sector_id — soft-delete + archive to
+   *  Recovery Center. 204 on success; 404 unknown. */
+  app.delete(
+    '/v1/master/sectors/:sector_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const sector_id = req.params.sector_id ?? '';
+      try {
+        // 1) Soft-delete in the store. Returns the tombstoned row so
+        //    its payload can be archived for restore.
+        const tombstoned = sectorMasterStore.softDelete(
+          req.tenant!.tenant_id,
+          sector_id,
+          actor,
+          now(),
+        );
+        // 2) Archive to Recovery Center (best-effort — same pattern as
+        //    other delete routes). Failure to archive does NOT roll
+        //    back the soft-delete — the row stays tombstoned, restore
+        //    just won't be available for this particular delete.
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'sector_master',
+            original_id: sector_id,
+            original_table: 'app_master.sectors',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/master/sectors/:sector_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof SectorMasterError) {
+          if (e.code === 'unknown_sector') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_sector', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   // ── Service-account API keys (T6 M1.2) ──────────────────────────────
   //
   // Provisioning + revocation surface for machine-identity API keys.
@@ -19404,6 +19682,70 @@ export function makeApp(deps: AppDeps = {}) {
       // captures the failure and the admin can inspect it. The endpoint
       // succeeded (we sent the request); only the recipient failed.
       res.json(wrapResponse(delivery, ctx));
+    },
+  );
+
+  // ── Self-service report builder (T4.6.1+) ─────────────────────────
+  //
+  // Additive on top of existing /v1/reports/*. The /builder/* sub-tree
+  // is the analyst-driven ad-hoc report surface — distinct from the
+  // M12.1 catalog (templated reports the admin runs) + /v1/reports/
+  // :type (synchronous canned reports).
+  //
+  // Mounted BEFORE the M12.1 routes so the literal `/builder/` segment
+  // isn't shadowed by `:type` or `:job_id` wildcards.
+
+  /** GET /v1/reports/builder/sources (T4.6.1) — canonical data source
+   *  catalog. Returns every queryable mart + app_* surface with field
+   *  schema + drill-targets + tenant_scoped + required_role. Drives
+   *  the SPA report builder source picker. Platform-static. */
+  app.get(
+    '/v1/reports/builder/sources',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listReportSources } =
+        require('./reports/builder_catalog') as typeof import('./reports/builder_catalog');
+      const sources = listReportSources();
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total_sources: sources.length,
+            sources,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/reports/builder/sources/:source_id (T4.6.1) — single
+   *  source lookup. 404 EWS_404_unknown_source on miss. */
+  app.get(
+    '/v1/reports/builder/sources/:source_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getReportSource } =
+        require('./reports/builder_catalog') as typeof import('./reports/builder_catalog');
+      const src = getReportSource(req.params.source_id);
+      if (!src) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_source',
+              message: `unknown report source: ${req.params.source_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(src, ctx));
     },
   );
 
