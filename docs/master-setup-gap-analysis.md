@@ -9,12 +9,12 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A done | B.1 | B.2 | B.3 | After B.4 (2026-05-21) |
-|---|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~86% | ~88% | ~90% | **~92%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 29/49 | 30/49 | 31/49 | **32/49** |
-| BFF route count delta | — | +33 | +41 | +49 | +55 | **+61** (Policy master adds 6) |
-| BFF test suite | 8087 | 8333 | 8392 | 8441 | 8564 | **8606** ✅ |
+| Metric | Initial | A done | B done | After C.1 (2026-05-21) |
+|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | **~93%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | **33/49** |
+| BFF route count delta | — | +33 | +61 | **+69** (STR adds 8) |
+| BFF test suite | 8087 | 8333 | 8606 | **8666** ✅ |
 
 ## Phase B — COMPLETE ✅
 

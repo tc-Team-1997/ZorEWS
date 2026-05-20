@@ -127,6 +127,15 @@ import {
   type PolicyMasterStore,
 } from './master/policy_master';
 import {
+  defaultStrReportStore,
+  StrError,
+  ALL_STR_STATUSES,
+  ALL_STR_REASONS,
+  isStrStatus,
+  buildStrSummary,
+  type StrReportStore,
+} from './aml/str_reporting';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1055,6 +1064,8 @@ export interface AppDeps {
   accountMasterStore?: AccountMasterStore;
   /** Phase B.4 (2026-05-21) — Product & Policy Master Setup store. */
   policyMasterStore?: PolicyMasterStore;
+  /** Phase C.1 (2026-05-21) — AML STR Reporting workflow store. */
+  strReportStore?: StrReportStore;
   /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
    *  Defaults to a singleton InMemoryDqStore. */
   dqStore?: DqStore;
@@ -1305,6 +1316,9 @@ export function makeApp(deps: AppDeps = {}) {
   // GENERAL_HEALTH) with premium + coverage + waiting + grace periods.
   const policyMasterStore =
     deps.policyMasterStore ?? defaultPolicyMasterStore;
+  // Phase C.1 — STR Reporting workflow. draft → ready_for_review →
+  // submitted → acknowledged/rejected. Maker-checker enforced.
+  const strReportStore = deps.strReportStore ?? defaultStrReportStore;
   // Phase A.3 — DQ Engine. Single store carries rules + executions.
   const dqStore = deps.dqStore ?? defaultDqStore;
   // Phase A.4 — Reconciliation Engine. Single store carries
@@ -1676,6 +1690,26 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = policyMasterStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('policy_master', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase C.1 — str_report adapter. STR drafts can be restored
+    // (only drafts + ready_for_review allow soft-delete in the first
+    // place; submitted/acknowledged STRs are immutable per FIU-IND
+    // retention).
+    registerRecoveryAdapter({
+      entity_type: 'str_report',
+      display_name: 'AML STR (Suspicious Transaction Report)',
+      module: 'bff',
+      original_table: 'app_aml.str_reports',
+      restore: async (record) => {
+        const ok = strReportStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('str_report', record.original_id);
         }
       },
     });
@@ -18246,6 +18280,357 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_policy_type', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase C.1 — AML STR Reporting Workflow ──────────────────────────
+  //
+  // PDF §11 AML Integration item 4. Maker-checker workflow for RBI
+  // FIU-IND Suspicious Transaction Report submissions: draft →
+  // ready_for_review → submitted → acknowledged/rejected. Per RBI
+  // segregation of duties: maker can't be checker on submit. All
+  // routes audit:read admin-only.
+
+  /** GET /v1/aml/str-reports/taxonomy — closed enums. */
+  app.get(
+    '/v1/aml/str-reports/taxonomy',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          { statuses: [...ALL_STR_STATUSES], reasons: [...ALL_STR_REASONS] },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/aml/str-reports/summary — dashboard rollup. */
+  app.get(
+    '/v1/aml/str-reports/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const summary = buildStrSummary(strReportStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/aml/str-reports?status=&customer_id=&since=&until=&limit= */
+  app.get(
+    '/v1/aml/str-reports',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const stRaw = req.query.status;
+      if (stRaw !== undefined && !isStrStatus(stRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: `status must be one of: ${ALL_STR_STATUSES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = strReportStore.list(req.tenant!.tenant_id, {
+        include_deleted,
+        status: stRaw as never,
+        customer_id: req.query.customer_id as string | undefined,
+        since: req.query.since as string | undefined,
+        until: req.query.until as string | undefined,
+        limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/aml/str-reports/:str_id. */
+  app.get(
+    '/v1/aml/str-reports/:str_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entry = strReportStore.get(req.tenant!.tenant_id, req.params.str_id ?? '');
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_str', message: `unknown str_id: ${req.params.str_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/aml/str-reports — create draft. maker = X-APEX-USER. */
+  app.post(
+    '/v1/aml/str-reports',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const maker =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = strReportStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          maker,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof StrError) {
+          if (e.code === 'duplicate_str_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_str_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/aml/str-reports/:str_id — edit draft / ready_for_review. */
+  app.patch(
+    '/v1/aml/str-reports/:str_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = strReportStore.update(
+          req.tenant!.tenant_id,
+          req.params.str_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof StrError) {
+          if (e.code === 'unknown_str') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_str', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'immutable') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_immutable', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/aml/str-reports/:str_id/transition — workflow advance. */
+  app.post(
+    '/v1/aml/str-reports/:str_id/transition',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = strReportStore.transition(
+          req.tenant!.tenant_id,
+          req.params.str_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof StrError) {
+          if (e.code === 'unknown_str') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_str', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'invalid_transition') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_invalid_transition', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'self_approval_forbidden') {
+            // CRITICAL severity — RBI segregation-of-duties violation
+            // attempt is a compliance-grade incident.
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_self_approval_forbidden', message: e.message, severity: 'CRITICAL' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'transition failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/aml/str-reports/:str_id — soft-delete + archive
+   *  (only allowed in draft / ready_for_review per FIU-IND retention). */
+  app.delete(
+    '/v1/aml/str-reports/:str_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const str_id = req.params.str_id ?? '';
+      try {
+        const tombstoned = strReportStore.softDelete(
+          req.tenant!.tenant_id,
+          str_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'str_report',
+            original_id: str_id,
+            original_table: 'app_aml.str_reports',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/aml/str-reports/:str_id',
+            prior_status: tombstoned.status,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof StrError) {
+          if (e.code === 'unknown_str') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_str', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'immutable') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_immutable', message: e.message, severity: 'MEDIUM' },
                 ctx,
               ),
             );
