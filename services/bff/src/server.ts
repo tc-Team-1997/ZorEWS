@@ -150,6 +150,13 @@ import {
   type FieldMaskingStore,
 } from './security/field_masking';
 import {
+  defaultAuditRetentionPolicyStore,
+  AuditRetentionError,
+  ALL_RETENTION_STRATEGIES,
+  ALL_RETENTION_SCOPES,
+  type AuditRetentionPolicyStore,
+} from './audit/retention_policy';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1088,6 +1095,8 @@ export interface AppDeps {
   reconStore?: ReconStore;
   /** Phase D.2 (2026-05-21) — Field-Level Masking policy store. */
   fieldMaskingStore?: FieldMaskingStore;
+  /** Phase D.3 (2026-05-21) — Audit Admin retention policy store. */
+  auditRetentionPolicyStore?: AuditRetentionPolicyStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1342,6 +1351,9 @@ export function makeApp(deps: AppDeps = {}) {
   const reconStore = deps.reconStore ?? defaultReconStore;
   // Phase D.2 — Field-Level Masking policy store.
   const fieldMaskingStore = deps.fieldMaskingStore ?? defaultFieldMaskingStore;
+  // Phase D.3 — Audit Admin retention policy store.
+  const auditRetentionPolicyStore =
+    deps.auditRetentionPolicyStore ?? defaultAuditRetentionPolicyStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1654,6 +1666,29 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = fieldMaskingStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('field_masking_policy', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase D.3 — audit_retention_policy adapter. Restore is gated by
+    // the duplicate_scope invariant: if a live active policy already
+    // governs the same scope, refuse. Same semantics as the field-
+    // masking adapter.
+    registerRecoveryAdapter({
+      entity_type: 'audit_retention_policy',
+      display_name: 'Audit retention policy',
+      module: 'bff',
+      original_table: 'app_admin.audit_retention_policies',
+      restore: async (record) => {
+        const ok = auditRetentionPolicyStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError(
+            'audit_retention_policy',
+            record.original_id,
+          );
         }
       },
     });
@@ -5862,6 +5897,231 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── T5.1.1 — Retraining schedule + outcome ledger ──────────────────
+  //
+  // Closes the "no training scheduler is wired" gap of T5.1. The actual
+  // training script (`ml/pipelines/train_pd.py`) runs externally — when
+  // it finishes, an external scheduler (Airflow / manual / future cron)
+  // POSTs the outcome here. Ops gets fleet status + per-model history
+  // + last_outcome via /v1/ai/retraining/status, paired with the M7.2
+  // promotion-gate decision already on this route family.
+  const _retraining = require('./ai_retraining') as typeof import('./ai_retraining');
+  const _retrainScheduleStore = _retraining.defaultRetrainingScheduleStore();
+  const _retrainOutcomeStore = _retraining.defaultRetrainingOutcomeStore();
+
+  function _retrainErrorTo400(err: { code?: string; message?: string }) {
+    return {
+      code: `EWS_400_${err.code ?? 'invalid_input'}`,
+      message: err.message ?? 'invalid input',
+      severity: 'MEDIUM' as ErrorSeverity,
+    };
+  }
+
+  /** POST /v1/ai/retraining/schedules — create a schedule for one model. */
+  app.post(
+    '/v1/ai/retraining/schedules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      try {
+        const actor =
+          (req.headers['x-apex-user'] as string | undefined)?.trim() || 'admin';
+        const row = _retrainScheduleStore.create(inner as never, {
+          tenant_id: req.tenant!.tenant_id,
+          now: now(),
+          actor,
+        });
+        return res.status(201).json(wrapResponse(row, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'RetrainingError') throw err;
+        if (e.code === 'duplicate_schedule') {
+          return res.status(409).json(
+            wrapError({ code: 'EWS_409_duplicate_schedule', message: e.message ?? '', severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(400).json(wrapError(_retrainErrorTo400(e), ctx));
+      }
+    },
+  );
+
+  /** GET /v1/ai/retraining/schedules — list. */
+  app.get(
+    '/v1/ai/retraining/schedules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = _retrainScheduleStore.list(req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          { tenant_id: req.tenant!.tenant_id, total: items.length, schedules: items },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ai/retraining/schedules/:schedule_id — single. */
+  app.get(
+    '/v1/ai/retraining/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const row = _retrainScheduleStore.get(req.tenant!.tenant_id, req.params.schedule_id);
+      if (!row) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_schedule', message: 'unknown', severity: 'LOW' }, ctx),
+        );
+      }
+      return res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  /** PATCH /v1/ai/retraining/schedules/:schedule_id — update. */
+  app.patch(
+    '/v1/ai/retraining/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      try {
+        const actor =
+          (req.headers['x-apex-user'] as string | undefined)?.trim() || 'admin';
+        const row = _retrainScheduleStore.update(
+          req.tenant!.tenant_id,
+          req.params.schedule_id,
+          inner as never,
+          { now: now(), actor },
+        );
+        return res.json(wrapResponse(row, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'RetrainingError') throw err;
+        if (e.code === 'unknown_schedule') {
+          return res.status(404).json(
+            wrapError({ code: 'EWS_404_unknown_schedule', message: e.message ?? '', severity: 'LOW' }, ctx),
+          );
+        }
+        return res.status(400).json(wrapError(_retrainErrorTo400(e), ctx));
+      }
+    },
+  );
+
+  /** DELETE /v1/ai/retraining/schedules/:schedule_id — remove. */
+  app.delete(
+    '/v1/ai/retraining/schedules/:schedule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const ok = _retrainScheduleStore.delete(req.tenant!.tenant_id, req.params.schedule_id);
+      if (!ok) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_schedule', message: 'unknown', severity: 'LOW' }, ctx),
+        );
+      }
+      return res.status(204).send();
+    },
+  );
+
+  /** POST /v1/ai/retraining/outcomes — external scheduler posts a
+   *  completed retrain (success/failure/rolled_back/in_progress). On
+   *  success the linked schedule's last_retrained_at + next_retrain_at
+   *  auto-advance per the cadence. */
+  app.post(
+    '/v1/ai/retraining/outcomes',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | Record<string, unknown>;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
+          ? (raw.body as Record<string, unknown>)
+          : (raw as Record<string, unknown>);
+      try {
+        const row = _retrainOutcomeStore.record(inner as never, {
+          tenant_id: req.tenant!.tenant_id,
+          now: now(),
+        });
+        return res.status(201).json(wrapResponse(row, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'RetrainingError') throw err;
+        return res.status(400).json(wrapError(_retrainErrorTo400(e), ctx));
+      }
+    },
+  );
+
+  /** GET /v1/ai/retraining/outcomes?model_id=&status=&since=ISO — list. */
+  app.get(
+    '/v1/ai/retraining/outcomes',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const model_id = (req.query.model_id as string | undefined) || undefined;
+      const statusQ = (req.query.status as string | undefined) || undefined;
+      const since = (req.query.since as string | undefined) || undefined;
+      if (statusQ && !_retraining.isRetrainingOutcomeStatus(statusQ)) {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400_invalid_status', message: 'invalid status', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      try {
+        const items = _retrainOutcomeStore.list(req.tenant!.tenant_id, {
+          model_id,
+          status: statusQ as ReturnType<typeof _retraining.isRetrainingOutcomeStatus> extends true ? never : never,
+          since,
+        });
+        return res.json(
+          wrapResponse(
+            { tenant_id: req.tenant!.tenant_id, total: items.length, outcomes: items },
+            ctx,
+          ),
+        );
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'RetrainingError') throw err;
+        return res.status(400).json(wrapError(_retrainErrorTo400(e), ctx));
+      }
+    },
+  );
+
+  /** GET /v1/ai/retraining/status — fleet rollup: per-model schedule +
+   *  last outcome + is_overdue flag + 30d success rate. */
+  app.get(
+    '/v1/ai/retraining/status',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const schedules = _retrainScheduleStore.list(tenant_id);
+      const outcomes = _retrainOutcomeStore.list(tenant_id);
+      const summary = _retraining.buildFleetRetrainingStatus(
+        tenant_id,
+        schedules,
+        outcomes,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
     },
   );
 
@@ -16117,6 +16377,290 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(204).send();
       } catch (e) {
         if (e instanceof FieldMaskingError) {
+          if (e.code === 'unknown_policy') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_policy', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase D.3 — Audit Admin retention policy (CRUD + recovery) ───────
+  //
+  // PDF §A6 Audit Administration. Per-tenant admin-editable retention
+  // policy governing the audit ledger. Admin-only (audit:read).
+  // Soft-delete + Recovery Center registered.
+
+  /** GET /v1/admin/audit-retention/strategies — closed enum + scopes. */
+  app.get(
+    '/v1/admin/audit-retention/strategies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            strategies: [...ALL_RETENTION_STRATEGIES],
+            scopes: [...ALL_RETENTION_SCOPES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/admin/audit-retention?include_deleted= — tenant-scoped list. */
+  app.get(
+    '/v1/admin/audit-retention',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const items = auditRetentionPolicyStore.list(req.tenant!.tenant_id, {
+        include_deleted,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/admin/audit-retention/active/:scope — convenience lookup. */
+  app.get(
+    '/v1/admin/audit-retention/active/:scope',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const scope = req.params.scope ?? '';
+      if (!(ALL_RETENTION_SCOPES as readonly string[]).includes(scope)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_scope', message: `unknown scope: ${scope}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const entry = auditRetentionPolicyStore.resolveActive(
+        req.tenant!.tenant_id,
+        scope as never,
+      );
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            scope,
+            policy: entry,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/admin/audit-retention/:policy_id — single. 404 unknown. */
+  app.get(
+    '/v1/admin/audit-retention/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const policy_id = req.params.policy_id ?? '';
+      const entry = auditRetentionPolicyStore.get(req.tenant!.tenant_id, policy_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_policy', message: `unknown policy_id: ${policy_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/admin/audit-retention — create. 201 on success. */
+  app.post(
+    '/v1/admin/audit-retention',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = auditRetentionPolicyStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof AuditRetentionError) {
+          if (e.code === 'duplicate_policy_id' || e.code === 'duplicate_scope') {
+            return res.status(409).json(
+              wrapError(
+                { code: `EWS_409_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/admin/audit-retention/:policy_id — partial update. */
+  app.patch(
+    '/v1/admin/audit-retention/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const policy_id = req.params.policy_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = auditRetentionPolicyStore.update(
+          req.tenant!.tenant_id,
+          policy_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof AuditRetentionError) {
+          if (e.code === 'unknown_policy') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_policy', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'duplicate_scope') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_scope', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/admin/audit-retention/:policy_id — soft-delete + archive. */
+  app.delete(
+    '/v1/admin/audit-retention/:policy_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const policy_id = req.params.policy_id ?? '';
+      try {
+        const tombstoned = auditRetentionPolicyStore.softDelete(
+          req.tenant!.tenant_id,
+          policy_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'audit_retention_policy',
+            original_id: policy_id,
+            original_table: 'app_admin.audit_retention_policies',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/admin/audit-retention/:policy_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof AuditRetentionError) {
           if (e.code === 'unknown_policy') {
             return res.status(404).json(
               wrapError(
