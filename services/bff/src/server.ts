@@ -81,6 +81,14 @@ import {
   type SectorMasterStore,
 } from './master/sector_master';
 import {
+  defaultGeographyMasterStore,
+  GeographyMasterError,
+  ALL_GEO_RISK_LEVELS,
+  ALL_AML_REGIMES,
+  isGeoRiskLevel,
+  type GeographyMasterStore,
+} from './master/geography_master';
+import {
   AuthSvcRestoreClient,
   makeAuthSvcRestoreClientFromEnv,
 } from './recovery/auth_svc_restore_client';
@@ -973,6 +981,9 @@ export interface AppDeps {
   /** Phase A.1 (2026-05-21) — Sector & Industry Master Setup store.
    *  Defaults to a singleton InMemorySectorMasterStore. */
   sectorMasterStore?: SectorMasterStore;
+  /** Phase A.2 (2026-05-21) — Geography & Risk Region Master Setup
+   *  store. Defaults to a singleton InMemoryGeographyMasterStore. */
+  geographyMasterStore?: GeographyMasterStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1196,6 +1207,10 @@ export function makeApp(deps: AppDeps = {}) {
   // reused across makeApp() calls; tests inject a fresh store.
   const sectorMasterStore =
     deps.sectorMasterStore ?? defaultSectorMasterStore;
+  // Phase A.2 — Geography & Risk Region Master Setup. Same pattern as
+  // A.1; default singleton reused across makeApp() calls; tests inject.
+  const geographyMasterStore =
+    deps.geographyMasterStore ?? defaultGeographyMasterStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1431,6 +1446,25 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = sectorMasterStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('sector_master', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase A.2 — geography_master adapter. Same shape as A.1: plain
+    // re-insert via the store's restore() method. No conservative
+    // semantic flip — master rows carry no credentials.
+    registerRecoveryAdapter({
+      entity_type: 'geography_master',
+      display_name: 'Geography master entry',
+      module: 'bff',
+      original_table: 'app_master.geographies',
+      restore: async (record) => {
+        const ok = geographyMasterStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('geography_master', record.original_id);
         }
       },
     });
@@ -16548,6 +16582,278 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_sector', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase A.2 — Geography & Risk Region Master Setup ────────────────
+  //
+  // PDF §7 Master Setup item 5. Same shape as Phase A.1 sectors. Used
+  // by AML M14.3 + EWS scoring overlays. Closed-enum risk_level
+  // (high/medium/low) + sanction_flag boolean overlay. Soft-delete +
+  // Recovery Center adapter wired.
+
+  /** GET /v1/master/geographies/risk-levels — closed enum. */
+  app.get(
+    '/v1/master/geographies/risk-levels',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            risk_levels: [...ALL_GEO_RISK_LEVELS],
+            aml_regimes: [...ALL_AML_REGIMES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/geographies?risk_level=&sanction_flag=&include_deleted=
+   *  — tenant-scoped list with optional filters. */
+  app.get(
+    '/v1/master/geographies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const rlRaw = req.query.risk_level;
+      const sfRaw = req.query.sanction_flag;
+      // Validate filters up-front so bogus query strings → 400 with
+      // code routing rather than silently dropping the filter.
+      if (rlRaw !== undefined && !isGeoRiskLevel(rlRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_risk_level', message: `risk_level must be one of: ${ALL_GEO_RISK_LEVELS.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      let sanction_flag: boolean | undefined;
+      if (sfRaw !== undefined) {
+        if (sfRaw === 'true') sanction_flag = true;
+        else if (sfRaw === 'false') sanction_flag = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_sanction_flag', message: 'sanction_flag must be true or false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      const items = geographyMasterStore.list(req.tenant!.tenant_id, {
+        include_deleted,
+        risk_level: rlRaw as never,
+        sanction_flag,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/master/geographies/:country_code — single. */
+  app.get(
+    '/v1/master/geographies/:country_code',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const cc = (req.params.country_code ?? '').toUpperCase();
+      const entry = geographyMasterStore.get(req.tenant!.tenant_id, cc);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_country', message: `unknown country_code: ${cc}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/master/geographies → 201. */
+  app.post(
+    '/v1/master/geographies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = geographyMasterStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof GeographyMasterError) {
+          if (e.code === 'duplicate_country_code') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_country_code', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/master/geographies/:country_code. */
+  app.patch(
+    '/v1/master/geographies/:country_code',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const cc = (req.params.country_code ?? '').toUpperCase();
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = geographyMasterStore.update(
+          req.tenant!.tenant_id,
+          cc,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof GeographyMasterError) {
+          if (e.code === 'unknown_country') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_country', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/master/geographies/:country_code — soft-delete + archive. */
+  app.delete(
+    '/v1/master/geographies/:country_code',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const cc = (req.params.country_code ?? '').toUpperCase();
+      try {
+        const tombstoned = geographyMasterStore.softDelete(
+          req.tenant!.tenant_id,
+          cc,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'geography_master',
+            original_id: cc,
+            original_table: 'app_master.geographies',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/master/geographies/:country_code',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof GeographyMasterError) {
+          if (e.code === 'unknown_country') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_country', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );
