@@ -54,6 +54,7 @@ const NAV: readonly NavItem[] = [
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },
   { to: '/scenario', i18nKey: 'scenario', icon: FlaskConical },
   { to: '/reports', i18nKey: 'reports', icon: FileBarChart },
+  { to: '/reports/builder', i18nKey: 'report_builder', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/analytics', i18nKey: 'analytics', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/profile/sessions', i18nKey: 'my_sessions', icon: Smartphone },
   { to: '/profile/activity', i18nKey: 'my_activity', icon: History },

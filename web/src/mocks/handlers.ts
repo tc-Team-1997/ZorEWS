@@ -2170,7 +2170,313 @@ function illegal(c: CaseDetail, attempted: Transition) {
   }
 })();
 
+// ── T4.6.5 — Report builder MSW (in-memory) ──────────────────────────
+//
+// Each handler responds with the bank-grade envelope used by the BFF
+// post-T4.24. Source catalog is platform-static (mirror of the BFF
+// builder_catalog.ts file). Saved-report store is per-module mutable.
+
+interface _MswSavedReport {
+  report_id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  definition: unknown;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  visibility: 'private' | 'role' | 'tenant';
+  visible_to_roles: string[];
+  tags: string[];
+}
+
+const _mswReportSources = [
+  {
+    source_id: 'mart.customer_360',
+    display_name: 'Customer 360',
+    description: 'One row per customer with risk band, PD score, utilization, exposure, KYC + bureau snapshot.',
+    schema: 'mart',
+    table: 'customer_360',
+    fields: [
+      { name: 'customer_id', display_name: 'Customer ID', type: 'string', filterable: true, groupable: true, aggregatable: false, pii: true },
+      { name: 'risk_level', display_name: 'Risk Level', type: 'enum', enum_values: ['Low', 'Medium', 'High'], filterable: true, groupable: true, aggregatable: false, pii: false },
+      { name: 'pd_score', display_name: 'PD Score', type: 'number', filterable: true, groupable: false, aggregatable: true, pii: false },
+      { name: 'utilization', display_name: 'Utilization', type: 'number', filterable: true, groupable: false, aggregatable: true, pii: false },
+      { name: 'has_npa', display_name: 'Has NPA', type: 'boolean', filterable: true, groupable: true, aggregatable: false, pii: false },
+    ],
+    default_filter_fields: ['risk_level', 'has_npa'],
+    drill_targets: [
+      { to_source_id: 'mart.loan_360', via_field: 'customer_id', display_name: 'Loans' },
+    ],
+    tenant_scoped: true,
+    required_role: 'customers:read_risk_profile',
+  },
+  {
+    source_id: 'mart.loan_360',
+    display_name: 'Loan 360',
+    description: 'Loan-level facts joined to repayment aggregates.',
+    schema: 'mart',
+    table: 'loan_360',
+    fields: [
+      { name: 'loan_id', display_name: 'Loan ID', type: 'string', filterable: true, groupable: true, aggregatable: false, pii: false },
+      { name: 'customer_id', display_name: 'Customer ID', type: 'string', filterable: true, groupable: true, aggregatable: false, pii: true },
+      { name: 'product_code', display_name: 'Product', type: 'enum', enum_values: ['PL_RET', 'AUTO_RET', 'INV_SME', 'WC_SME', 'CORP_TL'], filterable: true, groupable: true, aggregatable: false, pii: false },
+      { name: 'outstanding_balance', display_name: 'Outstanding', type: 'number', filterable: true, groupable: false, aggregatable: true, pii: false },
+      { name: 'worst_dpd', display_name: 'Worst DPD', type: 'integer', filterable: true, groupable: true, aggregatable: true, pii: false },
+    ],
+    default_filter_fields: ['product_code', 'worst_dpd'],
+    drill_targets: [
+      { to_source_id: 'mart.customer_360', via_field: 'customer_id', display_name: 'Customer' },
+    ],
+    tenant_scoped: true,
+    required_role: 'customers:read_risk_profile',
+  },
+] as const;
+
+const _mswSavedReports: _MswSavedReport[] = [];
+let _mswSavedSeq = 0;
+
+export function __resetMswReportsBuilder(): void {
+  _mswSavedReports.length = 0;
+  _mswSavedSeq = 0;
+}
+
+function _mswSynthRow(idx: number, source: typeof _mswReportSources[number]): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const f of source.fields) {
+    const name = f.name;
+    const type = f.type as string;
+    if (type === 'string') {
+      row[name] = `${name.slice(0, 3).toUpperCase()}-${String(idx + 1).padStart(5, '0')}`;
+    } else if (type === 'integer') {
+      row[name] = (idx * 7) % 180;
+    } else if (type === 'number') {
+      row[name] = Math.round(((idx * 0.137) % 1) * 100) / 100;
+    } else if (type === 'boolean') {
+      row[name] = idx % 2 === 0;
+    } else if (type === 'enum') {
+      const values = (f as { enum_values?: readonly string[] }).enum_values ?? [];
+      row[name] = values[idx % Math.max(1, values.length)] ?? '';
+    } else {
+      row[name] = '';
+    }
+  }
+  return row;
+}
+
+const _mswReportBuilderHandlers = [
+  http.get('/v1/reports/builder/sources', () => {
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: new Date().toISOString(),
+        total_sources: _mswReportSources.length,
+        sources: _mswReportSources,
+      }),
+    );
+  }),
+
+  http.get('/v1/reports/builder/sources/:source_id', ({ params }) => {
+    const src = _mswReportSources.find((s) => s.source_id === params.source_id);
+    if (!src) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_source', `unknown source: ${params.source_id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(src));
+  }),
+
+  http.post('/v1/reports/builder/preview', async ({ request }) => {
+    const body = (await request.json()) as { source_id?: string };
+    const src = _mswReportSources.find((s) => s.source_id === body.source_id);
+    if (!src) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_source', `unknown: ${body.source_id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(
+      envelope({
+        source_id: src.source_id,
+        sql: `SELECT ${src.fields.map((f) => f.name).join(', ')}\nFROM ${src.schema}.${src.table}\nWHERE tenant_id = :tenant_id\nLIMIT :limit`,
+        params: { tenant_id: 'BIL', limit: 100 },
+        projection: src.fields.map((f) => f.name),
+        param_count: 2,
+        is_aggregate: false,
+      }),
+    );
+  }),
+
+  http.post('/v1/reports/builder/run', async ({ request }) => {
+    const body = (await request.json()) as { source_id?: string; limit?: number };
+    const src = _mswReportSources.find((s) => s.source_id === body.source_id);
+    if (!src) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_unknown_source', `unknown: ${body.source_id}`, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const limit = Math.min(body.limit ?? 100, 1000);
+    const rows = Array.from({ length: Math.min(limit, 25) }, (_, i) => _mswSynthRow(i, src));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: new Date().toISOString(),
+        source_id: src.source_id,
+        is_aggregate: false,
+        rows,
+        aggregates: {},
+        total_rows: rows.length,
+        candidate_rows: limit,
+        projection: src.fields.map((f) => f.name),
+        duration_ms: 5,
+      }),
+    );
+  }),
+
+  http.post('/v1/reports/builder/export.csv', async ({ request }) => {
+    const body = (await request.json()) as { source_id?: string };
+    const src = _mswReportSources.find((s) => s.source_id === body.source_id);
+    if (!src) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_unknown_source', `unknown: ${body.source_id}`, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const header = src.fields.map((f) => f.name).join(',');
+    const row = src.fields.map((f) => _mswSynthRow(0, src)[f.name]).join(',');
+    const csv = `${header}\r\n${row}\r\n`;
+    return new HttpResponse(csv, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="report-${src.source_id.replace(/\W+/g, '_')}.csv"`,
+      },
+    });
+  }),
+
+  http.get('/v1/reports/builder/saved', ({ request }) => {
+    const url = new URL(request.url);
+    const visibility = url.searchParams.get('visibility');
+    let rows = _mswSavedReports.filter((r) => r.tenant_id === 'BIL');
+    if (visibility) rows = rows.filter((r) => r.visibility === visibility);
+    return HttpResponse.json(
+      envelope({ tenant_id: 'BIL', total: rows.length, reports: rows }),
+    );
+  }),
+
+  http.get('/v1/reports/builder/saved/:id', ({ params }) => {
+    const r = _mswSavedReports.find((x) => x.report_id === params.id && x.tenant_id === 'BIL');
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_report', `unknown: ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/reports/builder/saved', async ({ request }) => {
+    const body = (await request.json()) as {
+      name?: string;
+      description?: string;
+      definition?: unknown;
+      visibility?: 'private' | 'role' | 'tenant';
+      visible_to_roles?: string[];
+      tags?: string[];
+    };
+    if (!body.name) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'name required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    _mswSavedSeq++;
+    const r: _MswSavedReport = {
+      report_id: `rpt-BIL-${Date.now()}-${_mswSavedSeq}`,
+      tenant_id: 'BIL',
+      name: body.name.trim(),
+      description: body.description ?? '',
+      definition: body.definition ?? {},
+      created_by: 'alice',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      visibility: body.visibility ?? 'private',
+      visible_to_roles: body.visible_to_roles ?? [],
+      tags: body.tags ?? [],
+    };
+    _mswSavedReports.push(r);
+    return HttpResponse.json(envelope(r, 'EWS_201'), { status: 201 });
+  }),
+
+  http.patch('/v1/reports/builder/saved/:id', async ({ params, request }) => {
+    const r = _mswSavedReports.find((x) => x.report_id === params.id && x.tenant_id === 'BIL');
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_report', `unknown: ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const body = (await request.json()) as Record<string, unknown>;
+    if (typeof body.name === 'string') r.name = body.name.trim();
+    if (typeof body.description === 'string') r.description = body.description.trim();
+    if (body.visibility === 'private' || body.visibility === 'role' || body.visibility === 'tenant') {
+      r.visibility = body.visibility;
+    }
+    r.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.delete('/v1/reports/builder/saved/:id', ({ params }) => {
+    const idx = _mswSavedReports.findIndex(
+      (x) => x.report_id === params.id && x.tenant_id === 'BIL',
+    );
+    if (idx === -1) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_report', `unknown: ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    _mswSavedReports.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post('/v1/reports/builder/saved/:id/run', ({ params }) => {
+    const r = _mswSavedReports.find((x) => x.report_id === params.id && x.tenant_id === 'BIL');
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_report', `unknown: ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const def = r.definition as { source_id?: string };
+    const src = _mswReportSources.find((s) => s.source_id === def.source_id);
+    if (!src) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_unknown_source', `unknown: ${def.source_id}`, 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const rows = Array.from({ length: 5 }, (_, i) => _mswSynthRow(i, src));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: new Date().toISOString(),
+        source_id: src.source_id,
+        is_aggregate: false,
+        rows,
+        aggregates: {},
+        total_rows: rows.length,
+        candidate_rows: 100,
+        projection: src.fields.map((f) => f.name),
+        duration_ms: 3,
+      }),
+    );
+  }),
+];
+
 export const handlers = [
+  ..._mswReportBuilderHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

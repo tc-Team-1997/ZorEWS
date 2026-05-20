@@ -27,6 +27,7 @@ import { CaseCapPage } from '@/modules/cms/CaseCapPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
 import { ReportsPage } from '@/modules/reports/ReportsPage';
 import { CasesDetailReportPage } from '@/modules/reports/CasesDetailReportPage';
+import { ReportBuilderPage } from '@/modules/reports/builder/ReportBuilderPage';
 import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
@@ -97,6 +98,7 @@ export function App() {
             <Route path="scenario" element={<ScenarioPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="reports/cases-detail" element={<CasesDetailReportPage />} />
+            <Route path="reports/builder" element={<ReportBuilderPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="profile/sessions" element={<SessionsPage />} />
             <Route path="profile/activity" element={<LoginActivityPage />} />
