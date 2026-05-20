@@ -101,6 +101,18 @@ import {
   type DqExecutionStatus,
 } from './dq/dq_engine';
 import {
+  defaultReconStore,
+  ReconError,
+  ALL_RECON_KINDS,
+  ALL_RECON_SEVERITIES,
+  buildReconDashboard,
+  runReconcile,
+  isReconKind,
+  isReconSeverity,
+  type ReconStore,
+  type ReconRunStatus,
+} from './recon/recon_engine';
+import {
   AuthSvcRestoreClient,
   makeAuthSvcRestoreClientFromEnv,
 } from './recovery/auth_svc_restore_client';
@@ -999,6 +1011,9 @@ export interface AppDeps {
   /** Phase A.3 (2026-05-21) — DQ Engine store (rules + executions).
    *  Defaults to a singleton InMemoryDqStore. */
   dqStore?: DqStore;
+  /** Phase A.4 (2026-05-21) — Reconciliation Engine store (definitions
+   *  + runs). Defaults to a singleton InMemoryReconStore. */
+  reconStore?: ReconStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1228,6 +1243,9 @@ export function makeApp(deps: AppDeps = {}) {
     deps.geographyMasterStore ?? defaultGeographyMasterStore;
   // Phase A.3 — DQ Engine. Single store carries rules + executions.
   const dqStore = deps.dqStore ?? defaultDqStore;
+  // Phase A.4 — Reconciliation Engine. Single store carries
+  // definitions + run history.
+  const reconStore = deps.reconStore ?? defaultReconStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1502,6 +1520,24 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = dqStore.restoreRule(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('dq_rule', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase A.4 — recon_definition adapter. Same shape as A.3 — runs
+    // are append-only audit-trail and don't appear here.
+    registerRecoveryAdapter({
+      entity_type: 'recon_definition',
+      display_name: 'Reconciliation definition',
+      module: 'bff',
+      original_table: 'app_recon.definitions',
+      restore: async (record) => {
+        const ok = reconStore.restoreDefinition(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('recon_definition', record.original_id);
         }
       },
     });
@@ -17307,6 +17343,402 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const dashboard = buildDqDashboard(dqStore, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  // ── Phase A.4 — Reconciliation & Controls Engine ────────────────────
+  //
+  // PDF §6 Ecosystem item E12. Reconciliation between two record
+  // sources (e.g. CBS upstream vs mart materialised view). 3 kinds:
+  // count_only / amount_match / set_diff. Soft-delete + Recovery on
+  // definitions; runs are append-only audit-trail.
+
+  /** GET /v1/recon/kinds — closed enums for SPA pickers. */
+  app.get(
+    '/v1/recon/kinds',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          { kinds: [...ALL_RECON_KINDS], severities: [...ALL_RECON_SEVERITIES] },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/recon/definitions[?kind=&severity=&include_deleted=] */
+  app.get(
+    '/v1/recon/definitions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const kindRaw = req.query.kind;
+      const sevRaw = req.query.severity;
+      if (kindRaw !== undefined && !isReconKind(kindRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_kind', message: `kind must be one of: ${ALL_RECON_KINDS.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (sevRaw !== undefined && !isReconSeverity(sevRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_severity', message: `severity must be one of: ${ALL_RECON_SEVERITIES.join(', ')}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = reconStore.listDefinitions(req.tenant!.tenant_id, {
+        include_deleted,
+        kind: kindRaw as never,
+        severity: sevRaw as never,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/recon/definitions/:recon_id. */
+  app.get(
+    '/v1/recon/definitions/:recon_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const def = reconStore.getDefinition(req.tenant!.tenant_id, req.params.recon_id ?? '');
+      if (!def) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_recon', message: `unknown recon_id: ${req.params.recon_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(def, ctx));
+    },
+  );
+
+  /** POST /v1/recon/definitions. */
+  app.post(
+    '/v1/recon/definitions',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const def = reconStore.createDefinition(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(def, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof ReconError) {
+          if (e.code === 'duplicate_recon_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_recon_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/recon/definitions/:recon_id. */
+  app.patch(
+    '/v1/recon/definitions/:recon_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const def = reconStore.updateDefinition(
+          req.tenant!.tenant_id,
+          req.params.recon_id ?? '',
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(def, ctx));
+      } catch (e) {
+        if (e instanceof ReconError) {
+          if (e.code === 'unknown_recon') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_recon', message: e.message, severity: 'LOW', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/recon/definitions/:recon_id — soft-delete + archive. */
+  app.delete(
+    '/v1/recon/definitions/:recon_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const recon_id = req.params.recon_id ?? '';
+      try {
+        const tombstoned = reconStore.softDeleteDefinition(
+          req.tenant!.tenant_id,
+          recon_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'recon_definition',
+            original_id: recon_id,
+            original_table: 'app_recon.definitions',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/recon/definitions/:recon_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof ReconError) {
+          if (e.code === 'unknown_recon') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_recon', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/recon/definitions/:recon_id/run — execute now. Body:
+   *  { source_records: any[], target_records: any[] }. */
+  app.post(
+    '/v1/recon/definitions/:recon_id/run',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const body = (inner ?? {}) as { source_records?: unknown; target_records?: unknown };
+      try {
+        const run = runReconcile(
+          reconStore,
+          req.tenant!.tenant_id,
+          {
+            recon_id: req.params.recon_id ?? '',
+            source_records: Array.isArray(body.source_records)
+              ? (body.source_records as Array<Record<string, unknown>>)
+              : [],
+            target_records: Array.isArray(body.target_records)
+              ? (body.target_records as Array<Record<string, unknown>>)
+              : [],
+            triggered_by: actor,
+          },
+          now(),
+        );
+        return res.json(wrapResponse(run, ctx));
+      } catch (e) {
+        if (e instanceof ReconError) {
+          if (e.code === 'unknown_recon') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_recon', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'recon_inactive') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_recon_inactive', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'run failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/recon/runs?recon_id=&status=&limit= */
+  app.get(
+    '/v1/recon/runs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const recon_id = req.query.recon_id as string | undefined;
+      const statusRaw = req.query.status as string | undefined;
+      const limit = Math.max(1, Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500));
+      if (statusRaw !== undefined && !['running', 'balanced', 'breaks_found', 'error'].includes(statusRaw)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: 'status must be running|balanced|breaks_found|error', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = reconStore.listRuns(req.tenant!.tenant_id, {
+        recon_id,
+        status: statusRaw as ReconRunStatus | undefined,
+        limit,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/recon/runs/:run_id. */
+  app.get(
+    '/v1/recon/runs/:run_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const r = reconStore.getRun(req.tenant!.tenant_id, req.params.run_id ?? '');
+      if (!r) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_run', message: `unknown run_id: ${req.params.run_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(r, ctx));
+    },
+  );
+
+  /** GET /v1/recon/dashboard — pre-computed rollup. */
+  app.get(
+    '/v1/recon/dashboard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildReconDashboard(reconStore, req.tenant!.tenant_id, now());
       return res.json(wrapResponse(dashboard, ctx));
     },
   );

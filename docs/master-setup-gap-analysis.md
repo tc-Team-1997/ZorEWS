@@ -9,15 +9,29 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial (2026-05-20) | After A.1 | After A.2 | After A.3 (2026-05-21) |
+| Metric | Initial | A.1 | A.2 | A.3 | After A.4 (2026-05-21) |
+|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | ~80% | **~84%** |
+| PDF surfaces fully shipped (✅) | 24 / 49 | 25 / 49 | 26 / 49 | 27 / 49 | **28 / 49** |
+| PDF surfaces partially shipped (⚠️) | 19 / 49 | 18 / 49 | 17 / 49 | 17 / 49 | 17 / 49 |
+| PDF surfaces not shipped (❌) | 6 / 49 | 5 / 49 | 4 / 49 | 3 / 49 | **2 / 49** |
+| Net-new screens needed to close | ~22 SPA | ~21 | ~20 | ~17 | ~14 (every greenfield Phase A item now has BFF surface; SPA pages bulk deferred to Phase B) |
+| Net-new backend modules needed | 2 (DQ + Reconciliation) | unchanged | unchanged | **1** (Reconciliation only) | **0 — ALL GREENFIELD MODULES SHIPPED** |
+| New tables required | 5 master-data tables | 4 | 3 | 1 | **0 — all 4 Phase A SQL migrations landed (024–027)** |
+| BFF route count delta | — | +6 | +12 | +22 | **+33** (Recon adds 11 more) |
+| BFF test suite | 8087 | 8129 | 8175 | 8286 | **8333** ✅ clean run |
+
+## Phase A — COMPLETE ✅
+
+All 4 greenfield items shipped end-to-end (BFF module + Recovery adapter + SQL migration + jest tests):
+
+| Sub-phase | Module | Routes | Tests | Schema |
 |---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~75% | ~76% | **~80%** |
-| PDF surfaces fully shipped (✅) | 24 / 49 | 25 / 49 | 26 / 49 | **27 / 49** |
-| PDF surfaces partially shipped (⚠️) | 19 / 49 | 18 / 49 | 17 / 49 | 17 / 49 |
-| PDF surfaces not shipped (❌) | 6 / 49 | 5 / 49 | 4 / 49 | **3 / 49** |
-| Net-new screens needed to close | ~22 SPA pages | ~21 | ~20 | ~17 (Sector + Geography + DQ master pages still pending — BFF surface shipped) |
-| Net-new backend modules needed | 2 modules (DQ Engine, Reconciliation) | unchanged | unchanged | **1** (Reconciliation only) |
-| New tables required | 5 master-data tables | 4 | 3 | **1** (DQ rules + executions + Sectors + Geographies landed; Reconciliation still pending) |
+| A.1 (2026-05-21) | `services/bff/src/master/sector_master.ts` | 6 | 49 | `024_master_sectors.sql` |
+| A.2 (2026-05-21) | `services/bff/src/master/geography_master.ts` | 6 | 47 | `025_master_geographies.sql` |
+| A.3 (2026-05-21) | `services/bff/src/dq/dq_engine.ts` | 10 | 57 | `026_dq_engine.sql` |
+| A.4 (2026-05-21) | `services/bff/src/recon/recon_engine.ts` | 11 | 47 | `027_recon_engine.sql` |
+| **Total** | **4 modules** | **33 routes** | **200 tests** | **4 migrations** |
 
 **Headline:** The system's *runtime* — rule evaluation, scoring, alerts, cases, workflow, audit, notifications — is heavily shipped (90%+). The gap is concentrated in **admin master-data UIs** (Customer / Account / Product / Sector / Geography / Bureau setup screens) and **two greenfield modules** (Data Quality Engine, Reconciliation & Controls). The backend data models for most master-setup items either already exist in `mart.*` or `app_iam.tenants`; what's missing is the **CRUD admin SPA + a thin master-data table layer for the 5 lookup-style entities**.
 

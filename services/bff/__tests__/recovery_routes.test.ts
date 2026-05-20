@@ -61,11 +61,13 @@ describe('/v1/recovery — empty store', () => {
     //   Phase A.1: sector_master (BFF-local, always registered)
     //   Phase A.2: geography_master (BFF-local, always registered)
     //   Phase A.3: dq_rule (BFF-local, always registered)
+    //   Phase A.4: recon_definition (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'cms_case_attachment',
       'dq_rule',
       'geography_master',
+      'recon_definition',
       'saved_scenario',
       'sector_master',
       'tenant',
