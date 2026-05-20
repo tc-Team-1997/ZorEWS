@@ -1,7 +1,7 @@
 # Recovery Center — Architecture + Adoption Guide
 
 **Status:** Phase 1 shipped 2026-05-18; saved_report_filter adopted 2026-05-19.
-**Wired services:** webhooks · saved scenarios · saved report filters
+**Wired services:** webhooks · saved scenarios · saved report filters · cms_case_attachments · auth-svc/{teams, team members, dashboard widgets, service clients, users}
 **Deferred:** 7 candidate services (auth-svc + regulatory-svc + tenant) — see audit below
 
 > **Attribution note (one-time):** Phase 1's 17 files (this doc included)
@@ -202,6 +202,7 @@ Roughly in order of complexity:
 | Service | Entity types | Notes |
 |---|---|---|
 | ✅ `services/bff/src/reports/saved_filters_store.ts` | `saved_report_filter` | **Adopted 2026-05-19** (commit follows this doc) |
+| ✅ `services/bff/src/cms_store.ts` (attachments) | `cms_case_attachment` | **Adopted 2026-05-20 (Phase 2h).** BFF-local; DELETE /v1/cms/cases/:case_id/attachments/:attachment_id archives the row snapshot (including file_url + virus_scan_status) before delete. Restore re-inserts onto the parent case via `restoreAttachment()`; refuses (409) when an attachment with the same id already exists OR when the parent case is gone. 6 new tests. |
 | ✅ `services/auth-svc/src/teams.ts` | `user_team` + `user_team_member` | **Archive (Phase 2c, 2026-05-19) + Restore (Phase 2d, 2026-05-20) both shipped — first end-to-end cross-service adopter.** Archive: `recovery_archive_client.ts` copy in auth-svc src/; both DELETE routes archive before deleting (best-effort posture). Restore: shared-secret-authed `POST /auth/recovery/restore` on auth-svc + BFF registers adapters that HTTP-call through `auth_svc_restore_client.ts`. Cascade limitation: restoring a member whose parent team is gone returns 409 (operator must restore the team first). 43 new tests total (10 archive + 15 auth-svc restore + 18 BFF adapter). |
 | ✅ `services/auth-svc/src/dashboard_widgets.ts` | `role_dashboard_widget` | **Adopted 2026-05-20 (Phase 2e).** Semantic twist: no DELETE endpoint exists; the destructive op is `PUT /auth/dashboard-widgets/:role` which atomically replaces a role's layout. Adoption archives the PRIOR non-empty layout before each replace (treats layout snapshots as "soft deletes" — gives admins a rollback path for any layout edit, not just clears). Restore re-applies via `replaceForRole` and deliberately does NOT archive the overwrite (avoids Recycle Bin loops). 15 new tests (14 archive + 1 BFF adapter). |
 | ✅ `services/auth-svc/src/service_clients.ts` | `service_client` | **Adopted 2026-05-20 (Phase 2f).** Security concern addressed via CONSERVATIVE restore semantic: regardless of the archive's `active` flag, restored clients ALWAYS come back with `active=false`. The preserved hash is audit-historic only — `find()` short-circuits on inactive so the credential cannot authenticate. Operators who want re-activation: delete the restored inactive row + re-create with the same id (new secret minted). 11 new auth-svc tests + 1 BFF e2e test. |

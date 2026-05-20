@@ -191,6 +191,20 @@ export interface CmsCaseStore {
     deleted_by: string,
     now: Date,
   ): boolean;
+  /**
+   * Recovery Center Phase 2h — re-insert a previously deleted
+   * attachment row with its ORIGINAL attachment_id + case_id +
+   * tenant_id. Returns false if the attachment_id already exists for
+   * that case (conflict) or if the parent case no longer exists
+   * (operator must restore the case first — though cases don't
+   * currently support delete, this guards against future cascade
+   * semantics). No conservative semantic flip needed: attachments
+   * carry no credentials or access; restore brings the row back
+   * exactly as archived (file_url, virus_scan_status, etc.). The
+   * file_url points at the same blob as before — operators verify
+   * the underlying object hasn't been GC'd in storage.
+   */
+  restoreAttachment?: (att: CmsCaseAttachment) => boolean;
   /** Test-time hook: flip a pending scan to clean/infected/failed. */
   setVirusScanStatus(
     tenant_id: string,
@@ -893,6 +907,25 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
       deleted_by.trim(),
       now,
     );
+    return true;
+  }
+
+  restoreAttachment(att: CmsCaseAttachment): boolean {
+    // Verify the parent case still exists. requireCase throws when
+    // missing — we catch + return false so the caller surfaces 409
+    // restore_conflict rather than a 500.
+    try {
+      this.requireCase(att.tenant_id, att.case_id);
+    } catch {
+      return false;
+    }
+    const key = `${att.tenant_id}::${att.case_id}`;
+    const arr = this.attachments.get(key) ?? [];
+    if (arr.some((x) => x.attachment_id === att.attachment_id)) return false;
+    // Deep-clone via clone() helper used elsewhere in this file so the
+    // caller's reference can't mutate stored state.
+    arr.push(clone(att));
+    this.attachments.set(key, arr);
     return true;
   }
 

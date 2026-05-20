@@ -1214,6 +1214,45 @@ export function makeApp(deps: AppDeps = {}) {
   } catch {
     /* already registered */
   }
+  try {
+    // Phase 2h: CMS case attachment. BFF-local — same in-process
+    // pattern as webhooks + scenarios. No conservative semantic flip
+    // needed: attachments carry no credentials/access.
+    registerRecoveryAdapter({
+      entity_type: 'cms_case_attachment',
+      display_name: 'CMS case attachment',
+      module: 'bff',
+      original_table: 'app_cases.cms_case_attachments',
+      restore: async (record) => {
+        if (!cmsCaseStore.restoreAttachment) {
+          // Defensive: an older store impl that hasn't implemented
+          // restoreAttachment surfaces as 501 no_adapter via the
+          // route's catch.
+          throw new RecoveryError(
+            'no_adapter',
+            'cms case store does not support attachment restore',
+          );
+        }
+        const ok = cmsCaseStore.restoreAttachment(
+          record.payload as never,
+        );
+        if (!ok) {
+          // restoreAttachment returns false on duplicate attachment_id
+          // OR when the parent case is gone. The former is a true
+          // conflict; the latter is a cascade limitation operators
+          // need to know about. Use the conflict error class so the
+          // route maps to 409 — SPA shows "restore conflict, check
+          // whether the parent case still exists".
+          throw new RestoreConflictError(
+            'cms_case_attachment',
+            record.original_id,
+          );
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
   // Phase 2d: cross-service restore adapters. Each entity_type
   // archived by a non-BFF service needs an adapter here that
   // HTTP-calls the source service's restore endpoint. Registered
@@ -8481,14 +8520,58 @@ export function makeApp(deps: AppDeps = {}) {
     '/v1/cms/cases/:case_id/attachments/:attachment_id',
     requireTenantMw,
     requireRole('cases:list'),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.case_id ?? '';
       const fid = req.params.attachment_id ?? '';
       const deleted_by = cmsApexUser(req);
+      const tenant_id = req.tenant!.tenant_id;
       try {
+        // Phase 2h: snapshot the attachment row BEFORE delete so the
+        // Recovery Center can re-insert it later. getAttachment()
+        // returns the live row (incl. file_url + virus_scan_status);
+        // we skip archiving if the lookup misses, since the DELETE
+        // call itself will then return 404 with no side-effect.
+        const snapshot = cmsCaseStore.getAttachment(tenant_id, id, fid);
+        if (snapshot) {
+          try {
+            const recovery_id = await recoveryStore.archive({
+              tenant_id,
+              module: 'bff',
+              entity_type: 'cms_case_attachment',
+              original_id: snapshot.attachment_id,
+              original_table: 'app_cases.cms_case_attachments',
+              payload: snapshot as unknown as Record<string, unknown>,
+              deleted_by,
+              source_action: 'user_initiated',
+              prior_status: snapshot.virus_scan_status,
+            });
+            const archived = await recoveryStore.get(tenant_id, recovery_id);
+            if (archived) {
+              recordRecoveryAudit(
+                {
+                  auditTrailStore,
+                  tenant_id,
+                  actor_username: deleted_by,
+                  actor_role: getRole(req) ?? 'admin',
+                  now: now(),
+                },
+                archived,
+              );
+            }
+          } catch (err) {
+            // Best-effort: archive failure doesn't block the delete.
+            // Same posture as the other in-BFF adopters.
+            // eslint-disable-next-line no-console
+            console.error(
+              '[recovery] archive failed for cms attachment',
+              snapshot.attachment_id,
+              err,
+            );
+          }
+        }
         const ok = cmsCaseStore.deleteAttachment(
-          req.tenant!.tenant_id,
+          tenant_id,
           id,
           fid,
           deleted_by,
@@ -8507,7 +8590,7 @@ export function makeApp(deps: AppDeps = {}) {
           );
         }
         writeCmsAuditEvents(
-          req.tenant!.tenant_id,
+          tenant_id,
           'attachment_deleted',
           deleted_by,
           { case_id: id },
@@ -17680,6 +17763,28 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const summary = ingestionRegistry.health(req.tenant!.tenant_id);
       return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/schema/field-count-histogram (T6 M3.18) — 5-
+   *  bucket field-count histogram over the M3.2 schema catalog
+   *  (minimal 1-3 / small 4-6 / medium 7-10 / large 11-15 / x_large
+   *  16+). Per-bucket: count + by_record_format (every key at 0) +
+   *  sample_connector_ids cap 3 sorted asc. Envelope: peak_bucket +
+   *  mean_fields + min_fields + max_fields + empty_buckets[].
+   *  Platform-static. Mirror of M4.15 / M5.18 / M9.11 / M8.12 / M7.15
+   *  / M3.16 bucketing pattern for the connector schema surface. */
+  app.get(
+    '/v1/ingestion/schema/field-count-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorSchemaFieldCountHistogram } =
+        require('./connector_schema_field_count_histogram') as
+        typeof import('./connector_schema_field_count_histogram');
+      const out = buildConnectorSchemaFieldCountHistogram(now());
+      return res.json(wrapResponse(out, ctx));
     },
   );
 

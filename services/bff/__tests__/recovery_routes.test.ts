@@ -52,9 +52,13 @@ describe('/v1/recovery — empty store', () => {
     expect(res.status).toBe(200);
     expect(res.body.body.total).toBe(0);
     expect(res.body.body.by_status).toEqual({ archived: 0, restored: 0, purged: 0 });
-    // Webhook + saved-scenario adapters auto-registered by makeApp
+    // Adapters auto-registered by makeApp (grew over phases):
+    //   Phase 1: webhook_subscription, saved_scenario
+    //   Phase 1+: saved_report_filter (only when savedFilterStore is
+    //             configured; not configured in this test)
+    //   Phase 2h: cms_case_attachment (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
-    expect(types).toEqual(['saved_scenario', 'webhook_subscription']);
+    expect(types).toEqual(['cms_case_attachment', 'saved_scenario', 'webhook_subscription']);
   });
 
   it('GET /v1/recovery returns 403 for non-admin', async () => {
