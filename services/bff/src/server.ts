@@ -1371,6 +1371,36 @@ export function makeApp(deps: AppDeps = {}) {
     }
   }
   const tenantLookup = deps.tenantLookup ?? defaultTenantLookup();
+  try {
+    // Phase 2i: tenant config row. BFF-local; restored via the live
+    // tenantLookup. CONSERVATIVE SEMANTIC: restored tenants come back
+    // with active=false regardless of the archived flag. Operators
+    // MUST PATCH active=true after restore to bring the tenant back
+    // online — high-blast-radius operation gets a second-confirm
+    // gate. System-protected tenants (BANK_DEMO) can never be archived
+    // in the first place (the DELETE route refuses before the archive
+    // call would fire), so they can't appear in the Recycle Bin.
+    registerRecoveryAdapter({
+      entity_type: 'tenant',
+      display_name: 'Tenant',
+      module: 'bff',
+      original_table: 'app_iam.tenants',
+      restore: async (record) => {
+        if (!tenantLookup.restore) {
+          throw new RecoveryError(
+            'no_adapter',
+            'tenant lookup does not support restore',
+          );
+        }
+        const ok = tenantLookup.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('tenant', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
   const jwtVerifier = deps.jwtVerifier ?? makeJwtVerifier();
   const requireTenantMw = requireTenant(tenantLookup, jwtVerifier);
   const now = deps.now ?? (() => new Date());
@@ -6360,6 +6390,31 @@ export function makeApp(deps: AppDeps = {}) {
         customPresetStore,
         now(),
       );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/scenarios/library/regulator-severity-matrix (T6 M16.21)
+   *  — 2D pivot combining 3 ScenarioRegulator rows (RBI / IRDAI /
+   *  INTERNAL) × 3 ScenarioSeverity cols (mild / moderate / severe).
+   *  9 cells, each preset in exactly one cell. Per-row + per-col +
+   *  peak_cell (canonical iteration tie-break) + empty_cells[] +
+   *  most_severe_regulator (highest severe count) + most_diverse +
+   *  most_universal. Orthogonal to M16.17 (category × regulator) —
+   *  answers "do we have a severe-level RBI scenario? where are the
+   *  gaps in stress-test severity per regulator?". Mirror of M14.28
+   *  / M12.14 / M15.14 matrix pattern. Platform-static. Mounted
+   *  BEFORE `/:preset_id` so the literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/regulator-severity-matrix',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioRegulatorSeverityMatrix } =
+        require('./scenario_regulator_severity_matrix') as
+        typeof import('./scenario_regulator_severity_matrix');
+      const out = buildScenarioRegulatorSeverityMatrix(now());
       return res.json(wrapResponse(out, ctx));
     },
   );
@@ -13803,13 +13858,61 @@ export function makeApp(deps: AppDeps = {}) {
         ),
       );
     }
-    const result = await tenantLookup.delete(req.params.tenant_id);
+    const target_tenant_id = req.params.tenant_id;
+    // Phase 2i: snapshot the tenant row BEFORE delete. The archive
+    // lives under the CALLER'S tenant (req.tenant.tenant_id), not the
+    // target — operators who delete BIL while logged in as BANK_DEMO
+    // admin find the recovery row in the BANK_DEMO Recycle Bin. This
+    // matches how Recovery Center is scoped per-tenant for ops UX,
+    // and keeps system_protected refusals from polluting the bin.
+    const archiverTenantId = req.tenant!.tenant_id;
+    const target = await tenantLookup(target_tenant_id);
+    // Skip archive for system_protected (the delete itself refuses)
+    // and for unknown tenants (no row to archive). We only archive
+    // when the delete WILL succeed.
+    const canArchive =
+      target !== undefined && !(['BANK_DEMO'] as readonly string[]).includes(target_tenant_id);
+    if (canArchive && target) {
+      const deleted_by =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      try {
+        const recovery_id = await recoveryStore.archive({
+          tenant_id: archiverTenantId,
+          module: 'bff',
+          entity_type: 'tenant',
+          original_id: target.tenant_id,
+          original_table: 'app_iam.tenants',
+          payload: target as unknown as Record<string, unknown>,
+          deleted_by,
+          source_action: 'user_initiated',
+          prior_status: target.active ? 'active' : 'inactive',
+        });
+        const archived = await recoveryStore.get(archiverTenantId, recovery_id);
+        if (archived) {
+          recordRecoveryAudit(
+            {
+              auditTrailStore,
+              tenant_id: archiverTenantId,
+              actor_username: deleted_by,
+              actor_role: getRole(req) ?? 'admin',
+              now: now(),
+            },
+            archived,
+          );
+        }
+      } catch (err) {
+        // Best-effort: archive failure does NOT block the delete.
+        // eslint-disable-next-line no-console
+        console.error('[recovery] archive failed for tenant', target_tenant_id, err);
+      }
+    }
+    const result = await tenantLookup.delete(target_tenant_id);
     if (result === 'system_protected') {
       return res.status(409).json(
         wrapError(
           {
             code: 'EWS_409',
-            message: `tenant '${req.params.tenant_id}' is system-protected and cannot be deleted`,
+            message: `tenant '${target_tenant_id}' is system-protected and cannot be deleted`,
             severity: 'MEDIUM',
           },
           ctx,
@@ -13819,7 +13922,7 @@ export function makeApp(deps: AppDeps = {}) {
     if (result === false) {
       return res.status(404).json(
         wrapError(
-          { code: 'EWS_404', message: `tenant '${req.params.tenant_id}' not found`, severity: 'LOW' },
+          { code: 'EWS_404', message: `tenant '${target_tenant_id}' not found`, severity: 'LOW' },
           ctx,
         ),
       );
