@@ -26,6 +26,7 @@ import {
   Send,
   PlayCircle,
   Trash2,
+  BarChart3,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -71,6 +72,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/escalation-worker', i18nKey: 'escalation_worker', icon: PlayCircle, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/case-scenarios', i18nKey: 'case_scenarios', icon: Zap, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/recycle-bin', i18nKey: 'recycle_bin', icon: Trash2, requireRole: ['admin'] },
+  { to: '/admin/recovery-analytics', i18nKey: 'recovery_analytics', icon: BarChart3, requireRole: ['admin'] },
 ] as const;
 
 // 15-min idle limit, 2-min warning window — banking standard.

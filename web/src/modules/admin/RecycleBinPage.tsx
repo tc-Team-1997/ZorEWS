@@ -17,9 +17,11 @@
 //   - Expandable JSON payload preview
 
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  BarChart3,
   ChevronDown,
   ChevronRight,
   Filter,
@@ -100,16 +102,25 @@ export function RecycleBinPage() {
         title="Recovery Center"
         subtitle="Soft-deleted records from every adopting module. Restore reinserts with the original ID; purge is permanent."
         actions={
-          <Button
-            variant="ghost"
-            onClick={() => {
-              qc.invalidateQueries({ queryKey: ['recovery-list'] });
-              qc.invalidateQueries({ queryKey: ['recovery-stats'] });
-            }}
-            data-testid="recycle-bin-refresh"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/admin/recovery-analytics"
+              className="text-[12px] text-muted hover:text-ink inline-flex items-center gap-1"
+              data-testid="recycle-bin-analytics-link"
+            >
+              <BarChart3 className="h-4 w-4" /> View analytics
+            </Link>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                qc.invalidateQueries({ queryKey: ['recovery-list'] });
+                qc.invalidateQueries({ queryKey: ['recovery-stats'] });
+              }}
+              data-testid="recycle-bin-refresh"
+            >
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+          </div>
         }
       />
 

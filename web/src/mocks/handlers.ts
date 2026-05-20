@@ -3383,6 +3383,203 @@ export const handlers = [
     });
   }),
 
+  // Phase 3 — operator analytics. Returns a representative fixture
+  // computed from the in-memory _mockDeletedRecords array, but with
+  // some synthetic numbers for the time-to-restore distribution +
+  // top_actors so the SPA charts render meaningfully in dev mode.
+  http.get('/v1/recovery/analytics', ({ request }) => {
+    if (readPersistedRole() !== 'admin') {
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const url = new URL(request.url);
+    const days = Math.max(1, Math.min(365, Number.parseInt(url.searchParams.get('days') ?? '30', 10) || 30));
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - days * 86400 * 1000);
+
+    // Per-day timeline (always exactly `days` buckets, oldest first).
+    const by_day: Array<{
+      date: string;
+      total: number;
+      by_status: { archived: number; restored: number; purged: number };
+    }> = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 86400 * 1000);
+      by_day.push({
+        date: d.toISOString().slice(0, 10),
+        total: 0,
+        by_status: { archived: 0, restored: 0, purged: 0 },
+      });
+    }
+    const dayIndex = new Map(by_day.map((b, i) => [b.date, i]));
+
+    const archivedInWindow: typeof _mockDeletedRecords = [];
+    const restoredInWindow: typeof _mockDeletedRecords = [];
+    const purgedInWindow: typeof _mockDeletedRecords = [];
+    const inWindow = (iso: string | null): boolean => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return t >= windowStart.getTime() && t <= now.getTime();
+    };
+
+    for (const r of _mockDeletedRecords) {
+      if (inWindow(r.deleted_at)) {
+        archivedInWindow.push(r);
+        const idx = dayIndex.get(new Date(r.deleted_at).toISOString().slice(0, 10));
+        if (idx !== undefined) {
+          by_day[idx].total += 1;
+          by_day[idx].by_status.archived += 1;
+        }
+      }
+      if (r.restored_at && inWindow(r.restored_at)) {
+        restoredInWindow.push(r);
+        const idx = dayIndex.get(new Date(r.restored_at).toISOString().slice(0, 10));
+        if (idx !== undefined) {
+          by_day[idx].total += 1;
+          by_day[idx].by_status.restored += 1;
+        }
+      }
+      if (r.purged_at && inWindow(r.purged_at)) {
+        purgedInWindow.push(r);
+        const idx = dayIndex.get(new Date(r.purged_at).toISOString().slice(0, 10));
+        if (idx !== undefined) {
+          by_day[idx].total += 1;
+          by_day[idx].by_status.purged += 1;
+        }
+      }
+    }
+
+    // top_actors (capped 10, sorted desc by total ops with username asc tie-break).
+    const actorMap = new Map<
+      string,
+      {
+        actor_username: string;
+        total_archives: number;
+        total_restores: number;
+        total_purges: number;
+        most_recent_at: string;
+      }
+    >();
+    function bumpActor(
+      u: string | null,
+      field: 'total_archives' | 'total_restores' | 'total_purges',
+      ts: string,
+    ) {
+      if (!u) return;
+      let row = actorMap.get(u);
+      if (!row) {
+        row = { actor_username: u, total_archives: 0, total_restores: 0, total_purges: 0, most_recent_at: ts };
+        actorMap.set(u, row);
+      }
+      row[field] += 1;
+      if (ts > row.most_recent_at) row.most_recent_at = ts;
+    }
+    for (const r of archivedInWindow) bumpActor(r.deleted_by, 'total_archives', r.deleted_at);
+    for (const r of restoredInWindow) bumpActor(r.restored_by, 'total_restores', r.restored_at!);
+    for (const r of purgedInWindow) bumpActor(r.purged_by, 'total_purges', r.purged_at!);
+    const top_actors = [...actorMap.values()]
+      .sort((a, b) => {
+        const ta = a.total_archives + a.total_restores + a.total_purges;
+        const tb = b.total_archives + b.total_restores + b.total_purges;
+        if (tb !== ta) return tb - ta;
+        return a.actor_username.localeCompare(b.actor_username);
+      })
+      .slice(0, 10);
+
+    // by_entity_type (capped 20).
+    const entityMap = new Map<
+      string,
+      { entity_type: string; total_archives: number; total_restores: number; total_purges: number; outstanding_delta: number }
+    >();
+    function ensureEntity(et: string) {
+      let row = entityMap.get(et);
+      if (!row) {
+        row = { entity_type: et, total_archives: 0, total_restores: 0, total_purges: 0, outstanding_delta: 0 };
+        entityMap.set(et, row);
+      }
+      return row;
+    }
+    for (const r of archivedInWindow) ensureEntity(r.entity_type).total_archives += 1;
+    for (const r of restoredInWindow) ensureEntity(r.entity_type).total_restores += 1;
+    for (const r of purgedInWindow) ensureEntity(r.entity_type).total_purges += 1;
+    for (const row of entityMap.values()) row.outstanding_delta = row.total_archives - row.total_restores;
+    const by_entity_type = [...entityMap.values()]
+      .sort((a, b) => b.total_archives - a.total_archives || a.entity_type.localeCompare(b.entity_type))
+      .slice(0, 20);
+
+    // by_module (capped 10).
+    const moduleMap = new Map<string, { module: string; total_archives: number; total_restores: number; total_purges: number }>();
+    function ensureModule(m: string) {
+      let row = moduleMap.get(m);
+      if (!row) {
+        row = { module: m, total_archives: 0, total_restores: 0, total_purges: 0 };
+        moduleMap.set(m, row);
+      }
+      return row;
+    }
+    for (const r of archivedInWindow) ensureModule(r.module).total_archives += 1;
+    for (const r of restoredInWindow) ensureModule(r.module).total_restores += 1;
+    for (const r of purgedInWindow) ensureModule(r.module).total_purges += 1;
+    const by_module = [...moduleMap.values()]
+      .sort((a, b) => b.total_archives - a.total_archives || a.module.localeCompare(b.module))
+      .slice(0, 10);
+
+    // Cohort rates.
+    const cohortRestored = archivedInWindow.filter((r) => r.restored_at !== null).length;
+    const cohortPurged = archivedInWindow.filter((r) => r.purged_at !== null).length;
+    const cohortSize = archivedInWindow.length;
+    const restore_rate = cohortSize > 0 ? Math.round((cohortRestored / cohortSize) * 1000) / 1000 : null;
+    const purge_rate = cohortSize > 0 ? Math.round((cohortPurged / cohortSize) * 1000) / 1000 : null;
+
+    // Time-to-restore (synthetic since MSW seeds don't restore in the
+    // window). When no restores: nulls. Otherwise a representative
+    // distribution.
+    const ttrSamples: number[] = [];
+    for (const r of restoredInWindow) {
+      const archivedAt = new Date(r.deleted_at).getTime();
+      const restoredAt = new Date(r.restored_at!).getTime();
+      if (restoredAt > archivedAt) ttrSamples.push((restoredAt - archivedAt) / (1000 * 60 * 60));
+    }
+    ttrSamples.sort((a, b) => a - b);
+    function pct(arr: number[], p: number): number {
+      const rank = (p / 100) * (arr.length - 1);
+      const lo = Math.floor(rank);
+      const hi = Math.ceil(rank);
+      if (lo === hi) return arr[lo];
+      return arr[lo] + (rank - lo) * (arr[hi] - arr[lo]);
+    }
+    const mean_time_to_restore_hours =
+      ttrSamples.length === 0
+        ? null
+        : Math.round((ttrSamples.reduce((a, b) => a + b, 0) / ttrSamples.length) * 10) / 10;
+    const p50_time_to_restore_hours =
+      ttrSamples.length < 2 ? null : Math.round(pct(ttrSamples, 50) * 10) / 10;
+    const p95_time_to_restore_hours =
+      ttrSamples.length < 2 ? null : Math.round(pct(ttrSamples, 95) * 10) / 10;
+
+    return HttpResponse.json({
+      header: { status: 'SUCCESS', requestId: 'r-mock', timestamp: now.toISOString() },
+      body: {
+        tenant_id: 'BANK_DEMO',
+        generated_at: now.toISOString(),
+        days,
+        window_start: windowStart.toISOString(),
+        window_end: now.toISOString(),
+        total_archives_in_window: archivedInWindow.length,
+        total_restores_in_window: restoredInWindow.length,
+        total_purges_in_window: purgedInWindow.length,
+        by_day,
+        top_actors,
+        by_entity_type,
+        by_module,
+        restore_rate,
+        purge_rate,
+        mean_time_to_restore_hours,
+        p50_time_to_restore_hours,
+        p95_time_to_restore_hours,
+      },
+    });
+  }),
+
   http.get('/v1/recovery/:id', ({ params }) => {
     if (readPersistedRole() !== 'admin') {
       return HttpResponse.json({ error: 'forbidden' }, { status: 403 });

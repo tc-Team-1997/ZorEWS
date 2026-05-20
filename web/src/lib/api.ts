@@ -1010,6 +1010,13 @@ export const api = {
       .get<EnvelopeBody<RecoveryStats>>('/v1/recovery/stats')
       .then((r) => r.data),
 
+  recoveryAnalytics: (days = 30) =>
+    http
+      .get<EnvelopeBody<RecoveryAnalytics>>('/v1/recovery/analytics', {
+        params: { days },
+      })
+      .then((r) => r.data),
+
   recoveryGet: (recovery_id: string) =>
     http
       .get<EnvelopeBody<DeletedRecord>>(`/v1/recovery/${encodeURIComponent(recovery_id)}`)
@@ -2169,4 +2176,55 @@ export interface RecoveryStats {
     display_name: string;
     module: RecoveryModule;
   }>;
+}
+
+// ── Phase 3 analytics endpoint ────────────────────────────────────
+
+export interface RecoveryDayBucket {
+  date: string; // YYYY-MM-DD UTC
+  total: number;
+  by_status: Record<RecoveryStatus, number>;
+}
+
+export interface RecoveryActorRow {
+  actor_username: string;
+  total_archives: number;
+  total_restores: number;
+  total_purges: number;
+  most_recent_at: string;
+}
+
+export interface RecoveryEntityRow {
+  entity_type: string;
+  total_archives: number;
+  total_restores: number;
+  total_purges: number;
+  outstanding_delta: number;
+}
+
+export interface RecoveryModuleRow {
+  module: string;
+  total_archives: number;
+  total_restores: number;
+  total_purges: number;
+}
+
+export interface RecoveryAnalytics {
+  tenant_id: string;
+  generated_at: string;
+  days: number;
+  window_start: string;
+  window_end: string;
+  total_archives_in_window: number;
+  total_restores_in_window: number;
+  total_purges_in_window: number;
+  by_day: RecoveryDayBucket[];
+  top_actors: RecoveryActorRow[];
+  by_entity_type: RecoveryEntityRow[];
+  by_module: RecoveryModuleRow[];
+  restore_rate: number | null;
+  purge_rate: number | null;
+  mean_time_to_restore_hours: number | null;
+  p50_time_to_restore_hours: number | null;
+  p95_time_to_restore_hours: number | null;
 }
