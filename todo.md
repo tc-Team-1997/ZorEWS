@@ -37,7 +37,7 @@
 | 4.2 | Early Risk Detection (before DPD) | ✅ | T2.2, T2.4 | PD score is computed independent of DPD; reason codes via SHAP |
 | 4.3 | Scenario Simulation (GDP / interest-rate / FX) | ✅ | T4.2 | Shipped 2026-05-02 — full feature pack: 5 templates (Baseline/Mild/Severe/COVID/RBI), IFRS 9 stage migration matrix, segment×risk heatmap, Portfolio PD + NPA% cards, top-affected drill-down, saved scenarios with side-by-side compare, CSV/PDF/Excel export |
 | 4.4 | Smart Alert Prioritisation (Critical/Medium/Low) | ✅ | T2.7, T4.9 | Original SmartQueue (T2.7); v2 prioritization (T4.9) added 2026-05-02 with criticality formula + customer dedup + sort dropdown |
-| 4.5 | Continuous Learning Model | ⏳ | T5.1, T2.6 | Drift monitoring shipped (T2.6); auto-promotion gate shipped 2026-05-09 (`services/bff/src/ai_auto_promotion_gate.ts` + `/v1/ai/models/:id/promotion-gate/{evaluate,auto-promote}`). Continuous-learning *retraining pipeline* itself still pending — model registry is ready to consume new versions but the training loop isn't wired. |
+| 4.5 | Continuous Learning Model | ✅ | T5.1, T2.6 | Drift monitoring shipped (T2.6); auto-promotion gate shipped 2026-05-09; **T5.1.1 shipped 2026-05-21** — retraining schedule + outcome ledger at `services/bff/src/ai_retraining.ts` closes the wiring gap (5 cadences + 4 outcome statuses + `InMemoryRetrainingScheduleStore` with `recordSuccess` auto-advance + `InMemoryRetrainingOutcomeStore` + `buildFleetRetrainingStatus` rollup; 7 new BFF routes; 40 new jest tests). External Airflow scheduler wire-up + pg-backed stores deferred to Year-2 Theme E (operational glue, not contract design). |
 
 ## §5 UI Screens
 
