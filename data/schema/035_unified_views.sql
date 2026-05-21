@@ -147,4 +147,58 @@ LEFT JOIN mart.customer_360 m
     ON m.tenant_id = a.tenant_id
    AND m.customer_id = a.customer_id;
 
+-- --------------------------------------------------------------------------
+-- Section 6: unified.cases (spec §5.3)
+-- Identity: case_id. has_blocking_caps surfaces the T4.19 "case can't
+-- close while any CAP is open" gate as a query-time column so the SPA
+-- doesn't need a separate /cases/:id/caps call to render the tooltip.
+-- customer_pd_score overlay omitted — mart doesn't project pd_score.
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE VIEW unified.cases AS
+SELECT
+    c.tenant_id,
+    c.case_id,
+    c.alert_id,
+    c.customer_id,
+    c.customer_name,
+    c.severity,
+    c.rule_id,
+    c.rule_name,
+    c.state,
+    c.assignee,
+    c.loan_id,
+    c.reason_summary,
+    c.outcome,
+    c.sla_status,
+    c.created_at,
+    c.updated_at,
+    c.closed_at,
+    COALESCE(act.action_count, 0)                      AS action_count,
+    act.last_action_at,
+    COALESCE(cas.open_cas_count, 0)                    AS open_cas_count,
+    COALESCE(cap.open_cap_count, 0)                    AS open_cap_count,
+    COALESCE(cap.has_blocking_caps, false)             AS has_blocking_caps,
+    m.risk_rating                                       AS customer_risk_level
+FROM app_cases.cases c
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS action_count, MAX(occurred_at) AS last_action_at
+    FROM app_cases.actions
+    WHERE case_id = c.case_id
+) act ON true
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) FILTER (WHERE review_status = 'pending') AS open_cas_count
+    FROM app_cases.cas_records
+    WHERE case_id = c.case_id
+) cas ON true
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE status IN ('open','in_progress','overdue')) AS open_cap_count,
+        bool_or(status IN ('open','in_progress','overdue'))                 AS has_blocking_caps
+    FROM app_cases.caps
+    WHERE case_id = c.case_id
+) cap ON true
+LEFT JOIN mart.customer_360 m
+    ON m.tenant_id = c.tenant_id
+   AND m.customer_id = c.customer_id;
+
 COMMIT;
