@@ -45,7 +45,7 @@ DISCOVERY_TAG="karpenter.sh/discovery=${CLUSTER_NAME}"
 
 # Tag PRIVATE subnets only (Karpenter nodes go in private)
 PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
-  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:tier,Values=private" \
+  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:Tier,Values=private" \
   --query 'Subnets[].SubnetId' --output text)
 
 for subnet_id in ${PRIVATE_SUBNETS}; do

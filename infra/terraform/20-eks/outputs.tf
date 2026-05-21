@@ -38,3 +38,8 @@ output "karpenter_interruption_queue" {
   description = "SQS queue URL Karpenter polls for spot-interruption + ASG re-balance events."
   value       = var.enable_karpenter ? aws_sqs_queue.karpenter_interruption[0].url : null
 }
+
+output "external_secrets_role_arn" {
+  description = "IRSA role ARN for the External Secrets Operator (consumed by scripts/bootstrap-cluster.sh)."
+  value       = aws_iam_role.eso.arn
+}

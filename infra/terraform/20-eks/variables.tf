@@ -66,3 +66,8 @@ variable "enable_karpenter" {
   type        = bool
   default     = false
 }
+
+variable "secrets_kms_key_arn" {
+  description = "KMS CMK ARN for AWS Secrets Manager (from 00-landing-zone outputs.kms_key_arns['secrets'])."
+  type        = string
+}
