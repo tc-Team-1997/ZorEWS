@@ -37,6 +37,11 @@ import {
   makeUnifiedAuditActivityReaderFromEnv,
   type AuditActivitySource,
 } from './audit_activity_unified_reader';
+import {
+  type IFeatureStorePdReader,
+  enrichListItemsWithPd,
+  makeFeatureStorePdReaderFromEnv,
+} from './feature_store_pd_reader';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -999,6 +1004,16 @@ export interface AppDeps {
    */
   auditActivityReader?: IUnifiedAuditActivityReader;
   /**
+   * v1.5 B5 — feature-store PD reader shim. Closes B2's
+   * `pd_source: 'band'` stopgap. When defined, the customer routes
+   * (/api/customers + /api/customers/:id/risk + /v1/risk-profile/:id)
+   * call this reader after the unified.customer_360 read and flip
+   * pd_source from 'band' to 'feature_store' for rows that have real
+   * PD. When undefined (today's default — T2.1 not yet shipped), the
+   * band path is preserved unchanged.
+   */
+  featureStorePdReader?: IFeatureStorePdReader;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1434,6 +1449,8 @@ export function makeApp(deps: AppDeps = {}) {
   const casesReader: IUnifiedCasesReader | undefined = deps.casesReader;
   const auditActivityReader: IUnifiedAuditActivityReader | undefined =
     deps.auditActivityReader;
+  const featureStorePdReader: IFeatureStorePdReader | undefined =
+    deps.featureStorePdReader;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -2293,8 +2310,39 @@ export function makeApp(deps: AppDeps = {}) {
         levels: levelFilter.length ? levelFilter : undefined,
         pd_min: Number.isFinite(pdMin) ? pdMin : undefined,
       });
+      // v1.5 B5 — best-effort PD enrichment: when the feature-store
+      // reader is wired (T2.1 shipped), batch-lookup real PD for
+      // every customer in the result + flip pd_source from 'band' to
+      // 'feature_store' on rows where data exists. Partial-coverage
+      // mid-rollout produces mixed pd_source values, which is correct
+      // and what the SPA reflects. Failures here are swallowed so the
+      // list still returns even if the feature_store query blips.
+      if (featureStorePdReader && items.length > 0) {
+        try {
+          const pdMap = await featureStorePdReader.fetchPdBatch(
+            tenant_id,
+            items.map((i) => i.id),
+          );
+          if (pdMap.size > 0) {
+            enrichListItemsWithPd(items, pdMap);
+            // Re-apply pd_min filter post-enrichment in case real PD
+            // values pushed previously-included rows below the floor.
+            if (Number.isFinite(pdMin) && pdMin > 0) {
+              for (let i = items.length - 1; i >= 0; i--) {
+                if (items[i].pd < pdMin) items.splice(i, 1);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(
+            '[bff] feature-store PD enrichment failed, preserving band path:',
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
       // Sort by pd desc to preserve SPA expectation (matches the
-      // original stub-iterator behavior).
+      // original stub-iterator behavior). Re-sort after enrichment
+      // since real PD values may differ from band values.
       items.sort((a, b) => b.pd - a.pd);
       return res.json({ items, total: items.length });
     }
@@ -2324,12 +2372,25 @@ export function makeApp(deps: AppDeps = {}) {
     const profile = await riskProfile.get(req.params.id);
     if (!profile) return res.status(404).json({ error: `customer ${req.params.id} not found` });
     // v1.5 B2 — pure-additive overlay enrichment. Existing fields untouched.
+    // v1.5 B5 — additive feature_store_pd field in overlay (null when
+    // T2.1 not yet shipped). Existing `pd` field on profile stays
+    // model-derived (riskProfile.get path); overlay surfaces real PD
+    // separately so the SPA can render both side-by-side once T2.1
+    // lands.
     if (customerOverlayReader) {
       const tenant_id =
         ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
       try {
         const overlay = await customerOverlayReader.fetchOne(tenant_id, req.params.id);
         if (overlay) {
+          let feature_store_pd: number | null = null;
+          if (featureStorePdReader) {
+            try {
+              feature_store_pd = await featureStorePdReader.fetchPd(tenant_id, req.params.id);
+            } catch {
+              // best-effort — preserve null
+            }
+          }
           return res.json({
             ...profile,
             overlay: {
@@ -2340,6 +2401,8 @@ export function makeApp(deps: AppDeps = {}) {
               breached_sla_count: overlay.breached_sla_count,
               pending_approvals_count: overlay.pending_approvals_count,
               last_activity_at: overlay.last_activity_at,
+              feature_store_pd,
+              feature_store_pd_source: feature_store_pd !== null ? 'feature_store' : null,
             },
           });
         }
@@ -4662,6 +4725,7 @@ export function makeApp(deps: AppDeps = {}) {
           );
         }
         // v1.5 B2 — pure-additive overlay enrichment.
+        // v1.5 B5 — additive feature_store_pd field (null when T2.1 not shipped).
         let body: Record<string, unknown> = profile as unknown as Record<string, unknown>;
         if (customerOverlayReader) {
           try {
@@ -4670,6 +4734,17 @@ export function makeApp(deps: AppDeps = {}) {
               req.params.customer_id,
             );
             if (overlay) {
+              let feature_store_pd: number | null = null;
+              if (featureStorePdReader) {
+                try {
+                  feature_store_pd = await featureStorePdReader.fetchPd(
+                    req.tenant!.tenant_id,
+                    req.params.customer_id,
+                  );
+                } catch {
+                  // best-effort — preserve null
+                }
+              }
               body = {
                 ...body,
                 overlay: {
@@ -4680,6 +4755,8 @@ export function makeApp(deps: AppDeps = {}) {
                   breached_sla_count: overlay.breached_sla_count,
                   pending_approvals_count: overlay.pending_approvals_count,
                   last_activity_at: overlay.last_activity_at,
+                  feature_store_pd,
+                  feature_store_pd_source: feature_store_pd !== null ? 'feature_store' : null,
                 },
               };
             }
@@ -31436,6 +31513,17 @@ if (require.main === module) {
     if (auditActivityReader) {
       console.log('[bff] unified.audit_activity reader wired (v1.5 B3)');
     }
+    // v1.5 B5 — feature-store PD reader; closes B2's band-derived
+    // `pd_source: 'band'` stopgap. Probes for feature_store.feature_values
+    // table existence (T2.1 deliverable). TODAY returns undefined for
+    // every BFF instance — T2.1 has not yet landed the table. When
+    // T2.1 ships, this probe will find the table + the reader wires
+    // automatically + the SPA's pd_source discriminator flips from
+    // 'band' to 'feature_store' with zero customer-route code change.
+    const featureStorePdReader = await makeFeatureStorePdReaderFromEnv();
+    if (featureStorePdReader) {
+      console.log('[bff] feature-store PD reader wired (v1.5 B5)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -31446,6 +31534,7 @@ if (require.main === module) {
       customerOverlayReader,
       casesReader,
       auditActivityReader,
+      featureStorePdReader,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
