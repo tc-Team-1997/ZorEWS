@@ -27,6 +27,7 @@ import {
   PlayCircle,
   Trash2,
   BarChart3,
+  Database,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -56,6 +57,7 @@ const NAV: readonly NavItem[] = [
   { to: '/reports', i18nKey: 'reports', icon: FileBarChart },
   { to: '/reports/builder', i18nKey: 'report_builder', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/analytics', i18nKey: 'analytics', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+  { to: '/admin/feature-store', i18nKey: 'feature_store', icon: Database, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/profile/sessions', i18nKey: 'my_sessions', icon: Smartphone },
   { to: '/profile/activity', i18nKey: 'my_activity', icon: History },
   { to: '/admin/users', i18nKey: 'users', icon: UsersRound, requireRole: ['admin'] },

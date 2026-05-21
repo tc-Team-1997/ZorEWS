@@ -2475,8 +2475,161 @@ const _mswReportBuilderHandlers = [
   }),
 ];
 
+// ── T2.1.2 — Feature store explorer MSW handlers ────────────────────
+
+const _mswFeatureCatalog = [
+  { name: 'utilization', display_name: 'Exposure-to-income utilization', description: 'Credit exposure / monthly income, clamped to [0, 1.5].', value_type: 'number' as const, range: [0, 1.5], enum_labels: [], risk_polarity: 'higher_is_worse' as const },
+  { name: 'dpd_max_90d', display_name: 'Max DPD (90d)', description: 'Worst days-past-due in trailing 90 days.', value_type: 'integer' as const, range: [0, 180], enum_labels: [], risk_polarity: 'higher_is_worse' as const },
+  { name: 'bureau_score', display_name: 'Bureau score', description: 'Credit bureau score (300..900 typical band).', value_type: 'integer' as const, range: [300, 900], enum_labels: [], risk_polarity: 'lower_is_worse' as const },
+  { name: 'repayment_delay_streak', display_name: 'Repayment delay streak', description: 'Consecutive months with late payment.', value_type: 'integer' as const, range: [0, 24], enum_labels: [], risk_polarity: 'higher_is_worse' as const },
+  { name: 'txn_volume_zscore_90d', display_name: 'Transaction-volume z-score (90d)', description: 'Z-score of monthly txn volume vs 90d.', value_type: 'number' as const, range: [-3, 3], enum_labels: [], risk_polarity: 'lower_is_worse' as const },
+  { name: 'tenure_months', display_name: 'Tenure months', description: 'Months since customer onboarding.', value_type: 'integer' as const, range: [0, 240], enum_labels: [], risk_polarity: 'lower_is_worse' as const },
+  { name: 'product_level', display_name: 'Product type (encoded)', description: 'Categorical encoding of the loan product family.', value_type: 'enum' as const, range: [0, 4], enum_labels: ['PL_RET', 'AUTO_RET', 'INV_SME', 'WC_SME', 'CORP_TL'], risk_polarity: 'neutral' as const },
+  { name: 'income_level', display_name: 'Income band (encoded)', description: 'Categorical encoding of monthly income band.', value_type: 'enum' as const, range: [0, 4], enum_labels: ['<25k', '25-50k', '50-100k', '100-250k', '250k+'], risk_polarity: 'neutral' as const },
+];
+
+function _mswFeatureValueAt(customer_id: string, name: string, at: Date, range: number[]) {
+  // Cheap deterministic synth — matches the BFF contract shape.
+  const seed = (customer_id + name + at.toISOString().slice(0, 10))
+    .split('')
+    .reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
+  const norm = (Math.abs(seed) % 1000) / 1000;
+  const v = range[0] + norm * (range[1] - range[0]);
+  return Number.isInteger(range[0]) && Number.isInteger(range[1])
+    ? Math.round(v)
+    : Math.round(v * 1000) / 1000;
+}
+
+const _mswFeatureStoreHandlers = [
+  http.get('/v1/feature-store/catalog', () => {
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        total_features: _mswFeatureCatalog.length,
+        features: _mswFeatureCatalog,
+      }),
+    );
+  }),
+
+  http.get('/v1/feature-store/coverage', () => {
+    const now = new Date();
+    const earliest = new Date(now.getTime() - 744 * 86_400_000);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: now.toISOString(),
+        catalog_size: _mswFeatureCatalog.length,
+        earliest_observed_at: earliest.toISOString(),
+        latest_observed_at: now.toISOString(),
+        window_days: 744,
+        total_entities_seeded: 'unbounded_synthetic',
+        features: _mswFeatureCatalog,
+      }),
+    );
+  }),
+
+  http.get('/v1/feature-store/customers/:customer_id/snapshot', ({ params, request }) => {
+    const url = new URL(request.url);
+    const atRaw = url.searchParams.get('at');
+    if (atRaw && !/^\d{4}-\d{2}-\d{2}T/.test(atRaw)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_date', 'malformed ISO-8601', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const at = atRaw ? new Date(atRaw) : new Date();
+    const features: Record<string, number> = {};
+    for (const def of _mswFeatureCatalog) {
+      features[def.name] = _mswFeatureValueAt(
+        params.customer_id as string,
+        def.name,
+        at,
+        def.range,
+      );
+    }
+    return HttpResponse.json(
+      envelope({
+        entity_id: params.customer_id as string,
+        observed_at: at.toISOString(),
+        features,
+      }),
+    );
+  }),
+
+  http.get('/v1/feature-store/customers/:customer_id/history', ({ params, request }) => {
+    const url = new URL(request.url);
+    const feature_name = url.searchParams.get('feature_name');
+    const def = _mswFeatureCatalog.find((f) => f.name === feature_name);
+    if (!def) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_unknown_feature', 'unknown feature_name', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const now = new Date();
+    const until = url.searchParams.get('until')
+      ? new Date(url.searchParams.get('until')!)
+      : now;
+    const since = url.searchParams.get('since')
+      ? new Date(url.searchParams.get('since')!)
+      : new Date(until.getTime() - 90 * 86_400_000);
+    const days = Math.floor((until.getTime() - since.getTime()) / 86_400_000);
+    if (days > 744) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_window_too_long', 'window exceeds 24mo', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const points: Array<{ observed_at: string; value: number }> = [];
+    const values: number[] = [];
+    for (let t = since.getTime(); t <= until.getTime(); t += 86_400_000) {
+      const at = new Date(t);
+      const v = _mswFeatureValueAt(params.customer_id as string, def.name, at, def.range);
+      points.push({ observed_at: at.toISOString(), value: v });
+      values.push(v);
+    }
+    const min = values.length ? Math.min(...values) : null;
+    const max = values.length ? Math.max(...values) : null;
+    const mean = values.length
+      ? Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 1_000_000) / 1_000_000
+      : null;
+    const first_value = points[0]?.value ?? null;
+    const last_value = points[points.length - 1]?.value ?? null;
+    let trend: 'rising' | 'falling' | 'flat' | null = null;
+    if (first_value !== null && last_value !== null) {
+      if (def.value_type === 'enum') trend = 'flat';
+      else {
+        const abs = Math.abs(first_value);
+        const delta = last_value - first_value;
+        const rel = abs > 0 ? delta / abs : delta;
+        if (rel > 0.05) trend = 'rising';
+        else if (rel < -0.05) trend = 'falling';
+        else trend = 'flat';
+      }
+    }
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        entity_id: params.customer_id as string,
+        feature_name: def.name,
+        since: since.toISOString(),
+        until: until.toISOString(),
+        count: points.length,
+        points,
+        min,
+        max,
+        mean,
+        first_value,
+        last_value,
+        trend,
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
+  ..._mswFeatureStoreHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {
