@@ -12,18 +12,18 @@
 
 | § | Feature | Status | TASKS.md | Notes |
 |---|---------|--------|----------|-------|
-| 3.1 | CBS — loan / DPD / repayment ingest | ⏳ | T3.1 | Synthetic seed scaled 2026-05-03 to 10k customers + 24k loans + 247k repayments in `mart.loan_360`; real CBS loader (T1.4b → `raw.cbs_*` tables) still pending. The empty `cbs_*` tables defined by `002_raw_tables.sql` were dropped 2026-05-03 — see `docs/database-gap-analysis.md` Gap 1 (closed) |
+| 3.1 | CBS — loan / DPD / repayment ingest | ⏳ | T3.1 | Synthetic seed scaled 2026-05-03 to 10k customers + 24k loans + 247k repayments in `mart.loan_360`; real CBS loader (T1.4b → `raw.cbs_*` tables) still pending. The empty `cbs_*` tables defined by `002_raw_tables.sql` were dropped 2026-05-03 — see `docs/database-gap-analysis.md` Gap 1 (closed). **Code-side closed 2026-05-21:** `services/bff/src/integrations/cbs_http_client.ts` HttpCbsClient ships full OpenAPI op mapping + Bearer rotation + retry-friendly 599 sentinel + 10 jest tests. External blocker = bank CBS endpoint URL + Bearer token via Secrets Manager. |
 | 3.1 | Account transactions | ✅ | T1.3, T1.4 | `mart.txn_features` materialised; scaled to 10k customers / 290k transactions 2026-05-03 |
 | 3.1 | Customer profile | ✅ | T1.3 | `mart.customer_360` (10,000 rows as of 2026-05-03) |
 | 3.1 | External data (bureau, market) | ⏳ | T1.4 | Bureau-sync DAG scaffolded; 10k bureau snapshots in seed; live bureau integration not in prototype scope |
-| 3.1 | 24-month historical backfill | ⏳ | T2.1 | Feature store + Aurora/S3 backfill pending |
+| 3.1 | 24-month historical backfill | ⏳ | T2.1 | Feature store surface + persistence + dbt model shipped (T2.1.1/2/3). **Code-side closed 2026-05-21**: `data/airflow/dags/feature_store_backfill.py` DAG shipped — 6-step daily backfill (sensor → dbt run → dbt test → retention purge >24mo → S3 offline-store sync → audit). External blocker = MWAA running. |
 | 3.2 | Indicator Engine — Financial family | ✅ | T1.5, T1.6 | 32-indicator catalog, compute coverage green |
 | 3.2 | Indicator Engine — Behavioural family | ✅ | T1.5, T1.6 | |
 | 3.2 | Indicator Engine — Transaction family | ✅ | T1.5, T1.6 | |
 | 3.2 | Indicator Engine — Credit family | ✅ | T1.5, T1.6 | |
 | 3.3 | Rule Engine — DSL + lifecycle | ✅ | T1.7, T1.8, T1.9 | 30 seed rules, simulator FP 0.148 |
 | 3.4 | AI Risk Scoring — PD + Risk Level | ✅ | T2.2, T2.3, T2.4 | Synthetic-trained champion AUC 0.8822 |
-| 3.5 | Alert Engine — real-time alerts | ⏳ | T2.12 | **Partial 2026-05-08**: BFF→SPA live delivery path (SSE banner). **Partial 2026-05-21 (T2.12.1)**: measurement-layer half — `services/bff/src/streaming_alert_path.ts` ships the latency telemetry primitive (`processStreamingEvent` pure fn + `summarizeStreamingLatency` with `target_p95_60s_met` boolean against EWS.docx §3.5 budget + `InMemoryStreamingLedger` cap 1000/tenant); 3 new routes (`POST /v1/streaming/indicator-events` + `GET /v1/streaming/latency` + `/events`); 34 jest tests. **Still pending (T2.12.2)**: upstream Kafka producer on `apex.indicator.values` + downstream rule-eval + alert-producer wiring. Year-2 Theme D. |
+| 3.5 | Alert Engine — real-time alerts | ✅ | T2.12 | **Closed 2026-05-21 (code-side).** T2.12.1 BFF latency telemetry + T2.12.2 Kafka producer + T2.12.3 streaming consumer all shipped. `services/regulatory-svc/indicators/src/streaming_consumer.ts` `StreamingRuleEvaluatorConsumer` drains `apex.indicator.values` from MSK + POSTs to BFF `/v1/streaming/indicator-events` with X-Tenant-ID propagation, at-least-once 3-retry exponential 1s/4s/16s + NDJSON DLQ fallback (`services/regulatory-svc/indicators/src/streaming_dlq.ts` per `outbox.ts` pattern; day-partitioned, crash-safe). 13 consumer tests + 8 DLQ tests. K8s manifest `infra/k8s/streaming-consumer.yaml` (Deployment + SA + PDB minAvailable=1, ESO-sourced KAFKA_BROKERS). IRSA role `apex-ews-${env}-streaming-consumer` in `infra/terraform/20-eks/cert_manager_irsa.tf` with topic-scoped MSK IAM-auth read + group `apex-ews-streaming-rule-evaluator*`. **External blocker = running MSK cluster + KAFKA_BROKERS env wired via ESO**. |
 | 3.5 | Alert type — high-risk customer | ✅ | T1.10, T2.7 | |
 | 3.5 | Alert type — potential default | ✅ | T1.10, T2.7 | |
 | 3.5 | Alert type — fraud suspicion | ✅ | T2.11 | Closed 2026-05-08 — Fraud indicator family added (`FRD-001` sudden-withdrawal-spike, `FRD-002` salary-credit-disappeared, `FRD-003` channel-anomaly, `FRD-004` geo-anomaly) under `services/regulatory-svc/indicators/src/compute/fraud.ts`; seed rules `RULE-031..033` carry `fraud_suspicion` tag. DSL schema regex extended to permit `FRD-` prefix. |
@@ -62,8 +62,8 @@
 
 | § | Feature | Status | TASKS.md | Notes |
 |---|---------|--------|----------|-------|
-| 7 | CBS — loan + repayment | ⏳ | T3.1 | OpenAPI mock at `integrations/cbs/openapi.yaml`; live deepening pending |
-| 7 | IFRS 9 — stage movement + ECL | ⏳ | T3.2 | Mock contract only |
+| 7 | CBS — loan + repayment | ⏳ | T3.1 | OpenAPI mock at `integrations/cbs/openapi.yaml`. **Code-side closed 2026-05-21**: HttpCbsClient impl + ResilientCbsClient retry/breaker wrapper. External blocker = bank endpoint URL. |
+| 7 | IFRS 9 — stage movement + ECL | ⏳ | T3.2 | Mock contract + T3.2.1 signal layer over Ifrs9Adapter. **Code-side closed 2026-05-21**: HttpIfrs9Adapter impl with defensive normalisation + ECL re-compute. External blocker = bank endpoint URL. |
 | 7 | Collection — auto case creation | ✅ | T3.4 | `services/collection-adapter` — case routing + callback wired |
 | 7 | AML — suspicious activity | ✅ | T3.3 | Closed 2026-05-21 — `correlateAmlWithEws` forward + `correlateEwsWithAml` reverse pure functions (6099ddf) wired to 2 BFF routes (`POST /v1/aml/correlate/:match_id` + `POST /v1/aml/correlate/by-alert/:alert_id`) + SPA `AmlCorrelationPanel` on `/customers/:id` (05c6d93). 13 route tests + 2 SPA tests. Year-2: real OFAC/CIBIL feed adapter replacing M14.3 stub. |
 

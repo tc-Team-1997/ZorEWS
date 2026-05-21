@@ -62,32 +62,33 @@ Roughly 88 sub-phases remain across 16 modules. Pattern is established; ~2 sub-p
 
 ### 2.3 Theme C — Real bank integrations
 
-| Epic | Estimate | Pre-reqs | Owner |
-|---|---|---|---|
-| CBS real connector (T3.1) | 8 weeks | Bank API access | agent-integration + agent-data |
-| IFRS9 stage live feed (T3.2) | 6 weeks | ECL pipeline | agent-integration + agent-ai |
-| AML bidirectional correlation (T3.3) | 8 weeks | AML vendor SDK | agent-integration |
-| Bureau live integration (CIBIL/CRIF/EXPERIAN/EQUIFAX) | 6 weeks each, parallelisable | Bureau MoUs | agent-integration |
-| Per-tenant integration enablement (feature flag) | 2 weeks | M13.1 config | agent-integration |
+| Epic | Estimate | Pre-reqs | Owner | Code-side state |
+|---|---|---|---|---|
+| CBS real connector (T3.1) | 8 weeks | Bank API access | agent-integration + agent-data | **Code shipped 2026-05-21** — HttpCbsClient + ResilientCbsClient wrapper + 28 jest tests. Runtime swap = set CBS_BASE_URL + CBS_BEARER_TOKEN. |
+| IFRS9 stage live feed (T3.2) | 6 weeks | ECL pipeline | agent-integration + agent-ai | **Code shipped 2026-05-21** — HttpIfrs9Adapter + signal layer + 18 jest tests. Runtime swap = set IFRS9_BASE_URL + IFRS9_BEARER_TOKEN. |
+| AML bidirectional correlation (T3.3) | 8 weeks | AML vendor SDK | agent-integration | T3.3 correlation primitives + SPA panel shipped earlier. Live source still pending. |
+| Bureau live integration (CIBIL/CRIF/EXPERIAN/EQUIFAX) | 6 weeks each, parallelisable | Bureau MoUs | agent-integration | M14.5 stub + 90d idempotency cache shipped. Live HTTP impl follows same pattern as HttpCbsClient. |
+| Per-tenant integration enablement (feature flag) | 2 weeks | M13.1 config | agent-integration | M13.1 config + feature flag plumbing already in place. |
 
 ### 2.4 Theme D — Real-time alert path (T2.12)
 
-| Epic | Estimate | Pre-reqs | Owner |
-|---|---|---|---|
-| Kafka producer on `apex.indicator.values` | 3 weeks | Indicator compute service | agent-indicator |
-| Streaming rule evaluator (consumer group) | 4 weeks | rules service | agent-rule |
-| End-to-end latency monitoring (indicator → SPA SSE) | 2 weeks | M15.1 audit + Grafana | SRE lead |
-| Failure / replay strategy | 2 weeks | DLQ topic + outbox pattern | agent-alert |
-| Load test to confirm p95 < 60s under 10× current volume | 1 week | infra | SRE lead |
+| Epic | Estimate | Pre-reqs | Owner | Code-side state |
+|---|---|---|---|---|
+| Kafka producer on `apex.indicator.values` | 3 weeks | Indicator compute service | agent-indicator | **Code shipped (T2.12.2)** — `services/regulatory-svc/indicators/src/kafka_producer.ts` with Outbox + Kafka impls + DLQ fallback + 19 tests. |
+| Streaming rule evaluator (consumer group) | 4 weeks | rules service | agent-rule | **Code shipped 2026-05-21 (T2.12.3)** — `services/regulatory-svc/indicators/src/streaming_consumer.ts` + `infra/k8s/streaming-consumer.yaml` Deployment + IRSA + 13 jest tests. |
+| End-to-end latency monitoring (indicator → SPA SSE) | 2 weeks | M15.1 audit + Grafana | SRE lead | **Code shipped (T2.12.1)** — `streaming_alert_path.ts` + `STREAMING_SLO_BUDGET_MS = 60_000` + 3 BFF routes + 34 jest tests. |
+| Failure / replay strategy | 2 weeks | DLQ topic + outbox pattern | agent-alert | **Code shipped 2026-05-21** — `services/regulatory-svc/indicators/src/streaming_dlq.ts` NDJSON sink + 8 jest tests. Operator replay flow documented at top of file. |
+| Load test to confirm p95 < 60s under 10× current volume | 1 week | infra | SRE lead | k6 scenarios for streaming_ingest already in `infra/load-test/scenarios/`. Runs once MSK is live. |
 
 ### 2.5 Theme E — Continuous learning loop (T5.1 retraining)
 
-| Epic | Estimate | Pre-reqs | Owner |
-|---|---|---|---|
-| Quarterly retrain scheduler (Airflow DAG) | 3 weeks | feature store | agent-ai |
-| Champion/challenger A/B test harness in production | 4 weeks | M7.x model registry + auto-promotion gate | agent-ai |
-| Drift-triggered ad-hoc retrain | 2 weeks | T2.6 drift monitor | agent-ai |
-| Model card auto-generation on promotion | 1 week | M7.1 + audit | agent-ai |
+| Epic | Estimate | Pre-reqs | Owner | Code-side state |
+|---|---|---|---|---|
+| Quarterly retrain scheduler (Airflow DAG) | 3 weeks | feature store | agent-ai | **Code shipped 2026-05-21** — `data/airflow/dags/retraining_scheduler.py` 4-step DAG (fetch_due_schedules / run_retraining / publish_audit) firing every 6h at :15; MAX_RETRAINS_PER_RUN=3 cost cap; auto-promote when AUC ≥ AUTO_PROMOTE_AUC_GATE. |
+| Feature-store backfill DAG | 2 weeks | feature store | agent-data | **Code shipped 2026-05-21** — `data/airflow/dags/feature_store_backfill.py` 6-step daily DAG (sensor → dbt run → dbt test → retention purge → S3 sync → audit). |
+| Champion/challenger A/B test harness in production | 4 weeks | M7.x model registry + auto-promotion gate | agent-ai | M7.5 A/B test harness + M7.2 promotion engine + auto-promotion gate (T5.1) all shipped. |
+| Drift-triggered ad-hoc retrain | 2 weeks | T2.6 drift monitor | agent-ai | T2.6 drift monitor shipped. Cadence `drift_triggered` already declared in T5.1.1. |
+| Model card auto-generation on promotion | 1 week | M7.1 + audit | agent-ai | M7.10 promotion timeline + audit chain wired. Card generation = template formatting over existing data. |
 
 ### 2.6 Theme F — Mobile (T4.3)
 

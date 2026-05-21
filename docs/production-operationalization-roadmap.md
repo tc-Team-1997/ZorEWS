@@ -562,17 +562,17 @@ These items don't gate go-live but should be picked up in the first 90 days post
 
 | Item | Source | Track |
 |---|---|---|
-| Airflow DAG calling `dbt run --select feat_values_backfill` daily | T2.1.3 Year-2 Theme E | post-launch |
-| S3 offline-store sync for >24mo historical feature data | T2.1.3 Year-2 Theme E | post-launch |
-| `ml/data/load_from_mart.py` swap to `as_of_date`-parameterised SELECT | T2.1.3 Year-2 Theme E | post-launch |
-| MSK monitoring dashboards for DLQ depth + consumer lag | T2.12.2 Year-2 Theme D | post-launch (Track 5 stretch) |
-| BFF routes for AML correlation (`POST /v1/aml/correlate/:match_id`) | T3.3.1 | post-launch |
-| SPA per-customer-360 AML correlation panel | T3.3.1 | post-launch |
-| Mobile screens (LoginScreen + AlertListScreen + CaseDetailScreen + ActionCaptureScreen) | T4.3.2 | merged into Track 6 |
+| Airflow DAG calling `dbt run --select feat_values_backfill` daily | T2.1.3 Year-2 Theme E | **Code shipped 2026-05-21** — `data/airflow/dags/feature_store_backfill.py`. Runtime needs MWAA. |
+| S3 offline-store sync for >24mo historical feature data | T2.1.3 Year-2 Theme E | **Code shipped 2026-05-21** — feature_store_backfill DAG step 5 `s3_offline_sync` via `export_feature_store_to_s3` macro. Runtime needs MWAA + curated bucket. |
+| `ml/data/load_from_mart.py` swap to `as_of_date`-parameterised SELECT | T2.1.3 Year-2 Theme E | post-launch (one-line SELECT change once feature_store.feature_values has rows) |
+| MSK monitoring dashboards for DLQ depth + consumer lag | T2.12.2 Year-2 Theme D | post-launch (Track 5 stretch); recording rules already in `infra/k8s/prometheus/recording-rules.yaml` |
+| BFF routes for AML correlation (`POST /v1/aml/correlate/:match_id`) | T3.3.1 | shipped earlier this session — see STATUS.md activity log |
+| SPA per-customer-360 AML correlation panel | T3.3.1 | shipped earlier this session |
+| Mobile screens (LoginScreen + AlertListScreen + CaseDetailScreen + ActionCaptureScreen) | T4.3.2 | merged into Track 6; offline-sync queue shipped 2026-05-21 (commit 7ff5971) |
 | k6 nightly CI run with 7-day baseline regression Slack alert | T4.5.1 Year-2 | post-launch |
 | T6 BIL platform expansion — remaining ~88 sub-phases | per `docs/year-2-backlog.md` Theme B | post-launch (~16-22 weeks at sustained pace) |
-| Continuous-learning Airflow DAG calling `train_pd.py` quarterly | T5.1 Year-2 Theme E | post-launch |
-| Real-time Kafka producer for indicator-update streaming (operational wire-up) | T2.12.2 Year-2 Theme D | post-launch |
+| Continuous-learning Airflow DAG calling `train_pd.py` quarterly | T5.1 Year-2 Theme E | **Code shipped 2026-05-21** — `data/airflow/dags/retraining_scheduler.py`. Runtime needs MWAA + RETRAINING_TOKEN_SECRET in Secrets Manager. |
+| Real-time Kafka producer + downstream streaming consumer for indicator-update streaming | T2.12.2 + T2.12.3 Year-2 Theme D | **Code-side closed 2026-05-21** — producer (kafka_producer.ts) + consumer (streaming_consumer.ts) + DLQ (streaming_dlq.ts) + Deployment + IRSA all in repo. Runtime needs MSK cluster + KAFKA_BROKERS env wired. |
 
 ---
 

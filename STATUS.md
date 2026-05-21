@@ -91,6 +91,17 @@ Per the original T6 brief (~365 APIs across 16 modules), surface coverage by API
 
 ## Activity Log
 
+### 2026-05-21 — Doc reconciliation — TASKS / todo / year-2-backlog / go-live-gating / roadmap
+
+- [orchestrator] Documentation reconciliation pass across 5 markdown files to reflect the actual repository state at session-end. **No new tasks invented; no new manifests added.** Appended session-closure markers to pending items whose code-side was closed this session:
+  - **TASKS.md** — appended "Year-2 Theme E — Airflow DAG shipped 2026-05-21" to T2.1 (`data/airflow/dags/feature_store_backfill.py`); appended "HttpCbsClient shipped 2026-05-21" to T3.1 (`services/bff/src/integrations/cbs_http_client.ts` + 10 jest); appended "HttpIfrs9Adapter shipped 2026-05-21" to T3.2 (`services/bff/src/integrations/ifrs9_http_adapter.ts` + 18 jest); appended "Year-2 Theme E DAG shipped 2026-05-21" to T5.1 (`data/airflow/dags/retraining_scheduler.py`). Each closure note states the remaining external blocker (bank endpoint URL / MWAA running / Secrets Manager). Pending tick count unchanged at 5 (T2.1 / T3.1 / T3.2 / T6 backlog / dbt-seed-runtime); each carries explicit code-side-closed + external-blocker text.
+  - **todo.md** — updated 4 ⏳ rows: 3.1 CBS, 3.1 24-month backfill, 3.5 real-time alerts (flipped to ✅), 7 IFRS9 — each annotated with code-side closure pointer + external blocker. The 3.5 row promoted to ✅ since the full producer + consumer + DLQ chain now in repo (only running MSK pending).
+  - **docs/operationalization/go-live-gating.md** §9 post-launch open items tracker — annotated T2.12 / T2.1 / T3.1 / T5.1 rows with "Code-side closed 2026-05-21" + named the external runtime dependency. Items don't gate go-live; tracker now accurately reflects code vs. runtime split.
+  - **docs/year-2-backlog.md** §2.3 Theme C + §2.4 Theme D + §2.5 Theme E — extended each epic table with a "Code-side state" column documenting which line items have shipped code already (HttpCbsClient + HttpIfrs9Adapter + streaming_consumer.ts + feature_store_backfill.py + retraining_scheduler.py + streaming_dlq.ts) and which remain pending runtime swap.
+  - **docs/production-operationalization-roadmap.md** §13 Appendix open-work tracker — updated 4 rows (feature_store backfill DAG / S3 offline-store sync / continuous learning DAG / Kafka producer + downstream consumer) to reflect 2026-05-21 code shipments, leaving runtime needs (MWAA / MSK / Secrets Manager) as the only remaining blockers.
+- **No counters changed:** T6 sub-phase tally untouched (parallel sessions own that), test totals untouched, route counts untouched. This pass is doc-state-vs-repo-state reconciliation only.
+- **Final post-reconciliation state:** TASKS.md 83 ✅ + 5 ⏳ (4 with shipped code + 1 backlog) — all ⏳ items now correctly annotated with code-side-closed markers. todo.md 5 ⏳ markers remain (down from 7 — alerts flipped to ✅; CBS+IFRS9+backfill rows carry code-side closure notes).
+
 ### 2026-05-21 — Closure audit batch — T2.12 downstream consumer + Mobile offline-sync
 
 - [agent-alert + agent-ui] Closure-audit batch closes the last two code-owned gaps the prototype controls. After this commit every external blocker is bank-side / vendor-side / Expo-build-side — there are no remaining ZorEWS-implementable surfaces outside Year-2 themes.

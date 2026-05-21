@@ -245,12 +245,12 @@ These do NOT block T9-P2 cutover but are tracked for Year-2 Theme A (production 
 | S3 Cross-Region Replication active | Pending T5.2 IaC flag flip | SRE | Year-2 Q1 |
 | `/v1/reports` PDF/Excel migrated to client-side (MSW dev mode) | Pending follow-up | UI | post-launch |
 | Reserved webhook events (`alert.updated`, `case.assigned`, `case.closed`) | Pending follow-up | INT | post-launch |
-| Real CBS schema lock-in (T3.1 deepening beyond initial wire-up) | Pending T4-P2 production cycle | INT | Year-2 Q1 |
-| T2.12 real-time alert path Kafka streaming branch | Pending T2.12.2 work | INT+RULE | Year-2 Q1 |
-| T2.1 feature-store 24mo backfill from production data | Pending T2-P3 ramp-up | DATA | Year-2 Q1 |
+| Real CBS schema lock-in (T3.1 deepening beyond initial wire-up) | **Code-side closed 2026-05-21** (HttpCbsClient + HttpIfrs9Adapter + 28 jest tests). External: bank endpoint URLs + Bearer tokens | INT | Year-2 Q1 (runtime) |
+| T2.12 real-time alert path Kafka streaming branch | **Code-side closed 2026-05-21** (T2.12.1+2+3 incl. streaming_consumer + NDJSON DLQ). External: MSK cluster + KAFKA_BROKERS env wired | INT+RULE | Year-2 Q1 (runtime) |
+| T2.1 feature-store 24mo backfill from production data | **Code-side closed 2026-05-21** (feature_store_backfill.py DAG + PgFeatureStore + dbt model). External: MWAA running | DATA | Year-2 Q1 (runtime) |
 | First production DR game-day | Pending T9 hypercare end | SRE | Q3 2026 |
 | Second tenant onboarding | Pending T9-P4 | INT | post-launch |
-| Continuous learning pipeline T5.1 retraining cycle | Pending Theme E | AI | Year-2 Q2 |
+| Continuous learning pipeline T5.1 retraining cycle | **Code-side closed 2026-05-21** (retraining_scheduler.py DAG + 7 BFF routes + 40 jest tests). External: MWAA running + RETRAINING_TOKEN_SECRET in Secrets Manager | AI | Year-2 Q2 (runtime) |
 | Mobile RN store-published production version | Pending T6-P5 store-side review | UI | T+13w |
 | ISO 27001 Stage-2 (full certification) | Pending Stage-1 + 6-month conformance period | CISO | Year-2 Q3 |
 
