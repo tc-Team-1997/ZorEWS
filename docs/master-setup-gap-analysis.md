@@ -9,12 +9,21 @@
 
 ## 1. Executive Summary
 
-| Metric | Initial | A done | B done | C done | D done (2026-05-21) |
-|---|---|---|---|---|---|
-| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~95% | **~98%** |
-| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 35/49 | **39/49** |
-| BFF route count delta | — | +33 | +61 | +71 | **+90** (Lineage adds 5) |
-| BFF test suite | 8087 | 8333 | 8606 | 8718 | **8968** ✅ |
+| Metric | Initial | A done | B done | C done | D done | E.1 done (2026-05-21) |
+|---|---|---|---|---|---|---|
+| Overall PDF coverage (weighted) | ~74% | ~84% | ~92% | ~95% | ~98% | **~98.5%** |
+| PDF surfaces fully shipped (✅) | 24/49 | 28/49 | 32/49 | 35/49 | 39/49 | **40/49** |
+| BFF route count delta | — | +33 | +61 | +71 | +90 | **+96** (DR admin adds 6) |
+| BFF test suite | 8087 | 8333 | 8606 | 8718 | 8968 | **9053** ✅ |
+
+## Phase E — IN PROGRESS 🚧
+
+| Sub-phase | Module | Routes | Tests |
+|---|---|---|---|
+| E.1 DR admin runbook + game-day | `dr/dr_admin.ts` (catalog + ledger) | 6 | 40 |
+| E.2 Version/Release management | _pending_ | — | — |
+| E.3 Drag-drop weight adjustment (backend) | _pending_ | — | — |
+| **Running total** | **1 module** | **6 routes** | **40 tests** |
 
 ## Phase D — COMPLETE ✅
 

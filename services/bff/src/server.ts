@@ -17083,6 +17083,258 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase E.1 — DR admin runbook + game-day surface ──────────────────
+  //
+  // PDF §A7. Two surfaces: pure-data RUNBOOK catalog (mirrors
+  // docs/dr-runbook.md + docs/dr-game-day-plan.md) + per-tenant
+  // GAME-DAY ledger with auditable scoring. Admin-only (audit:read).
+
+  /** GET /v1/dr/runbook — full runbook + targets + checklist + scope ladder. */
+  app.get(
+    '/v1/dr/runbook',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            generated_at: now().toISOString(),
+            rto_rpo_targets: [...DR_RTO_RPO_TARGETS],
+            failover_steps: [...DR_RUNBOOK_STEPS],
+            game_day_scope: [...DR_GAME_DAY_SCOPE],
+            pregame_checklist: [...DR_PREGAME_CHECKLIST],
+            cadences: [...ALL_DR_CADENCES],
+            score_dimensions: [...ALL_DR_SCORE_DIMENSIONS],
+            scores: [...ALL_DR_SCORES],
+            verdicts: [...ALL_DR_VERDICTS],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/dr/game-days?include_deleted= — tenant-scoped ledger list. */
+  app.get(
+    '/v1/dr/game-days',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const items = drGameDayLedger.list(req.tenant!.tenant_id, { include_deleted });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/dr/game-days/:record_id — single. 404 unknown. */
+  app.get(
+    '/v1/dr/game-days/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const record_id = req.params.record_id ?? '';
+      const entry = drGameDayLedger.get(req.tenant!.tenant_id, record_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_record',
+              message: `unknown record_id: ${record_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/dr/game-days — record a completed exercise. */
+  app.post(
+    '/v1/dr/game-days',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = drGameDayLedger.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof DrAdminError) {
+          if (e.code === 'duplicate_record_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_record_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/dr/game-days/:record_id — partial update. */
+  app.patch(
+    '/v1/dr/game-days/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const record_id = req.params.record_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = drGameDayLedger.update(
+          req.tenant!.tenant_id,
+          record_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof DrAdminError) {
+          if (e.code === 'unknown_record') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_record', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/dr/game-days/:record_id — soft-delete + archive. */
+  app.delete(
+    '/v1/dr/game-days/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const record_id = req.params.record_id ?? '';
+      try {
+        const tombstoned = drGameDayLedger.softDelete(
+          req.tenant!.tenant_id,
+          record_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'dr_game_day_record',
+            original_id: record_id,
+            original_table: 'app_admin.dr_game_day_records',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/dr/game-days/:record_id',
+            prior_status: null,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof DrAdminError) {
+          if (e.code === 'unknown_record') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_record', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   // ── Admin Configuration registry (T6 M13.1) ──────────────────────────
   //
   // Tenant-scoped key-value config store. The schema is platform-wide
