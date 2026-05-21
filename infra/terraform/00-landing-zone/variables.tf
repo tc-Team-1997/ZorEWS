@@ -51,3 +51,9 @@ variable "enable_security_hub" {
   type        = bool
   default     = true
 }
+
+variable "monthly_budget_usd" {
+  description = "Hard monthly AWS spend cap. Triggers 50/80/100/forecast-100 alarms. Default $30k aligns with docs/charter.md envelope."
+  type        = string
+  default     = "30000"
+}

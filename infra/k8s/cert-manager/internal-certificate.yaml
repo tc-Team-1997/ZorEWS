@@ -1,0 +1,49 @@
+# Example Certificate CRs for internal in-cluster TLS.
+# Public ALB certs are managed by ACM directly (see 40-edge IaC).
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-ui-tls
+  namespace: argocd
+  annotations:
+    operationalization-phase: "T3-P5"
+spec:
+  secretName: argocd-ui-tls
+  duration: 2160h     # 90d (Let's Encrypt cap)
+  renewBefore: 360h   # auto-renew 15d before expiry
+  dnsNames:
+    - argocd.internal.apex-ews.example
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-ui-tls
+  namespace: monitoring
+spec:
+  secretName: grafana-ui-tls
+  duration: 2160h
+  renewBefore: 360h
+  dnsNames:
+    - grafana.internal.apex-ews.example
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: prometheus-ui-tls
+  namespace: monitoring
+spec:
+  secretName: prometheus-ui-tls
+  duration: 2160h
+  renewBefore: 360h
+  dnsNames:
+    - prometheus.internal.apex-ews.example
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

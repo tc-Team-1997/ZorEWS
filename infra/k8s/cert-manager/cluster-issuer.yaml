@@ -1,0 +1,48 @@
+# ClusterIssuer — Let's Encrypt via Route 53 DNS01 challenge.
+# Production-grade for internal cluster certs (Argo CD UI, Grafana,
+# internal Service ingress). Public ALB uses ACM-managed certs
+# attached directly to the LB via aws-load-balancer-controller.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  annotations:
+    operationalization-phase: "T3-P5"
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: cert-admin@apex-ews.example
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: af-south-1
+            # cert-manager pod's IRSA role handles Route 53 changes — no
+            # access key required. Role provisioned in 40-edge IaC.
+        selector:
+          dnsZones:
+            - "internal.apex-ews.example"
+            - "apex-ews.example"
+---
+# Staging issuer for low-rate-limit testing (use ONLY for first-deploy
+# validation; Let's Encrypt prod limits 50 certs/week/domain)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: cert-admin@apex-ews.example
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: af-south-1
+        selector:
+          dnsZones:
+            - "internal.apex-ews.example"
+            - "apex-ews.example"

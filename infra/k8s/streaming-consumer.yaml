@@ -1,0 +1,112 @@
+# T2.12.3 — streaming rule-evaluator Deployment.
+# Drains apex.indicator.values from MSK → posts to BFF
+# /v1/streaming/indicator-events. Closes the downstream half of T2.12.
+#
+# Runs as a separate workload (not part of indicators-svc Deployment)
+# because Kafka consumers should NOT share lifecycle with HTTP servers
+# (consumer crash should not affect the indicators HTTP API).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streaming-consumer
+  namespace: apex-ews
+  labels:
+    app.kubernetes.io/name: streaming-consumer
+    app.kubernetes.io/component: kafka-consumer
+    app.kubernetes.io/part-of: apex-ews
+    apex-ews-monitored: "true"
+spec:
+  replicas: 2  # 2 for HA; Kafka consumer group does the rebalance
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streaming-consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: streaming-consumer
+        app.kubernetes.io/component: kafka-consumer
+        apex-ews-monitored: "true"
+      annotations:
+        operationalization-phase: "T2.12.3"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: streaming-consumer
+      nodeSelector:
+        workload: platform
+      containers:
+        - name: consumer
+          image: ${ECR_REGISTRY}/apex-ews/regulatory-svc-indicators:${IMAGE_TAG}
+          command: ["node", "-e", "require('./dist/streaming_consumer').runStreamingConsumer().catch(e => { console.error(e); process.exit(1); })"]
+          env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: regulatory-svc-indicators-secrets
+                  key: KAFKA_BROKERS
+            - name: BFF_URL
+              value: "http://bff.apex-ews.svc:8081"
+            - name: STREAMING_BFF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: streaming-consumer-secrets
+                  key: BFF_TOKEN
+                  optional: true  # falls back to no-auth in dev
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          # Kafka consumers don't have a /healthz HTTP endpoint by default.
+          # Liveness = process running (exit on signal). Readiness = consumer
+          # joined the group (subscribe() resolved). The startup script
+          # writes /tmp/ready when subscribe returns.
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: streaming-consumer
+  namespace: apex-ews
+  annotations:
+    eks.amazonaws.com/role-arn: ${STREAMING_CONSUMER_IRSA_ROLE_ARN}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: streaming-consumer
+  namespace: apex-ews
+spec:
+  minAvailable: 1  # always keep at least 1 consumer running during voluntary disruption
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streaming-consumer
+---
+# ServiceMonitor for Prometheus scraping (relies on apex-ews-monitored label)
+# is already covered by the generic ServiceMonitor in
+# infra/k8s/prometheus/servicemonitors.yaml. This Deployment carries that label.
