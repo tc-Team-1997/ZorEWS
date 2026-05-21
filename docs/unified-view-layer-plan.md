@@ -6,7 +6,7 @@
 
 **Architecture:** One migration `data/schema/035_unified_views.sql` (+ rollback). Plain `CREATE VIEW` only — no materialized, no INSTEAD OF triggers. `tenant_id` as a first-class column on every view. Companion pg-integration test under `services/bff/__tests__/unified_views_pg.test.ts` that gates on `BFF_PG_URL` and skips in hermetic CI (mirrors T4.13–T4.18 pattern).
 
-**Tech Stack:** PostgreSQL 16 (existing `apex-ews-pg` container on `localhost:55432`), `pg` Node.js driver, Jest + ts-jest (existing BFF test infrastructure). No new runtime dependencies.
+**Tech Stack:** PostgreSQL 16 (existing `zorews-pg` container on `localhost:55432`), `pg` Node.js driver, Jest + ts-jest (existing BFF test infrastructure). No new runtime dependencies.
 
 **Spec:** `docs/unified-view-layer-design.md` (576 lines, 16 sections — read it first; this plan implements it verbatim).
 
@@ -64,15 +64,15 @@ Confirm the column names + existing indexes the spec assumes still match the liv
 
 ```bash
 cd /Users/chuadhary_taniya/ZorEWS
-make ps 2>/dev/null | grep apex-ews-pg || (cd data/schema && make up && make migrate && make verify)
+make ps 2>/dev/null | grep zorews-pg || (cd data/schema && make up && make migrate && make verify)
 ```
 
-Expected: `apex-ews-pg` container running on `:55432`; `make verify` reports 4+ schemas + audit-trigger smoke pass.
+Expected: `zorews-pg` container running on `:55432`; `make verify` reports 4+ schemas + audit-trigger smoke pass.
 
 - [ ] **Step 2: Inspect column shapes for every underlying table the views touch**
 
 ```bash
-PG="psql -h localhost -p 55432 -U apex -d apex_ews"
+PG="psql -h localhost -p 55432 -U zorews_user -d zorews"
 PGPASSWORD=apex $PG -c "\d mart.customer_360" -c "\d app_alerts.alerts" -c "\d app_cases.cases" -c "\d app_cases.actions" -c "\d app_cases.cas_records" -c "\d app_cases.caps" -c "\d app_audit.approvals" -c "\d app_iam.audit_events" -c "\d audit.event_log"
 ```
 
@@ -84,7 +84,7 @@ Verify each row of the following table by reading your `\d` output:
 
 | Table | Column expected | Spec section |
 |---|---|---|
-| `mart.customer_360` | `name`, `risk_level`, `pd_score`, `exposure_kes`, `worst_dpd`, `kyc_status`, `segment`, `onboarded_at`, `tenant_id`, `customer_id` | §5.1 |
+| `mart.customer_360` | `full_name`, `risk_rating`, `total_outstanding`, `worst_dpd`, `kyc_status`, `segment`, `onboarded_at`, `as_of`, `tenant_id`, `customer_id` (view aliases these to `name`/`risk_level`/`exposure_kes`/`last_activity_at`; **no `pd_score` column** in current dbt projection — omitted from view) | §5.1 |
 | `app_alerts.alerts` | `alert_id`, `severity`, `customer_id`, `customer_name`, `rule_id`, `rule_name`, `indicators`, `confidence`, `customer_exposure_kes`, `criticality_score`, `assignee`, `status`, `created_at`, `acked_at`, `closed_at`, `tenant_id` | §5.2 |
 | `app_cases.cases` | `case_id`, `alert_id`, `customer_id`, `customer_name`, `severity`, `rule_id`, `rule_name`, `state`, `assignee`, `loan_id`, `reason_summary`, `outcome`, `created_at`, `updated_at`, `closed_at`, `sla_status`, `tenant_id` | §5.3 |
 | `app_cases.actions` | column for "when action occurred" (likely `occurred_at` OR `created_at`) | §5.3 + spec note |
@@ -170,7 +170,7 @@ COMMIT;
 
 ```bash
 cd /Users/chuadhary_taniya/ZorEWS/data/schema
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f 035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f 035_unified_views.sql
 ```
 
 Expected: `BEGIN`, `CREATE SCHEMA` (or `NOTICE: schema "unified" already exists, skipping`), `ALTER TABLE`, `CREATE INDEX` × 2, `COMMIT`. No errors.
@@ -178,7 +178,7 @@ Expected: `BEGIN`, `CREATE SCHEMA` (or `NOTICE: schema "unified" already exists,
 - [ ] **Step 3: Verify schema + column + indexes**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='unified'" -c "\d app_audit.approvals" -c "\di app_audit.*"
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='unified'" -c "\d app_audit.approvals" -c "\di app_audit.*"
 ```
 
 Expected: `unified` schema row present; `app_audit.approvals` shows new `tenant_id` column with default `'BANK_DEMO'` + FK; `approvals_tenant_idx` + `approvals_correlation_status_idx` present.
@@ -211,7 +211,7 @@ CREATE INDEX IF NOT EXISTS actions_case_id_idx
 Re-apply the migration (idempotent because of `IF NOT EXISTS`):
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f 035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f 035_unified_views.sql
 ```
 
 Expected: all `CREATE INDEX` statements succeed; `IF NOT EXISTS` swallows pre-existing indexes silently.
@@ -255,8 +255,8 @@ COMMIT;
 - [ ] **Step 6: Smoke-test the rollback (apply + verify schema + indexes removed; re-apply main)**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f 035_unified_views_rollback.sql
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='unified'"
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f 035_unified_views_rollback.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='unified'"
 ```
 
 Expected: rollback succeeds; second query returns 0 rows (schema gone).
@@ -264,7 +264,7 @@ Expected: rollback succeeds; second query returns 0 rows (schema gone).
 Re-apply main to restore state for Task 3:
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f 035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f 035_unified_views.sql
 ```
 
 Expected: succeeds.
@@ -300,7 +300,7 @@ Set up the test file with the BFF_PG_URL gate, a TENANT prefix for isolation, an
 // Verifies each view exists with the columns declared in
 // docs/unified-view-layer-design.md §5, the conventions in §5.0 hold,
 // the ORM-readability gate in §8.5 is met, and the performance budget
-// in §10.5 is respected on the local apex-ews-pg seed.
+// in §10.5 is respected on the local zorews-pg seed.
 //
 // Skipped when BFF_PG_URL / ADMIN_PG_URL unset (mirrors T4.13-T4.18).
 
@@ -315,9 +315,11 @@ const TENANT_BANK = 'BANK_DEMO';
 const TENANT_BIL = 'BIL';
 
 // Column expectations sourced from spec §5 view DDLs (§5.0 ordering rule applied).
+// Reality-corrected 2026-05-21 against live mart (no pd_score; mart projects
+// full_name / risk_rating / total_outstanding / as_of which the views rename).
 const COLS_CUSTOMER_360 = [
   'tenant_id', 'customer_id',
-  'name', 'risk_level', 'pd_score', 'exposure_kes', 'dpd', 'kyc_status', 'segment', 'onboarded_at',
+  'name', 'risk_level', 'exposure_kes', 'dpd', 'kyc_status', 'segment', 'onboarded_at',
   'open_alerts_count', 'max_criticality_score', 'latest_alert_at',
   'open_cases_count', 'breached_sla_count', 'pending_approvals_count',
   'last_activity_at',
@@ -329,7 +331,7 @@ const COLS_ALERTS = [
   'customer_exposure_kes', 'indicators', 'status', 'assignee',
   'created_at', 'acked_at', 'closed_at',
   'age_minutes',
-  'customer_risk_level', 'customer_pd_score', 'customer_total_exposure_kes',
+  'customer_risk_level', 'customer_total_exposure_kes',
 ];
 
 const COLS_CASES = [
@@ -339,7 +341,7 @@ const COLS_CASES = [
   'created_at', 'updated_at', 'closed_at',
   'action_count', 'last_action_at',
   'open_cas_count', 'open_cap_count', 'has_blocking_caps',
-  'customer_risk_level', 'customer_pd_score',
+  'customer_risk_level',
 ];
 
 const COLS_AUDIT_ACTIVITY = [
@@ -413,7 +415,7 @@ describeIfPg('unified.* view layer (integration — requires BFF_PG_URL)', () =>
 
 ```bash
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -v
 ```
 
@@ -444,7 +446,7 @@ TDD cycle: existing failing test → add DDL → re-apply migration → test pas
 
 ```bash
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.customer_360" -v
 ```
 
@@ -465,10 +467,10 @@ CREATE VIEW unified.customer_360 AS
 SELECT
     m.tenant_id,
     m.customer_id,
-    m.name,
-    m.risk_level,
-    m.pd_score,
-    m.exposure_kes,
+    m.full_name                                       AS name,
+    m.risk_rating                                     AS risk_level,
+    -- pd_score omitted — mart doesn't project it (see spec §11)
+    m.total_outstanding                               AS exposure_kes,
     m.worst_dpd                                       AS dpd,
     m.kyc_status,
     m.segment,
@@ -479,7 +481,7 @@ SELECT
     COALESCE(c.open_cases_count, 0)                   AS open_cases_count,
     COALESCE(c.breached_sla_count, 0)                 AS breached_sla_count,
     COALESCE(ap.pending_approvals_count, 0)           AS pending_approvals_count,
-    GREATEST(a.latest_alert_at, c.last_case_updated_at) AS last_activity_at
+    GREATEST(a.latest_alert_at, c.last_case_updated_at, m.as_of) AS last_activity_at
 FROM mart.customer_360 m
 LEFT JOIN LATERAL (
     SELECT
@@ -513,7 +515,7 @@ LEFT JOIN LATERAL (
 - [ ] **Step 3: Re-apply the migration (idempotent on schema/indexes, additive on view)**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 ```
 
 Expected: `CREATE VIEW` succeeds. If it fails with `column "X" does not exist`, your mart.customer_360 projection diverges from the spec — fix per Task 4 Step 2 watch-out.
@@ -522,7 +524,7 @@ Expected: `CREATE VIEW` succeeds. If it fails with `column "X" does not exist`, 
 
 ```bash
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.customer_360" -v
 ```
 
@@ -591,7 +593,7 @@ Append inside the same `describeIfPg` block (after the existence tests):
 - [ ] **Step 6: Run the new data-correctness tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "customer_360" -v
 ```
 
@@ -620,7 +622,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Confirm test is RED**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.alerts" -v
 ```
 
@@ -658,9 +660,9 @@ SELECT
     a.acked_at,
     a.closed_at,
     EXTRACT(EPOCH FROM (now() - a.created_at)) / 60   AS age_minutes,
-    m.risk_level                                       AS customer_risk_level,
-    m.pd_score                                         AS customer_pd_score,
-    m.exposure_kes                                     AS customer_total_exposure_kes
+    m.risk_rating                                      AS customer_risk_level,
+    -- customer_pd_score omitted — mart doesn't project pd_score
+    m.total_outstanding                                AS customer_total_exposure_kes
 FROM app_alerts.alerts a
 LEFT JOIN mart.customer_360 m
     ON m.tenant_id = a.tenant_id
@@ -670,9 +672,9 @@ LEFT JOIN mart.customer_360 m
 - [ ] **Step 3: Re-apply migration + run test**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.alerts" -v
 ```
 
@@ -683,7 +685,7 @@ Expected: existence test GREEN.
 Append inside `describeIfPg` block:
 
 ```typescript
-  test('alerts: every customer_id either resolves in customer_360 OR carries NULL customer_pd_score', async () => {
+  test('alerts: every customer_id either resolves in customer_360 OR carries NULL customer_risk_level', async () => {
     const r = await pool.query(
       `SELECT COUNT(*)::int AS n
          FROM unified.alerts a
@@ -696,11 +698,11 @@ Append inside `describeIfPg` block:
       [TENANT_BANK],
     );
     // If view JOIN broke, this returns >0; LEFT JOIN integrity says it
-    // should be 0 OR matched-rows have customer_pd_score IS NULL on the
+    // should be 0 OR matched-rows have customer_risk_level IS NULL on the
     // alert side (we assert via the symmetric expectation):
     const orphanAlerts = await pool.query(
       `SELECT COUNT(*)::int AS n FROM unified.alerts
-         WHERE tenant_id = $1 AND customer_pd_score IS NULL`,
+         WHERE tenant_id = $1 AND customer_risk_level IS NULL`,
       [TENANT_BANK],
     );
     expect(r.rows[0].n).toBeLessThanOrEqual(orphanAlerts.rows[0].n);
@@ -719,7 +721,7 @@ Append inside `describeIfPg` block:
 - [ ] **Step 5: Run tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "alerts" -v
 ```
 
@@ -748,7 +750,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Confirm test is RED**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.cases" -v
 ```
 
@@ -789,8 +791,8 @@ SELECT
     COALESCE(cas.open_cas_count, 0)                    AS open_cas_count,
     COALESCE(cap.open_cap_count, 0)                    AS open_cap_count,
     COALESCE(cap.has_blocking_caps, false)             AS has_blocking_caps,
-    m.risk_level                                        AS customer_risk_level,
-    m.pd_score                                          AS customer_pd_score
+    m.risk_rating                                       AS customer_risk_level
+    -- customer_pd_score omitted — mart doesn't project pd_score
 FROM app_cases.cases c
 LEFT JOIN LATERAL (
     SELECT COUNT(*) AS action_count, MAX(occurred_at) AS last_action_at
@@ -817,9 +819,9 @@ LEFT JOIN mart.customer_360 m
 - [ ] **Step 3: Re-apply migration + run existence test**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.cases" -v
 ```
 
@@ -873,7 +875,7 @@ Append inside `describeIfPg`:
 - [ ] **Step 5: Run tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "cases" -v
 ```
 
@@ -902,7 +904,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Confirm test is RED**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.audit_activity" -v
 ```
 
@@ -971,9 +973,9 @@ FROM app_audit.approvals ap;
 - [ ] **Step 3: Re-apply + run existence test**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "unified.audit_activity" -v
 ```
 
@@ -1049,7 +1051,7 @@ Append inside `describeIfPg`:
 - [ ] **Step 5: Run tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "audit_activity|read-only|WORM" -v
 ```
 
@@ -1096,8 +1098,7 @@ COMMENT ON VIEW unified.customer_360 IS
 COMMENT ON COLUMN unified.customer_360.tenant_id IS 'BIL multi-tenant key (T4.24).';
 COMMENT ON COLUMN unified.customer_360.customer_id IS 'Business customer identifier (denormalised from mart.customer_360).';
 COMMENT ON COLUMN unified.customer_360.name IS 'Customer display name from mart.';
-COMMENT ON COLUMN unified.customer_360.risk_level IS 'Low/Medium/High derived in dbt from pd_score.';
-COMMENT ON COLUMN unified.customer_360.pd_score IS 'Probability of default 0..1 from dbt customer_360 model.';
+COMMENT ON COLUMN unified.customer_360.risk_level IS 'Low/Medium/High text bucket from mart.customer_360.risk_rating.';
 COMMENT ON COLUMN unified.customer_360.exposure_kes IS 'Total exposure in Kenyan Shillings.';
 COMMENT ON COLUMN unified.customer_360.dpd IS 'Worst days-past-due across customer loans (sourced as worst_dpd in mart).';
 COMMENT ON COLUMN unified.customer_360.kyc_status IS 'KYC verification status from mart.';
@@ -1133,7 +1134,7 @@ COMMENT ON COLUMN unified.alerts.acked_at IS 'When the alert was acknowledged (N
 COMMENT ON COLUMN unified.alerts.closed_at IS 'When the alert was closed (NULL while open or acked).';
 COMMENT ON COLUMN unified.alerts.age_minutes IS 'Computed: (now - created_at) in minutes.';
 COMMENT ON COLUMN unified.alerts.customer_risk_level IS 'Customer risk_level from mart (NULL on orphan alerts).';
-COMMENT ON COLUMN unified.alerts.customer_pd_score IS 'Customer pd_score from mart (NULL on orphan alerts).';
+-- customer_pd_score omitted from view (no mart projection) — no COMMENT needed
 COMMENT ON COLUMN unified.alerts.customer_total_exposure_kes IS 'Customer total exposure from mart (NULL on orphan alerts).';
 
 COMMENT ON VIEW unified.cases IS
@@ -1164,7 +1165,7 @@ COMMENT ON COLUMN unified.cases.open_cas_count IS 'Count of cas_records with rev
 COMMENT ON COLUMN unified.cases.open_cap_count IS 'Count of caps with status in (open, in_progress, overdue).';
 COMMENT ON COLUMN unified.cases.has_blocking_caps IS 'TRUE iff at least one CAP blocks case close (T4.19 gate).';
 COMMENT ON COLUMN unified.cases.customer_risk_level IS 'Customer risk_level from mart (NULL on orphan cases).';
-COMMENT ON COLUMN unified.cases.customer_pd_score IS 'Customer pd_score from mart (NULL on orphan cases).';
+-- customer_pd_score omitted from view (no mart projection) — no COMMENT needed
 
 COMMENT ON VIEW unified.audit_activity IS
   'IDENTITY: (source, event_id) — UNION ALL across audit.event_log (WORM), '
@@ -1212,7 +1213,7 @@ COMMIT;
 - [ ] **Step 2: Re-apply migration**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 ```
 
 Expected: `COMMENT ON VIEW` × 4 + `COMMENT ON COLUMN` × ~75 succeed.
@@ -1261,7 +1262,7 @@ Append inside `describeIfPg`:
 - [ ] **Step 4: Run tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "ORM-readability" -v
 ```
 
@@ -1385,7 +1386,7 @@ Lock in spec §10.5 by asserting no Seq Scan on > 1000-row tables + median runti
 - [ ] **Step 2: Run performance tests**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "perf:" -v
 ```
 
@@ -1400,7 +1401,7 @@ for q in \
   "SELECT * FROM unified.cases WHERE tenant_id = 'BANK_DEMO' AND state <> 'closed' LIMIT 500" \
   "SELECT * FROM unified.audit_activity WHERE tenant_id = 'BANK_DEMO' ORDER BY ts DESC LIMIT 100"; do
   echo "=== $q ==="
-  PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -c "EXPLAIN (ANALYZE, BUFFERS) $q"
+  PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -c "EXPLAIN (ANALYZE, BUFFERS) $q"
 done > unified-views-explain-analyze.txt
 ```
 
@@ -1430,7 +1431,7 @@ Confirm `035_unified_views_rollback.sql` cleanly removes everything, then re-app
 - [ ] **Step 1: Apply rollback**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views_rollback.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views_rollback.sql
 ```
 
 Expected: `BEGIN`, 4 `DROP VIEW`, `DROP SCHEMA`, 5 `DROP INDEX`, `COMMIT`. No errors.
@@ -1438,7 +1439,7 @@ Expected: `BEGIN`, 4 `DROP VIEW`, `DROP SCHEMA`, 5 `DROP INDEX`, `COMMIT`. No er
 - [ ] **Step 2: Verify the unified schema is gone + indexes from Section 3 are gone + approvals.tenant_id kept**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews \
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews \
   -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='unified'" \
   -c "\d app_audit.approvals" \
   -c "\di app_audit.* app_alerts.* app_cases.*"
@@ -1454,7 +1455,7 @@ Expected:
 
 ```bash
 cd services/bff
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -t "exists with declared columns" -v
 ```
 
@@ -1463,7 +1464,7 @@ Expected: 4 view-existence tests FAIL (post-rollback they should fail loudly, no
 - [ ] **Step 4: Re-apply the main migration to restore state**
 
 ```bash
-PGPASSWORD=apex psql -h localhost -p 55432 -U apex -d apex_ews -f data/schema/035_unified_views.sql
+PGPASSWORD=apex psql -h localhost -p 55432 -U zorews_user -d zorews -f data/schema/035_unified_views.sql
 ```
 
 Expected: succeeds; all 5 indexes from Section 3 + 4 views recreated.
@@ -1471,7 +1472,7 @@ Expected: succeeds; all 5 indexes from Section 3 + 4 views recreated.
 - [ ] **Step 5: Run the FULL test suite — all green**
 
 ```bash
-BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews \
+BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews \
   npx jest __tests__/unified_views_pg.test.ts -v
 ```
 
@@ -1580,7 +1581,7 @@ Append the full detail entry:
 
 ```bash
 cd /Users/chuadhary_taniya/ZorEWS
-make test-pg 2>&1 | tail -20 || (cd services/bff && BFF_PG_URL=postgresql://apex:apex@localhost:55432/apex_ews npx jest __tests__/unified_views_pg.test.ts)
+make test-pg 2>&1 | tail -20 || (cd services/bff && BFF_PG_URL=postgresql://zorews_user:apex@localhost:55432/zorews npx jest __tests__/unified_views_pg.test.ts)
 ```
 
 Expected: all unified-views tests GREEN. If `make test-pg` isn't a defined target, fall back to running `npx jest` directly. The pre-existing test suite (~8000 BFF jest tests) is NOT affected by this work — only the new pg-integration file matters for T4.25.
@@ -1633,7 +1634,7 @@ Expected: succeeds; `make services-ci.yml` GitHub Action picks up on push and ru
 
 - [ ] **Step 4: Note for the user (no command)**
 
-T4.25 ship complete. The 4 `unified.*` views are queryable in DBeaver against the local `apex-ews-pg` container. The next natural ticket — v1.5 consumer migration — picks up `services/bff/src/mapping.ts` to read from `unified.alerts` instead of in-code joins. That's a separate plan, not part of T4.25.
+T4.25 ship complete. The 4 `unified.*` views are queryable in DBeaver against the local `zorews-pg` container. The next natural ticket — v1.5 consumer migration — picks up `services/bff/src/mapping.ts` to read from `unified.alerts` instead of in-code joins. That's a separate plan, not part of T4.25.
 
 ---
 

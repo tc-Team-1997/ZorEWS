@@ -58,7 +58,7 @@ Reads flow up. Writes flow into the underlying schemas exactly as today. The uni
 |---|---|---|
 | `unified` | ✅ Selected | Short. Reads as "across all owned namespaces". DBeaver list stays clean (sorts after `staging`, before nothing). |
 | `app_unified` | Pass | Redundant ("app" + "unified"); slight visual clustering benefit with `app_*` not worth the prefix. |
-| `zorews` / `zorews_unified` | Pass | DB is already `apex_ews`; branded prefix adds nothing. |
+| `zorews` / `zorews_unified` | Pass | DB is already `zorews`; branded prefix adds nothing. |
 | `public` | ❌ Rejected | Pollutes the default search_path; convention is to keep `public` empty. |
 
 ## 5. The 4 views (v1)
@@ -76,7 +76,7 @@ These rules are normative — implementation MUST conform and the pg integration
 2. Primary identity column(s) — `customer_id` / `alert_id` / `case_id` / `(source, event_id)`
 3. Foreign identity columns — `customer_id` on alerts/cases; `alert_id` on cases
 4. Natural attributes — `name`, `severity`, `status`, `state`, `outcome`, ...
-5. Denormalised joined attributes — `customer_risk_level`, `customer_pd_score`, ...
+5. Denormalised joined attributes — `customer_risk_level`, `customer_total_exposure_kes`, ...
 6. Aggregate counts — `open_alerts_count`, `action_count`, ...
 7. Latest-event timestamps — `latest_alert_at`, `last_action_at`, ...
 8. Lifecycle timestamps — `created_at`, `updated_at`, `closed_at`, `acked_at`
@@ -91,11 +91,11 @@ These rules are normative — implementation MUST conform and the pg integration
 | `_score` | `NUMERIC` dimensionless rating | `criticality_score`, `pd_score` |
 | `_id` | `TEXT` business identifier (NOT `event_id`'s `BIGSERIAL` — that's cast to TEXT for cross-source union) | `customer_id`, `alert_id`, `case_id` |
 
-**Boolean naming:** `is_*` for instantaneous state predicates, `has_*` for relationships/possessions. The original `has_blocking_caps` is renamed to **`has_blocking_caps`** to conform (and reads more naturally — "this case has CAPs that block close" vs. "this case is blocking close").
+**Boolean naming:** `is_*` for instantaneous state predicates, `has_*` for relationships/possessions. The cases-view close-gate column is named **`has_blocking_caps`** ("this case has CAPs that block close") — chosen over the more terse `is_blocking_close` because it names the *cause* (open CAPs) not just the effect.
 
 **NULL handling:**
 - Counts (`*_count`) — `COALESCE(..., 0)` so SUM/AVG behave predictably
-- Joined attributes (e.g. `customer_pd_score` via LEFT JOIN) — leave NULL when underlying row absent (caller distinguishes "0 PD" from "unknown PD")
+- Joined attributes (e.g. `customer_risk_level` via LEFT JOIN) — leave NULL when underlying row absent (caller distinguishes "Low risk" from "unknown")
 - Latest-event timestamps — NULL when there are no events of that type (do NOT `COALESCE(..., epoch)`)
 
 **SQL alias conventions in DDL** (use throughout for grep-friendly cross-view consistency):
@@ -130,10 +130,11 @@ CREATE VIEW unified.customer_360 AS
 SELECT
     m.tenant_id,
     m.customer_id,
-    m.name,
-    m.risk_level,                                  -- Low / Medium / High (dbt-derived)
-    m.pd_score,
-    m.exposure_kes,
+    m.full_name                  AS name,
+    m.risk_rating                AS risk_level,    -- Low / Medium / High text bucket (dbt projection)
+    -- NOTE: pd_score is not projected by the current dbt mart (only risk_rating).
+    -- Once T2.1 feature-store lands a PD column, add it here. v1 omits.
+    m.total_outstanding          AS exposure_kes,
     m.worst_dpd                  AS dpd,
     m.kyc_status,
     m.segment,
@@ -144,7 +145,7 @@ SELECT
     COALESCE(c.open_cases_count, 0)          AS open_cases_count,
     COALESCE(c.breached_sla_count, 0)        AS breached_sla_count,
     COALESCE(ap.pending_approvals_count, 0)  AS pending_approvals_count,
-    GREATEST(a.latest_alert_at, c.last_case_updated_at, m.last_updated_at) AS last_activity_at
+    GREATEST(a.latest_alert_at, c.last_case_updated_at, m.as_of) AS last_activity_at
 FROM mart.customer_360 m
 LEFT JOIN LATERAL (
     SELECT
@@ -201,9 +202,9 @@ SELECT
     a.acked_at,
     a.closed_at,
     EXTRACT(EPOCH FROM (now() - a.created_at)) / 60   AS age_minutes,
-    m.risk_level                                  AS customer_risk_level,
-    m.pd_score                                    AS customer_pd_score,
-    m.exposure_kes                                AS customer_total_exposure_kes
+    m.risk_rating                                 AS customer_risk_level,
+    -- NOTE: customer_pd_score dropped — mart doesn't project pd_score yet (T2.1).
+    m.total_outstanding                           AS customer_total_exposure_kes
 FROM app_alerts.alerts a
 LEFT JOIN mart.customer_360 m
     ON m.tenant_id = a.tenant_id
@@ -244,8 +245,8 @@ SELECT
     COALESCE(cas.open_cas_count, 0)          AS open_cas_count,
     COALESCE(cap.open_cap_count, 0)          AS open_cap_count,
     COALESCE(cap.has_blocking_caps, false)      AS has_blocking_caps,
-    m.risk_level                              AS customer_risk_level,
-    m.pd_score                                AS customer_pd_score
+    m.risk_rating                             AS customer_risk_level
+    -- NOTE: customer_pd_score dropped — mart doesn't project pd_score yet (T2.1).
 FROM app_cases.cases c
 LEFT JOIN LATERAL (
     SELECT COUNT(*) AS action_count, MAX(occurred_at) AS last_action_at
@@ -486,7 +487,7 @@ Asserted by `services/bff/__tests__/unified_views_pg.test.ts` (gated on `BFF_PG_
 1. **Existence** — `unified.{customer_360, alerts, cases, audit_activity}` exist with the column lists declared in §5.
 2. **Tenant data** — `SELECT COUNT(*) FROM unified.customer_360 WHERE tenant_id='BANK_DEMO'` > 0 (the 10k-customer seed should populate).
 3. **Tenant isolation** — for any view, `(tenant_id_a) ∩ (tenant_id_b)` row keys are empty when both tenants have data. Skipped with explicit log when one tenant has zero rows in a view (current state: `mart.customer_360` has BANK_DEMO seed data only, BIL synthetic data is a separate T4.24 standalone follow-up).
-4. **JOIN integrity — alerts → customer_360** — every `unified.alerts.customer_id` either has a matching row in `unified.customer_360` OR `customer_pd_score IS NULL` (LEFT JOIN preserves orphan alerts).
+4. **JOIN integrity — alerts → customer_360** — every `unified.alerts.customer_id` either has a matching row in `unified.customer_360` OR `customer_risk_level IS NULL` (LEFT JOIN preserves orphan alerts).
 5. **JOIN integrity — cases → alerts** — every `unified.cases.alert_id` (when non-null) appears in `unified.alerts.alert_id`.
 6. **Audit UNION shape** — `unified.audit_activity` returns the discriminator set `{'chain', 'auth_local', 'approval'}`; total row count = sum of per-source counts.
 7. **Read-only sanity** — `INSERT INTO unified.customer_360 (tenant_id, customer_id, name) VALUES (...)` returns Pg error `cannot insert into view "customer_360"` (confirms no one accidentally added INSTEAD OF triggers).
@@ -494,16 +495,16 @@ Asserted by `services/bff/__tests__/unified_views_pg.test.ts` (gated on `BFF_PG_
 9. **`has_blocking_caps` correctness** — for a case with an open CAP, `unified.cases.has_blocking_caps = true`; after closing the CAP, the next read shows `false`.
 10. **`open_alerts_count` correctness** — sum of `open_alerts_count` over `unified.customer_360` for a tenant ≈ count of `app_alerts.alerts` rows with `status = 'open'` for that tenant.
 11. **No Seq Scan regression** — `EXPLAIN (ANALYZE, BUFFERS)` of each view's representative tenant-filtered query (per §10.5 table) shows no `Seq Scan` on any underlying table with > 1000 rows. Plan output persisted in the PR.
-12. **Per-view p95 within budget** — median of 5 sequential runs of each representative query meets the §10.5 latency target on the local `apex-ews-pg` container with current seed.
+12. **Per-view p95 within budget** — median of 5 sequential runs of each representative query meets the §10.5 latency target on the local `zorews-pg` container with current seed.
 13. **ORM-readability metadata populated** — every view has a non-empty `COMMENT ON VIEW`, every column has a non-empty `COMMENT ON COLUMN`, and the view comment carries an `IDENTITY: (...)` line matching the §5.0 identity-tuple contract (parsed by the test).
 
-**CI integration:** the test file runs under the existing `make test-pg` target (mirrors T4.13–T4.18 pg integration suites). Hermetic CI skips when `BFF_PG_URL` is unset. PR description includes a manual smoke transcript against the local `apex-ews-pg` container.
+**CI integration:** the test file runs under the existing `make test-pg` target (mirrors T4.13–T4.18 pg integration suites). Hermetic CI skips when `BFF_PG_URL` is unset. PR description includes a manual smoke transcript against the local `zorews-pg` container.
 
 ## 10.5 Performance + index-review checkpoints
 
 Cross-schema JOINs hide indexing assumptions. This section locks in the performance contract + the audit that confirms the underlying tables already carry the indexes the views need.
 
-**Per-view latency targets** on the current seed (10k customers / 24k loans / 2.5k alerts / 528 cases / 12k audit events) on the local `apex-ews-pg` container:
+**Per-view latency targets** on the current seed (10k customers / 24k loans / 2.5k alerts / 528 cases / 12k audit events) on the local `zorews-pg` container:
 
 | View | Representative query | p95 target | Action when exceeded |
 |---|---|---|---|
@@ -553,7 +554,8 @@ The EXPLAIN output for all 4 representative queries is pasted into the PR descri
 
 | Gap | v1 impact | Resolution path |
 |---|---|---|
-| `mart.customer_360` column list isn't versioned in this spec — dbt model is the source of truth | Implementation must verify `name`, `risk_level`, `pd_score`, `exposure_kes`, `worst_dpd`, `kyc_status`, `segment`, `onboarded_at` are all projected; drop missing columns from the view | Inspect `data/dbt/models/marts/customer_360.sql` during implementation; spec assumes the standard projection |
+| `mart.customer_360` doesn't project `pd_score` — dbt only has `risk_rating` text bucket today | `unified.customer_360` omits `pd_score`; alerts + cases views omit `customer_pd_score` overlay (v1 surface) | When T2.1 feature-store lands a PD column on the mart, add `pd_score` to the view + `customer_pd_score` overlays in a v1.1 ticket |
+| `mart.customer_360` uses `full_name` / `risk_rating` / `total_outstanding` / `as_of` | v1 view renames via `AS`: `full_name AS name`, `risk_rating AS risk_level`, `total_outstanding AS exposure_kes`, `as_of AS` in `GREATEST(...)` for last_activity_at | Reality-corrected 2026-05-21 after pre-flight against live mart (Phase R of execution) — see git log for the correction commit |
 | `app_audit.approvals` lacks `customer_id` | Approvals JOIN to customer_360 traverses `correlation_id → case_id → customer_id` (one extra subquery) | Future ticket: denormalize `customer_id` onto approvals at write time; the view can then drop the subquery |
 | Audit chain's `resource_type` is NULL for `'chain'` rows | SPA timeline can't filter `unified.audit_activity` by resource_type for chain events without a derivation table | Future ticket: add an event_type → resource_type lookup table OR populate the column at write time in audit-svc |
 | Rule registry not in pg | `unified.alerts.rule_name` comes from the denormalised column on `app_alerts.alerts` (set at write time) | Acceptable for v1; if rule_name drift becomes an issue, add a `unified.rules` view backed by a pg table populated from the in-memory registry |
