@@ -11807,6 +11807,61 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Phase E.3 — Drag-drop weight adjustment preview ──────────────────
+  //
+  // POST /v1/scoring/weights/preview body
+  //   { baseline: { [indicator_id]: number },
+  //     candidate: { [indicator_id]: number },
+  //     samples: [{ sample_id, values: { [indicator_id]: number } }, ...],
+  //     thresholds?: ScoringThresholds }
+  // → returns per-sample baseline vs candidate score diff +
+  //   weight-change summary. Pure compute; no state mutation.
+  // RBAC: customers:read_risk_profile (matches M6.x scoring read scope).
+  app.post(
+    '/v1/scoring/weights/preview',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const env = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      // Local require to avoid hoisting the heavy module at app-init
+      // time; preview is opt-in per-request.
+      const { previewWeightChange, WeightPreviewError } = require('./scoring/weight_preview') as
+        typeof import('./scoring/weight_preview');
+      try {
+        const result = previewWeightChange((inner ?? {}) as never);
+        return res.json(wrapResponse(result, env));
+      } catch (e) {
+        if (e instanceof WeightPreviewError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              env,
+            ),
+          );
+        }
+        if (e instanceof ScoringInputError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              env,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'preview failed', severity: 'HIGH' },
+            env,
+          ),
+        );
+      }
+    },
+  );
+
   // ── Scoring weight presets (T6 M6.3) ─────────────────────────────────
   //
   // Named bundles of weight-multipliers (conservative/balanced/
