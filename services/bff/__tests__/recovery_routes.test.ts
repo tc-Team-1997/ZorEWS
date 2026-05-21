@@ -70,6 +70,7 @@ describe('/v1/recovery — empty store', () => {
     //   Phase D.2: field_masking_policy (BFF-local, always registered)
     //   Phase D.3: audit_retention_policy (BFF-local, always registered)
     //   Phase E.1: dr_game_day_record (BFF-local, always registered)
+    //   Phase E.2: release_history (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
@@ -83,6 +84,7 @@ describe('/v1/recovery — empty store', () => {
       'geography_master',
       'policy_master',
       'recon_definition',
+      'release_history',
       'saved_scenario',
       'sector_master',
       'str_report',

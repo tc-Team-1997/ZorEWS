@@ -182,6 +182,15 @@ import {
   type DrGameDayLedger,
 } from './dr/dr_admin';
 import {
+  defaultReleaseHistoryStore,
+  ReleaseHistoryError,
+  ALL_RELEASE_ENVIRONMENTS,
+  ALL_RELEASE_STATUSES,
+  isReleaseEnvironment,
+  resolveReleaseInfo,
+  type ReleaseHistoryStore,
+} from './release/release_info';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1124,6 +1133,11 @@ export interface AppDeps {
   auditRetentionPolicyStore?: AuditRetentionPolicyStore;
   /** Phase E.1 (2026-05-21) — DR game-day exercise ledger. */
   drGameDayLedger?: DrGameDayLedger;
+  /** Phase E.2 (2026-05-21) — Release history ledger. */
+  releaseHistoryStore?: ReleaseHistoryStore;
+  /** Phase E.2 (2026-05-21) — env source for resolveReleaseInfo
+   *  (defaults to process.env; injected by tests). */
+  releaseEnvSource?: NodeJS.ProcessEnv;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1383,6 +1397,10 @@ export function makeApp(deps: AppDeps = {}) {
     deps.auditRetentionPolicyStore ?? defaultAuditRetentionPolicyStore;
   // Phase E.1 — DR game-day exercise ledger.
   const drGameDayLedger = deps.drGameDayLedger ?? defaultDrGameDayLedger;
+  // Phase E.2 — Release history ledger + env source.
+  const releaseHistoryStore =
+    deps.releaseHistoryStore ?? defaultReleaseHistoryStore;
+  const releaseEnvSource = deps.releaseEnvSource ?? process.env;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1738,6 +1756,27 @@ export function makeApp(deps: AppDeps = {}) {
         if (!ok) {
           throw new RestoreConflictError(
             'dr_game_day_record',
+            record.original_id,
+          );
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase E.2 — release_history adapter. Append-mostly evidence;
+    // plain re-insert via the ledger's restore() method.
+    registerRecoveryAdapter({
+      entity_type: 'release_history',
+      display_name: 'Release history entry',
+      module: 'bff',
+      original_table: 'app_admin.release_history',
+      restore: async (record) => {
+        const ok = releaseHistoryStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError(
+            'release_history',
             record.original_id,
           );
         }
@@ -17314,6 +17353,306 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_record', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase E.2 — Version & Release Management ────────────────────────
+  //
+  // PDF §A10. Read-only release info + per-tenant release history
+  // ledger. Admin-only (audit:read).
+
+  /** GET /v1/release/info — current release metadata (read-only). */
+  app.get(
+    '/v1/release/info',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const info = resolveReleaseInfo(releaseEnvSource, now);
+      return res.json(
+        wrapResponse(
+          {
+            ...info,
+            environments: [...ALL_RELEASE_ENVIRONMENTS],
+            statuses: [...ALL_RELEASE_STATUSES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/release/current/:environment — newest deployed entry. */
+  app.get(
+    '/v1/release/current/:environment',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const environment = req.params.environment ?? '';
+      if (!isReleaseEnvironment(environment)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_environment',
+              message: `unknown environment: ${environment}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const entry = releaseHistoryStore.resolveCurrent(req.tenant!.tenant_id, environment);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            environment,
+            release: entry,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/release/history?environment=&include_deleted= — list. */
+  app.get(
+    '/v1/release/history',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const envQuery = req.query.environment;
+      let envFilter: 'development' | 'sandbox' | 'staging' | 'production' | undefined;
+      if (envQuery !== undefined) {
+        if (typeof envQuery !== 'string' || !isReleaseEnvironment(envQuery)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_environment',
+                message: `unknown environment filter: ${envQuery}`,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        envFilter = envQuery;
+      }
+      const items = releaseHistoryStore.list(req.tenant!.tenant_id, {
+        environment: envFilter,
+        include_deleted,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/release/history/:release_id — single. 404 unknown. */
+  app.get(
+    '/v1/release/history/:release_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const release_id = req.params.release_id ?? '';
+      const entry = releaseHistoryStore.get(req.tenant!.tenant_id, release_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            {
+              code: 'EWS_404_unknown_release',
+              message: `unknown release_id: ${release_id}`,
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/release/history — record a new release. */
+  app.post(
+    '/v1/release/history',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = releaseHistoryStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof ReleaseHistoryError) {
+          if (e.code === 'duplicate_release_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_release_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/release/history/:release_id — partial update. */
+  app.patch(
+    '/v1/release/history/:release_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const release_id = req.params.release_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = releaseHistoryStore.update(
+          req.tenant!.tenant_id,
+          release_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof ReleaseHistoryError) {
+          if (e.code === 'unknown_release') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_release', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/release/history/:release_id — soft-delete + archive. */
+  app.delete(
+    '/v1/release/history/:release_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const release_id = req.params.release_id ?? '';
+      try {
+        const tombstoned = releaseHistoryStore.softDelete(
+          req.tenant!.tenant_id,
+          release_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'release_history',
+            original_id: release_id,
+            original_table: 'app_admin.release_history',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/release/history/:release_id',
+            prior_status: tombstoned.status,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof ReleaseHistoryError) {
+          if (e.code === 'unknown_release') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_release', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );
