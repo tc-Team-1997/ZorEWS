@@ -23,6 +23,10 @@ import {
   PgOrphanScanner,
   makeOrphanScannerFromEnv,
 } from './data_quality_diagnostics';
+import {
+  type IUnifiedCustomer360Reader,
+  makeUnifiedCustomer360ReaderFromEnv,
+} from './customer_overlay_reader';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -957,6 +961,17 @@ export interface AppDeps {
    */
   orphanScanner?: IOrphanScanner;
   /**
+   * v1.5 B2 — pg-backed reader for unified.customer_360. When set:
+   *   - /api/customers list reads ~10k mart customers (was ~5 stubs)
+   *   - /api/customers/:id/risk + /v1/risk-profile/:customer_id get
+   *     enriched with overlay fields (open_alerts_count / open_cases_count /
+   *     latest_alert_at / pending_approvals_count) appended to the
+   *     existing riskProfile response shape — pure additive.
+   * When undefined, routes use the existing stub riskProfile source.
+   * Bootstrap probes for unified.customer_360 existence + wires it.
+   */
+  customerOverlayReader?: IUnifiedCustomer360Reader;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1381,6 +1396,11 @@ export function makeApp(deps: AppDeps = {}) {
   // v1.5 B6 — orphan-reference scanner; undefined → /v1/admin/data-quality/*
   // returns 501. Wired by bootstrap when BFF_PG_URL set.
   const orphanScanner: IOrphanScanner | undefined = deps.orphanScanner;
+  // v1.5 B2 — unified.customer_360 reader; undefined → /api/customers +
+  // /api/customers/:id/risk + /v1/risk-profile/:customer_id use the
+  // existing stub riskProfile path. Wired by bootstrap when BFF_PG_URL set.
+  const customerOverlayReader: IUnifiedCustomer360Reader | undefined =
+    deps.customerOverlayReader;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -2226,6 +2246,28 @@ export function makeApp(deps: AppDeps = {}) {
   app.get('/api/customers', requireRole('customers:read_risk_profile'), async (req, res) => {
     const levelFilter = String(req.query.level ?? '').split(',').map(s => s.trim()).filter(Boolean);
     const pdMin = Number(req.query.pdMin ?? 0);
+
+    // v1.5 B2 — when pg-backed unified.customer_360 reader is wired,
+    // read directly from the mart (10k+ rows instead of ~5 stubs).
+    // Band-derived pd_score is a stopgap until B5 lands real PD from
+    // the feature store; pd_source field signals to the SPA which
+    // bucket the value came from.
+    if (customerOverlayReader) {
+      const tenant_id =
+        ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+      const items = await customerOverlayReader.fetchList({
+        tenant_id,
+        levels: levelFilter.length ? levelFilter : undefined,
+        pd_min: Number.isFinite(pdMin) ? pdMin : undefined,
+      });
+      // Sort by pd desc to preserve SPA expectation (matches the
+      // original stub-iterator behavior).
+      items.sort((a, b) => b.pd - a.pd);
+      return res.json({ items, total: items.length });
+    }
+
+    // Fallback path — existing stub iteration (preserved for
+    // in-memory tests + BFF instances without pg).
     const items: Array<{
       id: string; name: string; pd: number; level: 'Low'|'Medium'|'High';
       exposure: number; dpd: number;
@@ -2248,6 +2290,31 @@ export function makeApp(deps: AppDeps = {}) {
   app.get('/api/customers/:id/risk', requireRole('customers:read_risk_profile'), async (req, res) => {
     const profile = await riskProfile.get(req.params.id);
     if (!profile) return res.status(404).json({ error: `customer ${req.params.id} not found` });
+    // v1.5 B2 — pure-additive overlay enrichment. Existing fields untouched.
+    if (customerOverlayReader) {
+      const tenant_id =
+        ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+      try {
+        const overlay = await customerOverlayReader.fetchOne(tenant_id, req.params.id);
+        if (overlay) {
+          return res.json({
+            ...profile,
+            overlay: {
+              open_alerts_count: overlay.open_alerts_count,
+              max_criticality_score: overlay.max_criticality_score,
+              latest_alert_at: overlay.latest_alert_at,
+              open_cases_count: overlay.open_cases_count,
+              breached_sla_count: overlay.breached_sla_count,
+              pending_approvals_count: overlay.pending_approvals_count,
+              last_activity_at: overlay.last_activity_at,
+            },
+          });
+        }
+      } catch {
+        // overlay enrichment is best-effort — fall through to bare profile
+        // rather than 500ing the whole call.
+      }
+    }
     res.json(profile);
   });
 
@@ -4508,7 +4575,33 @@ export function makeApp(deps: AppDeps = {}) {
             ),
           );
         }
-        res.json(wrapResponse(profile, ctx));
+        // v1.5 B2 — pure-additive overlay enrichment.
+        let body: Record<string, unknown> = profile as unknown as Record<string, unknown>;
+        if (customerOverlayReader) {
+          try {
+            const overlay = await customerOverlayReader.fetchOne(
+              req.tenant!.tenant_id,
+              req.params.customer_id,
+            );
+            if (overlay) {
+              body = {
+                ...body,
+                overlay: {
+                  open_alerts_count: overlay.open_alerts_count,
+                  max_criticality_score: overlay.max_criticality_score,
+                  latest_alert_at: overlay.latest_alert_at,
+                  open_cases_count: overlay.open_cases_count,
+                  breached_sla_count: overlay.breached_sla_count,
+                  pending_approvals_count: overlay.pending_approvals_count,
+                  last_activity_at: overlay.last_activity_at,
+                },
+              };
+            }
+          } catch {
+            // best-effort — don't fail the call on overlay errors
+          }
+        }
+        res.json(wrapResponse(body, ctx));
       } catch (e) {
         res.status(500).json(
           wrapError(
@@ -31054,6 +31147,13 @@ if (require.main === module) {
     if (orphanScanner) {
       console.log('[bff] orphan-reference scanner wired (v1.5 B6)');
     }
+    // v1.5 B2 — unified.customer_360 reader; drives /api/customers list
+    // migration + overlay enrichment on /api/customers/:id/risk +
+    // /v1/risk-profile/:customer_id.
+    const customerOverlayReader = await makeUnifiedCustomer360ReaderFromEnv();
+    if (customerOverlayReader) {
+      console.log('[bff] unified.customer_360 reader wired (v1.5 B2)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -31061,6 +31161,7 @@ if (require.main === module) {
       scenarioStore,
       unifiedAlertsReader,
       orphanScanner,
+      customerOverlayReader,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
