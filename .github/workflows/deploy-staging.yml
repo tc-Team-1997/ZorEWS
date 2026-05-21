@@ -1,0 +1,190 @@
+name: Deploy to staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'infra/k8s/**'
+      - 'infra/terraform/**'
+      - 'web/**'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Specific ArgoCD app to sync (leave empty for all)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+# Staging deploys do NOT block on each other — staging is intended for fast iteration
+concurrency:
+  group: deploy-staging-${{ github.sha }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: af-south-1
+  CLUSTER_NAME: apex-ews-staging
+  ENVIRONMENT: staging
+
+jobs:
+  # Lighter pre-validation than prod — no GitHub Environment gate
+  pre-deploy-validate:
+    name: Pre-deploy validation (staging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+
+      - name: Install tools
+        run: |
+          curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+
+      - name: Pre-deploy validation
+        env:
+          DEPLOY_PHASE: pre
+        run: bash ./scripts/deploy-validate.sh
+
+  build-push:
+    name: Build + push images (staging)
+    needs: pre-deploy-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - services/bff
+          - services/auth-svc
+          - services/audit-svc
+          - services/regulatory-svc/cases
+          - services/regulatory-svc/alerts
+          - services/regulatory-svc/rules
+          - services/regulatory-svc/indicators
+          - services/collection-adapter
+          - services/notification-svc
+          - services/ai-copilot-svc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build + push
+        run: |
+          docker build \
+            -t ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:${{ github.sha }} \
+            -t ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:staging-latest \
+            -f ${{ matrix.service }}/Dockerfile \
+            ${{ matrix.service }}
+          docker push --all-tags ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}
+
+      # Staging skips Trivy CRITICAL fail-build — runs as advisory scan only
+      - name: Trivy advisory scan
+        continue-on-error: true
+        run: |
+          curl -L https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.tar.gz | tar xz -C /usr/local/bin
+          trivy image --severity CRITICAL,HIGH --no-progress \
+            ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:${{ github.sha }} \
+            > trivy-${{ strategy.job-index }}.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trivy-staging-${{ strategy.job-index }}
+          path: trivy-*.txt
+          retention-days: 14
+
+  argocd-sync:
+    name: ArgoCD sync (staging)
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup tools
+        run: |
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+          curl -sLO https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install argocd-linux-amd64 /usr/local/bin/argocd
+
+      - name: ArgoCD login + sync
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN_STAGING }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER_STAGING }}
+        run: |
+          argocd login --grpc-web ${ARGOCD_SERVER} --auth-token ${ARGOCD_AUTH_TOKEN}
+
+          if [ -n "${{ inputs.app }}" ]; then
+            argocd app sync ${{ inputs.app }} --grpc-web
+            argocd app wait ${{ inputs.app }} --health --timeout 600 --grpc-web
+          else
+            for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+              argocd app sync ${app} --grpc-web &
+            done
+            wait
+            for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+              argocd app wait ${app} --health --timeout 600 --grpc-web || true
+            done
+          fi
+
+  post-deploy-validate:
+    name: Post-deploy validation (staging)
+    needs: argocd-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        run: aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+
+      - name: Post-deploy validation
+        env:
+          DEPLOY_PHASE: post
+          NAMESPACE: apex-ews
+          BFF_URL: ${{ secrets.BFF_STAGING_URL }}
+          AUTH_URL: ${{ secrets.AUTH_STAGING_URL }}
+          PROMETHEUS_URL: ${{ secrets.PROMETHEUS_STAGING_URL }}
+        run: bash ./scripts/deploy-validate.sh
+
+      - name: Tenant isolation test
+        env:
+          BFF_URL: ${{ secrets.BFF_STAGING_URL }}
+          AUTH_URL: ${{ secrets.AUTH_STAGING_URL }}
+          BANK_DEMO_USER: alice.admin
+          BIL_USER: bil.admin
+        run: bash ./scripts/test-tenant-isolation.sh
+
+      - name: Slack notify
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+          STATUS: ${{ job.status }}
+        run: |
+          ICON="✓"
+          if [ "${STATUS}" != "success" ]; then ICON="✕"; fi
+          curl -X POST -H 'Content-Type: application/json' --data "{
+            \"text\": \"${ICON} Staging deploy ${{ github.sha }}: ${STATUS}\",
+            \"channel\": \"#apex-ews-deploys\",
+            \"username\": \"deploy-staging\"
+          }" $SLACK_WEBHOOK_URL || true

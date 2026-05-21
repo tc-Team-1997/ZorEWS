@@ -10,6 +10,8 @@ Production operational scripts referenced by `docs/operationalization/*.md`.
 | `dr-drill.sh` | DR game-day automation with scoring rubric | Quarterly (Q1/Q2/Q3/Q4) | SRE-lead + CISO |
 | `rollback.sh` | Emergency rollback (CISO sign-off required) | Incident response only | on-call SRE |
 | `infra-health.sh` | Walks every infra row from readiness-checklists.md §2 | BAU daily; after IaC change | SRE |
+| `seed-secrets.sh` | Bootstrap Secrets Manager with every key the ESO manifests expect | T3-P3 (one-shot per env) + before secret rotation | SRE |
+| `test-tenant-isolation.sh` | Security test verifying cross-tenant data leak is impossible | Pre-pentest (T7-P2) + every deploy involving auth/tenant code | CISO + SRE |
 
 ## Make targets
 

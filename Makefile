@@ -258,3 +258,10 @@ deploy-validate-post:
 
 rollback:
 	@./scripts/rollback.sh $${ROLLBACK_ARGS:-}
+
+.PHONY: seed-secrets test-tenant-isolation
+seed-secrets:
+	@./scripts/seed-secrets.sh
+
+test-tenant-isolation:
+	@./scripts/test-tenant-isolation.sh

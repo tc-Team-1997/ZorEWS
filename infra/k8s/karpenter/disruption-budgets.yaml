@@ -1,0 +1,61 @@
+# Karpenter disruption budgets — limits how many nodes Karpenter can disrupt
+# (consolidate, expire, or drift-replace) at once. Layered on top of K8s PDBs.
+#
+# Phase: T3-P2 + post-T8-P3 capacity tuning
+# Owner: SRE
+#
+# Without these, Karpenter consolidation can race ahead of PDBs in some
+# edge cases (e.g. when no pods are scheduled to the node yet). Setting a
+# global percentage cap is belt-and-braces on the existing PDB minAvailable.
+#
+# Apply AFTER nodepool.yaml:
+#   kubectl apply -f infra/k8s/karpenter/disruption-budgets.yaml
+
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: general
+  annotations:
+    operationalization-phase: "T3-P2"
+spec:
+  # ... (other fields managed by nodepool.yaml; this is a partial patch
+  #      that adds the disruption.budgets block via server-side apply)
+  disruption:
+    # Inherit consolidation policy from nodepool.yaml
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 30s
+    budgets:
+      # Always allow at least 1 node disruption (no progress otherwise)
+      # Cap at 10% of pool during business hours
+      - nodes: "10%"
+        schedule: "0 8 * * 1-5"   # business hours start
+        duration: 10h
+        reasons:
+          - Drifted
+          - Empty
+          - Underutilized
+      # Wider window overnight (off-hours)
+      - nodes: "25%"
+        schedule: "0 18 * * 1-5"  # business hours end
+        duration: 14h
+      # Weekend: full 25% any time
+      - nodes: "25%"
+        schedule: "0 0 * * 6,0"
+        duration: 24h
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: ai
+  annotations:
+    operationalization-phase: "T3-P2"
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 300s   # GPU instances are scarce — wait longer before reaping
+    budgets:
+      # GPU nodes have high cold-start cost; restrict to 1 disruption at a time
+      - nodes: "1"
+        reasons:
+          - Drifted
+          - Empty

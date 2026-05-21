@@ -1,0 +1,21 @@
+# Wave 5 — regulatory-svc/cases. Depends on auth-svc + audit-svc (wave 4).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: regulatory-svc-cases
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s
+    directory: {include: "deployments.yaml"}
+  destination: {server: https://kubernetes.default.svc, namespace: apex-ews}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: {limit: 5, backoff: {duration: 30s, factor: 2}}
