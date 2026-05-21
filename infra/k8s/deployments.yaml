@@ -62,11 +62,14 @@ kind: Service
 metadata:
   name: auth-svc
   namespace: platform
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: auth-svc
   ports:
-    - port: 8080
+    - name: metrics
+      port: 8080
       targetPort: 8080
 ---
 apiVersion: apps/v1
@@ -115,11 +118,14 @@ kind: Service
 metadata:
   name: audit-svc
   namespace: platform
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: audit-svc
   ports:
-    - port: 8081
+    - name: metrics
+      port: 8081
       targetPort: 8081
 ---
 apiVersion: apps/v1
@@ -153,11 +159,14 @@ kind: Service
 metadata:
   name: notification-svc
   namespace: platform
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: notification-svc
   ports:
-    - port: 8082
+    - name: metrics
+      port: 8082
       targetPort: 8082
 ---
 apiVersion: apps/v1
@@ -191,11 +200,14 @@ kind: Service
 metadata:
   name: pipeline-svc
   namespace: data
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: pipeline-svc
   ports:
-    - port: 8083
+    - name: metrics
+      port: 8083
       targetPort: 8083
 ---
 apiVersion: apps/v1
@@ -229,11 +241,14 @@ kind: Service
 metadata:
   name: regulatory-svc
   namespace: regulatory
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: regulatory-svc
   ports:
-    - port: 8084
+    - name: metrics
+      port: 8084
       targetPort: 8084
 ---
 apiVersion: apps/v1
@@ -277,11 +292,14 @@ kind: Service
 metadata:
   name: ai-copilot-svc
   namespace: ai
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: ai-copilot-svc
   ports:
-    - port: 8085
+    - name: metrics
+      port: 8085
       targetPort: 8085
 ---
 apiVersion: apps/v1
@@ -313,9 +331,12 @@ kind: Service
 metadata:
   name: analytics-svc
   namespace: analytics
+  labels:
+    apex-ews-monitored: "true"
 spec:
   selector:
     app: analytics-svc
   ports:
-    - port: 8086
+    - name: metrics
+      port: 8086
       targetPort: 8086

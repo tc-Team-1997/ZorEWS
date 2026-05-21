@@ -24,7 +24,7 @@ spec:
     matchLabels:
       apex-ews-monitored: "true"
   namespaceSelector:
-    matchNames: [apex-ews, platform, regulatory, ai, data]
+    matchNames: [apex-ews, platform, regulatory, ai, data, analytics]
   endpoints:
     - port: metrics
       interval: 30s
