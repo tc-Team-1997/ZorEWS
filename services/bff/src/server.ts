@@ -28226,6 +28226,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/hourly-volume (T6 M12.18) — CYCLIC INTRADAY
+   *  distribution: every job in the tenant's history bucketed by UTC
+   *  hour-of-day 0..23. Distinct from M12.13 (linear daily trend over
+   *  N days) — orthogonal scheduler-ergonomics view answering "do
+   *  all our reports fire at 6am? — should we stagger?". Per-bucket:
+   *  hour + total + by_status (every JobStatus at 0 when absent) +
+   *  by_format (every ReportFormat at 0 when absent) +
+   *  distinct_requesters (Set-deduped). Envelope: peak_hour
+   *  (earliest-wins tie-break) + mean_per_hour + quiet_hours[] +
+   *  busiest_format (canonical json>csv>pdf>xlsx tie-break). Mirror
+   *  of M3.12 connector hourly volume + M14.22/M15.7 dow×hour
+   *  heatmap pattern (this is the 1D variant). Mounted BEFORE the
+   *  /:job_id wildcard so the literal segment wins. */
+  app.get(
+    '/v1/reports/jobs/hourly-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportJobHourlyVolumeFromStore } = require('./report_job_hourly_volume') as
+        typeof import('./report_job_hourly_volume');
+      try {
+        const out = await buildReportJobHourlyVolumeFromStore(
+          reportJobStore,
+          req.tenant!.tenant_id,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   /** GET /v1/reports/jobs/analytics (T6 M12.5) — supervisor rollup
    *  over the M12.1 reports-job ledger: status mix, format mix,
    *  per-report counts + success rate + mean processing time, top
