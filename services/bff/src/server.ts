@@ -199,6 +199,17 @@ import {
   type CbsSyncStore,
 } from './integrations/cbs_sync';
 import {
+  defaultStageMovementLedger,
+  defaultEclOverrideStore,
+  Ifrs9StageError,
+  ALL_IFRS9_STAGES,
+  ALL_STAGE_MOVEMENT_REASONS,
+  computeEcl,
+  applyEclOverride,
+  type StageMovementLedger,
+  type EclOverrideStore,
+} from './ifrs9/stage_movement';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1148,6 +1159,10 @@ export interface AppDeps {
   releaseEnvSource?: NodeJS.ProcessEnv;
   /** Phase T3.1 (2026-05-21) — CBS sync job ledger. */
   cbsSyncStore?: CbsSyncStore;
+  /** Phase T3.2 (2026-05-21) — IFRS9 stage movement ledger. */
+  stageMovementLedger?: StageMovementLedger;
+  /** Phase T3.2 (2026-05-21) — IFRS9 ECL input override store. */
+  eclOverrideStore?: EclOverrideStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1413,6 +1428,9 @@ export function makeApp(deps: AppDeps = {}) {
   const releaseEnvSource = deps.releaseEnvSource ?? process.env;
   // Phase T3.1 — CBS sync ledger.
   const cbsSyncStore = deps.cbsSyncStore ?? defaultCbsSyncStore;
+  // Phase T3.2 — IFRS9 stage movement ledger + ECL override store.
+  const stageMovementLedger = deps.stageMovementLedger ?? defaultStageMovementLedger;
+  const eclOverrideStore = deps.eclOverrideStore ?? defaultEclOverrideStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1809,6 +1827,43 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = cbsSyncStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('cbs_sync_job', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase T3.2 — ifrs9_stage_movement adapter. Append-mostly audit
+    // trail of stage transitions.
+    registerRecoveryAdapter({
+      entity_type: 'ifrs9_stage_movement',
+      display_name: 'IFRS9 stage movement',
+      module: 'bff',
+      original_table: 'app_admin.ifrs9_stage_movements',
+      restore: async (record) => {
+        const ok = stageMovementLedger.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('ifrs9_stage_movement', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase T3.2 — ifrs9_ecl_override adapter. Refuses to restore when
+    // another active override governs the customer (gated by the
+    // duplicate-active invariant inside InMemoryEclOverrideStore.restore).
+    registerRecoveryAdapter({
+      entity_type: 'ifrs9_ecl_override',
+      display_name: 'IFRS9 ECL override',
+      module: 'bff',
+      original_table: 'app_admin.ifrs9_ecl_overrides',
+      restore: async (record) => {
+        const ok = eclOverrideStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('ifrs9_ecl_override', record.original_id);
         }
       },
     });
@@ -18069,6 +18124,580 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_job', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase T3.2 — IFRS9 Stage Movement + ECL Inputs ──────────────────
+  //
+  // Per-customer stage transition ledger + per-tenant ECL override
+  // store + ECL calculator + portfolio rollup. Admin-only
+  // (customers:read_risk_profile — matches M14.2's scope).
+
+  /** GET /v1/ifrs9/enums — stages + movement reasons. */
+  app.get(
+    '/v1/ifrs9/enums',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            stages: [...ALL_IFRS9_STAGES],
+            movement_reasons: [...ALL_STAGE_MOVEMENT_REASONS],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** POST /v1/ifrs9/ecl/compute — pure preview calculator. */
+  app.post(
+    '/v1/ifrs9/ecl/compute',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const inputs = (inner ?? {}) as Parameters<typeof computeEcl>[0];
+        const ecl = computeEcl(inputs);
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              generated_at: now().toISOString(),
+              inputs,
+              ecl,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'compute failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/ifrs9/portfolio — portfolio rollup. */
+  app.get(
+    '/v1/ifrs9/portfolio',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const rollup = stageMovementLedger.portfolioRollup(req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            ...rollup,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ifrs9/movements?customer_id=&to_stage=&reason=&limit= */
+  app.get(
+    '/v1/ifrs9/movements',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.query.customer_id !== undefined ? String(req.query.customer_id) : undefined;
+      const to_stage_raw = req.query.to_stage !== undefined ? Number(req.query.to_stage) : undefined;
+      const reason = req.query.reason !== undefined ? String(req.query.reason) : undefined;
+      const include_deleted = String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const limit = req.query.limit !== undefined && Number.isFinite(Number(req.query.limit))
+        ? Number(req.query.limit)
+        : undefined;
+      if (to_stage_raw !== undefined && (to_stage_raw !== 1 && to_stage_raw !== 2 && to_stage_raw !== 3)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_stage', message: `invalid to_stage: ${req.query.to_stage}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (reason !== undefined && !(ALL_STAGE_MOVEMENT_REASONS as readonly string[]).includes(reason)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_reason', message: `invalid reason: ${reason}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = stageMovementLedger.list(req.tenant!.tenant_id, {
+        customer_id,
+        to_stage: to_stage_raw as never,
+        reason: reason as never,
+        include_deleted,
+        limit,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ifrs9/movements/current/:customer_id — resolve newest stage. */
+  app.get(
+    '/v1/ifrs9/movements/current/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.params.customer_id ?? '';
+      const stage = stageMovementLedger.resolveCurrentStage(
+        req.tenant!.tenant_id,
+        customer_id,
+      );
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            customer_id,
+            current_stage: stage,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ifrs9/movements/:movement_id — single (404). */
+  app.get(
+    '/v1/ifrs9/movements/:movement_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const movement_id = req.params.movement_id ?? '';
+      const entry = stageMovementLedger.get(req.tenant!.tenant_id, movement_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_movement', message: `unknown movement_id: ${movement_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/ifrs9/movements — record a transition. */
+  app.post(
+    '/v1/ifrs9/movements',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = stageMovementLedger.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Recorded' }),
+        );
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          if (e.code === 'duplicate_movement_id') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_movement_id', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/ifrs9/movements/:movement_id — soft-delete + archive. */
+  app.delete(
+    '/v1/ifrs9/movements/:movement_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const movement_id = req.params.movement_id ?? '';
+      try {
+        const tombstoned = stageMovementLedger.softDelete(
+          req.tenant!.tenant_id,
+          movement_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'ifrs9_stage_movement',
+            original_id: movement_id,
+            original_table: 'app_admin.ifrs9_stage_movements',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/ifrs9/movements/:movement_id',
+            prior_status: null,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          if (e.code === 'unknown_movement') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_movement', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/ifrs9/ecl-overrides?customer_id=&active=&include_deleted= */
+  app.get(
+    '/v1/ifrs9/ecl-overrides',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.query.customer_id !== undefined ? String(req.query.customer_id) : undefined;
+      const activeRaw = req.query.active;
+      let active: boolean | undefined;
+      if (activeRaw !== undefined) {
+        const lo = String(activeRaw).toLowerCase();
+        if (lo === 'true') active = true;
+        else if (lo === 'false') active = false;
+        else {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'active must be true|false', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+      }
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const items = eclOverrideStore.list(req.tenant!.tenant_id, {
+        customer_id,
+        active,
+        include_deleted,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ifrs9/ecl-overrides/active/:customer_id — resolve active. */
+  app.get(
+    '/v1/ifrs9/ecl-overrides/active/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.params.customer_id ?? '';
+      const entry = eclOverrideStore.resolveActive(req.tenant!.tenant_id, customer_id);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            customer_id,
+            override: entry,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/ifrs9/ecl-overrides/:override_id — single (404). */
+  app.get(
+    '/v1/ifrs9/ecl-overrides/:override_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const override_id = req.params.override_id ?? '';
+      const entry = eclOverrideStore.get(req.tenant!.tenant_id, override_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_override', message: `unknown override_id: ${override_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/ifrs9/ecl-overrides — create. */
+  app.post(
+    '/v1/ifrs9/ecl-overrides',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = eclOverrideStore.create(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Created' }),
+        );
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          if (e.code === 'duplicate_override') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_override', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** PATCH /v1/ifrs9/ecl-overrides/:override_id — partial update. */
+  app.patch(
+    '/v1/ifrs9/ecl-overrides/:override_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const override_id = req.params.override_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = eclOverrideStore.update(
+          req.tenant!.tenant_id,
+          override_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          if (e.code === 'unknown_override') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_override', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'duplicate_override') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_override', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/ifrs9/ecl-overrides/:override_id — soft-delete + archive. */
+  app.delete(
+    '/v1/ifrs9/ecl-overrides/:override_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const override_id = req.params.override_id ?? '';
+      try {
+        const tombstoned = eclOverrideStore.softDelete(
+          req.tenant!.tenant_id,
+          override_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'ifrs9_ecl_override',
+            original_id: override_id,
+            original_table: 'app_admin.ifrs9_ecl_overrides',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/ifrs9/ecl-overrides/:override_id',
+            prior_status: tombstoned.active ? 'active' : 'inactive',
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof Ifrs9StageError) {
+          if (e.code === 'unknown_override') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_override', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );

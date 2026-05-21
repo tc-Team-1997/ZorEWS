@@ -72,6 +72,7 @@ describe('/v1/recovery — empty store', () => {
     //   Phase E.1: dr_game_day_record (BFF-local, always registered)
     //   Phase E.2: release_history (BFF-local, always registered)
     //   Phase T3.1: cbs_sync_job (BFF-local, always registered)
+    //   Phase T3.2: ifrs9_stage_movement + ifrs9_ecl_override (BFF-local)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
@@ -84,6 +85,8 @@ describe('/v1/recovery — empty store', () => {
       'dr_game_day_record',
       'field_masking_policy',
       'geography_master',
+      'ifrs9_ecl_override',
+      'ifrs9_stage_movement',
       'policy_master',
       'recon_definition',
       'release_history',
