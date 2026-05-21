@@ -212,14 +212,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Factory selecting consumer based on env. */
+/** Factory selecting consumer based on env. Auto-wires NDJSON DLQ. */
 export function makeStreamingConsumer(
   env: NodeJS.ProcessEnv = process.env,
 ): StreamingRuleEvaluatorConsumer {
+  // Lazy-require so unit tests don't need fs module mocking.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { makeStreamingDlqWriter } = require("./streaming_dlq") as typeof import("./streaming_dlq");
   return new StreamingRuleEvaluatorConsumer({
     brokers: (env.KAFKA_BROKERS ?? "").split(",").filter(Boolean),
     bffUrl: env.BFF_URL,
     authToken: () => env.STREAMING_BFF_TOKEN ?? "",
+    dlqWrite: makeStreamingDlqWriter(env),
   });
 }
 

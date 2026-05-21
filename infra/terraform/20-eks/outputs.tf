@@ -43,3 +43,13 @@ output "external_secrets_role_arn" {
   description = "IRSA role ARN for the External Secrets Operator (consumed by scripts/bootstrap-cluster.sh)."
   value       = aws_iam_role.eso.arn
 }
+
+output "cert_manager_role_arn" {
+  description = "IRSA role ARN for cert-manager (Route 53 DNS01 ACME)."
+  value       = aws_iam_role.cert_manager.arn
+}
+
+output "streaming_consumer_role_arn" {
+  description = "IRSA role ARN for the streaming rule-evaluator consumer (MSK IAM read)."
+  value       = aws_iam_role.streaming_consumer.arn
+}
