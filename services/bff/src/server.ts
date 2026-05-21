@@ -7562,6 +7562,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/shock-directions (T6 M16.22) — per-axis
+   *  pivot by SIGN of the shock (positive / negative / zero). Distinct
+   *  from M16.18 (single magnitude per preset) + M16.20 (per-axis
+   *  magnitude histogram, sign-agnostic). Surfaces direction balance:
+   *  "are all GDP scenarios down-shocks? does the library lean
+   *  upward on rates?". Per-row {axis, positive_count, negative_count,
+   *  zero_count, by_category (4-key partition), positive_examples
+   *  cap 3 sorted raw desc, negative_examples cap 3 sorted raw asc}.
+   *  Envelope: most_positive_axis + most_negative_axis +
+   *  most_neutral_axis (all canonical ALL_SHOCK_AXES tie-break);
+   *  by_direction_totals (Σ across 3 axes = 3 × total_presets).
+   *  Platform-static. Mounted BEFORE `/:preset_id` so the literal
+   *  segment wins. */
+  app.get(
+    '/v1/scenarios/library/shock-directions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioShockDirectionReport } =
+        require('./scenario_shock_direction') as
+        typeof import('./scenario_shock_direction');
+      const out = buildScenarioShockDirectionReport(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/coverage-matrix (T6 M16.17) — 2D
    *  rollup over the M16.1 library showing per-(category,
    *  regulator) coverage counts. Cells with `count < expected_min`
