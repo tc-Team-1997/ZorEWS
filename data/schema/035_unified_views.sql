@@ -201,4 +201,58 @@ LEFT JOIN mart.customer_360 m
     ON m.tenant_id = c.tenant_id
    AND m.customer_id = c.customer_id;
 
+-- --------------------------------------------------------------------------
+-- Section 7: unified.audit_activity (spec §5.4)
+-- Identity: (source, event_id). UNION ALL across audit.event_log
+-- (WORM hash chain), app_iam.audit_events (auth-svc local), and
+-- app_audit.approvals (maker-checker). The Pg planner refuses INSERTs
+-- on UNION views, preserving WORM semantics on audit.event_log even
+-- by accident.
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE VIEW unified.audit_activity AS
+SELECT
+    'chain'              AS source,
+    e.tenant_id,
+    e.event_id::text     AS event_id,
+    e.event_ts           AS ts,
+    e.actor              AS actor,
+    e.event_type         AS action,
+    NULL::text           AS resource_type,
+    e.subject_id         AS resource_id,
+    NULL::text           AS outcome,
+    NULL::text           AS severity,
+    e.correlation_id     AS correlation_id,
+    e.payload            AS metadata
+FROM audit.event_log e
+UNION ALL
+SELECT
+    'auth_local'         AS source,
+    ae.tenant_id,
+    ae.id::text          AS event_id,
+    ae.occurred_at       AS ts,
+    ae.actor_username    AS actor,
+    ae.event_type        AS action,
+    'user'::text         AS resource_type,
+    ae.target_username   AS resource_id,
+    NULL::text           AS outcome,
+    NULL::text           AS severity,
+    NULL::text           AS correlation_id,
+    ae.detail            AS metadata
+FROM app_iam.audit_events ae
+UNION ALL
+SELECT
+    'approval'                            AS source,
+    COALESCE(ap.tenant_id, 'BANK_DEMO')   AS tenant_id,
+    ap.approval_id                        AS event_id,
+    ap.proposed_at                        AS ts,
+    ap.maker                              AS actor,
+    ap.action                             AS action,
+    ap.subject_type                       AS resource_type,
+    ap.subject_id                         AS resource_id,
+    ap.status                             AS outcome,
+    NULL::text                            AS severity,
+    ap.correlation_id                     AS correlation_id,
+    ap.payload                            AS metadata
+FROM app_audit.approvals ap;
+
 COMMIT;

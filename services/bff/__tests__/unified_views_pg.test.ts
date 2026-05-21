@@ -270,4 +270,68 @@ describeIfPg('unified.* view layer (integration — requires BFF_PG_URL)', () =>
 
     expect(viewFlag.rows[0].has_blocking_caps).toBe(directCount.rows[0].n > 0);
   });
+
+  // --------------------------------------------------------------------
+  // unified.audit_activity tests per spec §10 items #6, #7, #8
+  // --------------------------------------------------------------------
+
+  test('audit_activity: source discriminator subset of {chain, auth_local, approval} and sums to total', async () => {
+    const breakdown = await pool.query(
+      `SELECT source, COUNT(*)::int AS n FROM unified.audit_activity
+         WHERE tenant_id = $1 GROUP BY source`,
+      [TENANT_BANK],
+    );
+    const sources = new Set(breakdown.rows.map((r) => r.source as string));
+    // At least one source must produce data on the seed.
+    expect(sources.size).toBeGreaterThan(0);
+    // Only declared sources may appear.
+    for (const s of sources) {
+      expect(['chain', 'auth_local', 'approval']).toContain(s);
+    }
+    const total = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM unified.audit_activity WHERE tenant_id = $1`,
+      [TENANT_BANK],
+    );
+    const sumOfParts = breakdown.rows.reduce(
+      (acc, r) => acc + (r.n as number),
+      0,
+    );
+    expect(total.rows[0].n).toBe(sumOfParts);
+  });
+
+  test('all unified views are read-only: INSERT fails on each (spec §10 item #7)', async () => {
+    for (const view of ['customer_360', 'alerts', 'cases', 'audit_activity']) {
+      await expect(
+        pool.query(`INSERT INTO unified.${view} DEFAULT VALUES`),
+      ).rejects.toThrow();
+    }
+  });
+
+  test('audit_activity preserves WORM: a fresh audit.event_log row appears in the view + DELETE is refused (spec §10 item #8)', async () => {
+    const synthetic = `evq-${Date.now()}`;
+    // INSERT with NULL hashes — the audit.fn_event_log_chain trigger
+    // auto-fills prev_hash + event_hash with the correct SHA-256 chain.
+    await pool.query(
+      `INSERT INTO audit.event_log
+         (event_ts, event_type, actor, subject_id, correlation_id, payload, prev_hash, event_hash, tenant_id)
+       VALUES (now(), 'INTEGRATION_TEST', 'unified_views_test', $1, NULL,
+               '{}'::jsonb, NULL, NULL, $2)`,
+      [synthetic, TENANT_BANK],
+    );
+    // Always-live: the view immediately sees the new row.
+    const r = await pool.query(
+      `SELECT actor FROM unified.audit_activity
+         WHERE source = 'chain' AND resource_id = $1`,
+      [synthetic],
+    );
+    expect(r.rowCount).toBe(1);
+    expect(r.rows[0].actor).toBe('unified_views_test');
+
+    // WORM property: DELETE is refused by audit.fn_event_log_immutable.
+    // This both asserts the table's WORM contract AND explains why the
+    // synthetic row persists across test runs (intentional — that's WORM).
+    await expect(
+      pool.query(`DELETE FROM audit.event_log WHERE subject_id = $1`, [synthetic]),
+    ).rejects.toThrow(/append-only/);
+  });
 });
