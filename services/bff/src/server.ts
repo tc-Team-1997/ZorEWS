@@ -169,6 +169,19 @@ import {
   LineageError,
 } from './metadata/lineage';
 import {
+  defaultDrGameDayLedger,
+  DrAdminError,
+  DR_RTO_RPO_TARGETS,
+  DR_RUNBOOK_STEPS,
+  DR_GAME_DAY_SCOPE,
+  DR_PREGAME_CHECKLIST,
+  ALL_DR_CADENCES,
+  ALL_DR_SCORE_DIMENSIONS,
+  ALL_DR_SCORES,
+  ALL_DR_VERDICTS,
+  type DrGameDayLedger,
+} from './dr/dr_admin';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1109,6 +1122,8 @@ export interface AppDeps {
   fieldMaskingStore?: FieldMaskingStore;
   /** Phase D.3 (2026-05-21) — Audit Admin retention policy store. */
   auditRetentionPolicyStore?: AuditRetentionPolicyStore;
+  /** Phase E.1 (2026-05-21) — DR game-day exercise ledger. */
+  drGameDayLedger?: DrGameDayLedger;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1366,6 +1381,8 @@ export function makeApp(deps: AppDeps = {}) {
   // Phase D.3 — Audit Admin retention policy store.
   const auditRetentionPolicyStore =
     deps.auditRetentionPolicyStore ?? defaultAuditRetentionPolicyStore;
+  // Phase E.1 — DR game-day exercise ledger.
+  const drGameDayLedger = deps.drGameDayLedger ?? defaultDrGameDayLedger;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1699,6 +1716,28 @@ export function makeApp(deps: AppDeps = {}) {
         if (!ok) {
           throw new RestoreConflictError(
             'audit_retention_policy',
+            record.original_id,
+          );
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase E.1 — dr_game_day_record adapter. Game-day rows are
+    // append-mostly evidence; plain re-insert via the ledger's
+    // restore() method (refuses on live-row conflict).
+    registerRecoveryAdapter({
+      entity_type: 'dr_game_day_record',
+      display_name: 'DR game-day record',
+      module: 'bff',
+      original_table: 'app_admin.dr_game_day_records',
+      restore: async (record) => {
+        const ok = drGameDayLedger.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError(
+            'dr_game_day_record',
             record.original_id,
           );
         }
@@ -3223,6 +3262,139 @@ export function makeApp(deps: AppDeps = {}) {
           ctx,
         ),
       );
+    },
+  );
+
+  // ── T2.1.1 — Feature store catalog + point-in-time + history ──────
+  //
+  // Surface-layer half of T2.1 ("Feature store with 24-mo backfill of
+  // synthetic data"). Today: in-memory + deterministic synthesis. The
+  // production swap is Aurora schema `feature_store.feature_values`
+  // satisfying the same query interface — getFeatureSnapshot +
+  // getFeatureHistory + buildFeatureCoverageStats are pure pipe over
+  // whatever persistence layer is wired underneath.
+  const _featureStore = require('./feature_store') as typeof import('./feature_store');
+
+  /** GET /v1/feature-store/catalog — closed-enum catalog (8 PD-model
+   *  features matching `ml/data/load_from_mart.py`). Platform-static. */
+  app.get(
+    '/v1/feature-store/catalog',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            total_features: _featureStore.FEATURE_CATALOG.length,
+            features: _featureStore.FEATURE_CATALOG,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/feature-store/coverage — coverage envelope: catalog
+   *  size + earliest/latest observed_at window + 24-month cap. */
+  app.get(
+    '/v1/feature-store/coverage',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          _featureStore.buildFeatureCoverageStats(req.tenant!.tenant_id, now()),
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/feature-store/customers/:customer_id/snapshot?at=ISO —
+   *  point-in-time row of every catalog feature for this customer. */
+  app.get(
+    '/v1/feature-store/customers/:customer_id/snapshot',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const at = _featureStore.parseSnapshotAt(req.query.at as string | undefined, now());
+        const row = _featureStore.getFeatureSnapshot(
+          req.tenant!.tenant_id,
+          req.params.customer_id,
+          at,
+        );
+        return res.json(wrapResponse(row, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'FeatureStoreError') throw err;
+        return res.status(400).json(
+          wrapError(
+            {
+              code: `EWS_400_${e.code ?? 'invalid_input'}`,
+              message: e.message ?? 'invalid input',
+              severity: 'MEDIUM' as ErrorSeverity,
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/feature-store/customers/:customer_id/history?feature_name=&since=&until= */
+  app.get(
+    '/v1/feature-store/customers/:customer_id/history',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const feature_name = req.query.feature_name as string | undefined;
+      if (!feature_name || !_featureStore.isFeatureName(feature_name)) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_unknown_feature',
+              message: `feature_name must be one of ${_featureStore.ALL_FEATURE_NAMES.join('/')}`,
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const { since, until } = _featureStore.parseHistoryWindow(
+          req.query.since as string | undefined,
+          req.query.until as string | undefined,
+          now(),
+        );
+        const series = _featureStore.getFeatureHistory(
+          req.tenant!.tenant_id,
+          req.params.customer_id,
+          feature_name,
+          since,
+          until,
+        );
+        return res.json(wrapResponse(series, ctx));
+      } catch (err) {
+        const e = err as { code?: string; message?: string; name?: string };
+        if (e?.name !== 'FeatureStoreError') throw err;
+        const status = e.code === 'unknown_feature' ? 404 : 400;
+        return res.status(status).json(
+          wrapError(
+            {
+              code: `EWS_${status}_${e.code ?? 'invalid_input'}`,
+              message: e.message ?? 'invalid input',
+              severity: 'MEDIUM' as ErrorSeverity,
+            },
+            ctx,
+          ),
+        );
+      }
     },
   );
 
