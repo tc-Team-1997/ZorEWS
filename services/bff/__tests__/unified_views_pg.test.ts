@@ -112,4 +112,62 @@ describeIfPg('unified.* view layer (integration — requires BFF_PG_URL)', () =>
     );
     expect(r.rows.map((row) => row.column_name)).toEqual(COLS_AUDIT_ACTIVITY);
   });
+
+  // --------------------------------------------------------------------
+  // Data-correctness tests per spec §10 items 2, 3, 10
+  // --------------------------------------------------------------------
+
+  test('customer_360: BANK_DEMO has rows from the 10k-customer seed', async () => {
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM unified.customer_360 WHERE tenant_id = $1`,
+      [TENANT_BANK],
+    );
+    expect(r.rows[0].n).toBeGreaterThan(0);
+  });
+
+  test('customer_360: open_alerts_count aggregate matches direct count', async () => {
+    const fromView = await pool.query(
+      `SELECT COALESCE(SUM(open_alerts_count), 0)::int AS n
+         FROM unified.customer_360 WHERE tenant_id = $1`,
+      [TENANT_BANK],
+    );
+    const direct = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM app_alerts.alerts
+         WHERE tenant_id = $1 AND status = 'open'
+           AND customer_id IN (SELECT customer_id FROM mart.customer_360 WHERE tenant_id = $1)`,
+      [TENANT_BANK],
+    );
+    // Sum of per-customer open alert counts equals the count of open
+    // alerts whose customer is present in the mart for that tenant.
+    // (Orphan alerts on customers not in the mart don't show up in
+    // the view, so we constrain the direct count likewise.)
+    expect(fromView.rows[0].n).toBe(direct.rows[0].n);
+  });
+
+  test('customer_360: tenant isolation — BIL ∩ BANK_DEMO customer_ids empty when both have data (spec §10 item #3)', async () => {
+    const bilCount = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM unified.customer_360 WHERE tenant_id = $1`,
+      [TENANT_BIL],
+    );
+    if (bilCount.rows[0].n === 0) {
+      // Current state per spec §10 item #3 + §11: mart.customer_360
+      // has BANK_DEMO seed only; BIL synthetic data is a T4.24
+      // standalone follow-up. Test logs + passes vacuously.
+      // eslint-disable-next-line no-console
+      console.log(
+        'customer_360 tenant isolation: BIL has 0 rows in the view; ' +
+          'skipping intersection check (T4.24 follow-up will seed BIL data).',
+      );
+      return;
+    }
+    // Both tenants have data — the intersection MUST be empty.
+    const intersection = await pool.query(
+      `SELECT b.customer_id FROM unified.customer_360 b
+         JOIN unified.customer_360 d
+              ON d.customer_id = b.customer_id AND d.tenant_id = $1
+        WHERE b.tenant_id = $2 LIMIT 1`,
+      [TENANT_BANK, TENANT_BIL],
+    );
+    expect(intersection.rowCount).toBe(0);
+  });
 });

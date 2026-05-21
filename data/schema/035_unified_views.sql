@@ -60,4 +60,58 @@ CREATE INDEX IF NOT EXISTS caps_case_status_idx
 CREATE INDEX IF NOT EXISTS actions_case_id_idx
   ON app_cases.actions(case_id);
 
+-- --------------------------------------------------------------------------
+-- Section 4: unified.customer_360 (spec §5.1)
+-- Identity: (tenant_id, customer_id). LATERAL aggregates over alerts +
+-- cases + approvals; LEFT JOIN preserves customer rows that have no
+-- alerts/cases/approvals yet. Reality-correction: mart projects
+-- full_name / risk_rating / total_outstanding / as_of (NOT name /
+-- risk_level / exposure_kes / last_updated_at) — view renames via AS.
+-- pd_score omitted — mart doesn't project it yet (T2.1 feature-store).
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE VIEW unified.customer_360 AS
+SELECT
+    m.tenant_id,
+    m.customer_id,
+    m.full_name                                       AS name,
+    m.risk_rating                                     AS risk_level,
+    m.total_outstanding                               AS exposure_kes,
+    m.worst_dpd                                       AS dpd,
+    m.kyc_status,
+    m.segment,
+    m.onboarded_at,
+    COALESCE(a.open_alerts_count, 0)                  AS open_alerts_count,
+    a.max_criticality_score,
+    a.latest_alert_at,
+    COALESCE(c.open_cases_count, 0)                   AS open_cases_count,
+    COALESCE(c.breached_sla_count, 0)                 AS breached_sla_count,
+    COALESCE(ap.pending_approvals_count, 0)           AS pending_approvals_count,
+    GREATEST(a.latest_alert_at, c.last_case_updated_at, m.as_of) AS last_activity_at
+FROM mart.customer_360 m
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE status = 'open')                          AS open_alerts_count,
+        MAX(criticality_score) FILTER (WHERE status = 'open')            AS max_criticality_score,
+        MAX(created_at)                                                  AS latest_alert_at
+    FROM app_alerts.alerts
+    WHERE tenant_id = m.tenant_id AND customer_id = m.customer_id
+) a ON true
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE state <> 'closed')                        AS open_cases_count,
+        COUNT(*) FILTER (WHERE sla_status IN ('approaching','breached')) AS breached_sla_count,
+        MAX(updated_at)                                                  AS last_case_updated_at
+    FROM app_cases.cases
+    WHERE tenant_id = m.tenant_id AND customer_id = m.customer_id
+) c ON true
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS pending_approvals_count
+    FROM app_audit.approvals
+    WHERE correlation_id IN (
+        SELECT case_id FROM app_cases.cases
+        WHERE tenant_id = m.tenant_id AND customer_id = m.customer_id
+    )
+    AND status = 'pending'
+) ap ON true;
+
 COMMIT;
