@@ -142,17 +142,37 @@ export function mapAlertList(
   filters: ListFilters = {},
   now: () => Date = () => new Date(),
 ): AlertRow[] {
-  let rows = canonicals
+  const rows = canonicals
     .map((c) => mapAlertEvent(c, lookups, now))
     .filter((r) => {
       if (filters.severity && r.severity !== filters.severity) return false;
       if (filters.assignee && r.assignee !== filters.assignee) return false;
       return true;
     });
+  // Dedup + sort delegated to the shared helper (v1.5 B1 — the unified
+  // .alerts reader path also calls applyDedupAndSort on its rows).
+  return applyDedupAndSort(rows, filters);
+}
 
+/**
+ * Apply dedup + sort to an already-mapped AlertRow[] list.
+ *
+ * Extracted from mapAlertList's tail so the v1.5 B1 unified.alerts
+ * reader path can reuse the same dedup + sort logic without going
+ * through the canonical-event hydration. mapAlertList itself just
+ * delegates to this helper after producing its rows.
+ *
+ * Pure — no IO. Sort tie-break order (newest created_at first, then
+ * ascending id) is identical to the original.
+ */
+export function applyDedupAndSort(
+  rows: AlertRow[],
+  filters: { dedup?: boolean; sort?: 'criticality' | 'severity' | 'age' } = {},
+): AlertRow[] {
+  let result = rows;
   if (filters.dedup) {
     const byCustomer = new Map<string, AlertRow[]>();
-    for (const r of rows) {
+    for (const r of result) {
       const arr = byCustomer.get(r.customer.id) ?? [];
       arr.push(r);
       byCustomer.set(r.customer.id, arr);
@@ -167,24 +187,20 @@ export function mapAlertList(
       const linked = arr.filter((r) => r.id !== primary.id).map((r) => r.id);
       merged.push({ ...primary, linked_alert_ids: linked });
     }
-    rows = merged;
+    result = merged;
   }
-
   const sort = filters.sort ?? 'criticality';
-  rows.sort((a, b) => {
+  const sorted = [...result];
+  sorted.sort((a, b) => {
     let primary = 0;
     if (sort === 'criticality') primary = b.criticality_score - a.criticality_score;
     else if (sort === 'severity') primary = SEVERITY_WEIGHT[b.severity] - SEVERITY_WEIGHT[a.severity];
-    else primary = b.age_min - a.age_min; // age — oldest first
+    else primary = b.age_min - a.age_min;
     if (primary !== 0) return primary;
-    // Deterministic tiebreakers so equal-score alerts return in a
-    // stable order across reloads:
-    //   1. newest first by created_at
-    //   2. ascending id (string compare)
     if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
     return a.id.localeCompare(b.id);
   });
-  return rows;
+  return sorted;
 }
 
 /** Test/dev helper: deduplicate canonicals by alert_id (last-write-wins). */

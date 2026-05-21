@@ -12,7 +12,12 @@
 
 import { randomUUID } from 'node:crypto';
 import express, { NextFunction, Request, Response } from 'express';
-import { dedupeByAlertId, mapAlertList } from './mapping';
+import { applyDedupAndSort, dedupeByAlertId, mapAlertList } from './mapping';
+import {
+  type IUnifiedAlertsReader,
+  makeUnifiedAlertsReader,
+  makeUnifiedAlertsReaderFromEnv,
+} from './alerts_unified_reader';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -27,7 +32,7 @@ import {
   type Evaluator,
 } from './score';
 import { StubRiskProfileSource, type RiskProfileSource } from './risk_profile';
-import type { Lookups, UiSeverity } from './types';
+import type { AlertRow, Lookups, UiSeverity } from './types';
 import { requireRole as rbacRequireRole } from '../../../infra/rbac/lib/dist/src/index';
 import { respondAsync as copilotRespond, type ChatRequest } from './copilot/chat';
 import {
@@ -929,6 +934,16 @@ export interface AppDeps {
    */
   alertRoutingEngine?: AlertRoutingEngine;
   /**
+   * v1.5 B1 — pg-backed reader for unified.alerts. When set, the 3
+   * alert routes (/v1/alerts, /v1/alerts/by-class/:class, /api/alerts)
+   * skip the in-code mapAlertList() hydration and read directly from
+   * the SQL view. When undefined, routes fall through to the existing
+   * source.read() + mapAlertList() path — additive, backward-compat.
+   * Bootstrap probes for unified.alerts existence + wires it; tests
+   * inject an InMemoryUnifiedAlertsReader for hermetic runs.
+   */
+  unifiedAlertsReader?: IUnifiedAlertsReader;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1347,6 +1362,9 @@ export function makeApp(deps: AppDeps = {}) {
   const smsTransport = deps.smsTransport ?? defaultSmsTransport;
   const pushTransport = deps.pushTransport ?? defaultPushTransport;
   const alertRoutingEngine = deps.alertRoutingEngine ?? defaultAlertRoutingEngine;
+  // v1.5 B1 — pg-backed reader for unified.alerts; undefined falls back
+  // to the existing source.read() + mapAlertList() path.
+  const unifiedAlertsReader: IUnifiedAlertsReader | undefined = deps.unifiedAlertsReader;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -2184,7 +2202,7 @@ export function makeApp(deps: AppDeps = {}) {
 
   // ---------- /api (internal BFF — T3.10) ----------
   app.get('/api/alerts', requireRole('alerts:list'), (req, res) =>
-    listAlerts(req, res, source, lookups, now),
+    listAlerts(req, res, source, lookups, now, unifiedAlertsReader),
   );
 
   // /api/customers — list of monitored customers (SPA Customers page).
@@ -2720,7 +2738,7 @@ export function makeApp(deps: AppDeps = {}) {
    * /v1/alerts — same data + filters as /api/alerts; T4.24 wraps the
    * response in the bank-grade envelope and gates on tenant context.
    */
-  app.get('/v1/alerts', requireTenantMw, requireRole('alerts:list'), (req, res) => {
+  app.get('/v1/alerts', requireTenantMw, requireRole('alerts:list'), async (req, res) => {
     const ctx = extractCtx(req, now);
     const sevRaw = req.query.severity as string | undefined;
     if (sevRaw && !VALID_SEVERITIES.includes(sevRaw as UiSeverity)) {
@@ -2736,13 +2754,24 @@ export function makeApp(deps: AppDeps = {}) {
       );
     }
     const assignee = (req.query.assignee as string | undefined) || undefined;
-    const canonicals = dedupeByAlertId(source.read());
-    const items = mapAlertList(
-      canonicals,
-      lookups,
-      { severity: sevRaw as UiSeverity | undefined, assignee },
-      now,
-    );
+    // v1.5 B1 — when pg-backed unified.alerts reader is wired, skip the
+    // in-code mapAlertList() hydration; SQL JOIN does it.
+    let items;
+    if (unifiedAlertsReader) {
+      items = await unifiedAlertsReader.fetch({
+        tenant_id: req.tenant!.tenant_id,
+        severity: sevRaw as UiSeverity | undefined,
+        assignee,
+      });
+    } else {
+      const canonicals = dedupeByAlertId(source.read());
+      items = mapAlertList(
+        canonicals,
+        lookups,
+        { severity: sevRaw as UiSeverity | undefined, assignee },
+        now,
+      );
+    }
     res.json(wrapResponse({ items, total: items.length }, ctx));
   });
 
@@ -2818,7 +2847,7 @@ export function makeApp(deps: AppDeps = {}) {
     '/v1/alerts/by-class/:class',
     requireTenantMw,
     requireRole('alerts:list'),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const cls = req.params.class;
       if (!isBilAlertClass(cls)) {
@@ -2834,8 +2863,18 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       const target: BilAlertClass = cls;
-      const canonicals = dedupeByAlertId(source.read());
-      const all = mapAlertList(canonicals, lookups, {}, now);
+      // v1.5 B1 — prefer unified.alerts reader when available; BIL class
+      // filtering stays caller-side because the view exposes severity not
+      // bil_class (classify is a pure SPA-facing derivation).
+      let all;
+      if (unifiedAlertsReader) {
+        all = await unifiedAlertsReader.fetch({
+          tenant_id: req.tenant!.tenant_id,
+        });
+      } else {
+        const canonicals = dedupeByAlertId(source.read());
+        all = mapAlertList(canonicals, lookups, {}, now);
+      }
       const items = all
         .filter((a) => classifyAlertSeverity(a.severity) === target)
         .map((a) => ({
@@ -30668,12 +30707,13 @@ const VALID_TRANSITIONS: RuleTransition[] = [
 const REPORT_TYPES: ReportType[] = ['snapshot', 'alerts', 'cases', 'rbi'];
 const REPORT_PERIODS: ReportPeriod[] = ['week', 'month', 'quarter'];
 
-function listAlerts(
+async function listAlerts(
   req: Request,
   res: Response,
   source: AlertSource,
   lookups: Lookups,
   now: () => Date,
+  reader?: IUnifiedAlertsReader,
 ) {
   const sevRaw = req.query.severity as string | undefined;
   if (sevRaw && !VALID_SEVERITIES.includes(sevRaw as UiSeverity)) {
@@ -30688,13 +30728,30 @@ function listAlerts(
   const sort: 'criticality' | 'severity' | 'age' =
     sortRaw === 'severity' || sortRaw === 'age' ? sortRaw : 'criticality';
 
-  const canonicals = dedupeByAlertId(source.read());
-  const items = mapAlertList(
-    canonicals,
-    lookups,
-    { severity: sevRaw as UiSeverity | undefined, assignee, dedup, sort },
-    now,
-  );
+  // v1.5 B1 — when pg-backed unified.alerts reader is wired, fetch from
+  // the SQL view + apply dedup+sort via the shared helper. /api/alerts
+  // isn't tenant-gated by requireTenantMw (SPA-internal route), so the
+  // tenant is read from the header with the established BANK_DEMO
+  // default that all /api/* routes use.
+  let items: AlertRow[];
+  if (reader) {
+    const tenant_id =
+      ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+    const raw = await reader.fetch({
+      tenant_id,
+      severity: sevRaw as UiSeverity | undefined,
+      assignee,
+    });
+    items = applyDedupAndSort(raw, { dedup, sort });
+  } else {
+    const canonicals = dedupeByAlertId(source.read());
+    items = mapAlertList(
+      canonicals,
+      lookups,
+      { severity: sevRaw as UiSeverity | undefined, assignee, dedup, sort },
+      now,
+    );
+  }
   res.json({ items, total: items.length });
 }
 
@@ -30818,11 +30875,19 @@ if (require.main === module) {
         `escalation worker cron started — every ${escIntervalSec}s across [${tenants.join(', ')}]`,
       );
     }
+    // v1.5 B1 — probe unified.alerts presence; wires the pg-backed
+    // reader when BFF_PG_URL is set + the view exists. Undefined →
+    // the 3 alert routes fall through to mapAlertList() (existing path).
+    const unifiedAlertsReader = await makeUnifiedAlertsReaderFromEnv();
+    if (unifiedAlertsReader) {
+      console.log('[bff] unified.alerts reader wired (v1.5 B1)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
       webhookStore,
       scenarioStore,
+      unifiedAlertsReader,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
