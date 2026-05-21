@@ -42,6 +42,12 @@ import {
   enrichListItemsWithPd,
   makeFeatureStorePdReaderFromEnv,
 } from './feature_store_pd_reader';
+import {
+  type IUnifiedAuditActivityBenchmark,
+  classifyPromotionVerdict,
+  promotionRationale,
+  makeUnifiedAuditActivityBenchmarkFromEnv,
+} from './audit_activity_benchmark';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -1014,6 +1020,15 @@ export interface AppDeps {
    */
   featureStorePdReader?: IFeatureStorePdReader;
   /**
+   * v1.5 B7 — unified.audit_activity benchmark primitive. Drives the
+   * /v1/admin/audit-activity/benchmark route that lets ops know
+   * WHEN to flip the view to MATERIALIZED (per spec §6.5).
+   * Returns BenchmarkResult with mean/p50/p95/p99/max + promotion
+   * verdict (no_action / monitor / materialize_required).
+   * Undefined → route returns 501.
+   */
+  auditActivityBenchmark?: IUnifiedAuditActivityBenchmark;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1451,6 +1466,8 @@ export function makeApp(deps: AppDeps = {}) {
     deps.auditActivityReader;
   const featureStorePdReader: IFeatureStorePdReader | undefined =
     deps.featureStorePdReader;
+  const auditActivityBenchmark: IUnifiedAuditActivityBenchmark | undefined =
+    deps.auditActivityBenchmark;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -25114,6 +25131,83 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** POST /v1/admin/audit-activity/benchmark (v1.5 B7) — measures
+   *  the canonical /v1/admin/audit-activity query latency
+   *  distribution. Runs PRE_WARM_RUNS=3 warm-up queries first
+   *  (results discarded) then N timed runs. Returns mean / p50 /
+   *  p95 / p99 / max plus a `promotion_verdict`
+   *  ('no_action' / 'monitor' / 'materialize_required') derived from
+   *  p95 against spec §6.5 thresholds. Drives the ops decision on
+   *  whether to flip unified.audit_activity from plain VIEW to
+   *  MATERIALIZED (template at bottom of 035_unified_views.sql §9).
+   *  Default 50 runs; max 500. Requires audit_activity_benchmark
+   *  wired (BFF_PG_URL set); 501 envelope when in-memory. */
+  app.post(
+    '/v1/admin/audit-activity/benchmark',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!auditActivityBenchmark) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_available',
+              message:
+                'unified.audit_activity benchmark not wired — requires ' +
+                'BFF_PG_URL pointing at a database with the unified.* views.',
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const queriesRaw = req.query.queries as string | undefined;
+      let queries: number | undefined;
+      if (queriesRaw !== undefined) {
+        const n = Number(queriesRaw);
+        if (!Number.isFinite(n)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'queries must be an integer',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        queries = Math.floor(n);
+      }
+      try {
+        const result = await auditActivityBenchmark.run(
+          req.tenant!.tenant_id,
+          queries,
+        );
+        const verdict = classifyPromotionVerdict(result.p95_ms);
+        return res.json(
+          wrapResponse(
+            {
+              ...result,
+              promotion_verdict: verdict,
+              promotion_rationale: promotionRationale(verdict, result.p95_ms),
+            },
+            ctx,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   /** GET /v1/admin/audit-activity/correlation/:correlation_id
    *  (v1.5 B3) — full cross-source ladder for one workflow,
    *  oldest-first. Drives "show me everything that happened to
@@ -31524,6 +31618,15 @@ if (require.main === module) {
     if (featureStorePdReader) {
       console.log('[bff] feature-store PD reader wired (v1.5 B5)');
     }
+    // v1.5 B7 — unified.audit_activity benchmark primitive; drives
+    // /v1/admin/audit-activity/benchmark which lets ops know WHEN
+    // to flip the view to MATERIALIZED (per spec §6.5 thresholds).
+    // Same probe target as B3 (unified.audit_activity view). When
+    // undefined, the benchmark route returns 501.
+    const auditActivityBenchmark = await makeUnifiedAuditActivityBenchmarkFromEnv();
+    if (auditActivityBenchmark) {
+      console.log('[bff] unified.audit_activity benchmark wired (v1.5 B7)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -31535,6 +31638,7 @@ if (require.main === module) {
       casesReader,
       auditActivityReader,
       featureStorePdReader,
+      auditActivityBenchmark,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
