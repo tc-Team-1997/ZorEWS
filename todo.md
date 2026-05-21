@@ -65,7 +65,7 @@
 | 7 | CBS — loan + repayment | ⏳ | T3.1 | OpenAPI mock at `integrations/cbs/openapi.yaml`; live deepening pending |
 | 7 | IFRS 9 — stage movement + ECL | ⏳ | T3.2 | Mock contract only |
 | 7 | Collection — auto case creation | ✅ | T3.4 | `services/collection-adapter` — case routing + callback wired |
-| 7 | AML — suspicious activity | ⏳ | T3.3 | Bidirectional alert correlation pending |
+| 7 | AML — suspicious activity | ✅ | T3.3 | Closed 2026-05-21 — `correlateAmlWithEws` forward + `correlateEwsWithAml` reverse pure functions (6099ddf) wired to 2 BFF routes (`POST /v1/aml/correlate/:match_id` + `POST /v1/aml/correlate/by-alert/:alert_id`) + SPA `AmlCorrelationPanel` on `/customers/:id` (05c6d93). 13 route tests + 2 SPA tests. Year-2: real OFAC/CIBIL feed adapter replacing M14.3 stub. |
 
 ## §8 Reporting
 
