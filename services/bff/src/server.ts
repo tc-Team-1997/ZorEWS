@@ -3271,6 +3271,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/ack/actor-activity (T6 M8.18) — per-actor pivot
+   *  over the M8.3 AlertAckStore. For each operator: total_actions,
+   *  ack_count, unack_count, ack_rate, distinct_alerts, alert_ids[]
+   *  cap 50 sorted asc, first/most_recent timestamps. Envelope:
+   *  most_active_actor (canonical username asc tie-break) +
+   *  excessive_unackers[] (unack_rate >= 0.5 AND total >= 3 — flags
+   *  operators whose acks get reversed often) + by_action_totals
+   *  marginal. Mirror of M15.8 / M9.16 / M9.14 per-actor pattern.
+   *  Tenant-scoped via store.listForTenant. Mounted at literal path
+   *  (4 segments) — distinct from `/v1/alerts/:alert_id/ack` (3
+   *  segments) + `/v1/alerts/:alert_id/ack/history` (4 segments
+   *  but literal `history` ≠ `actor-activity`). */
+  app.get(
+    '/v1/alerts/ack/actor-activity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeAlertAckActorActivity } =
+        require('./alert_ack_actor_activity') as
+        typeof import('./alert_ack_actor_activity');
+      const states = alertAckStore.listForTenant(req.tenant!.tenant_id);
+      const out = summarizeAlertAckActorActivity(
+        req.tenant!.tenant_id,
+        states,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/routing/analytics?window=N (T6 M8.6) — aggregate
    *  routing performance over the recent window: class mix, channel
    *  mix, ack rate, time-to-ack percentiles, SLA breach count, escalation

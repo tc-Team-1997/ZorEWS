@@ -122,6 +122,11 @@ export interface AlertAckStore {
     reason: string,
     now: Date,
   ): AlertAckState;
+  /** List every alert state for this tenant that has been touched at
+   *  least once (acked OR unacked). Open-never-touched states are NOT
+   *  surfaced — they have no history. Order is undefined; callers
+   *  sort. Added T6 M8.18 for per-actor analytics. */
+  listForTenant(tenant_id: string): AlertAckState[];
 }
 
 // ─── In-memory implementation ─────────────────────────────────────────
@@ -232,6 +237,17 @@ export class InMemoryAlertAckStore implements AlertAckStore {
     };
     bucket.set(alert_id, next);
     return this.get(tenant_id, alert_id);
+  }
+
+  listForTenant(tenant_id: string): AlertAckState[] {
+    const m = this.states.get(tenant_id);
+    if (!m) return [];
+    // Defensive deep-copy each state + history so callers can't
+    // mutate live state. Matches the `get()` defensive-copy contract.
+    return [...m.values()].map((s) => ({
+      ...s,
+      history: s.history.map((h) => ({ ...h })),
+    }));
   }
 }
 
