@@ -1,0 +1,172 @@
+# ServiceMonitor CRDs — tell Prometheus what to scrape.
+#
+# Without these, kube-prometheus-stack only scrapes itself + the
+# kubernetes platform. Every ZorEWS service needs an explicit
+# ServiceMonitor pointing at the /metrics endpoint exposed by
+# `prom-client` middleware in TS services + prometheus_client in Python.
+#
+# Phase: T5-P1 (per docs/operationalization/execution-plans.md)
+# Owner: SRE
+#
+# Recording rules in recording-rules.yaml + alerting-rules.yaml depend
+# on the metric labels emitted by these scrape targets.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: apex-ews-services
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    operationalization-phase: "T5-P1"
+spec:
+  selector:
+    matchLabels:
+      apex-ews-monitored: "true"
+  namespaceSelector:
+    matchNames: [apex-ews, platform, regulatory, ai, data]
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      path: /metrics
+      relabelings:
+        # Inject service + namespace + tenant labels for SLO queries
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          targetLabel: service
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+      metricRelabelings:
+        # Drop high-cardinality labels that blow up Prometheus TSDB
+        - sourceLabels: [__name__]
+          regex: 'http_request_duration_seconds_bucket'
+          action: keep
+          targetLabel: __keep__
+---
+# auth-svc — separate ServiceMonitor because auth has more sensitive
+# label semantics (e.g. usernames could leak via Prometheus exposition)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: auth-svc
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: auth-svc}
+  namespaceSelector: {matchNames: [apex-ews]}
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - replacement: "auth-svc"
+          targetLabel: service
+      metricRelabelings:
+        # Aggressively drop label values that could leak PII
+        - sourceLabels: [username]
+          regex: '.+'
+          replacement: '<redacted>'
+          targetLabel: username
+        - sourceLabels: [actor_username]
+          regex: '.+'
+          replacement: '<redacted>'
+          targetLabel: actor_username
+---
+# BFF — its own ServiceMonitor with per-route labels for SLO breakdown
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: bff
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: bff}
+  namespaceSelector: {matchNames: [apex-ews]}
+  endpoints:
+    - port: metrics
+      interval: 15s    # tighter interval — BFF is the hot path
+      scrapeTimeout: 5s
+      path: /metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - replacement: "bff"
+          targetLabel: service
+---
+# Cluster components — kube-state-metrics + node-exporter already
+# scraped by kube-prometheus-stack; this adds Karpenter controller.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: karpenter
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: karpenter}
+  namespaceSelector: {matchNames: [karpenter]}
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      path: /metrics
+---
+# External Secrets Operator — important for ExternalSecretSyncStale alarm
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: external-secrets
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: external-secrets}
+  namespaceSelector: {matchNames: [external-secrets]}
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+---
+# ArgoCD — scraped for argocd_app_health_status alarm
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-metrics
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/component: server-metrics}
+  namespaceSelector: {matchNames: [argocd]}
+  endpoints:
+    - port: metrics
+      interval: 60s
+      path: /metrics
+---
+# PodMonitor for direct-pod scraping (services without a Service object —
+# rare, but needed for one-off CronJob runners like the audit-svc batch jobs)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: apex-ews-pods
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      apex-ews-pod-monitored: "true"
+  namespaceSelector:
+    matchNames: [apex-ews]
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics

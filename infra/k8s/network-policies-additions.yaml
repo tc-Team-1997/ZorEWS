@@ -1,0 +1,225 @@
+# Network policies for new namespaces created by the operationalization
+# package (argocd, external-secrets, monitoring, karpenter).
+#
+# Pattern matches the existing infra/k8s/network-policies.yaml:
+#   1. default-deny-all per namespace
+#   2. explicit allow rules for the legitimate cross-namespace traffic
+#
+# Phase: T3-P1 + T3-P5
+# Owner: SRE
+
+# ── argocd namespace ─────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-egress-cluster-api
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # Allow access to the K8s API server (mandatory for ArgoCD controller)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - port: 53
+          protocol: UDP
+    # Allow ArgoCD to reach all workload namespaces (it deploys into them)
+    - to:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [apex-ews, platform, regulatory, ai, data, monitoring, karpenter, external-secrets]
+    # Allow outbound HTTPS to GitHub for repo polling
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-ui-ingress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: argocd-server}
+  policyTypes: [Ingress]
+  ingress:
+    # Allow ALB → argocd-server
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# ── external-secrets namespace ───────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-egress
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # AWS Secrets Manager endpoint
+    - to: []
+      ports: [{port: 443, protocol: TCP}]
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{port: 53, protocol: UDP}]
+    # K8s API (to create/update Secret objects)
+    - to: []
+      ports: [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]
+---
+# ── monitoring namespace ─────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-egress-scrape-targets
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: prometheus}
+  policyTypes: [Egress]
+  egress:
+    # Allow Prometheus to scrape /metrics on every workload namespace
+    - to:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [apex-ews, platform, regulatory, ai, data, karpenter, external-secrets, argocd]
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+    # K8s API + DNS
+    - to: []
+      ports: [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{port: 53, protocol: UDP}]
+    # CloudWatch + AWS API (cloudwatch_exporter)
+    - to: []
+      ports: [{port: 443, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-ui-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [grafana, prometheus]
+  policyTypes: [Ingress]
+  ingress:
+    # ALB → Grafana / Prometheus UI
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports: [{port: 3000, protocol: TCP}, {port: 9090, protocol: TCP}]
+---
+# ── karpenter namespace ──────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: karpenter
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: karpenter-egress
+  namespace: karpenter
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # AWS EC2 + SQS + EKS APIs
+    - to: []
+      ports: [{port: 443, protocol: TCP}]
+    # K8s API + DNS
+    - to: []
+      ports: [{port: 443, protocol: TCP}, {port: 6443, protocol: TCP}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{port: 53, protocol: UDP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: karpenter-metrics-ingress
+  namespace: karpenter
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: karpenter}
+  policyTypes: [Ingress]
+  ingress:
+    # Allow Prometheus from monitoring to scrape Karpenter metrics
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports: [{port: 8080, protocol: TCP}]
+    # Allow Karpenter webhook (validating admission)
+    - from: []
+      ports: [{port: 8443, protocol: TCP}]

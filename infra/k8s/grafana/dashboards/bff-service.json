@@ -1,0 +1,128 @@
+{
+  "description": "BFF service detail — request rate, latency, errors per route, in-flight requests.",
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "title": "Request rate by route (5m)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "id": 1,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(http_request_duration_seconds_count{service=\"bff\"}[5m]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "title": "Latency p95 by route",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "id": 2,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{service=\"bff\"}[5m]))) * 1000",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": null, "color": "green"},
+              {"value": 800, "color": "yellow"},
+              {"value": 1500, "color": "red"}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Error rate by status class (5m)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "id": 3,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "apex_ews:sli:bff:request_rate:5m",
+          "legendFormat": "{{status_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "title": "p50 / p95 / p99 latency (overall)",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "id": 4,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{service=\"bff\"}[5m]))) * 1000", "legendFormat": "p50", "refId": "A"},
+        {"expr": "apex_ews:sli:bff:latency_p95:5m * 1000", "legendFormat": "p95", "refId": "B"},
+        {"expr": "apex_ews:sli:bff:latency_p99:5m * 1000", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}}
+    },
+    {
+      "title": "Pod count (HPA scaling)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 6},
+      "id": 5,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "kube_deployment_status_replicas{namespace=\"apex-ews\",deployment=\"bff\"}",
+          "legendFormat": "replicas",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_deployment_status_replicas_available{namespace=\"apex-ews\",deployment=\"bff\"}",
+          "legendFormat": "available",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "Pod CPU + memory usage",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 6},
+      "id": 6,
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [
+        {
+          "expr": "rate(container_cpu_usage_seconds_total{namespace=\"apex-ews\",pod=~\"bff-.+\"}[5m])",
+          "legendFormat": "{{pod}} CPU",
+          "refId": "A"
+        },
+        {
+          "expr": "container_memory_working_set_bytes{namespace=\"apex-ews\",pod=~\"bff-.+\"} / 1024 / 1024",
+          "legendFormat": "{{pod}} mem (MB)",
+          "refId": "B"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["bff", "production", "apex-ews"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "label": "Prometheus"}
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "APEX EWS — BFF service",
+  "uid": "apex-ews-bff-service",
+  "version": 1
+}
