@@ -5109,6 +5109,70 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/performance-freshness?fresh_days=&stale_days=
+   *  (T6 M7.18) — per-model freshness rollup. For each model in the
+   *  registry, compute `days_since_recorded` (newest perf record) +
+   *  classify into `recent` (< fresh_days) / `stable` (in range) /
+   *  `stale` (> stale_days) / `never_recorded`. Envelope: per-status
+   *  + per-type marginals + `production_models_without_perf[]`
+   *  (production models with no metric data — governance signal).
+   *  Default thresholds fresh=14 / stale=60 (weekly-ish perf checks
+   *  per docs/bau-runbook.md). Mirror of M11.18 (dashboard freshness)
+   *  + M13.11 (config override age) pattern for the AI/ML surface.
+   *  Drives quarterly model-risk review per docs/bau-runbook.md.
+   *  Mounted BEFORE catch-all `/:model_id` so the literal segment
+   *  wins. */
+  app.get(
+    '/v1/ai/models/performance-freshness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const freshRaw = req.query.fresh_days as string | undefined;
+      const staleRaw = req.query.stale_days as string | undefined;
+      const fresh_days =
+        freshRaw === undefined ? 14 : Number.parseInt(freshRaw, 10);
+      const stale_days =
+        staleRaw === undefined ? 60 : Number.parseInt(staleRaw, 10);
+      const {
+        summarizeModelPerformanceFreshness,
+        ModelPerformanceFreshnessError,
+      } = require('./ai_model_performance_freshness') as
+        typeof import('./ai_model_performance_freshness');
+      try {
+        const models = aiModelRegistry.list();
+        const lookup = (tenant_id: string, model_id: string): string | null => {
+          // M7.5 listFor with no since-filter → entire perf chain for this
+          // model. Find max recorded_at.
+          const entries = modelPerformanceStore.list(tenant_id, model_id, {});
+          if (entries.length === 0) return null;
+          let latest = entries[0]!.recorded_at;
+          for (const e of entries) if (e.recorded_at > latest) latest = e.recorded_at;
+          return latest;
+        };
+        const out = summarizeModelPerformanceFreshness(
+          req.tenant!.tenant_id,
+          models,
+          lookup,
+          now(),
+          fresh_days,
+          stale_days,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ModelPerformanceFreshnessError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/ai/models/framework-type-matrix (T6 M7.14) — 2D cross-
    *  tab over the M7.1 registry combining M7.12 (type coverage) ×
    *  M7.13 (framework distribution). Rows = 5 ModelFramework
