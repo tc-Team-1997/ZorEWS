@@ -114,4 +114,37 @@ LEFT JOIN LATERAL (
     AND status = 'pending'
 ) ap ON true;
 
+-- --------------------------------------------------------------------------
+-- Section 5: unified.alerts (spec §5.2)
+-- Identity: alert_id (globally unique). customer_name + rule_name are
+-- denormalised on the alert row at write time. LEFT JOIN to mart.customer_360
+-- for risk overlay; orphan alerts keep visible with NULL customer_* columns.
+-- customer_pd_score overlay omitted — mart doesn't project pd_score yet.
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE VIEW unified.alerts AS
+SELECT
+    a.tenant_id,
+    a.alert_id,
+    a.customer_id,
+    a.customer_name,
+    a.rule_id,
+    a.rule_name,
+    a.severity,
+    a.criticality_score,
+    a.confidence,
+    a.customer_exposure_kes,
+    a.indicators,
+    a.status,
+    a.assignee,
+    a.created_at,
+    a.acked_at,
+    a.closed_at,
+    EXTRACT(EPOCH FROM (now() - a.created_at)) / 60   AS age_minutes,
+    m.risk_rating                                      AS customer_risk_level,
+    m.total_outstanding                                AS customer_total_exposure_kes
+FROM app_alerts.alerts a
+LEFT JOIN mart.customer_360 m
+    ON m.tenant_id = a.tenant_id
+   AND m.customer_id = a.customer_id;
+
 COMMIT;

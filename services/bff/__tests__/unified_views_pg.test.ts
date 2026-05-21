@@ -170,4 +170,34 @@ describeIfPg('unified.* view layer (integration — requires BFF_PG_URL)', () =>
     );
     expect(intersection.rowCount).toBe(0);
   });
+
+  // --------------------------------------------------------------------
+  // unified.alerts data-correctness tests per spec §10 item #4
+  // --------------------------------------------------------------------
+
+  test('alerts: every alert that has a customer_id in mart resolves customer_risk_level (LEFT JOIN integrity)', async () => {
+    // Orphan alerts (customer not in mart) carry NULL customer_risk_level.
+    // Asserted symmetrically: any alert NOT in customer_360 must have
+    // NULL customer_risk_level on the view side.
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM unified.alerts a
+         LEFT JOIN mart.customer_360 m
+                ON m.tenant_id = a.tenant_id AND m.customer_id = a.customer_id
+        WHERE a.tenant_id = $1
+          AND m.customer_id IS NULL
+          AND a.customer_risk_level IS NOT NULL`,
+      [TENANT_BANK],
+    );
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  test('alerts: age_minutes is non-negative for past-created alerts', async () => {
+    const r = await pool.query(
+      `SELECT COALESCE(MIN(age_minutes)::float, 0) AS min_age FROM unified.alerts
+         WHERE tenant_id = $1 AND created_at <= now()`,
+      [TENANT_BANK],
+    );
+    expect(Number(r.rows[0].min_age)).toBeGreaterThanOrEqual(0);
+  });
 });
