@@ -21,6 +21,7 @@ import {
 import {
   type IOrphanScanner,
   PgOrphanScanner,
+  makeOrphanScannerFromEnv,
 } from './data_quality_diagnostics';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
@@ -948,6 +949,14 @@ export interface AppDeps {
    */
   unifiedAlertsReader?: IUnifiedAlertsReader;
   /**
+   * v1.5 B6 — orphan-reference scanner for the data-quality diagnostic
+   * surface. Wired in bootstrap when BFF_PG_URL set + a pg pool is
+   * available; undefined → /v1/admin/data-quality/orphan-references
+   * returns a 501 EWS_501_not_available envelope (in-memory BFF can't
+   * scan FK-style refs).
+   */
+  orphanScanner?: IOrphanScanner;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1369,6 +1378,9 @@ export function makeApp(deps: AppDeps = {}) {
   // v1.5 B1 — pg-backed reader for unified.alerts; undefined falls back
   // to the existing source.read() + mapAlertList() path.
   const unifiedAlertsReader: IUnifiedAlertsReader | undefined = deps.unifiedAlertsReader;
+  // v1.5 B6 — orphan-reference scanner; undefined → /v1/admin/data-quality/*
+  // returns 501. Wired by bootstrap when BFF_PG_URL set.
+  const orphanScanner: IOrphanScanner | undefined = deps.orphanScanner;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -16855,6 +16867,32 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations/location-distribution
+   *  (T6 M14.30) — orthogonal pivot of the M14.24 operation catalog
+   *  by parameter `in` location (path/query/body). Per-location row:
+   *  count, by_adapter (compact Record), by_method (compact),
+   *  by_type (4-key ParameterType Record at 0 when absent),
+   *  required_count + optional_count split, distinct_adapters,
+   *  sample_parameters (cap 5; sorted adapter_id asc + operation_id
+   *  asc + parameter_name asc). Envelope: locations[] in canonical
+   *  order even when zero-count, most_common_location (canonical
+   *  iteration tie-break: path wins over query at tied),
+   *  unused_locations[]. Platform-static. Mirror of M14.27 1D
+   *  distribution pattern. */
+  app.get(
+    '/v1/integrations/adapters/operations/location-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeAdapterParameterLocations } =
+        require('./adapter_parameter_location_distribution') as
+        typeof import('./adapter_parameter_location_distribution');
+      const out = summarizeAdapterParameterLocations(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/operations/param-type-required-matrix
    *  (T6 M14.29) — 2D pivot ACROSS every parameter in the M14.24
    *  catalog. Rows = 4 ParameterType (canonical string → integer →
@@ -30981,12 +31019,19 @@ if (require.main === module) {
     if (unifiedAlertsReader) {
       console.log('[bff] unified.alerts reader wired (v1.5 B1)');
     }
+    // v1.5 B6 — orphan-reference scanner; wired when BFF_PG_URL set.
+    // Undefined → /v1/admin/data-quality/orphan-references 501s.
+    const orphanScanner = await makeOrphanScannerFromEnv();
+    if (orphanScanner) {
+      console.log('[bff] orphan-reference scanner wired (v1.5 B6)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
       webhookStore,
       scenarioStore,
       unifiedAlertsReader,
+      orphanScanner,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
