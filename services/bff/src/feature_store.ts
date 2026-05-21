@@ -411,3 +411,206 @@ export function parseHistoryWindow(
 export function parseSnapshotAt(atRaw: string | undefined, now: Date): Date {
   return atRaw ? parseIso(atRaw, 'invalid_date') : now;
 }
+
+// ─── Persistence (T2.1.3 — Aurora swap) ──────────────────────────────
+//
+// IFeatureStore is the abstraction used by route handlers. The default
+// path uses the deterministic synthesiser (T2.1.1) so dev mode + tests
+// run without external infra. Production sets FEATURE_STORE_PG_URL and
+// the PgFeatureStore takes over — same response shapes, real data.
+//
+// pg client + Pool are imported lazily so the synth path doesn't drag
+// the dependency into test runs.
+
+export interface IFeatureStore {
+  getSnapshot(tenant_id: string, entity_id: string, at: Date): Promise<FeatureSnapshotRow>;
+  getHistory(
+    tenant_id: string,
+    entity_id: string,
+    feature_name: FeatureName,
+    since: Date,
+    until: Date,
+  ): Promise<FeatureHistory>;
+  coverage(tenant_id: string, now: Date): Promise<FeatureCoverageStats>;
+}
+
+/** Synth-backed impl wrapping the existing pure functions. Identity
+ *  for the dev / test path — preserves the T2.1.1 behaviour. */
+export class SynthFeatureStore implements IFeatureStore {
+  async getSnapshot(tenant_id: string, entity_id: string, at: Date): Promise<FeatureSnapshotRow> {
+    return getFeatureSnapshot(tenant_id, entity_id, at);
+  }
+  async getHistory(
+    tenant_id: string,
+    entity_id: string,
+    feature_name: FeatureName,
+    since: Date,
+    until: Date,
+  ): Promise<FeatureHistory> {
+    return getFeatureHistory(tenant_id, entity_id, feature_name, since, until);
+  }
+  async coverage(tenant_id: string, now: Date): Promise<FeatureCoverageStats> {
+    return buildFeatureCoverageStats(tenant_id, now);
+  }
+}
+
+/** Pg-backed impl satisfying the same shape. Uses `feature_store.feature_values`
+ *  per data/schema/034_feature_store.sql. Falls back to synth when no rows
+ *  exist for the (tenant, entity, feature) — keeps the dev surface alive
+ *  while real backfill is in progress. */
+export class PgFeatureStore implements IFeatureStore {
+  // The `pool` is typed as unknown so we don't require pg as a hard import
+  // here — production wires it via makeFeatureStore() below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(private pool: any) {}
+
+  async getSnapshot(tenant_id: string, entity_id: string, at: Date): Promise<FeatureSnapshotRow> {
+    if (!tenant_id) throw new FeatureStoreError('invalid_input', 'tenant_id required');
+    if (!entity_id) throw new FeatureStoreError('invalid_input', 'entity_id required');
+    // Query the catalog feature_names + latest value at-or-before `at`.
+    const sql = `
+      SELECT DISTINCT ON (feature_name)
+        feature_name,
+        value::double precision AS value
+      FROM feature_store.feature_values
+      WHERE tenant_id = $1
+        AND entity_id = $2
+        AND observed_at <= $3
+      ORDER BY feature_name, observed_at DESC
+    `;
+    const result = await this.pool.query(sql, [tenant_id, entity_id, at.toISOString()]);
+    const features = {} as Record<FeatureName, number>;
+    const seen = new Set<string>();
+    for (const row of result.rows ?? []) {
+      const fname = row.feature_name as FeatureName;
+      if (!isFeatureName(fname)) continue;
+      features[fname] = Number(row.value);
+      seen.add(fname);
+    }
+    // Fill any missing catalog features from synth (graceful fallback
+    // during partial-backfill). Production with a complete backfill
+    // returns every row from the SELECT above.
+    for (const f of ALL_FEATURE_NAMES) {
+      if (!seen.has(f)) features[f] = synthFeatureValue(tenant_id, entity_id, f, at);
+    }
+    return { entity_id, observed_at: at.toISOString(), features };
+  }
+
+  async getHistory(
+    tenant_id: string,
+    entity_id: string,
+    feature_name: FeatureName,
+    since: Date,
+    until: Date,
+  ): Promise<FeatureHistory> {
+    if (!tenant_id) throw new FeatureStoreError('invalid_input', 'tenant_id required');
+    if (!entity_id) throw new FeatureStoreError('invalid_input', 'entity_id required');
+    if (!isFeatureName(feature_name)) {
+      throw new FeatureStoreError('unknown_feature', `unknown feature: ${feature_name}`);
+    }
+    if (since.getTime() > until.getTime()) {
+      throw new FeatureStoreError('invalid_window', 'since must be <= until');
+    }
+    const days = Math.floor((until.getTime() - since.getTime()) / 86_400_000);
+    if (days > MAX_HISTORY_WINDOW_DAYS) {
+      throw new FeatureStoreError('window_too_long', `window exceeds ${MAX_HISTORY_WINDOW_DAYS}-day cap`);
+    }
+    const sql = `
+      SELECT observed_at, value::double precision AS value
+      FROM feature_store.feature_values
+      WHERE tenant_id = $1 AND entity_id = $2 AND feature_name = $3
+        AND observed_at >= $4 AND observed_at <= $5
+      ORDER BY observed_at ASC
+    `;
+    const result = await this.pool.query(sql, [
+      tenant_id,
+      entity_id,
+      feature_name,
+      since.toISOString(),
+      until.toISOString(),
+    ]);
+    const points: FeatureHistoryPoint[] = (result.rows ?? []).map((r: { observed_at: Date; value: number }) => ({
+      observed_at: new Date(r.observed_at).toISOString(),
+      value: Number(r.value),
+    }));
+    // If no data, fall back to synth (matches getSnapshot fallback).
+    if (points.length === 0) {
+      return getFeatureHistory(tenant_id, entity_id, feature_name, since, until);
+    }
+    const values = points.map((p) => p.value);
+    const count = points.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const mean = Math.round((values.reduce((s, v) => s + v, 0) / count) * 1_000_000) / 1_000_000;
+    const first_value = points[0].value;
+    const last_value = points[points.length - 1].value;
+    const def = getFeatureDef(feature_name);
+    let trend: FeatureHistory['trend'] = null;
+    if (def.value_type === 'enum') {
+      trend = 'flat';
+    } else {
+      const abs = Math.abs(first_value);
+      const delta = last_value - first_value;
+      const rel = abs > 0 ? delta / abs : delta;
+      if (rel > 0.05) trend = 'rising';
+      else if (rel < -0.05) trend = 'falling';
+      else trend = 'flat';
+    }
+    return {
+      tenant_id,
+      entity_id,
+      feature_name,
+      since: since.toISOString(),
+      until: until.toISOString(),
+      count,
+      points,
+      min,
+      max,
+      mean,
+      first_value,
+      last_value,
+      trend,
+    };
+  }
+
+  async coverage(tenant_id: string, now: Date): Promise<FeatureCoverageStats> {
+    // Coverage stats blend live pg counts (when present) with the
+    // 24-month synth window envelope. earliest_observed_at is the
+    // earliest row in the table for this tenant, falling back to
+    // (now - 24mo) when empty.
+    const sql = `
+      SELECT
+        COUNT(DISTINCT entity_id)::int AS distinct_entities,
+        MIN(observed_at) AS earliest,
+        MAX(observed_at) AS latest
+      FROM feature_store.feature_values
+      WHERE tenant_id = $1
+    `;
+    const result = await this.pool.query(sql, [tenant_id]);
+    const row = result.rows?.[0] as { distinct_entities: number; earliest: Date | null; latest: Date | null } | undefined;
+    const fallback = buildFeatureCoverageStats(tenant_id, now);
+    if (!row || row.distinct_entities === 0) return fallback;
+    return {
+      ...fallback,
+      earliest_observed_at: row.earliest ? new Date(row.earliest).toISOString() : fallback.earliest_observed_at,
+      latest_observed_at: row.latest ? new Date(row.latest).toISOString() : fallback.latest_observed_at,
+      total_entities_seeded: row.distinct_entities,
+    };
+  }
+}
+
+/** Env-gated factory. FEATURE_STORE_PG_URL set → PgFeatureStore;
+ *  unset → SynthFeatureStore (the T2.1.1 dev/test path). The pg client
+ *  is imported lazily so test runs without pg installed still load. */
+export async function makeFeatureStore(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ store: IFeatureStore; pool: unknown }> {
+  const url = env.FEATURE_STORE_PG_URL;
+  if (!url) return { store: new SynthFeatureStore(), pool: null };
+  // Lazy import — avoids dragging pg into the synth path.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Pool } = require('pg') as typeof import('pg');
+  const pool = new Pool({ connectionString: url, max: 4 });
+  return { store: new PgFeatureStore(pool), pool };
+}
+

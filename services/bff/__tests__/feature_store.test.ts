@@ -450,3 +450,126 @@ describe('Routes — /v1/feature-store/*', () => {
     expect(r1.body.body.features.utilization).not.toBe(r2.body.body.features.utilization);
   });
 });
+
+// ─── T2.1.3 — PgFeatureStore (mocked pool) ──────────────────────────
+
+import { PgFeatureStore, SynthFeatureStore, makeFeatureStore } from '../src/feature_store';
+
+interface MockPgRow {
+  feature_name?: string;
+  value?: number;
+  observed_at?: Date | string;
+  distinct_entities?: number;
+  earliest?: Date | null;
+  latest?: Date | null;
+}
+
+class MockPool {
+  constructor(private rows: MockPgRow[] = []) {}
+  async query(_sql: string, _params: unknown[]) {
+    return { rows: this.rows };
+  }
+}
+
+describe('SynthFeatureStore (default path)', () => {
+  test('getSnapshot returns the same shape as the pure function', async () => {
+    const s = new SynthFeatureStore();
+    const row = await s.getSnapshot(TENANT, 'CUST-1', NOW);
+    expect(row.entity_id).toBe('CUST-1');
+    for (const f of ALL_FEATURE_NAMES) expect(row.features[f]).toBeDefined();
+  });
+});
+
+describe('PgFeatureStore (mocked pool)', () => {
+  test('getSnapshot pulls each feature from latest-row pg DISTINCT ON', async () => {
+    const rows: MockPgRow[] = ALL_FEATURE_NAMES.map((name, i) => ({
+      feature_name: name,
+      value: 0.1 * (i + 1),
+    }));
+    const pool = new MockPool(rows);
+    const s = new PgFeatureStore(pool);
+    const snap = await s.getSnapshot(TENANT, 'CUST-1', NOW);
+    expect(snap.features.utilization).toBeCloseTo(0.1);
+    expect(snap.features.income_level).toBeCloseTo(0.8);
+  });
+
+  test('getSnapshot falls back to synth when pg returns empty', async () => {
+    const pool = new MockPool([]);
+    const s = new PgFeatureStore(pool);
+    const snap = await s.getSnapshot(TENANT, 'CUST-1', NOW);
+    // Every catalog feature still present.
+    for (const f of ALL_FEATURE_NAMES) {
+      expect(snap.features[f]).toBeDefined();
+    }
+  });
+
+  test('getSnapshot rejects empty tenant_id', async () => {
+    const pool = new MockPool([]);
+    const s = new PgFeatureStore(pool);
+    await expect(s.getSnapshot('', 'CUST-1', NOW)).rejects.toThrow(/tenant_id/);
+  });
+
+  test('getHistory builds points + aggregates from pg rows', async () => {
+    const since = new Date(NOW.getTime() - 10 * 86_400_000);
+    const rows: MockPgRow[] = Array.from({ length: 11 }, (_, i) => ({
+      observed_at: new Date(since.getTime() + i * 86_400_000),
+      value: 0.1 + i * 0.05,
+    }));
+    const pool = new MockPool(rows);
+    const s = new PgFeatureStore(pool);
+    const h = await s.getHistory(TENANT, 'CUST-1', 'utilization', since, NOW);
+    expect(h.count).toBe(11);
+    expect(h.first_value).toBeCloseTo(0.1);
+    expect(h.last_value).toBeCloseTo(0.6);
+    expect(h.min).toBeCloseTo(0.1);
+    expect(h.max).toBeCloseTo(0.6);
+    expect(h.trend).toBe('rising'); // > 5% rel change
+  });
+
+  test('getHistory falls back to synth when pg returns empty', async () => {
+    const since = new Date(NOW.getTime() - 10 * 86_400_000);
+    const pool = new MockPool([]);
+    const s = new PgFeatureStore(pool);
+    const h = await s.getHistory(TENANT, 'CUST-1', 'utilization', since, NOW);
+    expect(h.count).toBeGreaterThan(0);
+    expect(h.feature_name).toBe('utilization');
+  });
+
+  test('getHistory window > 24mo rejected as window_too_long', async () => {
+    const since = new Date(NOW.getTime() - (MAX_HISTORY_WINDOW_DAYS + 5) * 86_400_000);
+    const pool = new MockPool([]);
+    const s = new PgFeatureStore(pool);
+    try {
+      await s.getHistory(TENANT, 'CUST-1', 'utilization', since, NOW);
+      throw new Error('expected throw');
+    } catch (err) {
+      expect((err as FeatureStoreError).code).toBe('window_too_long');
+    }
+  });
+
+  test('coverage reflects pg distinct_entities + earliest/latest when populated', async () => {
+    const earliest = new Date('2025-01-01T00:00:00Z');
+    const latest = new Date('2026-05-21T00:00:00Z');
+    const pool = new MockPool([{ distinct_entities: 5_000, earliest, latest }]);
+    const s = new PgFeatureStore(pool);
+    const cov = await s.coverage(TENANT, NOW);
+    expect(cov.total_entities_seeded).toBe(5_000);
+    expect(cov.earliest_observed_at).toBe(earliest.toISOString());
+    expect(cov.latest_observed_at).toBe(latest.toISOString());
+  });
+
+  test('coverage falls back to synth envelope when pg is empty', async () => {
+    const pool = new MockPool([{ distinct_entities: 0, earliest: null, latest: null }]);
+    const s = new PgFeatureStore(pool);
+    const cov = await s.coverage(TENANT, NOW);
+    expect(cov.total_entities_seeded).toBe('unbounded_synthetic');
+  });
+});
+
+describe('makeFeatureStore factory', () => {
+  test('returns SynthFeatureStore when FEATURE_STORE_PG_URL is unset', async () => {
+    const { store, pool } = await makeFeatureStore({});
+    expect(store).toBeInstanceOf(SynthFeatureStore);
+    expect(pool).toBeNull();
+  });
+});
