@@ -231,3 +231,30 @@ logs:
 web-dev:
 	@echo "==> vite dev (Path A) — http://localhost:5173"
 	@cd $(WEB_PATH) && npm run dev
+
+# ---------- production operations ----------
+# Phases: T3-P2..T5-P3 + BAU + DR + go-live.
+# See docs/operationalization/execution-plans.md for phase IDs.
+
+.PHONY: bootstrap-cluster smoke-prod infra-health dr-drill deploy-validate-pre deploy-validate-post rollback
+
+bootstrap-cluster:
+	@./scripts/bootstrap-cluster.sh $${CLUSTER:-apex-ews-prod}
+
+smoke-prod:
+	@./scripts/smoke.sh
+
+infra-health:
+	@./scripts/infra-health.sh
+
+dr-drill:
+	@./scripts/dr-drill.sh --scope=$${SCOPE:-aurora} --target=$${TARGET:-staging} $${EXTRA_ARGS:-}
+
+deploy-validate-pre:
+	@DEPLOY_PHASE=pre ./scripts/deploy-validate.sh
+
+deploy-validate-post:
+	@DEPLOY_PHASE=post ./scripts/deploy-validate.sh
+
+rollback:
+	@./scripts/rollback.sh $${ROLLBACK_ARGS:-}

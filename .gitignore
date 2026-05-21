@@ -63,3 +63,7 @@ web/snapshot-*.csv
 
 # Claude Code — personal local settings (permission allowlists, etc.)
 .claude/settings.local.json
+
+# Operational scripts
+.rollback-log/
+# (DR drill reports under reports/dr-drills/ ARE committed for audit trail.)

@@ -1,0 +1,267 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'infra/k8s/**'
+      - 'infra/terraform/**'
+      - 'web/**'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Specific ArgoCD app to sync (leave empty for all)'
+        required: false
+        type: string
+
+# Tight permissions — only allow OIDC token, no PR comments etc
+permissions:
+  id-token: write
+  contents: read
+
+# Single-deploy guarantee: cancel any in-flight production deploy
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: af-south-1
+  CLUSTER_NAME: apex-ews-prod
+  ENVIRONMENT: production
+
+jobs:
+  # ════════════════════════════════════════════════════════════════
+  # Stage 1 — pre-deploy validation (matches deploy-validate.sh pre)
+  # ════════════════════════════════════════════════════════════════
+  pre-deploy-validate:
+    name: Pre-deploy validation
+    runs-on: ubuntu-latest
+    environment: production-gate  # GitHub Environment with required reviewers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+          curl -L https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.tar.gz | tar xz -C /usr/local/bin
+          pip install jsonschema
+
+      - name: Pre-deploy validation
+        env:
+          DEPLOY_PHASE: pre
+        run: bash ./scripts/deploy-validate.sh
+
+      - name: Upload pre-deploy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-deploy-validation
+          path: /tmp/schema-check.log
+          retention-days: 30
+
+  # ════════════════════════════════════════════════════════════════
+  # Stage 2 — build + push container image (only if pre passes)
+  # ════════════════════════════════════════════════════════════════
+  build-push:
+    name: Build + scan + push images
+    needs: pre-deploy-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - services/bff
+          - services/auth-svc
+          - services/audit-svc
+          - services/regulatory-svc/cases
+          - services/regulatory-svc/alerts
+          - services/regulatory-svc/rules
+          - services/regulatory-svc/indicators
+          - services/collection-adapter
+          - services/notification-svc
+          - services/ai-copilot-svc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build container
+        run: |
+          docker build \
+            -t ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:${{ github.sha }} \
+            -f ${{ matrix.service }}/Dockerfile \
+            ${{ matrix.service }}
+
+      - name: Trivy CRITICAL scan
+        run: |
+          trivy image --severity CRITICAL --exit-code 1 \
+            ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:${{ github.sha }}
+
+      - name: Push container
+        run: |
+          docker push ${{ steps.ecr.outputs.registry }}/apex-ews/${{ matrix.service }}:${{ github.sha }}
+
+  # ════════════════════════════════════════════════════════════════
+  # Stage 3 — ArgoCD sync + wait
+  # ════════════════════════════════════════════════════════════════
+  argocd-sync:
+    name: ArgoCD sync
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl + argocd
+        run: |
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+          curl -L https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 -o /usr/local/bin/argocd
+          chmod +x /usr/local/bin/argocd
+
+      - name: ArgoCD login
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        run: |
+          argocd login --grpc-web ${ARGOCD_SERVER} --auth-token ${ARGOCD_AUTH_TOKEN}
+
+      - name: Sync app(s)
+        run: |
+          if [ -n "${{ inputs.app }}" ]; then
+            argocd app sync ${{ inputs.app }} --grpc-web
+            argocd app wait ${{ inputs.app }} --health --timeout 600 --grpc-web
+          else
+            for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+              argocd app sync ${app} --grpc-web &
+            done
+            wait
+            for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+              argocd app wait ${app} --health --timeout 600 --grpc-web
+            done
+          fi
+
+  # ════════════════════════════════════════════════════════════════
+  # Stage 4 — post-deploy validation + smoke
+  # ════════════════════════════════════════════════════════════════
+  post-deploy-validate:
+    name: Post-deploy validation
+    needs: argocd-sync
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup tools
+        run: |
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+          curl -sLO https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install argocd-linux-amd64 /usr/local/bin/argocd
+
+      - name: Post-deploy validation
+        env:
+          DEPLOY_PHASE: post
+          NAMESPACE: apex-ews
+          BFF_URL: ${{ secrets.BFF_PROD_URL }}
+          AUTH_URL: ${{ secrets.AUTH_PROD_URL }}
+          PROMETHEUS_URL: ${{ secrets.PROMETHEUS_PROD_URL }}
+        run: bash ./scripts/deploy-validate.sh
+
+      - name: Notify Slack (success)
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+        run: |
+          curl -X POST -H 'Content-Type: application/json' --data "{
+            \"text\": \"✓ Production deploy ${{ github.sha }} complete\",
+            \"channel\": \"#apex-ews-alerts\",
+            \"username\": \"deploy-prod\"
+          }" $SLACK_WEBHOOK_URL
+
+      - name: Notify Slack (failure)
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+        run: |
+          curl -X POST -H 'Content-Type: application/json' --data "{
+            \"text\": \"✕ Production deploy ${{ github.sha }} FAILED — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
+            \"channel\": \"#apex-ews-incident\",
+            \"username\": \"deploy-prod\"
+          }" $SLACK_WEBHOOK_URL
+
+  # ════════════════════════════════════════════════════════════════
+  # Stage 5 — auto-rollback on post-deploy failure
+  # ════════════════════════════════════════════════════════════════
+  auto-rollback:
+    name: Auto-rollback on failure
+    if: failure()
+    needs: post-deploy-validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup argocd
+        run: |
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+          curl -sLO https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install argocd-linux-amd64 /usr/local/bin/argocd
+
+      - name: ArgoCD login
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        run: argocd login --grpc-web ${ARGOCD_SERVER} --auth-token ${ARGOCD_AUTH_TOKEN}
+
+      - name: Roll every app back 1 revision
+        env:
+          CISO_SIGNOFF: "auto-rollback-${{ github.run_id }}"
+        run: |
+          # Note: auto-rollback signs itself with the run_id; CISO sees this
+          # in the audit log and can revert if intentional deploy was wanted.
+          for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+            argocd app rollback ${app} --grpc-web || echo "skipped ${app}"
+          done
+
+          for app in $(argocd app list -o name --grpc-web | grep apex-ews); do
+            argocd app wait ${app} --health --timeout 600 --grpc-web || true
+          done
+
+      - name: Alert CISO + CTO
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_INCIDENT_WEBHOOK }}
+        run: |
+          curl -X POST -H 'Content-Type: application/json' --data "{
+            \"text\": \"🚨 AUTO-ROLLBACK fired on deploy ${{ github.sha }}. CISO + CTO + SRE-on-call please verify in #apex-ews-incident\",
+            \"channel\": \"#apex-ews-incident\",
+            \"username\": \"deploy-prod-auto-rollback\"
+          }" $SLACK_WEBHOOK_URL

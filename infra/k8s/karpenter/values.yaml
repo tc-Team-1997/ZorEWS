@@ -1,0 +1,127 @@
+# Karpenter Helm chart values — installed via OCI ECR public per AWS docs.
+# Phase: T3-P2 (per docs/operationalization/execution-plans.md)
+# Owner: SRE
+#
+# Install:
+#   helm registry logout public.ecr.aws/karpenter || true
+#   helm upgrade --install karpenter \
+#     oci://public.ecr.aws/karpenter/karpenter \
+#     --version "1.0.0" \
+#     --namespace karpenter \
+#     --create-namespace \
+#     --values infra/k8s/karpenter/values.yaml \
+#     --set settings.clusterName=apex-ews-prod \
+#     --set settings.interruptionQueue=apex-ews-prod-karpenter \
+#     --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=$(terraform -chdir=infra/terraform/20-eks output -raw karpenter_controller_role_arn)
+#
+# Then apply NodePool + EC2NodeClass:
+#   kubectl apply -f infra/k8s/karpenter/nodepool.yaml
+
+replicas: 2
+
+# Pin the controller to the platform tier (Karpenter cannot scale itself)
+nodeSelector:
+  workload: platform
+
+tolerations: []
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/arch
+              operator: In
+              values: [amd64]
+            - key: workload
+              operator: In
+              values: [platform]
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: karpenter
+        topologyKey: kubernetes.io/hostname
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+# ServiceAccount annotation populated via --set during install
+serviceAccount:
+  create: true
+  name: karpenter
+  annotations: {}  # injected by install script
+
+# Pod Security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+# Karpenter runtime settings
+settings:
+  # These 3 are populated by --set during install (placeholders here)
+  clusterName: ""
+  interruptionQueue: ""
+  isolatedVPC: false
+
+  # Batch idle/max windows — keep low for fast-scale, but not too low to avoid thrash
+  batchMaxDuration: 10s
+  batchIdleDuration: 1s
+
+  # Honor service-account RBAC by default
+  featureGates:
+    drift: true
+    spotToSpotConsolidation: true
+
+# Logging
+logLevel: info
+logEncoding: json
+logOutputPaths: [stdout]
+logErrorOutputPaths: [stderr]
+
+# Webhook config
+webhook:
+  enabled: true
+  port: 8443
+
+# Controller metrics — scraped by Prometheus via ServiceMonitor
+controller:
+  metrics:
+    port: 8080
+  healthProbe:
+    port: 8081
+
+# ServiceMonitor for Prometheus
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    prometheus: kube-prometheus
+  endpointConfig:
+    interval: 30s
+
+# DNS — required for cluster API access
+dnsPolicy: Default
+
+# Anti-affinity to spread across AZs
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: karpenter
