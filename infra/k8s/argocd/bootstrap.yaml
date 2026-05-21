@@ -1,0 +1,49 @@
+# App-of-Apps bootstrap — single Application resource that bootstraps
+# every child Application under infra/k8s/argocd/applications/.
+#
+# After applying this, ArgoCD watches the applications/ subdirectory
+# and instantiates one child Application per YAML file. Each child
+# then watches its own service manifests under infra/k8s/.
+#
+# Bootstrap: kubectl apply -f bootstrap.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apex-ews-platform
+  namespace: argocd
+  annotations:
+    description: "App-of-Apps parent — controls deployment of every ZorEWS service"
+    owned-by: "SRE"
+    operationalization-phase: "T3-P4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s/argocd/applications
+    directory:
+      recurse: true
+      include: "*.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  # Auto-revert manual kubectl edits within 3min
+  revisionHistoryLimit: 10

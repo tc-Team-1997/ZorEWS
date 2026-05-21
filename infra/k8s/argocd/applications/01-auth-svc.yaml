@@ -1,0 +1,27 @@
+# Wave 4 — auth-svc. Issues OAuth tokens, serves JWKS, manages 2FA + sessions.
+# No service-side dependencies (Aurora + Secrets Manager only via ESO/ClusterSecretStore from wave 1+2).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: auth-svc
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s
+    directory:
+      # Service is wired into the existing deployments.yaml — that file maps
+      # to per-service-named Deployment + Service via metadata.name selector.
+      include: "deployments.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apex-ews
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: {limit: 5, backoff: {duration: 30s, factor: 2}}

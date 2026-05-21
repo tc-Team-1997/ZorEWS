@@ -1,0 +1,134 @@
+# Burn-rate alarms — multi-window per Google SRE workbook.
+# Each tier-1 SLO has 3 alarms: 1h fast (P1) / 6h medium (P1) / 3d slow (P2).
+# `severity` label drives PagerDuty escalation per docs/on-call-rota.md.
+# `runbook_url` annotation is mandatory on every rule.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: apex-ews-burn-rate-alarms
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+  annotations:
+    description: "SLO burn-rate alarms for tier-1 SLOs"
+    operationalization-phase: "T5-P3"
+spec:
+  groups:
+    # ─── BFF API availability — 99.5%/30d (error budget 0.005) ────────
+    - name: bff-availability-burn
+      rules:
+        - alert: BffAvailabilityFastBurn
+          expr: |
+            apex_ews:slo:bff:burn_rate:1h > 14.4
+            and
+            apex_ews:slo:bff:burn_rate:6h > 6
+          for: 2m
+          labels:
+            severity: P1
+            slo: bff_availability
+            tenant: all
+          annotations:
+            summary: "BFF availability fast burn — 1h budget burn >14.4×"
+            description: "Error budget for {{ $labels.slo }} is burning >14.4× the normal rate over the last 1h, sustained over 6h. Page primary on-call."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#elevated-errors"
+
+        - alert: BffAvailabilitySlowBurn
+          expr: |
+            apex_ews:slo:bff:burn_rate:6h > 6
+            and
+            apex_ews:slo:bff:burn_rate:3d > 1
+          for: 15m
+          labels:
+            severity: P2
+            slo: bff_availability
+          annotations:
+            summary: "BFF availability slow burn — 3d budget at 100%"
+            description: "Sustained error rate over 3d will exhaust monthly budget. Slack notify SRE."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#weekly-slo-review"
+
+    # ─── BFF p95 latency — soft SLO at 800ms ─────────────────────────
+    - name: bff-latency
+      rules:
+        - alert: BffLatencyP95High
+          expr: apex_ews:sli:bff:latency_p95:5m > 1.5
+          for: 5m
+          labels:
+            severity: P1
+            slo: bff_latency
+          annotations:
+            summary: "BFF p95 latency > 1500ms for 5min"
+            description: "Service degraded; p95 = {{ $value | humanize }}s for 5min. Investigate Aurora reader CPU, MSK lag, downstream adapter latency."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#high-latency"
+
+    # ─── Auth-svc availability — 99.9%/30d ───────────────────────────
+    - name: auth-availability
+      rules:
+        - alert: AuthAvailabilityFastBurn
+          expr: |
+            avg_over_time(apex_ews:sli:auth:error_rate:5m[1h]) > 0.001 * 14.4
+          for: 2m
+          labels:
+            severity: P0  # auth-svc is upstream of everything
+            slo: auth_availability
+          annotations:
+            summary: "Auth-svc error rate >1.44% for 1h — login/token broken"
+            description: "Auth failure cascades to every service. Wake CISO + CTO."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/dr-runbook.md#auth-svc-outage"
+
+    # ─── Alert ingest p95 latency — <60s per EWS.docx §3.5 ───────────
+    - name: alert-ingest-latency
+      rules:
+        - alert: AlertIngestLatencyP95High
+          expr: apex_ews:sli:alert:end_to_end_p95:5m > 60
+          for: 5m
+          labels:
+            severity: P1
+            slo: alert_ingest_latency
+          annotations:
+            summary: "Alert ingest p95 > 60s — SLO breach"
+            description: "Indicator-to-alert latency p95 is {{ $value | humanize }}s vs 60s target. Investigate Kafka lag, rule evaluator pod health."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#alert-ingest-lag"
+
+    # ─── Webhook delivery success — 99.0%/30d ─────────────────────────
+    - name: webhook-delivery
+      rules:
+        - alert: WebhookSuccessRateLow
+          expr: apex_ews:sli:webhook:success_rate:5m < 0.95
+          for: 10m
+          labels:
+            severity: P2
+            slo: webhook_delivery
+          annotations:
+            summary: "Webhook delivery success rate < 95% for 10min"
+            description: "Recipient outage or HMAC misconfiguration. Auto-disable trips at 100% failure over 7d."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#webhook-failures"
+
+    # ─── Audit chain integrity — 100% target ─────────────────────────
+    - name: audit-integrity
+      rules:
+        - alert: AuditChainIntegrityFailed
+          expr: apex_ews:audit:chain_valid == 0
+          for: 1m
+          labels:
+            severity: P0  # security-critical
+            slo: audit_chain
+          annotations:
+            summary: "Audit chain integrity FAILED for tenant {{ $labels.tenant_id }}"
+            description: "Hash-chain verification failed. Possible tampering or storage corruption. Wake CISO immediately."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/dr-runbook.md#audit-trail"
+
+    # ─── Aurora Global DB replication lag ─────────────────────────────
+    - name: aurora-global-lag
+      rules:
+        - alert: AuroraGlobalReplicaLagHigh
+          expr: apex_ews:sli:aurora:replica_lag_seconds > 120
+          for: 5m
+          labels:
+            severity: P1
+            slo: aurora_global_lag
+          annotations:
+            summary: "Aurora Global replica lag > 120s for 5min"
+            description: "Secondary-region lag exceeds 2min RPO target. DR failover would lose data."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/dr-runbook.md"

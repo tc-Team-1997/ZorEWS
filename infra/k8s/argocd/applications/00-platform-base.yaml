@@ -1,0 +1,25 @@
+# Wave 0 — platform base: namespaces + RBAC + network policies + service accounts.
+# Every other wave depends on this being green.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s
+    directory:
+      include: "{namespaces.yaml,rbac.yaml,network-policies.yaml,serviceaccounts.yaml,hpa.yaml,pdb.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default  # multi-namespace targets via per-resource metadata.namespace
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, PruneLast=true, ServerSideApply=true]
+    retry: {limit: 3, backoff: {duration: 30s, factor: 2}}

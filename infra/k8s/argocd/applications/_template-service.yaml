@@ -1,0 +1,30 @@
+# Template for the remaining service Applications. Copy → rename → adjust:
+#   - metadata.name
+#   - sync-wave (4 = isolated, 5 = downstream of auth+audit, 6 = bff, 7 = peripheral, 8 = pipeline)
+# Services covered: audit-svc, regulatory-svc/{cases,alerts,rules,indicators},
+# collection-adapter, notification-svc, pipeline-svc, ai-copilot-svc.
+# Each appears in infra/k8s/deployments.yaml as a named Deployment + Service block.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: SERVICE_NAME_HERE
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "SYNC_WAVE_HERE"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s
+    directory:
+      include: "deployments.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apex-ews
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: {limit: 5, backoff: {duration: 30s, factor: 2}}

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    name: argocd
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    description: "ArgoCD installation namespace — App-of-Apps GitOps source-of-truth"
+    owned-by: "SRE"
+    operationalization-phase: "T3-P4"

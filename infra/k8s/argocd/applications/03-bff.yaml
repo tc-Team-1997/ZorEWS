@@ -1,0 +1,27 @@
+# Wave 6 — BFF (the API gateway). Depends on auth-svc (wave 4), audit-svc (wave 4),
+# all 4 regulatory-svc (wave 5), and AWS Aurora + MSK + ESO secrets (waves 0-2).
+# This is the hot-path service; PDB minAvailable: 2, HPA min=3 max=16 from existing
+# infra/k8s/hpa.yaml + pdb.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bff
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tc-Team-1997/ZorEWS.git
+    targetRevision: main
+    path: infra/k8s
+    directory:
+      include: "deployments.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apex-ews
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: {limit: 5, backoff: {duration: 30s, factor: 2}}

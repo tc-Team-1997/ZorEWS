@@ -1,0 +1,144 @@
+# Recording rules — pre-aggregated SLI/SLO time-series that the alarms below
+# and Grafana dashboards both depend on. Aggregating once via rules (vs. per-query
+# expressions) keeps the latency budget for Grafana dashboards bounded.
+#
+# Naming convention: apex_ews:<axis>:<metric>:<resolution>
+#   axis = the SLO axis (sli, slo, slo_burn, infra)
+#   metric = what we're measuring
+#   resolution = bucket (e.g. 1m, 5m, 1h)
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: apex-ews-sli-recording
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+  annotations:
+    description: "Pre-aggregated SLI metrics for tier-1 SLOs"
+    operationalization-phase: "T5-P3"
+spec:
+  groups:
+    # ─── BFF API SLI ──────────────────────────────────────────────────
+    - name: bff-sli
+      interval: 30s
+      rules:
+        # Total requests per service per status class, 5-min rate
+        - record: apex_ews:sli:bff:request_rate:5m
+          expr: |
+            sum by (service, status_class) (
+              rate(http_request_duration_seconds_count{service="bff"}[5m])
+            )
+        # Error rate (5xx) over 5min
+        - record: apex_ews:sli:bff:error_rate:5m
+          expr: |
+            sum(rate(http_request_duration_seconds_count{service="bff",status_class="5xx"}[5m]))
+              /
+            sum(rate(http_request_duration_seconds_count{service="bff"}[5m]))
+        # p95 latency over 5min
+        - record: apex_ews:sli:bff:latency_p95:5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le, service, route) (
+                rate(http_request_duration_seconds_bucket{service="bff"}[5m])
+              )
+            )
+        # p99 latency over 5min
+        - record: apex_ews:sli:bff:latency_p99:5m
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le, service, route) (
+                rate(http_request_duration_seconds_bucket{service="bff"}[5m])
+              )
+            )
+
+    # ─── auth-svc SLI ─────────────────────────────────────────────────
+    - name: auth-sli
+      interval: 30s
+      rules:
+        - record: apex_ews:sli:auth:error_rate:5m
+          expr: |
+            sum(rate(http_request_duration_seconds_count{service="auth-svc",status_class="5xx"}[5m]))
+              /
+            sum(rate(http_request_duration_seconds_count{service="auth-svc"}[5m]))
+        # OAuth token issuance latency p95
+        - record: apex_ews:sli:auth:token_p95:5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{service="auth-svc",route="/oauth/token"}[5m]))
+            )
+
+    # ─── Alert ingest latency ─────────────────────────────────────────
+    - name: alerts-sli
+      interval: 30s
+      rules:
+        # Streaming alert path: indicator-observed-at → alert-created-at p95
+        # Sourced from M2.12.1 streaming latency telemetry.
+        - record: apex_ews:sli:alert:end_to_end_p95:5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (
+                rate(streaming_alert_path_total_latency_ms_bucket[5m])
+              )
+            ) / 1000  # convert to seconds
+
+    # ─── Webhook delivery success rate ────────────────────────────────
+    - name: webhook-sli
+      interval: 30s
+      rules:
+        - record: apex_ews:sli:webhook:success_rate:5m
+          expr: |
+            sum(rate(webhook_delivery_attempts_total{outcome="success"}[5m]))
+              /
+            sum(rate(webhook_delivery_attempts_total[5m]))
+
+    # ─── Aurora SLI (via cloudwatch_exporter) ─────────────────────────
+    - name: aurora-sli
+      interval: 60s
+      rules:
+        - record: apex_ews:sli:aurora:writer_cpu_avg:5m
+          expr: avg(aws_rds_cpuutilization_average{role="writer"})
+        - record: apex_ews:sli:aurora:reader_cpu_avg:5m
+          expr: avg(aws_rds_cpuutilization_average{role="reader"})
+        - record: apex_ews:sli:aurora:replica_lag_seconds
+          expr: avg(aws_rds_aurora_global_db_replication_lag_seconds)
+
+    # ─── MSK SLI ──────────────────────────────────────────────────────
+    - name: msk-sli
+      interval: 60s
+      rules:
+        - record: apex_ews:sli:msk:broker_disk_used_pct
+          expr: avg(kafka_log_size{topic!~"__.*"}) / avg(kafka_broker_disk_total_bytes) * 100
+        - record: apex_ews:sli:msk:consumer_lag_seconds
+          expr: avg by (consumer_group, topic) (kafka_consumer_lag_seconds)
+
+  # ─── SLO budget recording (multi-burn-rate spec) ────────────────────
+    # Per tier-1 SLOs in docs/slos.md, 30d windows.
+    # Public API availability SLO = 99.5% → error budget = 0.005
+    - name: slo-budget-bff
+      interval: 30s
+      rules:
+        - record: apex_ews:slo:bff:error_budget_remaining
+          expr: |
+            1 - (
+              sum_over_time(apex_ews:sli:bff:error_rate:5m[30d])
+              / scalar(count_over_time(apex_ews:sli:bff:error_rate:5m[30d]))
+            ) / 0.005
+        # Burn rate at 1h window
+        - record: apex_ews:slo:bff:burn_rate:1h
+          expr: avg_over_time(apex_ews:sli:bff:error_rate:5m[1h]) / 0.005
+        # Burn rate at 6h window
+        - record: apex_ews:slo:bff:burn_rate:6h
+          expr: avg_over_time(apex_ews:sli:bff:error_rate:5m[6h]) / 0.005
+        # Burn rate at 3d window
+        - record: apex_ews:slo:bff:burn_rate:3d
+          expr: avg_over_time(apex_ews:sli:bff:error_rate:5m[3d]) / 0.005
+
+    # Audit chain integrity — binary; 100% target
+    - name: audit-chain
+      interval: 60s
+      rules:
+        - record: apex_ews:audit:chain_valid
+          expr: |
+            min by (tenant_id) (apex_ews_audit_chain_verification_status)

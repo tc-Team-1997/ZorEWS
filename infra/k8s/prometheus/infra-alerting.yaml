@@ -1,0 +1,130 @@
+# Infrastructure-level alarms — Aurora / MSK / EKS / Karpenter / ESO health.
+# Separate from SLO burn-rate alarms because these are about runtime SUBSTRATE
+# rather than SLO consumption. Per `docs/operationalization/readiness-checklists.md` §3.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: apex-ews-infra-alarms
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+  annotations:
+    description: "Infrastructure runtime alarms — Aurora, MSK, EKS, Karpenter, ESO"
+    operationalization-phase: "T5-P2 + T5-P3"
+spec:
+  groups:
+    - name: aurora-runtime
+      rules:
+        - alert: AuroraWriterCpuHigh
+          expr: apex_ews:sli:aurora:writer_cpu_avg:5m > 80
+          for: 10m
+          labels:
+            severity: P1
+          annotations:
+            summary: "Aurora writer CPU > 80% for 10min"
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#database-under-pressure"
+        - alert: AuroraReaderCpuHigh
+          expr: apex_ews:sli:aurora:reader_cpu_avg:5m > 80
+          for: 10m
+          labels:
+            severity: P1
+          annotations:
+            summary: "Aurora reader CPU > 80% for 10min"
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#database-under-pressure"
+        - alert: AuroraFailoverDetected
+          expr: increase(aws_rds_failover_count[5m]) > 0
+          labels:
+            severity: P0  # potential DR scenario
+          annotations:
+            summary: "Aurora failover triggered"
+            description: "Aurora cluster underwent failover. Validate via DR runbook before normal operations resume."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/dr-runbook.md"
+
+    - name: msk-runtime
+      rules:
+        - alert: MskBrokerDiskHigh
+          expr: apex_ews:sli:msk:broker_disk_used_pct > 85
+          for: 5m
+          labels:
+            severity: P0  # disk full = data loss risk
+          annotations:
+            summary: "MSK broker disk > 85%"
+            description: "Risk of broker eviction + message loss. Add capacity or expire old topics."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#kafka-disk-pressure"
+        - alert: MskConsumerLagHigh
+          expr: apex_ews:sli:msk:consumer_lag_seconds > 60
+          for: 10m
+          labels:
+            severity: P1
+          annotations:
+            summary: "Kafka consumer group {{ $labels.consumer_group }} lag > 60s"
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#consumer-lag"
+
+    - name: eks-runtime
+      rules:
+        - alert: HpaScalingFailed
+          expr: kube_horizontalpodautoscaler_status_condition{condition="AbleToScale",status="False"} == 1
+          for: 5m
+          labels:
+            severity: P1
+          annotations:
+            summary: "HPA {{ $labels.horizontalpodautoscaler }} cannot scale"
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#hpa-stuck"
+        - alert: PdbAtZeroAllowedDisruptions
+          expr: kube_poddisruptionbudget_status_pod_disruptions_allowed == 0
+          for: 10m
+          labels:
+            severity: P2
+          annotations:
+            summary: "PDB {{ $labels.poddisruptionbudget }} blocks all voluntary disruptions"
+            description: "Node drain / Karpenter consolidation will be blocked. Check pod health."
+
+    - name: karpenter-runtime
+      rules:
+        - alert: KarpenterProvisioningFailed
+          expr: rate(karpenter_nodes_terminated_count{reason!="empty"}[5m]) > 0.083  # 5/min
+          for: 5m
+          labels:
+            severity: P1
+          annotations:
+            summary: "Karpenter terminating > 5 nodes/min — check spot interruption rate"
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#karpenter-wedged"
+
+    - name: external-secrets-runtime
+      rules:
+        - alert: ExternalSecretSyncStale
+          expr: |
+            (time() - external_secret_sync_seconds_last_success) > 600
+          for: 2m
+          labels:
+            severity: P1
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} stale > 10min"
+            description: "ESO unable to sync from Secrets Manager. Service may use stale credentials."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#eso-outage"
+
+    - name: vpn-runtime
+      rules:
+        - alert: BothVpnTunnelsDown
+          expr: count by (vpn_connection_id) (aws_ec2_tunnel_state{state="UP"}) == 0
+          for: 2m
+          labels:
+            severity: P0
+          annotations:
+            summary: "Both VPN tunnels DOWN — bank connectivity lost"
+            description: "Bank-side integrations (CBS, IFRS9, AML, Bureau) cannot reach upstream. Falls back to INTEGRATIONS_MODE=mock."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/dr-runbook.md"
+
+    - name: argocd-runtime
+      rules:
+        - alert: ArgocdAppOutOfSync
+          expr: argocd_app_health_status{health_status!="Healthy"} == 1
+          for: 10m
+          labels:
+            severity: P1
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} unhealthy"
+            description: "Deployment drift or sync failure. Check ArgoCD UI."
+            runbook_url: "https://github.com/tc-Team-1997/ZorEWS/blob/main/docs/bau-runbook.md#argocd-drift"
