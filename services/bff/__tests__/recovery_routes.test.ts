@@ -71,11 +71,13 @@ describe('/v1/recovery — empty store', () => {
     //   Phase D.3: audit_retention_policy (BFF-local, always registered)
     //   Phase E.1: dr_game_day_record (BFF-local, always registered)
     //   Phase E.2: release_history (BFF-local, always registered)
+    //   Phase T3.1: cbs_sync_job (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
       'audit_retention_policy',
       'bureau_master',
+      'cbs_sync_job',
       'cms_case_attachment',
       'customer_master',
       'dq_rule',

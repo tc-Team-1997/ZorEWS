@@ -191,6 +191,14 @@ import {
   type ReleaseHistoryStore,
 } from './release/release_info';
 import {
+  defaultCbsSyncStore,
+  CbsSyncError,
+  ALL_CBS_SYNC_DIRECTIONS,
+  ALL_CBS_ENTITIES,
+  ALL_CBS_SYNC_STATUSES,
+  type CbsSyncStore,
+} from './integrations/cbs_sync';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1138,6 +1146,8 @@ export interface AppDeps {
   /** Phase E.2 (2026-05-21) — env source for resolveReleaseInfo
    *  (defaults to process.env; injected by tests). */
   releaseEnvSource?: NodeJS.ProcessEnv;
+  /** Phase T3.1 (2026-05-21) — CBS sync job ledger. */
+  cbsSyncStore?: CbsSyncStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1401,6 +1411,8 @@ export function makeApp(deps: AppDeps = {}) {
   const releaseHistoryStore =
     deps.releaseHistoryStore ?? defaultReleaseHistoryStore;
   const releaseEnvSource = deps.releaseEnvSource ?? process.env;
+  // Phase T3.1 — CBS sync ledger.
+  const cbsSyncStore = deps.cbsSyncStore ?? defaultCbsSyncStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1779,6 +1791,24 @@ export function makeApp(deps: AppDeps = {}) {
             'release_history',
             record.original_id,
           );
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase T3.1 — cbs_sync_job adapter. Append-mostly evidence;
+    // plain re-insert via the ledger's restore() method.
+    registerRecoveryAdapter({
+      entity_type: 'cbs_sync_job',
+      display_name: 'CBS sync job',
+      module: 'bff',
+      original_table: 'app_admin.cbs_sync_jobs',
+      restore: async (record) => {
+        const ok = cbsSyncStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('cbs_sync_job', record.original_id);
         }
       },
     });
@@ -17708,6 +17738,337 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_release', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase T3.1 — CBS Integration Deepening (sync job ledger) ────────
+  //
+  // Bidirectional sync-job tracking layered on top of M3.1 connector
+  // registry. Routes: enumerate enums + list + get + by-key + enqueue +
+  // transition + soft-delete + summary. Admin-only (audit:read).
+
+  /** GET /v1/integrations/cbs/enums — closed enum catalog for SPA. */
+  app.get(
+    '/v1/integrations/cbs/enums',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            directions: [...ALL_CBS_SYNC_DIRECTIONS],
+            entities: [...ALL_CBS_ENTITIES],
+            statuses: [...ALL_CBS_SYNC_STATUSES],
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/integrations/cbs/summary — monitoring dashboard rollup. */
+  app.get(
+    '/v1/integrations/cbs/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const summary = cbsSyncStore.summary(req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            ...summary,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/integrations/cbs/sync-jobs?direction=&entity=&status=&include_deleted=&limit= */
+  app.get(
+    '/v1/integrations/cbs/sync-jobs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const direction = req.query.direction !== undefined ? String(req.query.direction) : undefined;
+      const entity = req.query.entity !== undefined ? String(req.query.entity) : undefined;
+      const status = req.query.status !== undefined ? String(req.query.status) : undefined;
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const limit =
+        req.query.limit !== undefined && Number.isFinite(Number(req.query.limit))
+          ? Number(req.query.limit)
+          : undefined;
+      // Defensive filter validation — surface a 400 on bad query input
+      // instead of silently returning the whole list.
+      if (direction !== undefined && !(ALL_CBS_SYNC_DIRECTIONS as readonly string[]).includes(direction)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_direction', message: `invalid direction: ${direction}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (entity !== undefined && !(ALL_CBS_ENTITIES as readonly string[]).includes(entity)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_entity', message: `invalid entity: ${entity}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (status !== undefined && !(ALL_CBS_SYNC_STATUSES as readonly string[]).includes(status)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_status', message: `invalid status: ${status}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = cbsSyncStore.list(req.tenant!.tenant_id, {
+        direction: direction as never,
+        entity: entity as never,
+        status: status as never,
+        include_deleted,
+        limit,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/integrations/cbs/sync-jobs/by-key/:idempotency_key */
+  app.get(
+    '/v1/integrations/cbs/sync-jobs/by-key/:idempotency_key',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const key = req.params.idempotency_key ?? '';
+      const entry = cbsSyncStore.getByIdempotencyKey(req.tenant!.tenant_id, key);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_job', message: `no job for idempotency_key: ${key}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** GET /v1/integrations/cbs/sync-jobs/:job_id */
+  app.get(
+    '/v1/integrations/cbs/sync-jobs/:job_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const job_id = req.params.job_id ?? '';
+      const entry = cbsSyncStore.get(req.tenant!.tenant_id, job_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_job', message: `unknown job_id: ${job_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/integrations/cbs/sync-jobs — enqueue new job. */
+  app.post(
+    '/v1/integrations/cbs/sync-jobs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = cbsSyncStore.enqueue(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Enqueued' }),
+        );
+      } catch (e) {
+        if (e instanceof CbsSyncError) {
+          if (e.code === 'duplicate_idempotency_key') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_idempotency_key', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'enqueue failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/integrations/cbs/sync-jobs/:job_id/transition */
+  app.post(
+    '/v1/integrations/cbs/sync-jobs/:job_id/transition',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const job_id = req.params.job_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = cbsSyncStore.transition(
+          req.tenant!.tenant_id,
+          job_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+      } catch (e) {
+        if (e instanceof CbsSyncError) {
+          if (e.code === 'unknown_job') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_job', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'invalid_transition') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_invalid_transition', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'transition failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/integrations/cbs/sync-jobs/:job_id — soft-delete + archive. */
+  app.delete(
+    '/v1/integrations/cbs/sync-jobs/:job_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const job_id = req.params.job_id ?? '';
+      try {
+        const tombstoned = cbsSyncStore.softDelete(
+          req.tenant!.tenant_id,
+          job_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'cbs_sync_job',
+            original_id: job_id,
+            original_table: 'app_admin.cbs_sync_jobs',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/integrations/cbs/sync-jobs/:job_id',
+            prior_status: tombstoned.status,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof CbsSyncError) {
+          if (e.code === 'unknown_job') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_job', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );
