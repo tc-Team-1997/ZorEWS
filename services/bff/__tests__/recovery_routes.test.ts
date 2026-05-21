@@ -73,9 +73,11 @@ describe('/v1/recovery — empty store', () => {
     //   Phase E.2: release_history (BFF-local, always registered)
     //   Phase T3.1: cbs_sync_job (BFF-local, always registered)
     //   Phase T3.2: ifrs9_stage_movement + ifrs9_ecl_override (BFF-local)
+    //   Phase T3.3: aml_correlation_link (BFF-local, always registered)
     const types = res.body.body.adapters.map((a: { entity_type: string }) => a.entity_type).sort();
     expect(types).toEqual([
       'account_master',
+      'aml_correlation_link',
       'audit_retention_policy',
       'bureau_master',
       'cbs_sync_job',

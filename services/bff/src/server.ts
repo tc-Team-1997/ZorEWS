@@ -210,6 +210,17 @@ import {
   type EclOverrideStore,
 } from './ifrs9/stage_movement';
 import {
+  defaultAmlCorrelationStore,
+  AmlCorrelationError,
+  ALL_AML_ENTITY_KINDS,
+  ALL_AML_LINK_RELATIONS,
+  ALL_AML_TIMELINE_SEVERITIES,
+  composeCustomerTimeline,
+  AML_CORRELATION_MAX_TRAVERSAL_DEPTH,
+  type AmlCorrelationStore,
+  type AmlTimelineEvent,
+} from './aml/correlation';
+import {
   defaultDqStore,
   DqError,
   ALL_DQ_RULE_KINDS,
@@ -1163,6 +1174,8 @@ export interface AppDeps {
   stageMovementLedger?: StageMovementLedger;
   /** Phase T3.2 (2026-05-21) — IFRS9 ECL input override store. */
   eclOverrideStore?: EclOverrideStore;
+  /** Phase T3.3 (2026-05-21) — AML correlation store. */
+  amlCorrelationStore?: AmlCorrelationStore;
   /**
    * Phase 2d cross-service restore client (BFF → auth-svc). When
    * provided, makeApp registers RecoveryAdapter entries for
@@ -1431,6 +1444,8 @@ export function makeApp(deps: AppDeps = {}) {
   // Phase T3.2 — IFRS9 stage movement ledger + ECL override store.
   const stageMovementLedger = deps.stageMovementLedger ?? defaultStageMovementLedger;
   const eclOverrideStore = deps.eclOverrideStore ?? defaultEclOverrideStore;
+  // Phase T3.3 — AML correlation store.
+  const amlCorrelationStore = deps.amlCorrelationStore ?? defaultAmlCorrelationStore;
   // Register recovery adapters for the two services wired in Phase 1.
   // Closures over webhookStore + scenarioStore so the restore handler
   // operates on the LIVE store instance per makeApp() call.
@@ -1864,6 +1879,24 @@ export function makeApp(deps: AppDeps = {}) {
         const ok = eclOverrideStore.restore(record.payload as never);
         if (!ok) {
           throw new RestoreConflictError('ifrs9_ecl_override', record.original_id);
+        }
+      },
+    });
+  } catch {
+    /* already registered */
+  }
+  try {
+    // Phase T3.3 — aml_correlation_link adapter. Refuses on duplicate
+    // (source, target, relation) tuple coverage.
+    registerRecoveryAdapter({
+      entity_type: 'aml_correlation_link',
+      display_name: 'AML correlation link',
+      module: 'bff',
+      original_table: 'app_admin.aml_correlation_links',
+      restore: async (record) => {
+        const ok = amlCorrelationStore.restore(record.payload as never);
+        if (!ok) {
+          throw new RestoreConflictError('aml_correlation_link', record.original_id);
         }
       },
     });
@@ -18698,6 +18731,405 @@ export function makeApp(deps: AppDeps = {}) {
             return res.status(404).json(
               wrapError(
                 { code: 'EWS_404_unknown_override', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'delete failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── Phase T3.3 — AML Bidirectional Correlation ──────────────────────
+  //
+  // Cross-module link store + per-customer timeline composer.
+  // Admin-only (audit:read).
+
+  /** GET /v1/aml/correlation/enums — closed enum catalog. */
+  app.get(
+    '/v1/aml/correlation/enums',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(
+        wrapResponse(
+          {
+            entity_kinds: [...ALL_AML_ENTITY_KINDS],
+            relations: [...ALL_AML_LINK_RELATIONS],
+            severities: [...ALL_AML_TIMELINE_SEVERITIES],
+            max_traversal_depth: AML_CORRELATION_MAX_TRAVERSAL_DEPTH,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/aml/correlation/summary — graph health summary. */
+  app.get(
+    '/v1/aml/correlation/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const summary = amlCorrelationStore.summary(req.tenant!.tenant_id);
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            ...summary,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/aml/correlation/links — list with filters. */
+  app.get(
+    '/v1/aml/correlation/links',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const customer_id = req.query.customer_id !== undefined ? String(req.query.customer_id) : undefined;
+      const source_kind = req.query.source_kind !== undefined ? String(req.query.source_kind) : undefined;
+      const source_id = req.query.source_id !== undefined ? String(req.query.source_id) : undefined;
+      const target_kind = req.query.target_kind !== undefined ? String(req.query.target_kind) : undefined;
+      const target_id = req.query.target_id !== undefined ? String(req.query.target_id) : undefined;
+      const relation = req.query.relation !== undefined ? String(req.query.relation) : undefined;
+      const include_deleted =
+        String(req.query.include_deleted ?? '').toLowerCase() === 'true';
+      const limit = req.query.limit !== undefined && Number.isFinite(Number(req.query.limit))
+        ? Number(req.query.limit)
+        : undefined;
+      // Defensive: validate filter values before passing into the store.
+      if (source_kind !== undefined && !(ALL_AML_ENTITY_KINDS as readonly string[]).includes(source_kind)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_entity_kind', message: `invalid source_kind: ${source_kind}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (target_kind !== undefined && !(ALL_AML_ENTITY_KINDS as readonly string[]).includes(target_kind)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_entity_kind', message: `invalid target_kind: ${target_kind}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (relation !== undefined && !(ALL_AML_LINK_RELATIONS as readonly string[]).includes(relation)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_relation', message: `invalid relation: ${relation}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const items = amlCorrelationStore.list(req.tenant!.tenant_id, {
+        customer_id,
+        source_kind: source_kind as never,
+        source_id,
+        target_kind: target_kind as never,
+        target_id,
+        relation: relation as never,
+        include_deleted,
+        limit,
+      });
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/aml/correlation/entity/:kind/:id — symmetric lookup. */
+  app.get(
+    '/v1/aml/correlation/entity/:kind/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const kind = req.params.kind ?? '';
+      if (!(ALL_AML_ENTITY_KINDS as readonly string[]).includes(kind)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_entity_kind', message: `invalid kind: ${kind}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const id = req.params.id ?? '';
+      const items = amlCorrelationStore.listForEntity(
+        req.tenant!.tenant_id,
+        kind as never,
+        id,
+      );
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            entity_kind: kind,
+            entity_id: id,
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** POST /v1/aml/correlation/traverse — BFS from an origin. */
+  app.post(
+    '/v1/aml/correlation/traverse',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const body = (inner ?? {}) as {
+          kind?: unknown;
+          id?: unknown;
+          depth?: unknown;
+        };
+        const depth = typeof body.depth === 'number' ? body.depth : 2;
+        const out = amlCorrelationStore.traverse(
+          req.tenant!.tenant_id,
+          { kind: body.kind as never, id: String(body.id ?? '') },
+          depth,
+        );
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              origin: { kind: body.kind, id: body.id },
+              depth,
+              ...out,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof AmlCorrelationError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'traverse failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** POST /v1/aml/correlation/timeline — compose unified per-customer timeline. */
+  app.post(
+    '/v1/aml/correlation/timeline',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const body = (inner ?? {}) as {
+          customer_id?: unknown;
+          events?: unknown;
+          limit?: unknown;
+        };
+        const customer_id = String(body.customer_id ?? '');
+        const events = Array.isArray(body.events) ? (body.events as AmlTimelineEvent[]) : [];
+        const limit = typeof body.limit === 'number' ? body.limit : 50;
+        const out = composeCustomerTimeline(events, customer_id, limit);
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              customer_id,
+              limit,
+              total: out.length,
+              items: out,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof AmlCorrelationError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'timeline failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/aml/correlation/links/:link_id — single (404). */
+  app.get(
+    '/v1/aml/correlation/links/:link_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const link_id = req.params.link_id ?? '';
+      const entry = amlCorrelationStore.get(req.tenant!.tenant_id, link_id);
+      if (!entry) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_link', message: `unknown link_id: ${link_id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  /** POST /v1/aml/correlation/links — create. */
+  app.post(
+    '/v1/aml/correlation/links',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const entry = amlCorrelationStore.link(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as never,
+          actor,
+          now(),
+        );
+        return res.status(201).json(
+          wrapResponse(entry, ctx, { code: 'EWS_201', message: 'Linked' }),
+        );
+      } catch (e) {
+        if (e instanceof AmlCorrelationError) {
+          if (e.code === 'duplicate_link') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_duplicate_link', message: e.message, severity: 'MEDIUM', detail: e.detail },
+                ctx,
+              ),
+            );
+          }
+          if (e.code === 'cap_reached') {
+            return res.status(409).json(
+              wrapError(
+                { code: 'EWS_409_cap_reached', message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM', detail: e.detail },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'link failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** DELETE /v1/aml/correlation/links/:link_id — soft-delete + archive. */
+  app.delete(
+    '/v1/aml/correlation/links/:link_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor =
+        ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const link_id = req.params.link_id ?? '';
+      try {
+        const tombstoned = amlCorrelationStore.softDelete(
+          req.tenant!.tenant_id,
+          link_id,
+          actor,
+          now(),
+        );
+        try {
+          await recoveryStore.archive({
+            tenant_id: req.tenant!.tenant_id,
+            module: 'bff',
+            entity_type: 'aml_correlation_link',
+            original_id: link_id,
+            original_table: 'app_admin.aml_correlation_links',
+            payload: tombstoned as unknown as Record<string, unknown>,
+            deleted_by: actor,
+            deletion_reason: null,
+            source_action: 'bff:DELETE /v1/aml/correlation/links/:link_id',
+            prior_status: null,
+          });
+        } catch {
+          /* archive failure does not roll back the delete */
+        }
+        return res.status(204).send();
+      } catch (e) {
+        if (e instanceof AmlCorrelationError) {
+          if (e.code === 'unknown_link') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_link', message: e.message, severity: 'LOW' },
                 ctx,
               ),
             );
