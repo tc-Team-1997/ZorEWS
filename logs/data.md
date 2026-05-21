@@ -276,3 +276,48 @@ pipeline-svc:
 
 ### Sub-phase tally
 - T6 tally **164 → 165**.
+
+## 2026-05-21 — T4.25 Unified read-only view layer (+ Phase R: dbt warm-up)
+
+### Phase R (preconditions)
+
+- Installed `dbt-postgres==1.8.2` into `.venv/` (pulled in `dbt-core 1.11.0b3`)
+- Copied `~/.dbt/profiles.yml` from `data/dbt/profiles.yml.example` (targets `zorews-pg:55432` / db `zorews` / user `zorews_user`)
+- Added `.venv/lib/python3.9/site-packages/sitecustomize.py` to force IPv4-only DNS resolution — IPv6 path to dbt hub was hanging in SYN_SENT state; remove this file if/when IPv6 is restored
+- `dbt deps`: 12s — installed dbt-labs/dbt_utils 1.3.3, calogica/dbt_expectations 0.10.4, calogica/dbt_date 0.10.1
+- `dbt seed --full-refresh`: 4m44s — 5 seeds × 581,369 rows total (10k customers / 24k loans / 247,550 repayments / 289,819 transactions / 10k bureau scores) into raw.*
+- `dbt run`: 9s — 9 of 10 models built; `feature_store.feat_values_backfill` failed with `column "txn_count_zscore_90d" does not exist` (in-flight T2.1 work; unrelated to T4.25 — the 4 mart tables T4.25 needs all materialised)
+- `dbt test`: 1.3s — 79/79 tests pass
+
+### T4.25 work
+
+**Files touched:**
+- Created: `data/schema/035_unified_views.sql` (~300 lines: schema + ALTER approvals + 7 supporting indexes + 4 views + COMMENT ON × ~80 + future-promotion template)
+- Created: `data/schema/035_unified_views_rollback.sql` (~30 lines)
+- Created: `services/bff/__tests__/unified_views_pg.test.ts` (~400 lines: 5 existence + 3 customer_360 + 2 alerts + 2 cases + 3 audit + 2 ORM-readability + 8 perf = 25 tests, all passing)
+- Modified: `docs/database-schema.md` (appended `## Schema: unified` section)
+- Modified: `TASKS.md` (T4.25 entry under Phase 4, ticked)
+- Modified: `STATUS.md` (entry under 2026-05-21)
+- Spec: `docs/unified-view-layer-design.md` (576 → ~600 lines after Phase R reality-correction)
+- Plan: `docs/unified-view-layer-plan.md` (1691 lines, executed end-to-end)
+- Memory: 3 new feedback files (Hinglish communication style + subagent execution preference + zorews-pg connection)
+
+**Decisions logged in spec/plan (no change here):**
+- `unified` schema name (not `app_unified` / `zorews_unified` / `public`)
+- Plain VIEW (not MATERIALIZED) — promotion path in §6.5
+- `tenant_id` as first-class column (no RLS, no session-var auto-filter)
+- `has_blocking_caps` (not `blocking_close`) per §5.0 boolean convention
+- Hand-managed SQL (not dbt-owned) — keeps dbt boundary at mart
+- `app_audit.approvals` tenant_id added by 035 (T4.20 shipped pre-T4.24 P3)
+- Reality correction: mart projects `full_name` / `risk_rating` / `total_outstanding` / `as_of` — views rename via `AS`; `pd_score` not present in current dbt projection (only `risk_rating` text bucket) so omitted from view + alerts/cases overlays
+
+**Hand-offs:**
+- **v1.5+ consumer migrations** (one ticket per `PgStore`) — `services/bff/src/mapping.ts` is the first natural candidate (drops in-code lookup hydration in favour of `SELECT * FROM unified.alerts`); future tickets for each of T4.13–T4.18 stores
+- **T4.6 builder catalog extension** — add `unified.*` as additional data sources in the self-service report builder catalog (separate ticket, out of T4.25 scope)
+- **Year-2 perf** — promote `unified.audit_activity` to materialized if/when audit volume crosses the §10.5 200ms p95 budget; promotion DDL template is in `035_unified_views.sql` Section 9 (commented out)
+- **v1.1 PD overlay** — once T2.1 feature-store lands a `pd_score` column on the mart, add `pd_score` to `unified.customer_360` + `customer_pd_score` overlays to `unified.alerts` + `unified.cases`
+- **Seed-data quality** — synthetic seed has all 528 BANK_DEMO cases referencing alert_ids absent from `app_alerts.alerts`; tracked in spec §11 as a separate seed-quality follow-up (production cases ARE created from alerts so the FK relationship holds naturally; seed generator fix out of T4.25 scope)
+
+**Subagent dispatch attempted but unavailable** — initial Agent tool call failed with "Usage credits are required for long context requests"; haiku retry hit "Prompt is too long". Fell back to inline execution per the user's autonomous-mode contract + system "make the reasonable call" guidance. Per-task commit + self-review structure preserved; lost the fresh-agent-per-task context isolation.
+
+**No blockers.**

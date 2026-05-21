@@ -620,6 +620,34 @@ Saved-scenario records from the SPA's `/scenario` page. The full result snapshot
 
 ---
 
+## Schema: `unified` (read-only view layer)
+
+Added 2026-05-21 (T4.25). Spec: `docs/unified-view-layer-design.md` · Plan: `docs/unified-view-layer-plan.md` · Migration: `data/schema/035_unified_views.sql` (+ `_rollback.sql`).
+
+Read-only view layer flattening cross-schema joins for SPA + reporting + ad-hoc DBeaver. Underlying schemas (raw / staging / mart / audit / app_*) remain authoritative for writes — `unified.*` does not participate in any write path (Pg planner refuses INSERTs on plain VIEWs).
+
+| View | Identity | Source tables (LEFT JOIN unless noted) | Purpose |
+|---|---|---|---|
+| `unified.customer_360` | `(tenant_id, customer_id)` | `mart.customer_360` + LATERAL aggregates over `app_alerts.alerts`, `app_cases.cases`, `app_audit.approvals` | SPA dashboard hot-path — customer + risk overlay + open-counts per customer |
+| `unified.alerts` | `alert_id` | `app_alerts.alerts` + LEFT JOIN `mart.customer_360` | Alert list-row with denormalised customer + rule + risk overlay |
+| `unified.cases` | `case_id` | `app_cases.cases` + LATERAL aggregates over `actions`/`cas_records`/`caps` + LEFT JOIN `mart.customer_360` | Case list-row with CAS+CAP rollups + `has_blocking_caps` close-gate column (T4.19) |
+| `unified.audit_activity` | `(source, event_id)` | UNION ALL: `audit.event_log` + `app_iam.audit_events` + `app_audit.approvals` | Regulator-facing timeline; `source` discriminator (`chain` / `auth_local` / `approval`) |
+
+**Properties:**
+- All plain `VIEW` (not `MATERIALIZED`). Always-live, zero refresh cost.
+- `tenant_id` exposed as first-class column on every view (no RLS, no auto-filter — callers WHERE-clause explicitly per T4.24 convention).
+- `COMMENT ON VIEW` carries `IDENTITY: (...)` prefix → ORM tooling can recover the primary key from pg catalog without parsing this doc.
+- `COMMENT ON COLUMN` populated for every column (~75 comments total).
+- Future MATERIALIZED VIEW promotion preserves the column/name contract — template included as commented block in `035_unified_views.sql` Section 9.
+
+**Supporting indexes added by 035:** `app_audit.approvals_tenant_idx`, `approvals_correlation_status_idx`, `app_alerts.alerts_tenant_customer_idx`, `app_cases.cases_tenant_customer_idx`, `app_cases.cas_records_case_review_idx`, `app_cases.caps_case_status_idx`, `app_cases.actions_case_id_idx`. The migration also adds `app_audit.approvals.tenant_id` (T4.20 shipped pre-T4.24 P3).
+
+**Rollback:** `psql -f 035_unified_views_rollback.sql` — drops 4 views + unified schema + 5 supporting indexes. The `app_audit.approvals.tenant_id` column is preserved by default (additive, harmless; uncomment last block to fully revert).
+
+**Tests:** `services/bff/__tests__/unified_views_pg.test.ts` (25 tests, gated on `BFF_PG_URL`/`ADMIN_PG_URL`). Covers existence, BANK_DEMO data, tenant isolation, JOIN integrity (LEFT JOIN preserves rows incl. orphan cases — see spec §11 known-gap), UNION shape, read-only sanity, WORM preservation via INSERT into audit.event_log → visible in view + DELETE refused, `has_blocking_caps` correctness, ORM-readability comments parse, perf budget (p95 < target × 3 for local-machine variance margin).
+
+---
+
 ## Seed data (synthetic, prototype only)
 
 Two generators produce the synthetic data; both are deterministic (seed 42 / 43 respectively):
