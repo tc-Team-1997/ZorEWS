@@ -2627,9 +2627,130 @@ const _mswFeatureStoreHandlers = [
   }),
 ];
 
+// ── T2.12.1.SPA — Streaming Latency dashboard MSW handlers ──────────
+
+// Seed 24 synthetic records — mix of healthy (under-60s) and a slow
+// tail so the SLO banner + by_indicator rollup render meaningfully.
+const _mswStreamingRecords = (function buildSeed() {
+  const now = Date.now();
+  const records = [];
+  const indicators = ['FIN-001', 'BEH-002', 'TXN-001', 'CRD-003'];
+  for (let i = 0; i < 24; i++) {
+    const ind = indicators[i % indicators.length];
+    // 20 fast + 4 slow distribution.
+    const total = i < 20 ? 800 + (i % 5) * 1200 : 65_000 + (i % 4) * 8_000;
+    const processed = now - i * 4_000;
+    records.push({
+      event_id: `sie-BIL-${now}-${i + 1}`,
+      tenant_id: 'BIL',
+      indicator_id: ind,
+      customer_id: `CUST-${100 + (i % 8)}`,
+      observed_at: new Date(processed - total).toISOString(),
+      received_at: new Date(processed - Math.floor(total / 2)).toISOString(),
+      processed_at: new Date(processed).toISOString(),
+      ingest_latency_ms: Math.floor(total / 2),
+      processing_latency_ms: Math.floor(total / 2),
+      total_latency_ms: total,
+      fired_alert_ids: [],
+      fired_rule_ids: [],
+    });
+  }
+  return records;
+})();
+
+function _mswPercentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo));
+}
+
+function _mswStreamingSummary() {
+  const records = _mswStreamingRecords;
+  const totals = records.map((r) => r.total_latency_ms);
+  const procs = records.map((r) => r.processing_latency_ms);
+  const sortedTotals = [...totals].sort((a, b) => a - b);
+  const sortedProcs = [...procs].sort((a, b) => a - b);
+  const mean = (arr: number[]) =>
+    arr.length ? Math.round(arr.reduce((s, n) => s + n, 0) / arr.length) : null;
+  const under = totals.filter((t) => t < 60_000).length;
+
+  // by_indicator
+  const groups = new Map<string, number[]>();
+  for (const r of records) {
+    const arr = groups.get(r.indicator_id);
+    if (arr) arr.push(r.total_latency_ms);
+    else groups.set(r.indicator_id, [r.total_latency_ms]);
+  }
+  const by_indicator = Array.from(groups.entries())
+    .map(([indicator_id, ts]) => {
+      const s = [...ts].sort((a, b) => a - b);
+      const u = ts.filter((t) => t < 60_000).length;
+      return {
+        indicator_id,
+        count: ts.length,
+        mean_total_ms: mean(ts) ?? 0,
+        median_total_ms: _mswPercentile(s, 0.5),
+        p95_total_ms: _mswPercentile(s, 0.95),
+        max_total_ms: s[s.length - 1],
+        count_under_60s: u,
+        percentage_under_60s: Math.round((u / ts.length) * 10_000) / 10_000,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.indicator_id.localeCompare(b.indicator_id));
+
+  const newestAt = records.reduce((acc, r) => (r.processed_at > acc ? r.processed_at : acc), records[0]?.processed_at ?? '');
+  const oldestAt = records.reduce((acc, r) => (r.processed_at < acc ? r.processed_at : acc), records[0]?.processed_at ?? '');
+
+  return {
+    tenant_id: 'BIL',
+    generated_at: new Date().toISOString(),
+    sample_size: records.length,
+    mean_total_ms: mean(totals),
+    median_total_ms: _mswPercentile(sortedTotals, 0.5),
+    p95_total_ms: _mswPercentile(sortedTotals, 0.95),
+    max_total_ms: sortedTotals[sortedTotals.length - 1],
+    min_total_ms: sortedTotals[0],
+    mean_processing_ms: mean(procs),
+    p95_processing_ms: _mswPercentile(sortedProcs, 0.95),
+    count_under_60s: under,
+    count_over_60s: records.length - under,
+    percentage_under_60s: Math.round((under / records.length) * 10_000) / 10_000,
+    target_p95_60s_met: _mswPercentile(sortedTotals, 0.95) < 60_000,
+    by_indicator,
+    total_indicators: groups.size,
+    most_recent_at: newestAt || null,
+    oldest_at: oldestAt || null,
+  };
+}
+
+const _mswStreamingLatencyHandlers = [
+  http.get('/v1/streaming/latency', () => {
+    return HttpResponse.json(envelope(_mswStreamingSummary()));
+  }),
+  http.get('/v1/streaming/events', ({ request }) => {
+    const url = new URL(request.url);
+    const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+    // Newest-first.
+    const newestFirst = [..._mswStreamingRecords].sort((a, b) =>
+      b.processed_at.localeCompare(a.processed_at),
+    );
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        total: Math.min(limit, newestFirst.length),
+        events: newestFirst.slice(0, limit),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
+  ..._mswStreamingLatencyHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

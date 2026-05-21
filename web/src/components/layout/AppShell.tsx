@@ -28,6 +28,7 @@ import {
   Trash2,
   BarChart3,
   Database,
+  Gauge,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -58,6 +59,7 @@ const NAV: readonly NavItem[] = [
   { to: '/reports/builder', i18nKey: 'report_builder', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/analytics', i18nKey: 'analytics', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/admin/feature-store', i18nKey: 'feature_store', icon: Database, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+  { to: '/admin/streaming-latency', i18nKey: 'streaming_latency', icon: Gauge, requireRole: ['admin', 'supervisor'] },
   { to: '/profile/sessions', i18nKey: 'my_sessions', icon: Smartphone },
   { to: '/profile/activity', i18nKey: 'my_activity', icon: History },
   { to: '/admin/users', i18nKey: 'users', icon: UsersRound, requireRole: ['admin'] },
