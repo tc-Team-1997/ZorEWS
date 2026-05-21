@@ -31,6 +31,12 @@ import {
   type IUnifiedCasesReader,
   makeUnifiedCasesReaderFromEnv,
 } from './cases_unified_reader';
+import {
+  type IUnifiedAuditActivityReader,
+  isAuditActivitySource,
+  makeUnifiedAuditActivityReaderFromEnv,
+  type AuditActivitySource,
+} from './audit_activity_unified_reader';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -986,6 +992,13 @@ export interface AppDeps {
    */
   casesReader?: IUnifiedCasesReader;
   /**
+   * v1.5 B3 — unified.audit_activity reader. Drives the new
+   * /v1/admin/audit-activity admin surface (additive — distinct from
+   * the in-memory M15.1 auditTrailStore which serves /v1/audit/*).
+   * When undefined, /v1/admin/audit-activity routes return 501.
+   */
+  auditActivityReader?: IUnifiedAuditActivityReader;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1419,6 +1432,8 @@ export function makeApp(deps: AppDeps = {}) {
   // fall through to the cases-svc HTTP proxy. Wired by bootstrap when
   // BFF_PG_URL set.
   const casesReader: IUnifiedCasesReader | undefined = deps.casesReader;
+  const auditActivityReader: IUnifiedAuditActivityReader | undefined =
+    deps.auditActivityReader;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -24914,6 +24929,185 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/audit-activity (v1.5 B3) — cross-chain admin
+   *  audit timeline backed by unified.audit_activity (UNIONs
+   *  audit.event_log WORM + app_iam.audit_events auth-svc local +
+   *  app_audit.approvals maker-checker). Distinct from M15.1
+   *  /v1/audit/* — that surface reads the in-memory BIL ledger; this
+   *  reads pg-side cross-chain history. Filter axes: source[],
+   *  actor, action, resource_type, resource_id, correlation_id,
+   *  since, until. Newest-first. Requires unified.audit_activity
+   *  reader to be wired (BFF_PG_URL set). 501 envelope when in-memory. */
+  app.get(
+    '/v1/admin/audit-activity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!auditActivityReader) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_available',
+              message:
+                'unified.audit_activity reader not wired — requires ' +
+                'BFF_PG_URL pointing at a database with the unified.* ' +
+                'views. In-memory BFF instances cannot serve this surface.',
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      // Parse + validate filters
+      const sourceRaw = req.query.source as string | undefined;
+      let source: AuditActivitySource[] | undefined;
+      if (sourceRaw !== undefined) {
+        const parts = sourceRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const p of parts) {
+          if (!isAuditActivitySource(p)) {
+            return res.status(400).json(
+              wrapError(
+                {
+                  code: 'EWS_400_invalid_source',
+                  message:
+                    `Invalid source '${p}'. Must be one of chain, auth_local, approval.`,
+                  severity: 'MEDIUM',
+                },
+                ctx,
+              ),
+            );
+          }
+        }
+        source = parts as AuditActivitySource[];
+      }
+      const limitRaw = req.query.limit as string | undefined;
+      let limit: number | undefined;
+      if (limitRaw !== undefined) {
+        const n = Number(limitRaw);
+        if (!Number.isFinite(n)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'limit must be an integer',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        limit = Math.floor(n);
+      }
+      try {
+        const events = await auditActivityReader.fetchActivity({
+          tenant_id: req.tenant!.tenant_id,
+          source,
+          actor: req.query.actor as string | undefined,
+          action: req.query.action as string | undefined,
+          resource_type: req.query.resource_type as string | undefined,
+          resource_id: req.query.resource_id as string | undefined,
+          correlation_id: req.query.correlation_id as string | undefined,
+          since: req.query.since as string | undefined,
+          until: req.query.until as string | undefined,
+          limit,
+        });
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              total: events.length,
+              events,
+            },
+            ctx,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /** GET /v1/admin/audit-activity/correlation/:correlation_id
+   *  (v1.5 B3) — full cross-source ladder for one workflow,
+   *  oldest-first. Drives "show me everything that happened to
+   *  case X across approvals + WORM + auth" workflows. */
+  app.get(
+    '/v1/admin/audit-activity/correlation/:correlation_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!auditActivityReader) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_available',
+              message:
+                'unified.audit_activity reader not wired — requires ' +
+                'BFF_PG_URL pointing at a database with the unified.* views.',
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const limitRaw = req.query.limit as string | undefined;
+      let limit: number | undefined;
+      if (limitRaw !== undefined) {
+        const n = Number(limitRaw);
+        if (!Number.isFinite(n)) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'limit must be an integer',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        limit = Math.floor(n);
+      }
+      try {
+        const events = await auditActivityReader.fetchByCorrelationId(
+          req.tenant!.tenant_id,
+          req.params.correlation_id,
+          limit,
+        );
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              correlation_id: req.params.correlation_id,
+              total: events.length,
+              events,
+            },
+            ctx,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   /** GET /v1/audit/per-actor-activity (T6 M15.8) — actor-pivoted
    *  rollup over the audit chain. Per-actor: total_events,
    *  distinct_actions, by_action_top (top 5), by_outcome (every
@@ -31233,6 +31427,15 @@ if (require.main === module) {
     if (casesReader) {
       console.log('[bff] unified.cases reader wired (v1.5 B4)');
     }
+    // v1.5 B3 — unified.audit_activity reader; cross-chain pg audit
+    // timeline (UNIONs audit.event_log WORM + app_iam.audit_events +
+    // app_audit.approvals). Drives new /v1/admin/audit-activity surface.
+    // Distinct from M15.1 in-memory auditTrailStore (serves /v1/audit/*).
+    // Undefined → /v1/admin/audit-activity routes 501.
+    const auditActivityReader = await makeUnifiedAuditActivityReaderFromEnv();
+    if (auditActivityReader) {
+      console.log('[bff] unified.audit_activity reader wired (v1.5 B3)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -31242,6 +31445,7 @@ if (require.main === module) {
       orphanScanner,
       customerOverlayReader,
       casesReader,
+      auditActivityReader,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
