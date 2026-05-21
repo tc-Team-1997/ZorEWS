@@ -18,6 +18,10 @@ import {
   makeUnifiedAlertsReader,
   makeUnifiedAlertsReaderFromEnv,
 } from './alerts_unified_reader';
+import {
+  type IOrphanScanner,
+  PgOrphanScanner,
+} from './data_quality_diagnostics';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -13325,6 +13329,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/vertical-weight-matrix (T6 M4.18) — 2D
+   *  cross-tab combining M4.13 vertical axis × M4.15 weight buckets.
+   *  Rows = 2 ScoringVerticals × cols = 5 weight buckets (low /
+   *  low_medium / medium / high / critical) = 10 cells. Each indicator
+   *  in STUB_CATALOG lives in exactly one cell. Same strict-< upper
+   *  bound semantics as M4.15 (critical inclusive at 1.0). Per-row:
+   *  {vertical, total, by_bucket (every bucket at 0), buckets_without[]
+   *  canonical, mean_weight (rounded 4 decimals), min/max_weight}.
+   *  Per-col: {bucket, label, min, max, max_inclusive, total,
+   *  by_vertical (every vertical at 0), verticals_without[]}.
+   *  Envelope: peak_cell (canonical iteration tie-break) +
+   *  empty_cells[] (canonical row-major) + most_diverse_vertical +
+   *  heaviest_vertical (highest critical-bucket count). Mirror of
+   *  M4.16 / M14.28 / M3.14 / M15.14 matrix pattern. Platform-static.
+   *  Mounted BEFORE /thresholds so the literal segment isn't captured. */
+  app.get(
+    '/v1/indicators/vertical-weight-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorVerticalWeightMatrix } =
+        require('./indicator_vertical_weight_matrix') as
+        typeof import('./indicator_vertical_weight_matrix');
+      const out = buildIndicatorVerticalWeightMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/weight-histogram (T6 M4.15) — weight
    *  distribution histogram over the M6.2 STUB_CATALOG. 5 canonical
    *  buckets (low < 0.2 / low_medium [0.2, 0.4) / medium [0.4, 0.6) /
@@ -24581,6 +24614,72 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const out = auditTrailStore.verifyChainSample(req.tenant!.tenant_id, window, now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/admin/data-quality/orphan-references?sample_cap=N (v1.5 B6)
+   *  Diagnostic surface — surfaces FK-style references that fail to
+   *  resolve under the unified.* views' LEFT JOIN resilience. Read-only,
+   *  per-tenant, admin (audit:read). 3 orphan classes scanned:
+   *    1. cases_without_alert — case.alert_id ∉ app_alerts.alerts
+   *    2. alerts_without_customer — alert.customer_id ∉ mart.customer_360
+   *    3. approvals_without_case — approval.correlation_id (case-like
+   *       subject_type only) ∉ app_cases.cases
+   *  Returns per-class total_scanned + orphan_count + orphan_rate +
+   *  sample_orphans (cap 100 default, max 500). Requires the orphan
+   *  scanner to be wired (BFF_PG_URL set + pg pool); 501 envelope when
+   *  unavailable (in-memory mode). */
+  app.get(
+    '/v1/admin/data-quality/orphan-references',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!orphanScanner) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_available',
+              message:
+                'Orphan-reference scanner not wired — requires BFF_PG_URL ' +
+                'pointing at a database with unified.* views. In-memory ' +
+                'BFF instances cannot scan FK-style references.',
+              severity: 'LOW',
+            },
+            ctx,
+          ),
+        );
+      }
+      const sampleCapRaw = req.query.sample_cap as string | undefined;
+      let sample_cap: number | undefined = undefined;
+      if (sampleCapRaw !== undefined) {
+        const n = Number(sampleCapRaw);
+        if (!Number.isFinite(n)) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'sample_cap must be an integer', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        sample_cap = Math.floor(n);
+      }
+      try {
+        const report = await orphanScanner.run({
+          tenant_id: req.tenant!.tenant_id,
+          sample_cap,
+          now,
+        });
+        res.json(wrapResponse(report, ctx));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
     },
   );
 
