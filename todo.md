@@ -56,7 +56,7 @@
 | 6 | Real-time risk alerts | 🆕 | T2.12 (new) | See §3.5 |
 | 6 | Case View — customer risk summary | ✅ | T3.6 | |
 | 6 | Action — Call / Visit | ✅ | T3.5, T3.6 | Action capture + log |
-| 6 | Location — field tracking (GPS) | ⏳ | T4.3 | Web action capture has GPS; mobile RN shell pending in T4.3 |
+| 6 | Location — field tracking (GPS) | ✅ | T4.3 | Web action capture has GPS; mobile RN shell closed 2026-05-21 — see `mobile/` workspace with 3 screens + 4 API client modules + auth/session + GPS hook + 46 jest tests (commits `aa876b2` + `b854f67`). Offline-sync queue + Expo build pipeline deferred. |
 
 ## §7 Integration
 
@@ -93,7 +93,7 @@
 
 | Feature | Status | TASKS.md | Notes |
 |---------|--------|----------|-------|
-| Mobile RN shell — Alert list, Case view, call/visit log, GPS | ⏳ | T4.3 | Phase 4 |
+| Mobile RN shell — Alert list, Case view, call/visit log, GPS | ✅ | T4.3 | Closed 2026-05-21 (commits `aa876b2` + `b854f67`). Workspace at `mobile/` with 3 screens + API client + auth/session + GPS hook + 46 jest tests. Offline-mode + native push + Expo build pipeline deferred. |
 
 ## Net-new tasks added by this audit
 
