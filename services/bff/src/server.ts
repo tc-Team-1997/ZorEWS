@@ -11497,6 +11497,59 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/freshness?fresh_days=&stale_days= (T6
+   *  M11.18) — per-dashboard layout freshness rollup. Each row carries
+   *  {dashboard_id, name, created_by, total_widgets, days_since_updated,
+   *  days_since_created, freshness ∈ 'recent'|'stable'|'stale'}.
+   *  Envelope: recent_count + stable_count + stale_count + mean +
+   *  oldest_updated + newest_updated + stale_dashboards[] cap 20.
+   *  Default thresholds fresh_days=30 / stale_days=90; both bounded
+   *  to non-negative integers + stale_days ≥ fresh_days. Mirror of
+   *  M13.11 admin config override-age pattern for the dashboards
+   *  surface. Drives quarterly stale-content cleanup per
+   *  docs/bau-runbook.md monthly checklist. Mounted BEFORE catch-all
+   *  `/custom/:dashboard_id` so the literal segment wins. */
+  app.get(
+    '/v1/dashboards/custom/freshness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const freshRaw = req.query.fresh_days as string | undefined;
+      const staleRaw = req.query.stale_days as string | undefined;
+      const fresh_days =
+        freshRaw === undefined ? 30 : Number.parseInt(freshRaw, 10);
+      const stale_days =
+        staleRaw === undefined ? 90 : Number.parseInt(staleRaw, 10);
+      const {
+        summarizeDashboardFreshness,
+        DashboardFreshnessError,
+      } = require('./custom_dashboard_freshness') as
+        typeof import('./custom_dashboard_freshness');
+      try {
+        const dashboards = customDashboardStore.list(req.tenant!.tenant_id);
+        const out = summarizeDashboardFreshness(
+          req.tenant!.tenant_id,
+          dashboards,
+          now(),
+          fresh_days,
+          stale_days,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof DashboardFreshnessError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/dashboards/custom/authorship (T6 M11.15) — PIVOT-BY-
    *  CREATED_BY rollup over saved dashboards. Per author:
    *  dashboard_count, total_widgets (Σ widgets.length), distinct_
