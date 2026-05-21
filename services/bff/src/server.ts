@@ -27,6 +27,10 @@ import {
   type IUnifiedCustomer360Reader,
   makeUnifiedCustomer360ReaderFromEnv,
 } from './customer_overlay_reader';
+import {
+  type IUnifiedCasesReader,
+  makeUnifiedCasesReaderFromEnv,
+} from './cases_unified_reader';
 import { makeAlertSource, type AlertSource } from './source';
 import { makeSeedLookups } from './lookups';
 import {
@@ -972,6 +976,16 @@ export interface AppDeps {
    */
   customerOverlayReader?: IUnifiedCustomer360Reader;
   /**
+   * v1.5 B4 — pg-backed reader for unified.cases. When set:
+   *   - /api/cases list reads directly from pg (skips HTTP hop to
+   *     cases-svc:8083)
+   *   - /api/cases/:id detail also reads from pg
+   *   - SPA gets has_blocking_caps + customer_risk_level for free
+   * When undefined, routes fall through to the existing HTTP proxy
+   * (preserved for in-memory + dev modes).
+   */
+  casesReader?: IUnifiedCasesReader;
+  /**
    * Override for tests — alert acknowledgment store (T6 M8.3). Defaults
    * to the module-level InMemoryAlertAckStore.
    */
@@ -1401,6 +1415,10 @@ export function makeApp(deps: AppDeps = {}) {
   // existing stub riskProfile path. Wired by bootstrap when BFF_PG_URL set.
   const customerOverlayReader: IUnifiedCustomer360Reader | undefined =
     deps.customerOverlayReader;
+  // v1.5 B4 — unified.cases reader; undefined → /api/cases + /api/cases/:id
+  // fall through to the cases-svc HTTP proxy. Wired by bootstrap when
+  // BFF_PG_URL set.
+  const casesReader: IUnifiedCasesReader | undefined = deps.casesReader;
   const alertAckStore = deps.alertAckStore ?? defaultAlertAckStore;
   const routingLedger = deps.routingLedger ?? defaultRoutingLedger;
   const autoAckRuleStore = deps.autoAckRuleStore ?? defaultAutoAckRuleStore;
@@ -2341,8 +2359,41 @@ export function makeApp(deps: AppDeps = {}) {
     res.json({ items });
   });
 
-  // /api/cases — list of cases for the SPA Cases page. Pulls from cases-svc.
+  // /api/cases — list of cases for the SPA Cases page.
+  // v1.5 B4: when unified.cases reader is wired, read directly from pg
+  // (skips HTTP hop to cases-svc + gains has_blocking_caps + customer
+  // risk overlay for free). Else fall through to the cases-svc proxy.
   app.get('/api/cases', requireRole('cases:list'), async (req, res) => {
+    if (casesReader) {
+      const tenant_id =
+        ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+      const stateRaw = req.query.state as string | undefined;
+      const assigneeRaw = req.query.assignee as string | undefined;
+      const customerRaw = req.query.customer_id as string | undefined;
+      const slaRaw = req.query.sla_status as string | undefined;
+      try {
+        const items = await casesReader.fetchList({
+          tenant_id,
+          state: stateRaw,
+          assignee: assigneeRaw,
+          customer_id: customerRaw,
+          sla_status: slaRaw
+            ? slaRaw.split(',').map((s) => s.trim()).filter(Boolean)
+            : undefined,
+        });
+        return res.json({ items });
+      } catch (e) {
+        // pg reader failed mid-call — fall through to cases-svc proxy
+        // rather than 502ing the route entirely (defensive — keeps
+        // SPA functional under transient pg blips).
+        console.warn(
+          '[bff] cases reader failed, falling back to cases-svc proxy:',
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
+    // Fallback path — existing cases-svc proxy (preserved for in-memory
+    // BFF + reader-mid-call-failure recovery).
     try {
       const baseUrl = process.env.APEX_CASES_URL ?? 'http://localhost:8083';
       const qs = new URLSearchParams(req.query as Record<string, string>).toString();
@@ -2376,7 +2427,27 @@ export function makeApp(deps: AppDeps = {}) {
   });
 
   // /api/cases/:id — single case detail
+  // v1.5 B4: when unified.cases reader is wired, read pg directly
+  // (no HTTP hop, has_blocking_caps + customer_risk_level overlays
+  // surfaced for free). Else fall through to cases-svc proxy.
   app.get('/api/cases/:id', requireRole('cases:read'), async (req, res) => {
+    if (casesReader) {
+      const tenant_id =
+        ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+      try {
+        const detail = await casesReader.fetchOne(tenant_id, req.params.id);
+        if (!detail) return res.status(404).json({ error: 'case not found' });
+        return res.json(detail);
+      } catch (e) {
+        // Fall through to cases-svc proxy on pg blip — defensive (B4
+        // pattern matches /api/cases above).
+        console.warn(
+          '[bff] case reader failed, falling back to cases-svc proxy:',
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
+    // Fallback path — existing cases-svc proxy.
     try {
       const baseUrl = process.env.APEX_CASES_URL ?? 'http://localhost:8083';
       const r = await fetch(`${baseUrl}/cases/${req.params.id}`, {
@@ -31154,6 +31225,14 @@ if (require.main === module) {
     if (customerOverlayReader) {
       console.log('[bff] unified.customer_360 reader wired (v1.5 B2)');
     }
+    // v1.5 B4 — unified.cases reader; drives /api/cases + /api/cases/:id
+    // direct pg reads (no HTTP hop to cases-svc, surfaces
+    // has_blocking_caps + customer_risk_level overlays for free).
+    // Undefined → routes fall through to existing cases-svc proxy.
+    const casesReader = await makeUnifiedCasesReaderFromEnv();
+    if (casesReader) {
+      console.log('[bff] unified.cases reader wired (v1.5 B4)');
+    }
     // Seed the 10 brief-mandated EWS rules into both tenants so the
     // RulesPlus / EwsRuleBuilder pages aren't empty on a fresh `make up`.
     const { app } = makeApp({
@@ -31162,6 +31241,7 @@ if (require.main === module) {
       unifiedAlertsReader,
       orphanScanner,
       customerOverlayReader,
+      casesReader,
       userAccessOverrideStore,
       rolesForUser: defaultRolesForUser,
       slaMatrixSource,
