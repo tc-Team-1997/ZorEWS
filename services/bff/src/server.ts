@@ -8322,6 +8322,35 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/variables/channel-matrix (T6 M10.18) — 2D
+   *  cross-tab elevating M10.13's inverted index. Rows = distinct
+   *  variables (open axis, sorted asc) × cols = 3 channels (canonical
+   *  email → sms → push). Cell counts the templates in that channel
+   *  requiring this variable. Per-row {variable, total, by_channel
+   *  (3 keys at 0 when absent), channels_with[] canonical,
+   *  channels_without[] canonical, spans_all_channels}. Per-col
+   *  {channel, total, distinct_variables, templates_count,
+   *  top_variables cap 5 sorted count desc + variable asc}. Envelope:
+   *  peak_cell (canonical iteration tie-break — variables asc ×
+   *  channels canonical), empty_cells[] canonical row-major,
+   *  most_universal_variable (most distinct non-zero channels +
+   *  canonical asc tie-break), cross_channel_variables (spans_all=true),
+   *  single_channel_variables (exactly 1 non-zero channel). Mirror of
+   *  M10.13 with 2D matrix shape. Platform-static. */
+  app.get(
+    '/v1/notifications/variables/channel-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildNotificationVariableChannelMatrix } =
+        require('./notification_variable_channel_matrix') as
+        typeof import('./notification_variable_channel_matrix');
+      const out = buildNotificationVariableChannelMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/email/templates — list canned BIL templates. */
   app.get(
     '/v1/notifications/email/templates',
