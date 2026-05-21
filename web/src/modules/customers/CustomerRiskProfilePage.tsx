@@ -13,6 +13,7 @@ import { Bell, Briefcase } from 'lucide-react';
 import {
   api,
   type Alert,
+  type AmlEwsCorrelation,
   type CaseState,
   type CaseSummary,
   type ShapReason,
@@ -23,6 +24,8 @@ import { Badge, type BadgeTone, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { color } from '@/styles/tokens';
 import { useChatContext } from '@/components/copilot/useChatContext';
+import { ShieldAlert } from 'lucide-react';
+import { useState } from 'react';
 
 const LEVEL_TONE: Record<string, BadgeTone> = {
   Low: 'success',
@@ -170,6 +173,13 @@ export function CustomerRiskProfilePage() {
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
         <LinkedAlertsPanel customerId={id} />
         <LinkedCasesPanel customerId={id} />
+      </div>
+
+      {/* AML ↔ EWS correlation — T3.3. Lists open AML matches for the
+          customer; running the forward correlation surfaces the
+          recommended action across alerts/cases/investigations. */}
+      <div className="mt-6">
+        <AmlCorrelationPanel customerId={id} />
       </div>
     </div>
   );
@@ -415,5 +425,171 @@ function ShapBars({ reasons }: { reasons: ShapReason[] }) {
         );
       })}
     </ul>
+  );
+}
+
+// ─── AML correlation panel (T3.3) ────────────────────────────────────
+
+const AML_SEVERITY_TONE: Record<string, BadgeTone> = {
+  high: 'danger',
+  medium: 'warning',
+  low: 'success',
+};
+
+const ACTION_TONE: Record<string, BadgeTone> = {
+  escalate_case: 'danger',
+  open_investigation: 'warning',
+  monitor: 'blue',
+  no_action: 'success',
+};
+
+const ACTION_LABEL: Record<string, string> = {
+  escalate_case: 'Escalate case',
+  open_investigation: 'Open investigation',
+  monitor: 'Monitor',
+  no_action: 'No action',
+};
+
+function AmlCorrelationPanel({ customerId }: { customerId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['aml.matches', customerId],
+    queryFn: () => api.amlMatchesForCustomer(customerId),
+  });
+
+  const [correlation, setCorrelation] = useState<AmlEwsCorrelation | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function runCorrelation(match_id: string) {
+    setRunning(true);
+    setError(null);
+    try {
+      const out = await api.amlCorrelateForward(match_id);
+      setCorrelation(out);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'correlation failed');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const matches = data?.matches ?? [];
+
+  return (
+    <Panel
+      title="AML correlation"
+      action={
+        <Link
+          to="/aml/dashboard"
+          className="text-2xs text-action hover:underline focus:outline-none focus:ring-2 focus:ring-brand-blue/40 rounded"
+        >
+          Open AML console →
+        </Link>
+      }
+    >
+      {isLoading && <p className="caption">Loading matches…</p>}
+      {!isLoading && matches.length === 0 && (
+        <div className="text-center py-6" data-testid="aml-empty">
+          <ShieldAlert size={18} className="mx-auto text-muted mb-2" />
+          <p className="text-[12px] text-muted">No AML matches on this customer.</p>
+        </div>
+      )}
+      {matches.length > 0 && (
+        <div data-testid="aml-matches" className="space-y-3">
+          <ul className="divide-y divide-divider">
+            {matches.map((m) => (
+              <li key={m.match_id} className="py-2.5 flex items-start gap-3">
+                <Badge
+                  tone={AML_SEVERITY_TONE[m.severity] ?? 'neutral'}
+                  className="uppercase tracking-wide shrink-0"
+                >
+                  {m.severity}
+                </Badge>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-medium text-ink truncate">
+                    {m.list_entity_name}{' '}
+                    <span className="text-2xs text-muted font-normal">
+                      ({m.list_name})
+                    </span>
+                  </p>
+                  <p className="text-2xs text-muted mt-0.5">
+                    <span className="font-mono">{m.match_id}</span> · {m.match_type} ·
+                    status {m.status} · confidence{' '}
+                    <span className="tabular text-ink">{m.confidence_score.toFixed(2)}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="text-2xs text-action hover:underline disabled:opacity-50 shrink-0"
+                  disabled={running}
+                  onClick={() => runCorrelation(m.match_id)}
+                  data-testid={`correlate-${m.match_id}`}
+                >
+                  {running ? 'Running…' : 'Correlate →'}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {error && (
+            <div
+              className="rounded-md border border-danger bg-danger/10 px-3 py-2 text-2xs text-danger"
+              data-testid="aml-error"
+            >
+              {error}
+            </div>
+          )}
+
+          {correlation && (
+            <div
+              className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-2xs"
+              data-testid="correlation-result"
+            >
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div>
+                  <p className="text-[12px] font-medium text-ink">
+                    Correlation result —{' '}
+                    <span className="font-mono">{correlation.aml_match.match_id}</span>
+                  </p>
+                  <p className="text-2xs text-muted mt-0.5">
+                    Peak EWS severity:{' '}
+                    {correlation.peak_alert_severity ?? 'none'} ·
+                    bidirectional-high:{' '}
+                    {correlation.bidirectional_high_flag ? 'yes' : 'no'}
+                  </p>
+                </div>
+                <Badge tone={ACTION_TONE[correlation.recommended_action] ?? 'neutral'}>
+                  {ACTION_LABEL[correlation.recommended_action] ??
+                    correlation.recommended_action}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <CorrelationStat
+                  label="Linked alerts"
+                  count={correlation.linked_alerts.length}
+                />
+                <CorrelationStat
+                  label="Linked cases"
+                  count={correlation.linked_cases.length}
+                />
+                <CorrelationStat
+                  label="Investigations"
+                  count={correlation.linked_investigations.length}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function CorrelationStat({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="rounded border border-divider bg-surface px-2 py-1.5">
+      <p className="text-2xs text-muted">{label}</p>
+      <p className="text-base font-semibold text-ink tabular">{count}</p>
+    </div>
   );
 }

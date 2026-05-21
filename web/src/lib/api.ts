@@ -1493,7 +1493,107 @@ export const api = {
         params: filter,
       })
       .then((r) => r.data),
+
+  // ── AML ↔ EWS bidirectional correlation (T3.3) ──────────────────────
+  //
+  // Forward: given an AML match, return same-customer alerts/cases/
+  //          investigations + recommended_action.
+  // Reverse: given an EWS alert, return same-customer AML matches +
+  //          recommended_action.
+
+  amlMatchesForCustomer: (customer_id: string) =>
+    http
+      .get<EnvelopeBody<{ customer_id: string; matches: AmlMatch[] }>>(
+        '/v1/integrations/aml/matches',
+        { params: { customer_id } },
+      )
+      .then((r) => r.data),
+
+  amlCorrelateForward: (match_id: string) =>
+    http
+      .post<EnvelopeBody<AmlEwsCorrelation>>(
+        `/v1/aml/correlate/${encodeURIComponent(match_id)}`,
+        {},
+      )
+      .then((r) => r.data),
+
+  amlCorrelateReverse: (alert_id: string) =>
+    http
+      .post<EnvelopeBody<EwsAmlCorrelation>>(
+        `/v1/aml/correlate/by-alert/${encodeURIComponent(alert_id)}`,
+        {},
+      )
+      .then((r) => r.data),
 };
+
+// ── T3.3 correlation response shapes (mirror BFF aml_alert_correlation.ts) ──
+
+export type AmlMatchSeverity = 'high' | 'medium' | 'low';
+export type AmlMatchStatus = 'open' | 'cleared' | 'escalated' | 'false_positive';
+export type AmlMatchType = 'sanctions' | 'pep' | 'adverse_media' | 'internal';
+
+export interface AmlMatch {
+  match_id: string;
+  customer_id: string;
+  match_type: AmlMatchType;
+  severity: AmlMatchSeverity;
+  list_name: string;
+  list_entity_id: string;
+  list_entity_name: string;
+  confidence_score: number;
+  status: AmlMatchStatus;
+  status_changed_at: string | null;
+  status_changed_by: string | null;
+  detected_at: string;
+}
+
+export interface CorrelatedAlertLite {
+  id: string;
+  customer_id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  created_at: string;
+  rule_id?: string;
+  rule_name?: string;
+  status?: string;
+}
+
+export interface CorrelatedCaseLite {
+  case_id: string;
+  customer_id: string;
+  state: string;
+  created_at: string;
+  assignee_username?: string | null;
+}
+
+export interface CorrelatedInvestigationLite {
+  investigation_id: string;
+  customer_id: string;
+  status: string;
+  case_id?: string;
+  opened_at: string;
+}
+
+export interface AmlEwsCorrelation {
+  tenant_id: string;
+  generated_at: string;
+  aml_match: AmlMatch;
+  linked_alerts: CorrelatedAlertLite[];
+  linked_cases: CorrelatedCaseLite[];
+  linked_investigations: CorrelatedInvestigationLite[];
+  peak_alert_severity: CorrelatedAlertLite['severity'] | null;
+  bidirectional_high_flag: boolean;
+  recommended_action: 'escalate_case' | 'open_investigation' | 'monitor' | 'no_action';
+}
+
+export interface EwsAmlCorrelation {
+  tenant_id: string;
+  generated_at: string;
+  alert: CorrelatedAlertLite;
+  aml_matches: AmlMatch[];
+  peak_aml_severity: AmlMatchSeverity | null;
+  open_aml_high_flag: boolean;
+  recommended_action: 'sanctions_review' | 'kyc_refresh' | 'monitor' | 'no_action';
+}
 
 // CSV-encode array filters so the BFF can split with .split(',')
 function encodeCasesDetailParams(

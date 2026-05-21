@@ -645,6 +645,15 @@ import {
   type AmlMatchStatus,
 } from './integrations/aml';
 import {
+  CorrelationError as AmlEwsCorrelationError,
+  correlateAmlWithEws,
+  correlateEwsWithAml,
+  type AlertLite,
+  type CaseLite,
+  type CorrelationSources,
+  type InvestigationLite,
+} from './aml_alert_correlation';
+import {
   defaultDmsAdapter,
   DmsError,
   isDocumentStatus,
@@ -15555,6 +15564,199 @@ export function makeApp(deps: AppDeps = {}) {
             {
               code: 'EWS_502',
               message: e instanceof Error ? e.message : 'aml adapter failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  // ── AML ↔ EWS bidirectional correlation routes (T3.3) ────────────────
+  //
+  // Layered over the M14.3 AmlAdapter + the existing alert source, CMS
+  // case store, and case-investigation store. Forward: AML match →
+  // linked alerts/cases/investigations + recommended_action. Reverse:
+  // alert → AML matches + recommended_action. No new schema; pure
+  // composer that adapts the BFF's existing surfaces to the
+  // `CorrelationSources` interface the pure functions expect.
+
+  /** Adapter shim — bridges the bff stores into CorrelationSources. */
+  const correlationSources: CorrelationSources = {
+    async listAlertsForCustomer(tenant_id, customer_id) {
+      // AlertSource carries CanonicalAlert (uppercase severity); convert
+      // to AlertLite by lowercasing severity + filtering to tenant via the
+      // alert.alert_id prefix wouldn't be reliable, so we just filter by
+      // customer_id and rely on the SmartQueue / source already being
+      // tenant-scoped at the producer (M8.6 records each routed alert
+      // with its tenant_id baked in upstream).
+      const rows = source.read().filter((a) => a.customer_id === customer_id);
+      const items: AlertLite[] = rows.map((a) => {
+        const sev = (a.severity ?? 'LOW').toLowerCase() as AlertLite['severity'];
+        const ruleName = lookups.rules[a.rule_id]?.name;
+        return {
+          id: a.alert_id,
+          customer_id: a.customer_id,
+          severity: sev === 'critical' || sev === 'high' || sev === 'medium' || sev === 'low' ? sev : 'low',
+          created_at: a.raised_at,
+          rule_id: a.rule_id,
+          rule_name: ruleName,
+        };
+      });
+      // Newest-first by created_at.
+      items.sort((a, b) => (b.created_at < a.created_at ? -1 : b.created_at > a.created_at ? 1 : 0));
+      return items;
+    },
+
+    async listCasesForCustomer(tenant_id, customer_id) {
+      // CmsCase is alert-id-keyed (no customer_id column). Build a
+      // (alert_id → customer_id) join over the AlertSource then filter
+      // cases whose alert_id maps to the target customer. Tenant cap is
+      // 1000 so this is bounded.
+      const alertsForCustomer = new Set(
+        source
+          .read()
+          .filter((a) => a.customer_id === customer_id)
+          .map((a) => a.alert_id),
+      );
+      const all = cmsCaseStore.list(tenant_id, {});
+      const items: CaseLite[] = all
+        .filter((c) => c.alert_id !== null && alertsForCustomer.has(c.alert_id))
+        .map((c) => ({
+          case_id: c.case_id,
+          customer_id,
+          state: c.status,
+          created_at: c.created_at,
+          assignee_username: c.assigned_to ?? null,
+        }));
+      return items;
+    },
+
+    async listInvestigationsForCustomer(tenant_id, customer_id) {
+      // CaseInvestigationStore.list supports `customer_id` filter directly.
+      const out = caseInvestigationStore.list(tenant_id, { customer_id, page_size: 200 });
+      const items: InvestigationLite[] = out.items.map((i) => ({
+        investigation_id: i.investigation_id,
+        customer_id: i.customer_id,
+        status: i.status,
+        case_id: i.case_id,
+        opened_at: i.opened_at,
+      }));
+      return items;
+    },
+  };
+
+  /** Look one alert up across the AlertSource by id (tenant-aware via the
+   *  source's tenant-scoped upstream). */
+  async function alertLookupForCorrelation(
+    _tenant_id: string,
+    alert_id: string,
+  ): Promise<AlertLite | null> {
+    const rows = source.read().filter((a) => a.alert_id === alert_id);
+    if (rows.length === 0) return null;
+    const a = rows[0];
+    const sev = (a.severity ?? 'LOW').toLowerCase();
+    return {
+      id: a.alert_id,
+      customer_id: a.customer_id,
+      severity: sev === 'critical' || sev === 'high' || sev === 'medium' || sev === 'low' ? (sev as AlertLite['severity']) : 'low',
+      created_at: a.raised_at,
+      rule_id: a.rule_id,
+      rule_name: lookups.rules[a.rule_id]?.name,
+    };
+  }
+
+  /** Helper — map a CorrelationError code to an HTTP envelope. */
+  function emitCorrelationError(
+    res: Response,
+    ctx: ReturnType<typeof extractCtx>,
+    e: AmlEwsCorrelationError,
+  ) {
+    if (e.code === 'unknown_match') {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_match', message: e.message, severity: 'LOW' }, ctx),
+      );
+    }
+    if (e.code === 'unknown_alert') {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_alert', message: e.message, severity: 'LOW' }, ctx),
+      );
+    }
+    return res.status(400).json(
+      wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+    );
+  }
+
+  /**
+   * POST /v1/aml/correlate/:match_id
+   * Forward correlation. For a given AML match, returns the same-customer
+   * EWS alerts + cases + investigations + recommended action.
+   */
+  app.post(
+    '/v1/aml/correlate/:match_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const match_id = req.params.match_id ?? '';
+      try {
+        const out = await correlateAmlWithEws(
+          match_id,
+          req.tenant!.tenant_id,
+          amlAdapter,
+          correlationSources,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AmlEwsCorrelationError) {
+          return emitCorrelationError(res, ctx, e);
+        }
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'correlation failed',
+              severity: 'HIGH',
+            },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  /**
+   * POST /v1/aml/correlate/by-alert/:alert_id
+   * Reverse correlation. For a given EWS alert, returns AML matches on
+   * the same customer + recommended action.
+   */
+  app.post(
+    '/v1/aml/correlate/by-alert/:alert_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const alert_id = req.params.alert_id ?? '';
+      try {
+        const out = await correlateEwsWithAml(
+          alert_id,
+          req.tenant!.tenant_id,
+          alertLookupForCorrelation,
+          amlAdapter,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AmlEwsCorrelationError) {
+          return emitCorrelationError(res, ctx, e);
+        }
+        return res.status(502).json(
+          wrapError(
+            {
+              code: 'EWS_502',
+              message: e instanceof Error ? e.message : 'correlation failed',
               severity: 'HIGH',
             },
             ctx,

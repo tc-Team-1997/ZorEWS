@@ -82,4 +82,20 @@ describe('CustomerRiskProfilePage', () => {
     renderProfile('c-108');
     expect(await screen.findByTestId('linked-cases-empty')).toBeInTheDocument();
   });
+
+  // ── T3.3 AML correlation panel ────────────────────────────────────
+
+  it('AML correlation panel shows the open match for the customer', async () => {
+    // c-101 has a single seeded AML match in the MSW fixture.
+    renderProfile('c-101');
+    const block = await screen.findByTestId('aml-matches');
+    expect(block).toBeInTheDocument();
+    expect(screen.getByText(/Sample Watchlist Entity/)).toBeInTheDocument();
+    expect(screen.getByTestId('correlate-aml-m-101')).toBeInTheDocument();
+  });
+
+  it('AML correlation panel shows empty state for customers with no matches', async () => {
+    renderProfile('c-108');
+    expect(await screen.findByTestId('aml-empty')).toBeInTheDocument();
+  });
 });

@@ -2501,6 +2501,89 @@ function _mswFeatureValueAt(customer_id: string, name: string, at: Date, range: 
 }
 
 const _mswFeatureStoreHandlers = [
+  // ── AML ↔ EWS correlation (T3.3) ────────────────────────────────────
+  http.get('/v1/integrations/aml/matches', ({ request }) => {
+    const url = new URL(request.url);
+    const cid = url.searchParams.get('customer_id') ?? '';
+    // Deterministic dev fixture: c-101 has one open sanctions match.
+    const matches =
+      cid === 'c-101'
+        ? [
+            {
+              match_id: 'aml-m-101',
+              customer_id: cid,
+              match_type: 'sanctions' as const,
+              severity: 'high' as const,
+              list_name: 'OFAC SDN',
+              list_entity_id: 'E-9001',
+              list_entity_name: 'Sample Watchlist Entity',
+              confidence_score: 0.88,
+              status: 'open' as const,
+              status_changed_at: null,
+              status_changed_by: null,
+              detected_at: new Date().toISOString(),
+            },
+          ]
+        : [];
+    return HttpResponse.json(envelope({ customer_id: cid, matches }));
+  }),
+
+  http.post('/v1/aml/correlate/:match_id', ({ params }) => {
+    const match_id = String(params.match_id ?? '');
+    if (match_id !== 'aml-m-101') {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_match', `unknown AML match: ${match_id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: new Date().toISOString(),
+        aml_match: {
+          match_id,
+          customer_id: 'c-101',
+          match_type: 'sanctions' as const,
+          severity: 'high' as const,
+          list_name: 'OFAC SDN',
+          list_entity_id: 'E-9001',
+          list_entity_name: 'Sample Watchlist Entity',
+          confidence_score: 0.88,
+          status: 'open' as const,
+          status_changed_at: null,
+          status_changed_by: null,
+          detected_at: new Date().toISOString(),
+        },
+        linked_alerts: [],
+        linked_cases: [],
+        linked_investigations: [],
+        peak_alert_severity: null,
+        bidirectional_high_flag: false,
+        recommended_action: 'open_investigation' as const,
+      }),
+    );
+  }),
+
+  http.post('/v1/aml/correlate/by-alert/:alert_id', ({ params }) => {
+    const alert_id = String(params.alert_id ?? '');
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BIL',
+        generated_at: new Date().toISOString(),
+        alert: {
+          id: alert_id,
+          customer_id: 'c-101',
+          severity: 'high' as const,
+          created_at: new Date().toISOString(),
+        },
+        aml_matches: [],
+        peak_aml_severity: null,
+        open_aml_high_flag: false,
+        recommended_action: 'no_action' as const,
+      }),
+    );
+  }),
+
   http.get('/v1/feature-store/catalog', () => {
     return HttpResponse.json(
       envelope({
