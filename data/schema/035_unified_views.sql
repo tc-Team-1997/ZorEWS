@@ -255,4 +255,126 @@ SELECT
     ap.payload                            AS metadata
 FROM app_audit.approvals ap;
 
+-- --------------------------------------------------------------------------
+-- Section 8: COMMENT ON VIEW + COMMENT ON COLUMN (spec §8.5 ORM contract)
+-- View comment starts with "IDENTITY: (...)" so the test (§10 item #13)
+-- can recover the identity tuple from the catalog.
+-- --------------------------------------------------------------------------
+
+COMMENT ON VIEW unified.customer_360 IS
+  'IDENTITY: (tenant_id, customer_id) — Customer 360 dashboard row. '
+  'LATERAL aggregates over alerts + cases + approvals. Read-only. See spec §5.1.';
+
+COMMENT ON COLUMN unified.customer_360.tenant_id IS 'BIL multi-tenant key (T4.24).';
+COMMENT ON COLUMN unified.customer_360.customer_id IS 'Business customer identifier (denormalised from mart.customer_360).';
+COMMENT ON COLUMN unified.customer_360.name IS 'Customer display name (mart.customer_360.full_name AS name).';
+COMMENT ON COLUMN unified.customer_360.risk_level IS 'Low/Medium/High text bucket (mart.customer_360.risk_rating AS risk_level).';
+COMMENT ON COLUMN unified.customer_360.exposure_kes IS 'Total outstanding exposure in Kenyan Shillings (mart.customer_360.total_outstanding AS exposure_kes).';
+COMMENT ON COLUMN unified.customer_360.dpd IS 'Worst days-past-due across customer loans (mart.customer_360.worst_dpd AS dpd).';
+COMMENT ON COLUMN unified.customer_360.kyc_status IS 'KYC verification status from mart.';
+COMMENT ON COLUMN unified.customer_360.segment IS 'Customer segment classification.';
+COMMENT ON COLUMN unified.customer_360.onboarded_at IS 'When the customer was first onboarded.';
+COMMENT ON COLUMN unified.customer_360.open_alerts_count IS 'Count of app_alerts.alerts rows with status=open for this customer.';
+COMMENT ON COLUMN unified.customer_360.max_criticality_score IS 'Maximum criticality_score across the open alerts (NULL when no open alerts).';
+COMMENT ON COLUMN unified.customer_360.latest_alert_at IS 'Most recent app_alerts.alerts.created_at for this customer (NULL when none).';
+COMMENT ON COLUMN unified.customer_360.open_cases_count IS 'Count of app_cases.cases rows with state<>closed for this customer.';
+COMMENT ON COLUMN unified.customer_360.breached_sla_count IS 'Count of cases with sla_status in (approaching, breached).';
+COMMENT ON COLUMN unified.customer_360.pending_approvals_count IS 'Count of app_audit.approvals with status=pending tied to this customer''s cases.';
+COMMENT ON COLUMN unified.customer_360.last_activity_at IS 'GREATEST(latest_alert_at, last_case_updated_at, mart.as_of) for sort-by-recency.';
+
+COMMENT ON VIEW unified.alerts IS
+  'IDENTITY: (alert_id) — Alert list-row view. LEFT JOIN to mart.customer_360 '
+  'for risk overlay. Read-only. See spec §5.2.';
+
+COMMENT ON COLUMN unified.alerts.tenant_id IS 'BIL multi-tenant key (T4.24).';
+COMMENT ON COLUMN unified.alerts.alert_id IS 'Globally unique deterministic alert id.';
+COMMENT ON COLUMN unified.alerts.customer_id IS 'Customer this alert pertains to.';
+COMMENT ON COLUMN unified.alerts.customer_name IS 'Customer display name, denormalised on the alert at write time.';
+COMMENT ON COLUMN unified.alerts.rule_id IS 'Triggering rule identifier.';
+COMMENT ON COLUMN unified.alerts.rule_name IS 'Rule display name, denormalised on the alert at write time.';
+COMMENT ON COLUMN unified.alerts.severity IS 'critical / high / medium / low.';
+COMMENT ON COLUMN unified.alerts.criticality_score IS 'AI-computed criticality score (see services/bff/src/criticality.ts).';
+COMMENT ON COLUMN unified.alerts.confidence IS 'Model confidence 0..1 in the alert.';
+COMMENT ON COLUMN unified.alerts.customer_exposure_kes IS 'Customer exposure (KES) at alert creation.';
+COMMENT ON COLUMN unified.alerts.indicators IS 'Indicator codes that fired (IND_TXN_*, IND_BEH_*, etc).';
+COMMENT ON COLUMN unified.alerts.status IS 'open / acked / closed.';
+COMMENT ON COLUMN unified.alerts.assignee IS 'Assigned user or role (NULL when unassigned).';
+COMMENT ON COLUMN unified.alerts.created_at IS 'When the alert was created.';
+COMMENT ON COLUMN unified.alerts.acked_at IS 'When the alert was acknowledged (NULL while open).';
+COMMENT ON COLUMN unified.alerts.closed_at IS 'When the alert was closed (NULL while open or acked).';
+COMMENT ON COLUMN unified.alerts.age_minutes IS 'Computed: (now - created_at) in minutes.';
+COMMENT ON COLUMN unified.alerts.customer_risk_level IS 'Customer risk_level from mart.risk_rating (NULL on orphan alerts).';
+COMMENT ON COLUMN unified.alerts.customer_total_exposure_kes IS 'Customer total outstanding from mart (NULL on orphan alerts).';
+
+COMMENT ON VIEW unified.cases IS
+  'IDENTITY: (case_id) — Case list-row view with CAS+CAP rollups (T4.19) and '
+  'has_blocking_caps gate. LEFT JOIN to mart.customer_360 for risk overlay. '
+  'Read-only. See spec §5.3.';
+
+COMMENT ON COLUMN unified.cases.tenant_id IS 'BIL multi-tenant key (T4.24).';
+COMMENT ON COLUMN unified.cases.case_id IS 'Deterministic case id (hash of alert_id + customer_id).';
+COMMENT ON COLUMN unified.cases.alert_id IS 'Originating alert id (orphan possible in synthetic seed — see spec §11).';
+COMMENT ON COLUMN unified.cases.customer_id IS 'Customer this case pertains to.';
+COMMENT ON COLUMN unified.cases.customer_name IS 'Customer display name, denormalised at case write time.';
+COMMENT ON COLUMN unified.cases.severity IS 'low / medium / high / critical.';
+COMMENT ON COLUMN unified.cases.rule_id IS 'Triggering rule id.';
+COMMENT ON COLUMN unified.cases.rule_name IS 'Rule display name, denormalised at case write time.';
+COMMENT ON COLUMN unified.cases.state IS 'open / assigned / in_action / monitored / closed.';
+COMMENT ON COLUMN unified.cases.assignee IS 'Case officer username.';
+COMMENT ON COLUMN unified.cases.loan_id IS 'Loan tied to the alert (NULL when not loan-related).';
+COMMENT ON COLUMN unified.cases.reason_summary IS 'Short human-readable case reason.';
+COMMENT ON COLUMN unified.cases.outcome IS 'cured / cured_temp / defaulted (NULL until close).';
+COMMENT ON COLUMN unified.cases.sla_status IS 'on_track / approaching / breached / closed.';
+COMMENT ON COLUMN unified.cases.created_at IS 'When the case was opened.';
+COMMENT ON COLUMN unified.cases.updated_at IS 'Most recent case update.';
+COMMENT ON COLUMN unified.cases.closed_at IS 'When the case was closed (NULL until closed).';
+COMMENT ON COLUMN unified.cases.action_count IS 'Total action rows logged on this case.';
+COMMENT ON COLUMN unified.cases.last_action_at IS 'Most recent action timestamp (NULL when no actions).';
+COMMENT ON COLUMN unified.cases.open_cas_count IS 'Count of cas_records with review_status=pending.';
+COMMENT ON COLUMN unified.cases.open_cap_count IS 'Count of caps with status in (open, in_progress, overdue).';
+COMMENT ON COLUMN unified.cases.has_blocking_caps IS 'TRUE iff at least one CAP blocks case close (T4.19 gate).';
+COMMENT ON COLUMN unified.cases.customer_risk_level IS 'Customer risk_level from mart.risk_rating (NULL on orphan cases).';
+
+COMMENT ON VIEW unified.audit_activity IS
+  'IDENTITY: (source, event_id) — UNION ALL across audit.event_log (WORM), '
+  'app_iam.audit_events (auth-svc local), app_audit.approvals (maker-checker). '
+  'Pg planner refuses INSERTs on UNION views, preserving WORM on '
+  'audit.event_log. Read-only. See spec §5.4.';
+
+COMMENT ON COLUMN unified.audit_activity.source IS 'chain | auth_local | approval discriminator.';
+COMMENT ON COLUMN unified.audit_activity.tenant_id IS 'BIL multi-tenant key (T4.24).';
+COMMENT ON COLUMN unified.audit_activity.event_id IS 'Source-specific id, cast to TEXT for UNION compatibility.';
+COMMENT ON COLUMN unified.audit_activity.ts IS 'Event timestamp (event_ts / occurred_at / proposed_at normalised).';
+COMMENT ON COLUMN unified.audit_activity.actor IS 'Actor that performed the event (actor / actor_username / maker normalised).';
+COMMENT ON COLUMN unified.audit_activity.action IS 'Action verb (event_type / action normalised).';
+COMMENT ON COLUMN unified.audit_activity.resource_type IS 'Resource type acted on; NULL for chain rows, ''user'' for auth_local, subject_type for approval.';
+COMMENT ON COLUMN unified.audit_activity.resource_id IS 'Resource id acted on; subject_id for chain/approval, target_username for auth_local.';
+COMMENT ON COLUMN unified.audit_activity.outcome IS 'Outcome (currently approval status only; NULL for other sources).';
+COMMENT ON COLUMN unified.audit_activity.severity IS 'Reserved for future severity classification (NULL today).';
+COMMENT ON COLUMN unified.audit_activity.correlation_id IS 'Correlation id (chain.correlation_id / approval.correlation_id; NULL for auth_local).';
+COMMENT ON COLUMN unified.audit_activity.metadata IS 'Source-specific JSONB payload (payload / detail / payload).';
+
+-- --------------------------------------------------------------------------
+-- Section 9: FUTURE — materialized-view promotion template (spec §6.5)
+-- This block is COMMENTED OUT — copy-paste into a future migration when
+-- empirical p95 exceeds the §10.5 target for any view.
+-- --------------------------------------------------------------------------
+/*
+-- FUTURE: promote unified.customer_360 to MATERIALIZED VIEW
+-- Pre-conditions: spec §6.5 promotion criterion met.
+-- Schema name / view name / columns MUST remain identical.
+BEGIN;
+    DROP VIEW unified.customer_360 CASCADE;
+    CREATE MATERIALIZED VIEW unified.customer_360 AS
+        <same SELECT body as the original VIEW above>;
+    CREATE UNIQUE INDEX unified_customer_360_pkey
+        ON unified.customer_360 (tenant_id, customer_id);
+    REFRESH MATERIALIZED VIEW unified.customer_360;
+COMMIT;
+-- Refresh strategy options (pick one):
+--   (a) cron'd REFRESH MATERIALIZED VIEW CONCURRENTLY unified.customer_360;
+--   (b) trigger on app_alerts.alerts INSERT/UPDATE/DELETE that refreshes
+--   (c) BFF pg_notify listener that schedules a refresh
+*/
+
 COMMIT;

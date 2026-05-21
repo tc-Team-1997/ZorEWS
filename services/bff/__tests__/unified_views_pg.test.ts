@@ -334,4 +334,46 @@ describeIfPg('unified.* view layer (integration — requires BFF_PG_URL)', () =>
       pool.query(`DELETE FROM audit.event_log WHERE subject_id = $1`, [synthetic]),
     ).rejects.toThrow(/append-only/);
   });
+
+  // --------------------------------------------------------------------
+  // ORM-readability metadata per spec §8.5 + §10 item #13
+  // --------------------------------------------------------------------
+
+  test('ORM-readability: each view comment starts with IDENTITY: (...)', async () => {
+    const r = await pool.query(
+      `SELECT c.relname AS view_name, d.description
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+        WHERE n.nspname = 'unified' AND c.relkind = 'v'
+        ORDER BY c.relname`,
+    );
+    expect(r.rows.map((row) => row.view_name)).toEqual([
+      'alerts', 'audit_activity', 'cases', 'customer_360',
+    ]);
+    for (const row of r.rows) {
+      expect(row.description).toBeTruthy();
+      expect(row.description as string).toMatch(/^IDENTITY: \(.+\) —/);
+    }
+  });
+
+  test('ORM-readability: every column on every unified view has a non-empty COMMENT', async () => {
+    const r = await pool.query(
+      `SELECT c.relname AS view_name, a.attname AS column_name, d.description
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+         LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+        WHERE n.nspname = 'unified' AND c.relkind = 'v'
+        ORDER BY c.relname, a.attnum`,
+    );
+    const missing = r.rows.filter(
+      (row) => !row.description || (row.description as string).trim() === '',
+    );
+    if (missing.length > 0) {
+      // eslint-disable-next-line no-console
+      console.error('Missing COMMENT ON COLUMN entries:', missing);
+    }
+    expect(missing).toHaveLength(0);
+  });
 });
