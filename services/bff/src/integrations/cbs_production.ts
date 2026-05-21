@@ -28,7 +28,7 @@ export interface CbsRequest {
   /** Idempotency key — same key + same payload returns cached receipt. */
   idempotency_key?: string;
   /** Caller-supplied payload (passed through unchanged to the impl). */
-  payload: unknown;
+  payload?: unknown;
 }
 
 export interface CbsResponse<T = unknown> {
@@ -38,6 +38,11 @@ export interface CbsResponse<T = unknown> {
   /** True when the CBS gateway accepted but the operation is async-
    *  processed downstream. The caller polls via a follow-up request. */
   pending?: boolean;
+  /** Surfaced when ok=false. Carries the bank-side error message or a
+   *  local diagnostic (timeout / unknown operation). Not consumed by
+   *  ResilientCbsClient's retry decision logic — purely audit + logs.
+   *  Optional + additive vs the v1 contract. */
+  error?: string;
 }
 
 export interface CbsClient {
