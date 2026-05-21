@@ -11076,6 +11076,54 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/notes/daily-volume?days=N (T6 M9.18) —
+   *  per-UTC-day count of notes added across all investigations in
+   *  the tenant. Companion to M9.14 (per-actor authorship pivot).
+   *  Per-bucket {date, total, distinct_investigations, distinct_authors};
+   *  envelope: peak_day (earliest-day-wins tie-break) + mean_per_day
+   *  + growth_rate (second-half vs first-half; null when first-half=0
+   *  OR days<2) + busiest_author (canonical username asc tie-break).
+   *  Default days=30, bounds [1, 365]. Mirror of M15.11 / M10.15 /
+   *  M12.13 / M1.9 / M3.17 / M8.15 daily-volume pattern. Mounted
+   *  BEFORE /:id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/investigations/notes/daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const daysRaw = req.query.days as string | undefined;
+      const days =
+        daysRaw === undefined ? 30 : Number.parseInt(daysRaw, 10);
+      const {
+        drainTenantNotes,
+        summarizeInvestigationNoteDailyVolume,
+        InvestigationNoteDailyVolumeError,
+      } = require('./investigation_note_daily_volume') as
+        typeof import('./investigation_note_daily_volume');
+      try {
+        const notes = drainTenantNotes(caseInvestigationStore, req.tenant!.tenant_id);
+        const out = summarizeInvestigationNoteDailyVolume(
+          req.tenant!.tenant_id,
+          notes,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof InvestigationNoteDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/investigations/step-backlog (T6 M9.9) — fleet-wide
    *  per-step backlog. For each step_id seen across the cohort
    *  emits {step_id, name, pending_count, completed_count,
