@@ -24656,6 +24656,66 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/resource-hotspots?limit=N (T6 M15.18) — per-
+   *  (resource_type, resource_id) hot-spot pivot over the audit chain.
+   *  For each unique resource touched, surfaces total_events +
+   *  distinct_actors + distinct_actions + actors[] cap 50 sorted asc
+   *  + actions[] cap 50 sorted asc + first/last_event_at. Envelope:
+   *  hottest_resource (top of sorted list) + by_resource_type
+   *  marginal (every RT key present) + top_hotspots[] sorted by
+   *  total_events desc with resource_type asc + resource_id asc
+   *  tie-break. Default limit=20, bounds [1, 200] via
+   *  AuditResourceHotspotsError → 400 EWS_400_invalid_input. Mirror
+   *  of M15.8 / M9.14 / M11.15 per-entity pivot pattern. Drives
+   *  forensic drill-through: "which case has the most audit activity?
+   *  which config key gets edited most? which user has been touched
+   *  most for privacy review?". */
+  app.get(
+    '/v1/audit/resource-hotspots',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const limitRaw = req.query.limit as string | undefined;
+      const limit =
+        limitRaw === undefined ? 20 : Number.parseInt(limitRaw, 10);
+      const {
+        summarizeAuditResourceHotspots,
+        AuditResourceHotspotsError,
+      } = require('./audit_resource_hotspots') as
+        typeof import('./audit_resource_hotspots');
+      try {
+        const events: import('./audit_trail').AuditEvent[] = [];
+        const PAGE = 1000;
+        for (let page = 1; page <= 200; page++) {
+          const result = auditTrailStore.list(req.tenant!.tenant_id, {
+            page,
+            page_size: PAGE,
+          });
+          events.push(...result.items);
+          if (result.items.length < PAGE) break;
+        }
+        const out = summarizeAuditResourceHotspots(
+          req.tenant!.tenant_id,
+          events,
+          now(),
+          limit,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AuditResourceHotspotsError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/audit/severity-outcome-matrix (T6 M15.15) — 2D cross-tab
    *  over the audit chain combining severity × outcome. Rows = 3
    *  AuditSeverity (canonical critical → warning → info) × cols = 3
