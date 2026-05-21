@@ -24044,6 +24044,51 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/lifecycle-scope-matrix (T6 M1.16) — 2D
+   *  cross-tab combining M1.10 lifecycle stages (7 closed enum) ×
+   *  M1.5 scopes (VALID_SCOPES.length closed enum). 7 × N cells. Each
+   *  key contributes 1 per scope to its stage row — a key with 3
+   *  scopes contributes 3 bindings to its stage. Defensive intra-key
+   *  scope dedup via Set + closed-enum filter via VALID_SCOPES.
+   *  Per-cell {count, sample_key_ids cap 5 sorted asc}. Per-row
+   *  {stage, total, by_scope (every scope at 0 when absent),
+   *  scopes_without[] canonical, distinct_scopes}. Per-col {scope,
+   *  total, by_stage (every stage at 0), stages_without[],
+   *  distinct_stages}. Envelope: peak_cell (canonical iteration
+   *  tie-break: stages × scopes canonical), empty_cells[] in
+   *  row-major canonical order, most_diverse_stage (row with most
+   *  distinct non-zero scopes + canonical-order tie-break),
+   *  most_universal_scope (col with most distinct non-zero stages +
+   *  canonical tie-break). Drives "are dormant keys concentrated in
+   *  specific scopes? which scopes have keys nearing expiry?"
+   *  governance views. Distinct from M1.5/M1.8/M1.10/M1.11 by axis
+   *  combination. Mirror of M1.8/M1.11/M1.12/M1.14 matrix pattern.
+   *  Mounted BEFORE /:key_id wildcard so literal segment wins. */
+  app.get(
+    '/v1/admin/api-keys/lifecycle-scope-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyLifecycleScopeMatrix } =
+        require('./api_key_lifecycle_scope_matrix') as
+        typeof import('./api_key_lifecycle_scope_matrix');
+      const summary = buildApiKeyLifecycleScopeMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row

@@ -117,7 +117,13 @@ function daysBetween(a: number, b: number): number {
   return Math.floor(Math.abs(a - b) / MS_PER_DAY);
 }
 
-function classifyKey(entry: ApiKeyEntry, now: Date): ApiKeyLifecycleStage {
+/**
+ * Promoted from internal to exported in M1.16: cross-tab matrices
+ * (lifecycle × scope etc.) need access to the same priority-order
+ * classification rules so the M1.10 distribution + M1.11 / M1.16
+ * matrices stay consistent under any future threshold tweak.
+ */
+export function classifyApiKeyLifecycle(entry: ApiKeyEntry, now: Date): ApiKeyLifecycleStage {
   if (entry.status === 'revoked') return 'revoked';
 
   const nowMs = now.getTime();
@@ -181,7 +187,7 @@ export function summarizeApiKeyLifecycleDistribution(
   }
 
   for (const entry of entries) {
-    const stage = classifyKey(entry, now);
+    const stage = classifyApiKeyLifecycle(entry, now);
     buckets[stage].count++;
     buckets[stage].samples.push({ key_id: entry.key_id, name: entry.name });
   }
