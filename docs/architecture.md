@@ -133,3 +133,47 @@ Target P95 alert latency event → UI: < 60s (NFR-PERF-1).
 - MSK MirrorMaker 2 to a passive cluster.
 - Route53 health-check failover at the ALB.
 - Targets: RTO ≤ 30 min, RPO < 1s (NFR-DR).
+
+## Operationalization layer — UPDATED: 2026-05-21
+
+The platform now ships with a complete production-deployment surface alongside the application architecture documented above. This layer is intentionally separate from app design — the contracts above are stable; what follows is the runtime path.
+
+### Real-time alert path (closed code-side 2026-05-21)
+
+- **Producer:** `services/regulatory-svc/indicators/src/kafka_producer.ts` (T2.12.2) publishes to `apex.indicator.values`; partition key = customer_id; dev outbox + production Kafka impls + DLQ fallback.
+- **BFF latency telemetry:** `services/bff/src/streaming_alert_path.ts` (T2.12.1) measures p95 against the EWS.docx §3.5 60s budget; per-tenant in-memory ledger; `/v1/streaming/{indicator-events,latency,events}` routes.
+- **Consumer:** `services/regulatory-svc/rules/src/kafka_consumer.ts` (T2.12 downstream) — `IndicatorValueConsumer` interface + `OutboxIndicatorValueConsumer` (dev) + `KafkaIndicatorValueConsumer` (production, kafkajs wrapper) + `validateIndicatorValueEvent` + `makeIndicatorValueConsumer(env)` factory.
+- **DLQ:** `services/regulatory-svc/indicators/src/streaming_dlq.ts` — NDJSON crash-safe day-partitioned sink.
+- **Deployment:** `infra/k8s/streaming-consumer.yaml` (Deployment + ServiceAccount + PDB minAvailable=1, ESO-sourced `KAFKA_BROKERS`).
+- **IRSA:** `apex-ews-${env}-streaming-consumer` role in `infra/terraform/20-eks/cert_manager_irsa.tf` with topic-scoped MSK IAM-auth read + consumer-group `apex-ews-streaming-rule-evaluator*`.
+- **External dependency:** running MSK cluster (resolved by `terraform apply` 30-data + ArgoCD sync).
+
+### Mobile offline-sync (closed code-side 2026-05-21)
+
+- `mobile/src/sync/offline_queue.ts` — `OfflineSyncQueue` interface + `InMemoryOfflineQueue` (dev/tests) + `AsyncStorageOfflineQueue` (production via `AsyncStorageLike` abstraction) + `SyncRunner` with exponential back-off (`baseDelayMs × 2^retry_count` default 1s base, 6 max retries) + `PermanentSyncError` + `buildIdempotencyKey` 64-char deterministic helper.
+- 6 `QueuedActionKinds`: `alert.ack`, `alert.unack`, `case.log_action`, `investigation.note`, `investigation.step_complete`, `field_visit.log`.
+- 29 jest tests; external dependency = Expo + `@react-native-async-storage/async-storage` install (one-line import swap in bootstrap).
+
+### Production HTTP integrations (closed code-side 2026-05-21)
+
+- `services/bff/src/integrations/cbs_http_client.ts` — `HttpCbsClient` implementing the `CbsClient` interface declared by `services/bff/src/integrations/cbs_production.ts`. Maps 4 OpenAPI operations to bank CBS REST paths declared in `integrations/cbs/openapi.yaml`. Bearer auth resolved lazily per request (Secrets Manager rotation friendly), 8s timeout via AbortController, 202 → `pending=true`, network errors → status=599 sentinel, unknown operations → `ok:false + 400`.
+- `ResilientCbsClient` (T3.1.1, `cbs_production.ts`) wraps any concrete `CbsClient` with retry + circuit breaker + audit-trail fan-out.
+- `services/bff/src/integrations/ifrs9_http_adapter.ts` — `HttpIfrs9Adapter` implementing the M14.2 `Ifrs9Adapter` interface. Defensive normalisation: PD/LGD/EAD clamped to safe bounds; `pd_lifetime ≥ pd_12m` IFRS9 invariant auto-enforced; ECL re-computed as `driver_PD × LGD × EAD` (Stage 1 driver = pd_12m; Stages 2/3 = pd_lifetime); `dpd_days ≥ 0` clamped.
+- External dependency: bank-side endpoint URLs + Bearer tokens in AWS Secrets Manager (`apex-ews/prod/integrations/{cbs,ifrs9}/{base-url,bearer-token}`).
+
+### Continuous-learning pipeline (closed code-side 2026-05-21)
+
+- `data/airflow/dags/feature_store_backfill.py` (T2.1, Year-2 Theme E) — 6-step DAG (`wait_for_marts` ExternalTaskSensor → `dbt run --select feat_values_backfill` → `dbt test` → retention purge via `aurora_writer` hook (`DELETE … WHERE observed_at < NOW() - INTERVAL '24 months'`) → S3 offline-store sync via `export_feature_store_to_s3` macro to `apex-ews-prod-curated/feature_store/dt={ds}/` → `publish_audit feature_store.backfilled`). Schedule 06:30 IST daily, depends on `feature_build.publish`.
+- `data/airflow/dags/retraining_scheduler.py` (T5.1, Year-2 Theme E) — every-6h DAG polls `/v1/ai/retraining/schedules` per tenant, fires `python -m ml.pipelines.train_pd`, POSTs final outcome with metrics, auto-promotes when AUC ≥ 0.78. `MAX_RETRAINS_PER_RUN=3` caps cost; idempotent.
+- External dependency: MWAA cluster running + `RETRAINING_TOKEN_SECRET` in Secrets Manager.
+
+### Observability + GitOps
+
+- **Prometheus rules:** `infra/k8s/prometheus/{recording-rules,alerting-rules,infra-alerting}.yaml` + `servicemonitors.yaml`. Recording rules for tenant burn-rate; two-window alerts (1h fast / 6h slow / 3d slow).
+- **4 Grafana dashboards** under `infra/k8s/grafana/dashboards/`: `slo-overview`, `bff-service`, `aurora-msk-eks`, `tenant-spend`.
+- **ArgoCD App-of-Apps** at `infra/k8s/argocd/bootstrap.yaml` + 14 child Applications (10 services + observability + ESO + platform-base) with sync waves 0-8.
+- **External Secrets Operator** with KMS-scoped IRSA condition (`kms:ViaService = secretsmanager.<region>.amazonaws.com`) + 7 ExternalSecret manifests.
+- **Karpenter NodePools** with disruption budgets at `infra/k8s/karpenter/`.
+- **cert-manager** via Let's Encrypt DNS01 at `infra/k8s/cert-manager/` + IRSA role.
+
+See `EXECUTION-PLAYBOOK.md` for the 13-step sequential go-live runbook.

@@ -247,3 +247,16 @@ Every release that touches the data model:
 - `data/dbt/models/` — dbt source.
 - `data/schema/` — Aurora DDL migrations.
 - `infra/schema-registry/` — Kafka topic JSON schemas.
+
+## Airflow DAG inventory — UPDATED: 2026-05-21
+
+| DAG | Path | Cadence | Closes | External dependency |
+|---|---|---|---|---|
+| `cbs_ingestion` | `data/airflow/dags/cbs_ingestion.py` | daily | T1.4 | bank CBS endpoint (Year-2 Theme C) |
+| `bureau_sync` | `data/airflow/dags/bureau_sync.py` | weekly | T1.4 | bank bureau endpoint |
+| `feature_build` | `data/airflow/dags/feature_build.py` | daily | T1.4 | none — runs on mart |
+| `pd_retrain_monthly` | `data/airflow/dags/pd_retrain_monthly.py` | monthly | T2.5 | MWAA runtime |
+| `feature_store_backfill` | `data/airflow/dags/feature_store_backfill.py` | daily 06:30 IST | T2.1 (Year-2 Theme E) | MWAA cluster running |
+| `retraining_scheduler` | `data/airflow/dags/retraining_scheduler.py` | every 6h at :15 | T5.1 (Year-2 Theme E) | MWAA + `RETRAINING_TOKEN_SECRET` in Secrets Manager |
+
+The last two DAGs were closed code-side 2026-05-21 — runtime dependency is MWAA cluster provisioning (`terraform apply` 30-data).

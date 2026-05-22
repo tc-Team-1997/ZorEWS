@@ -4,6 +4,8 @@
 **Generated:** 2026-05-03
 **Purpose:** Map the BAC-A commercial-EWS spec against the current apex-ews prototype to identify what's covered, what's partial, and what's missing — so prioritisation decisions are explicit rather than buried.
 
+> **Closure status — UPDATED: 2026-05-21:** All 5 BAC-A Top-5 gaps (T4.19 CAS + CAP modelling · T4.20 Maker-Checker generic approvals · T4.21 Issue-Owner-Groups + branch teams · T4.22 Leave-Cover Request · T4.23 Per-role dashboard widgets) shipped between 2026-05-03 and 2026-05-05. See `TASKS.md` entries T4.19 through T4.23 for per-gap implementation pointers + tests. This document is preserved as historical reference; the Top-5 gaps tracked below are CLOSED unless explicitly marked otherwise.
+
 ---
 
 ## TL;DR — Coverage Per Module

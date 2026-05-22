@@ -30,3 +30,14 @@
 - CBS Kafka peak: 5,000 ev/s × 5 = 25,000 ev/s. MSK 3 × `kafka.m7g.large` sized for 30k ev/s headroom.
 - Aurora writes: indicator values + audit events ≈ 8,000 wps. r6g.xlarge writer sized for 12k wps headroom; serverless v2 burst path documented in `30-data/`.
 - S3 audit: ~50 GB/year at pilot, ~250 GB/year at 5x. 7y retention = 1.75 TB max footprint per env.
+
+## HTTP adapter implementations — UPDATED: 2026-05-21
+
+Production HTTP clients for the contract mocks above (code-closed; awaiting bank-side endpoint URLs):
+
+| Source system | Adapter | Tests | Wrapped by |
+|---|---|---|---|
+| CBS | `services/bff/src/integrations/cbs_http_client.ts` (`HttpCbsClient`) | `cbs_http_client.test.ts` (10) | `ResilientCbsClient` (T3.1.1) with retry + circuit breaker + audit fan-out |
+| IFRS9 | `services/bff/src/integrations/ifrs9_http_adapter.ts` (`HttpIfrs9Adapter`) | `ifrs9_http_adapter.test.ts` (18) | n/a (defensive normalisation built-in: PD/LGD clamp + pd_lifetime ≥ pd_12m invariant + ECL re-compute) |
+
+External dependency: bank-side endpoint URLs + Bearer tokens via AWS Secrets Manager (`apex-ews/prod/integrations/{cbs,ifrs9}/{base-url,bearer-token}`). Swap is mechanical — no code change required; factories env-gated on `CBS_BASE_URL` / `IFRS9_BASE_URL`.

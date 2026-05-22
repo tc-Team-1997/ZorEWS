@@ -28,10 +28,44 @@ capture).
 - App Store / Play Store release pipeline (Theme F)
 - Push notification client (server side is M10.3 — FCM/APNS;
   client-side wiring lands here in a follow-on)
-- Offline mode + sync queue
+- ~~Offline mode + sync queue~~ — **CLOSED 2026-05-21**; see
+  "Offline-sync queue" section below.
 - Native module wiring (this commit ships the TypeScript
   contract + stubs; a native engineer wires `@react-native-community/
   geolocation` etc.)
+
+## Offline-sync queue — UPDATED: 2026-05-21
+
+`mobile/src/sync/offline_queue.ts` ships:
+
+- `OfflineSyncQueue` interface
+- `InMemoryOfflineQueue` (dev / tests)
+- `AsyncStorageOfflineQueue` (production via `AsyncStorageLike`
+  abstraction — keeps tests free of the native module dependency)
+- `SyncRunner` with exponential back-off
+  (`baseDelayMs × 2^retry_count`, default 1s base, 6 max retries)
+- `PermanentSyncError` for non-retryable failures
+- `buildIdempotencyKey(kind, resource_id, actor, at_iso)` —
+  64-char deterministic key so retries from flaky network don't
+  double-fire when the server has already accepted.
+
+6 `QueuedActionKind` values:
+
+- `alert.ack`
+- `alert.unack`
+- `case.log_action`
+- `investigation.note`
+- `investigation.step_complete`
+- `field_visit.log`
+
+29 jest tests covering both impls + `SyncRunner` exponential
+back-off + corrupt-blob defensive wipe + permanent-vs-retryable
+error routing + idempotency-key determinism.
+
+**External dependency:** Expo + `@react-native-async-storage/async-storage`
+install. The `AsyncStorageLike` interface is satisfied directly by
+the real AsyncStorage module — production swap is one import line
+in the Expo bootstrap.
 
 ## Layout
 
