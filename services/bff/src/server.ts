@@ -14782,6 +14782,52 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/skip-reason-analytics (T6 M2.18) —
+   *  cross-tenant fleet rollup over the M2.5 skip_reason capture.
+   *  Per-step: {total_skips, total_with_reason (M2.5 path),
+   *  total_legacy (markStep('skipped') without reason), distinct_
+   *  actors, distinct_tenants, sample_skips (cap 5 newest-first)}.
+   *  Envelope: most_skipped_step (canonical step.order tie-break),
+   *  most_skipped_required_step (required-only filter — compliance-
+   *  relevant bottlenecks), total_legacy_skips + total_with_reason_
+   *  skips (partition: Σ = total_skips_observed). Distinct from M2.7
+   *  (single-tenant skip-history), M2.10 (per-tenant actor summary),
+   *  M2.13 (per-step completion ranking — doesn't surface reasons).
+   *  Async since tenantLookup.all() may be async. 501 envelope when
+   *  the lookup doesn't expose .all(). Mounted BEFORE the catch-all
+   *  /v1/tenants/:tenant_id so the literal segment isn't captured. */
+  app.get(
+    '/v1/tenants/onboarding/skip-reason-analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const { summarizeOnboardingSkipReasons } =
+        require('./tenant_onboarding_skip_reason_analytics') as
+        typeof import('./tenant_onboarding_skip_reason_analytics');
+      const out = summarizeOnboardingSkipReasons(
+        tenants,
+        (id: string) => onboardingStore.get(id),
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/onboarding/step-completion (T6 M2.13) —
    *  PER-STEP cross-tenant completion rollup. M2.12 pivots BY-TENANT
    *  ("where does each tenant stand?"); M2.13 pivots BY-STEP ("which
