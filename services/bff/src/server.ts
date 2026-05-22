@@ -29279,6 +29279,42 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/rules/templates/action-severity-matrix (T6 M5.19) — 2D
+   *  pivot over the M5.1 RULE_TEMPLATES library combining the M5.15
+   *  action axis × M5.16 severity axis. Each template contributes 1
+   *  per recommended_action to its (action, severity) cell — a template
+   *  with 3 actions on severity=critical contributes 1 to each of 3
+   *  cells. 6 RecommendedAction rows × 4 RecommendedSeverity cols = 24
+   *  cells. Per-row {action, total, by_severity (4 keys at 0 when
+   *  absent), severities_without[]}. Per-col {severity, total, by_action
+   *  (6 keys at 0 when absent), actions_without[]}. Envelope: peak_cell
+   *  (canonical iteration tie-break — actions in canonical order ×
+   *  severities in canonical critical-first order; carries template_ids
+   *  sorted asc; null on empty), empty_cells[] in canonical row-major
+   *  order, most_versatile_action (highest distinct non-zero severities;
+   *  canonical action-order tie-break; null on empty), most_distributed_
+   *  severity (highest distinct non-zero actions; canonical severity-
+   *  order tie-break; null on empty), total_contributions (= Σ
+   *  template.recommended_actions[].length). Defensive intra-template
+   *  action dedup. Mirror of M5.17 / M4.16 / M14.28 / M12.14 / M3.14
+   *  matrix pattern for the rule template surface. Platform-static —
+   *  same response across tenants since RULE_TEMPLATES is platform
+   *  data. Drives "do we ever recommend auto_decline at medium
+   *  severity?" governance view. Mounted BEFORE catch-all `/:id`. */
+  app.get(
+    '/v1/rules/templates/action-severity-matrix',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildRuleTemplateActionSeverityMatrix } =
+        require('./rule_template_action_severity_matrix') as
+        typeof import('./rule_template_action_severity_matrix');
+      const out = buildRuleTemplateActionSeverityMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/rules/templates/indicator-count-histogram (T6 M5.18) —
    *  histogram bucketing every M5.1 template by its supporting_indicators
    *  array length into 5 canonical buckets: minimal (1) / low (2-3) /
