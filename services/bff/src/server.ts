@@ -26119,6 +26119,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ingestion/freshness-alert (T6 M3.19) — per-connector
+   *  data-freshness detector. Compares `last_run_at` against schedule
+   *  deadline. Per-row {connector_id, name, source_system, schedule,
+   *  connector_status, expected_interval_minutes (parsed), last_run_at,
+   *  expected_next_run_at, overdue_minutes (signed), freshness_status
+   *  ∈ {on_time, overdue, critical_stale, never_run,
+   *  unparseable_schedule, paused}}. Envelope: by_status counts +
+   *  connectors[] sorted most-stale-first + worst_offender + total_at_risk
+   *  (overdue + critical_stale) + total_paused. Distinct from M3.1
+   *  (registry), M3.5 (run analytics), M3.12 (hourly volume), M14.26
+   *  (M14 adapter SLA budget). Drives ops "which connector hasn't run?
+   *  is the CBS feed stale?" answer in one round-trip. */
+  app.get(
+    '/v1/ingestion/freshness-alert',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorFreshnessReport } =
+        require('./connector_freshness_alert') as
+        typeof import('./connector_freshness_alert');
+      const out = buildConnectorFreshnessReport(
+        ingestionRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ingestion/schema/field-count-histogram (T6 M3.18) — 5-
    *  bucket field-count histogram over the M3.2 schema catalog
    *  (minimal 1-3 / small 4-6 / medium 7-10 / large 11-15 / x_large
