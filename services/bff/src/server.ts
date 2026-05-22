@@ -13780,6 +13780,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/shift-analysis (T6 M4.19) —
+   *  DIRECTION-aware shift view over per-tenant M4.4 threshold
+   *  overrides. For each override + each band classifies the shift
+   *  vs platform default as raised | lowered | unchanged. Per row:
+   *  yellow_shift + orange_shift + red_shift (each with signed delta
+   *  + direction + magnitude) + overall_direction (all_raised /
+   *  all_lowered / mixed / unchanged) + total_magnitude + net_signed_
+   *  delta. Envelope: by_band_direction (per-band raised/lowered/
+   *  unchanged counts) + by_overall_direction + most_aggressive_
+   *  tightening (largest net-negative delta) + most_aggressive_
+   *  loosening (largest net-positive delta) + most_recalibrated_
+   *  indicator (highest total_magnitude regardless of direction).
+   *  Distinct from M4.12 (drift score — magnitude-only, no direction).
+   *  Mounted BEFORE `/v1/indicators/thresholds/effective` + catch-
+   *  all `/:indicator_id` so the literal segment wins. */
+  app.get(
+    '/v1/indicators/thresholds/shift-analysis',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeIndicatorThresholdShifts } =
+        require('./indicator_threshold_shift_analysis') as
+        typeof import('./indicator_threshold_shift_analysis');
+      const out = summarizeIndicatorThresholdShifts(
+        thresholdOverrideStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/band-gap (T6 M4.14) — quality
    *  scorecard over the platform DEFAULTS threshold catalog.
    *  Distinct from M4.12 (per-tenant drift) — M4.14 audits the
