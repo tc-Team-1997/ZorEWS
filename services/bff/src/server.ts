@@ -20178,6 +20178,80 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/config/change-daily-volume?days=N (T6 M13.18) —
+   *  cross-tenant N-day TREND view over the M13.2 audit-trail wiring.
+   *  Every successful PUT/DELETE on /v1/admin/config/:key writes a
+   *  config.update / config.reset event to M15.1; this route
+   *  aggregates those events into a daily bucket distribution. Per
+   *  UTC day: {total, by_action (2 keys: config.update + config.reset),
+   *  by_category (5 keys per ConfigCategory; resource_id → DEFAULTS
+   *  lookup), distinct_actors, distinct_keys}. Envelope: peak_day
+   *  (earliest-wins tie-break) + mean_per_day + growth_rate
+   *  (second-half mean vs first-half; null when first_half=0 OR
+   *  days<2) + busiest_category (canonical listCategories tie-break).
+   *  Default days=30, [1, 365]. Distinct from M13.11 (override AGE
+   *  tracker — snapshot, no time-series), M13.12 (category override-
+   *  rate snapshot), M13.16 (per-actor rollup), M13.17 (category ×
+   *  actor matrix). Mirror of M2.16 / M12.13 / M1.9 / M15.11
+   *  daily-volume pattern. Mounted BEFORE the catch-all /v1/admin/
+   *  config/:key so the literal segment wins. */
+  app.get(
+    '/v1/admin/config/change-daily-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const daysRaw = req.query.days as string | undefined;
+      let days = 30;
+      if (daysRaw !== undefined) {
+        const parsed = Number.parseInt(daysRaw, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'days must be integer in [1, 365]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        days = parsed;
+      }
+      const {
+        summarizeConfigChangeDailyVolume,
+        ConfigChangeDailyVolumeError,
+      } = require('./admin_config_change_daily_volume') as
+        typeof import('./admin_config_change_daily_volume');
+      // Drain config events from the audit trail
+      const page = auditTrailStore.list(req.tenant!.tenant_id, {
+        resource_type: 'config',
+        action: 'config.update,config.reset',
+        page_size: 10_000,
+      });
+      try {
+        const out = summarizeConfigChangeDailyVolume(
+          req.tenant!.tenant_id,
+          page.items,
+          days,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ConfigChangeDailyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/config/catalog (T6 M13.10) — schema-only view of the
    *  config registry: per-key {key, category, type, default_value,
    *  description} grouped by category + by_type counts. Lets the SPA
