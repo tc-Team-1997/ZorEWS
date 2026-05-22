@@ -24209,6 +24209,45 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/revoker-rollup (T6 M1.17) — per-revoker
+   *  pivot over the M1.2 redacted ApiKeyEntry surface. Mirror of M1.6
+   *  by-creator pattern but pivots by REVOKER (revoked_by). Per-row
+   *  {revoker_username, total_revocations, distinct_creators_revoked,
+   *  distinct_scopes_revoked, key_ids[] cap 50 sorted asc,
+   *  first_revoked_at, last_revoked_at}. Envelope: most_active_revoker
+   *  + mass_revocation_events[] (revokers with > 5 revocations within
+   *  a 1-hour rolling window — surfaces incident-response patterns +
+   *  rogue-actor forensics; sorted count desc + username asc
+   *  tie-break). Distinct from M1.6 (by-CREATOR), M1.14 (creator ×
+   *  status matrix), M1.15 (revocation daily volume — time axis, not
+   *  actor-pivoted). Drives "who revoked which keys?" governance
+   *  views + security-incident post-mortems. Mounted BEFORE
+   *  /:key_id wildcard so the literal segment wins. */
+  app.get(
+    '/v1/admin/api-keys/revoker-rollup',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { summarizeApiKeyRevokerRollup } =
+        require('./api_key_revoker_rollup') as
+        typeof import('./api_key_revoker_rollup');
+      const summary = summarizeApiKeyRevokerRollup(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row
