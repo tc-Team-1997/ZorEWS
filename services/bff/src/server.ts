@@ -11971,6 +11971,43 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/widget-count-histogram (T6 M11.19) —
+   *  per-tenant histogram bucketing every saved dashboard by its
+   *  widgets.length into 6 canonical buckets: empty (0) / minimal (1)
+   *  / small (2-3) / medium (4-6) / large (7-12) / x_large (13+).
+   *  Strict-< upper bounds (4 widgets exactly → medium not small).
+   *  Per-bucket {count, sample_dashboards cap 3 sorted widget_count
+   *  desc + dashboard_id asc tie-break — most-dense first}. Envelope
+   *  peak_bucket (canonical iteration tie-break — empty wins over
+   *  minimal at tied count; null on empty), mean_widgets (rounded 2
+   *  decimals; null on empty), min/max_widgets, empty_buckets[] in
+   *  canonical order. Mirror of M5.18 / M4.15 / M9.11 / M8.12 / M7.15
+   *  histogram pattern for the custom dashboards surface. Distinct
+   *  from M11.11 (widget usage analytics per widget_type), M11.14
+   *  (fleet lint), M11.15 (authorship), M11.17 (widget × creator
+   *  matrix), M11.18 (freshness). Drives BIL governance "do
+   *  operators build dashboards with right content density? any
+   *  abandoned single-widget dashboards to consolidate or delete?"
+   *  review. Mounted BEFORE catch-all `/custom/:dashboard_id` so
+   *  the literal segment isn't captured by the param wildcard. */
+  app.get(
+    '/v1/dashboards/custom/widget-count-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildDashboardWidgetCountHistogramFromStore } =
+        require('./custom_dashboard_widget_count_histogram') as
+        typeof import('./custom_dashboard_widget_count_histogram');
+      const out = buildDashboardWidgetCountHistogramFromStore(
+        customDashboardStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/authorship (T6 M11.15) — PIVOT-BY-
    *  CREATED_BY rollup over saved dashboards. Per author:
    *  dashboard_count, total_widgets (Σ widgets.length), distinct_
