@@ -24248,6 +24248,48 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/time-to-revocation-histogram (T6 M1.18)
+   *  — bucketed distribution of revoked-key lifespan
+   *  (revoked_at − created_at). Answers "what's our typical key
+   *  lifespan? are we revoking prematurely? are most revocations
+   *  cleanup of never-used keys?". 5 canonical buckets in priority
+   *  order: under_1d / 1_to_7d / 7_to_30d / 30_to_90d / 90d_plus
+   *  (strict-< upper bounds). Per-bucket {count, by_scope (every
+   *  ApiKeyScope at 0 — stable grid), by_revoker (compact), sample_keys
+   *  cap 5 sorted lifetime_days asc}. Envelope: peak_bucket (canonical
+   *  iteration tie-break) + mean/median/p95 lifetime_days +
+   *  shortest_lived + longest_lived + unused_at_revocation_count
+   *  (never-used keys → likely cleanup signal). Distinct from M1.13
+   *  (usage RECENCY histogram — active keys' last_used_at), M1.15
+   *  (revocation DAILY VOLUME — time-axis trend), M1.17 (per-REVOKER
+   *  rollup — actor pivot). Mirror of M1.13 / M9.11 / M8.12 / M7.15
+   *  bucketing pattern. Mounted BEFORE /:key_id wildcard so the
+   *  literal segment wins. */
+  app.get(
+    '/v1/admin/api-keys/time-to-revocation-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { summarizeApiKeyTimeToRevocation } =
+        require('./api_key_time_to_revocation_histogram') as
+        typeof import('./api_key_time_to_revocation_histogram');
+      const summary = summarizeApiKeyTimeToRevocation(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row
