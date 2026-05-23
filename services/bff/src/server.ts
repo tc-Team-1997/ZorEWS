@@ -767,6 +767,14 @@ import {
   type ModelType,
 } from './ai_model_registry';
 import {
+  defaultAiPredictionStore,
+  PREDICTION_PAGE_SIZE_DEFAULT,
+  PREDICTION_PAGE_SIZE_MAX,
+  type AiPrediction,
+  type AiPredictionFilter,
+  type AiPredictionStore,
+} from './ai_predictions';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1225,6 +1233,13 @@ export interface AppDeps {
    */
   aiModelRegistry?: AiModelRegistry;
   /**
+   * Override for tests — AI prediction logging store (pg-ai-predictions).
+   * Defaults to the module-level InMemoryAiPredictionStore. Production
+   * swaps in PgAiPredictionStore via makeAiPredictionStore(env) when
+   * BFF_PG_URL is set; rows land in app_copilot.ai_predictions.
+   */
+  aiPredictionStore?: AiPredictionStore;
+  /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
    * requests + decisions; does NOT mutate the registry's view (M7.3
@@ -1511,6 +1526,7 @@ export function makeApp(deps: AppDeps = {}) {
   const checklistTemplateStore = deps.checklistTemplateStore ?? defaultChecklistTemplateStore;
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
+  const aiPredictionStore = deps.aiPredictionStore ?? defaultAiPredictionStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -5830,6 +5846,32 @@ export function makeApp(deps: AppDeps = {}) {
           req.tenant!.tenant_id,
           now(),
         );
+        // pg-ai-predictions: log the result for forensic replay. Best-effort —
+        // never blocks the response. record() returns sync from cache; pg
+        // INSERT fires in background. Errors during logging never propagate.
+        try {
+          const model = aiModelRegistry.get(id);
+          if (model) {
+            const actor =
+              ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() ||
+              'system';
+            aiPredictionStore.record(
+              {
+                tenant_id: req.tenant!.tenant_id,
+                model_id: model.model_id,
+                model_version: model.version,
+                prediction_type: model.type,
+                result,
+                input_snapshot: (inner ?? {}) as Record<string, unknown>,
+                created_by: actor,
+              },
+              now(),
+            );
+          }
+        } catch (logErr) {
+          // Logging failure must not break the response.
+          console.error('[ai_predictions] record() threw:', logErr);
+        }
         return res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof ModelRegistryError) {
@@ -5852,6 +5894,94 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+    },
+  );
+
+  // ── AI prediction log (pg-ai-predictions) ───────────────────────────
+  //
+  // GET /v1/ai/predictions?customer_id=&model_id=&model_version=&prediction_type=
+  //                       &since=ISO&until=ISO&page=N&page_size=N
+  //   Tenant-scoped, newest-first paginated list. Backs the SPA's
+  //   "model decisions for this customer" panel + the audit-trail
+  //   surface compliance teams query when reviewing model behaviour.
+  //
+  // GET /v1/ai/predictions/:prediction_id
+  //   Single row, tenant-scoped 404 on cross-tenant lookup.
+  //
+  // Both gated on `customers:read_risk_profile` — same scope as the
+  // /v1/ai/models/:model_id/score route that produces these rows.
+  app.get(
+    '/v1/ai/predictions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const q = req.query as Record<string, string | string[] | undefined>;
+        const filter: AiPredictionFilter = {};
+        if (typeof q.customer_id === 'string') filter.customer_id = q.customer_id;
+        if (typeof q.model_id === 'string') filter.model_id = q.model_id;
+        if (typeof q.model_version === 'string') filter.model_version = q.model_version;
+        if (typeof q.prediction_type === 'string') {
+          if (!isModelType(q.prediction_type)) {
+            return res.status(400).json(
+              wrapError(
+                {
+                  code: 'EWS_400_invalid_prediction_type',
+                  message: `prediction_type must be one of the closed enum (pd|fraud|churn|lapse|anomaly|claim_severity)`,
+                  severity: 'MEDIUM',
+                },
+                ctx,
+              ),
+            );
+          }
+          filter.prediction_type = q.prediction_type;
+        }
+        if (typeof q.since === 'string') filter.since = q.since;
+        if (typeof q.until === 'string') filter.until = q.until;
+        const pageNum = typeof q.page === 'string' ? parseInt(q.page, 10) : undefined;
+        const pageSize = typeof q.page_size === 'string' ? parseInt(q.page_size, 10) : undefined;
+        if (pageNum !== undefined) filter.page = pageNum;
+        if (pageSize !== undefined) filter.page_size = pageSize;
+        const out = aiPredictionStore.list(req.tenant!.tenant_id, filter);
+        return res.json(
+          wrapResponse(
+            {
+              ...out,
+              page_size_default: PREDICTION_PAGE_SIZE_DEFAULT,
+              page_size_max: PREDICTION_PAGE_SIZE_MAX,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'predictions list failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
+  app.get(
+    '/v1/ai/predictions/:prediction_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.prediction_id ?? '';
+      const row: AiPrediction | null = aiPredictionStore.get(req.tenant!.tenant_id, id);
+      if (!row) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_prediction', message: `prediction ${id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(wrapResponse(row, ctx));
     },
   );
 
