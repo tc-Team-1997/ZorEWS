@@ -11545,6 +11545,45 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/duration-histogram (T6 M9.19) —
+   *  per-tenant histogram bucketing every investigation by its
+   *  duration (closed_at − opened_at). 6 canonical buckets in
+   *  resolution-speed order: under_1h / 1_to_24h / 1_to_7d /
+   *  7_to_30d / 30d_plus / still_open. Strict-< upper bound
+   *  semantics (1h → 1_to_24h, 24h → 1_to_7d, 7d → 7_to_30d,
+   *  30d → 30d_plus; matches M8.12 / M9.11 boundary convention).
+   *  Per-bucket {count, samples cap 3 — closed buckets sort
+   *  duration desc (longest first); still_open sorts opened_at asc
+   *  (oldest pending first)}. Envelope: peak_bucket (canonical
+   *  iteration tie-break — under_1h beats 1_to_24h at tied; null
+   *  when zero), mean/median/p95_duration_ms over closed only via
+   *  M3.5 linear-interpolation percentile (null when no closed),
+   *  longest_closed + oldest_open samples + empty_buckets[]
+   *  canonical. Distinct from M9.11 (case age — time SINCE opened),
+   *  M9.13 (age × status matrix), M9.18 (note volume timeline).
+   *  Mirror of M8.12 alert ack-time + M7.15 promotion latency
+   *  histogram for the investigation surface. Drives BIL ops
+   *  "what's our typical fraud-investigation turnaround? any
+   *  investigations dragging past 30 days?" review. Mounted BEFORE
+   *  /:id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/investigations/duration-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildInvestigationDurationHistogramFromStore } =
+        require('./investigation_duration_histogram') as
+        typeof import('./investigation_duration_histogram');
+      const out = buildInvestigationDurationHistogramFromStore(
+        caseInvestigationStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/step-backlog (T6 M9.9) — fleet-wide
    *  per-step backlog. For each step_id seen across the cohort
    *  emits {step_id, name, pending_count, completed_count,
