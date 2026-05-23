@@ -40,27 +40,31 @@ echo ""
 echo "▶ Row-count validation:"
 
 # Connect via DSN — matches what dbt itself uses from ~/.dbt/profiles.yml.
-PSQL="psql postgres://apex:apex@localhost:55432/apex_ews"
+# Container: zorews-pg (db=zorews, user=zorews_user, port=55432).
+PSQL="psql postgres://zorews_user:apex@localhost:55432/zorews"
 
-# Each pair is (table_name, expected_row_count_lower_bound).
+# Each pair is "table_name|expected_row_count_lower_bound".
 # Lower bound because the synthesiser is deterministic but minor seed
 # regeneration can shift counts by ±5%.
-declare -A CHECKS=(
-    ["raw.seed_customer"]=9500
-    ["raw.seed_loans"]=22000
-    ["raw.seed_repayments"]=240000
-    ["raw.seed_txns"]=280000
-    ["raw.seed_bureau_score"]=9500
-    ["mart.customer_360"]=9500
-    ["mart.loan_360"]=22000
-    ["mart.txn_features"]=9500
-    ["mart.indicator_values"]=70000
+# (Pipe-delimited parallel array; declare -A with dotted keys trips
+#  bash's arithmetic-context parsing.)
+CHECKS=(
+    "raw.seed_customers|9500"
+    "raw.seed_loans|22000"
+    "raw.seed_repayments|240000"
+    "raw.seed_transactions|280000"
+    "raw.seed_bureau_score|9500"
+    "mart.customer_360|9500"
+    "mart.loan_360|22000"
+    "mart.txn_features|9500"
+    "mart.indicator_values|70000"
 )
 
 PASS=0
 FAIL=0
-for tbl in "${!CHECKS[@]}"; do
-    expected="${CHECKS[$tbl]}"
+for row in "${CHECKS[@]}"; do
+    tbl="${row%%|*}"
+    expected="${row##*|}"
     count=$($PSQL -t -A -c "SELECT count(*) FROM $tbl" 2>/dev/null | tr -d ' \n' || echo "0")
     if (( count >= expected )); then
         printf "  ✓ %-30s %s rows (>= %s)\n" "$tbl" "$count" "$expected"

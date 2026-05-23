@@ -42,11 +42,19 @@ WITH c360 AS (
     FROM {{ ref('customer_360') }}
 ),
 txn AS (
+    -- mart.txn_features doesn't carry a precomputed zscore column today —
+    -- compute it inline from txn_count_90d via window function over the
+    -- per-tenant population. Backward-compatible patch: model output shape
+    -- unchanged, just sources the value differently.
     SELECT
         tenant_id,
         customer_id AS entity_id,
-        coalesce(txn_count_zscore_90d, 0)::double precision
-                    AS txn_volume_zscore_90d
+        coalesce(
+            (txn_count_90d::double precision
+             - avg(txn_count_90d::double precision) OVER (PARTITION BY tenant_id))
+            / nullif(stddev_pop(txn_count_90d::double precision) OVER (PARTITION BY tenant_id), 0),
+            0
+        )::double precision AS txn_volume_zscore_90d
     FROM {{ ref('txn_features') }}
 ),
 loans AS (
