@@ -32412,6 +32412,13 @@ if (require.main === module) {
     for (const t of ['BANK_DEMO', 'BIL']) {
       try { seedDefaultEwsRules(defaultEwsRuleStore, t, 'system', new Date()); } catch { /* best-effort */ }
     }
+    // Mount Swagger UI for the auto-generated OpenAPI spec at /docs.
+    // Best-effort: skips silently when DISABLE_DOCS=true or the spec is
+    // not on disk (run `node scripts/gen-openapi.js` to regenerate).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { mountDocs } = require('./docs') as typeof import('./docs');
+    mountDocs(app);
+
     // eslint-disable-next-line no-console
     app.listen(port, () =>
       console.log(
