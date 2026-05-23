@@ -67,3 +67,4 @@ web/snapshot-*.csv
 # Operational scripts
 .rollback-log/
 # (DR drill reports under reports/dr-drills/ ARE committed for audit trail.)
+reports/newman/

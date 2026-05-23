@@ -10,6 +10,8 @@
     "postman:generate": "node scripts/gen-postman.js",
     "postman:validate": "node scripts/validate-postman.js",
     "postman": "npm run postman:generate && npm run postman:validate",
+    "newman:smoke": "bash scripts/run-newman-smoke.sh",
+    "newman:full": "bash scripts/run-newman-full.sh",
     "dev": "cd services/bff && npm run dev",
     "dev:bff": "cd services/bff && npm run dev",
     "dev:auth": "cd services/auth-svc && npm run dev",
@@ -23,5 +25,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "newman": "^6.2.2"
   }
 }
