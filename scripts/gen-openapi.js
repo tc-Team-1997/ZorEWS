@@ -497,7 +497,7 @@ function buildComponents() {
           'Bank-grade response envelope header per `Banking API Integration §6`.',
         required: ['status', 'code', 'message', 'requestId', 'timestamp'],
         properties: {
-          status: { type: 'string', enum: ['success', 'error'], example: 'success' },
+          status: { type: 'string', enum: ['SUCCESS', 'FAILURE'], example: 'SUCCESS' },
           code: { type: 'string', example: 'EWS_200' },
           message: { type: 'string', example: 'Processed Successfully' },
           requestId: { type: 'string', format: 'uuid' },
@@ -892,7 +892,7 @@ function buildComponents() {
         summary: 'Successful enveloped response',
         value: {
           header: {
-            status: 'success',
+            status: 'SUCCESS',
             code: 'EWS_200',
             message: 'Processed Successfully',
             requestId: '8f4e5a90-2a55-4f8e-9c63-bc4e5e1d3a91',
@@ -905,7 +905,7 @@ function buildComponents() {
         summary: 'Not-found error envelope',
         value: {
           header: {
-            status: 'error',
+            status: 'FAILURE',
             code: 'EWS_404_unknown_tenant',
             message: 'tenant BIL_FAKE not found',
             requestId: '8f4e5a90-2a55-4f8e-9c63-bc4e5e1d3a91',
@@ -922,7 +922,7 @@ function buildComponents() {
         summary: 'Forbidden envelope (RBAC scope missing)',
         value: {
           header: {
-            status: 'error',
+            status: 'FAILURE',
             code: 'EWS_403_missing_scope',
             message: 'role field_officer is not permitted to invoke webhooks:manage',
             requestId: '8f4e5a90-2a55-4f8e-9c63-bc4e5e1d3a91',
@@ -957,7 +957,7 @@ function buildComponents() {
         summary: 'AI score envelope',
         value: {
           header: {
-            status: 'success',
+            status: 'SUCCESS',
             code: 'EWS_200',
             message: 'Processed Successfully',
             requestId: '8f4e5a90-2a55-4f8e-9c63-bc4e5e1d3a91',

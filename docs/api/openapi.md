@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T15:43:55.875Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T16:46:18.230Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 

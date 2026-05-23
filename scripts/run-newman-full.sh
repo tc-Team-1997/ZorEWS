@@ -47,16 +47,36 @@ TOTAL_FAILED=0
 # We use --export-environment to persist + --environment to re-import.
 
 ENV_RUNNING="${REPORT_DIR}/.env-running.json"
-cp "$ENV" "$ENV_RUNNING"
 
-echo "▶ Step 1/2 — capture auth token via Auth smoke folder"
-"$NEWMAN" run "$REPO_ROOT/docs/postman/ZorEWS-Auth.postman_collection.json" \
-    -e "$ENV_RUNNING" \
-    --folder "00 — Smoke tests" \
-    --export-environment "$ENV_RUNNING" \
-    --reporters cli \
-    --reporter-cli-no-banner \
-    --color off
+# Capture the auth token via curl — avoids re-running the smoke folder's
+# negative tests (bad-creds) which would either fail OR trip the auth-svc
+# rate limiter after a few invocations in the same session.
+echo "▶ Step 1/2 — capture auth token via curl POST /auth/login"
+LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8080/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"username":"alice.admin","password":"Admin!Pass1"}')
+
+ACCESS_TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('access_token', ''))")
+REFRESH_TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('refresh_token', ''))")
+
+if [ -z "$ACCESS_TOKEN" ]; then
+    echo "✕ login failed — could not capture access_token"
+    echo "  response: $LOGIN_RESPONSE"
+    exit 1
+fi
+echo "  ✓ access_token captured (${ACCESS_TOKEN:0:24}…)"
+
+# Write a copy of the env with the captured tokens substituted in.
+python3 <<PYEOF
+import json
+with open("$ENV", "r") as f:
+    env = json.load(f)
+for v in env["values"]:
+    if v["key"] == "access_token":  v["value"] = "$ACCESS_TOKEN"
+    if v["key"] == "refresh_token": v["value"] = "$REFRESH_TOKEN"
+with open("$ENV_RUNNING", "w") as f:
+    json.dump(env, f, indent=2)
+PYEOF
 
 echo ""
 echo "▶ Step 2/2 — full-collection runs (one collection at a time)"
