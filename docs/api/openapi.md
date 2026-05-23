@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T16:46:18.230Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T17:53:12.883Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **775** route declarations auto-discovered: 734 from BFF + 41 from auth-svc
+- **780** route declarations auto-discovered: 739 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -621,7 +621,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**309 routes.** Routes sorted by path.
+**314 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -696,6 +696,11 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/audit/severity-distribution` | pivoted rollup. Per-severity: total_count + by_resource_type |
 | `GET` | `/v1/audit/severity-outcome-matrix` | AuditSeverity (canonical critical → warning → info) × cols = 3 |
 | `GET` | `/v1/audit/summary` | GET /v1/audit/summary?days=30 |
+| `GET` | `/v1/banking/sma/drill` |  |
+| `GET` | `/v1/banking/sma/movements` |  |
+| `POST` | `/v1/banking/sma/run-classification` |  |
+| `GET` | `/v1/banking/sma/sector-view` |  |
+| `GET` | `/v1/banking/sma/trend` |  |
 | `GET` | `/v1/dashboard/sla-breach-matrix` |  |
 | `POST` | `/v1/dashboard/sla-breach-matrix/preview` | POST /v1/dashboard/sla-breach-matrix/preview — show the impact of |
 | `GET` | `/v1/dq/dashboard` |  |

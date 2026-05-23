@@ -32122,6 +32122,168 @@ export function makeApp(deps: AppDeps = {}) {
     res.json(wrapResponse({ ...result, days, tenant_id }, ctx));
   });
 
+  // ── Banking — SMA classification (RBI / RMA / CBK) ────────────────────
+  //
+  // Per the ZorEWS_Pending_Gap_Analysis §2.1.1 — 5 endpoints powering the
+  // SMA Classification screen. Distinct from IFRS9 (PD-band-based); SMA
+  // is DPD-bucket-based per the RBI Master Direction (2015).
+  //
+  // All routes RBAC-gated on customers:read_risk_profile (analyst+).
+  // Pure-function deterministic synthesis per (tenant, customer, day);
+  // production swap = real query against mart.loan_360 with the same
+  // DPD → category mapping.
+
+  function pickFramework(req: Request): import('./banking_sma').Framework {
+    const { isFramework } = require('./banking_sma') as typeof import('./banking_sma');
+    const f = ((req.query.framework as string | undefined) ?? 'RBI').toUpperCase();
+    if (!isFramework(f)) {
+      throw new Error(`invalid_framework:${f}`);
+    }
+    return f;
+  }
+
+  function parseDateOrThrow(s: string | undefined, label: string, fallback: Date): Date {
+    if (!s) return fallback;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) throw new Error(`invalid_${label}`);
+    return d;
+  }
+
+  /** GET /v1/banking/sma/movements?date=&framework= */
+  app.get(
+    '/v1/banking/sma/movements',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSmaMovements } = require('./banking_sma') as typeof import('./banking_sma');
+        const framework = pickFramework(req);
+        const date = parseDateOrThrow(req.query.date as string | undefined, 'date', now());
+        const out = buildSmaMovements(req.tenant!.tenant_id, date, framework, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_movements_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  /** GET /v1/banking/sma/drill?from=&to=&framework= */
+  app.get(
+    '/v1/banking/sma/drill',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSmaDrill } = require('./banking_sma') as typeof import('./banking_sma');
+        const framework = pickFramework(req);
+        const defaultFrom = new Date(now().getTime() - 7 * 86_400_000);
+        const from = parseDateOrThrow(req.query.from as string | undefined, 'from', defaultFrom);
+        const until = parseDateOrThrow(req.query.to as string | undefined, 'to', now());
+        const out = buildSmaDrill(req.tenant!.tenant_id, from, until, framework, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_drill_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  /** GET /v1/banking/sma/sector-view?framework= */
+  app.get(
+    '/v1/banking/sma/sector-view',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSmaSectorView } = require('./banking_sma') as typeof import('./banking_sma');
+        const framework = pickFramework(req);
+        const out = buildSmaSectorView(req.tenant!.tenant_id, framework, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_sector_view_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  /** GET /v1/banking/sma/trend?customer_id=&framework=&from=&to= */
+  app.get(
+    '/v1/banking/sma/trend',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSmaTrend } = require('./banking_sma') as typeof import('./banking_sma');
+        const framework = pickFramework(req);
+        const cid = (req.query.customer_id as string | undefined) ?? '';
+        if (!cid) {
+          return res
+            .status(400)
+            .json(
+              wrapError(
+                { code: 'EWS_400_missing_customer_id', message: 'customer_id is required', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+        }
+        const defaultFrom = new Date(now().getTime() - 30 * 86_400_000);
+        const from = parseDateOrThrow(req.query.from as string | undefined, 'from', defaultFrom);
+        const until = parseDateOrThrow(req.query.to as string | undefined, 'to', now());
+        const out = buildSmaTrend(req.tenant!.tenant_id, cid, framework, from, until, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_trend_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  /** POST /v1/banking/sma/run-classification?framework= */
+  app.post(
+    '/v1/banking/sma/run-classification',
+    requireTenantMw,
+    requireRole('rules:retire'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { runSmaClassification } = require('./banking_sma') as typeof import('./banking_sma');
+        const framework = pickFramework(req);
+        const actor =
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const out = runSmaClassification(req.tenant!.tenant_id, framework, actor, now());
+        return res.status(201).json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_run_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 
