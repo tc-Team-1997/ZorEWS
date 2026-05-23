@@ -1,0 +1,4774 @@
+{
+  "info": {
+    "_postman_id": "7261fb2f-7868-4685-8604-6a4b7e999311",
+    "name": "ZorEWS — Alerts APIs",
+    "description": "Alerts routes from the ZorEWS BFF + auth-svc surface. 54 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Collection-level pre-request — log the active environment + tenant for visibility",
+          "if (!pm.environment.get('access_token') && pm.request.url.toString().indexOf('/auth/login') === -1 && pm.request.url.toString().indexOf('/oauth/token') === -1 && pm.request.url.toString().indexOf('/healthz') === -1 && pm.request.url.toString().indexOf('/.well-known/') === -1) {",
+          "  console.warn('access_token is empty — run the Smoke > Login request first to capture a token.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [],
+  "item": [
+    {
+      "name": "00 — Smoke tests",
+      "description": "Happy-path + negative-test sanity checks. Run this folder first to verify the local stack + auth flow.",
+      "item": [
+        {
+          "name": "✅ Happy path — GET /v1/alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('2xx or 401 (no auth in env)', () => {",
+                  "  pm.expect([200, 201, 401, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "❌ Negative — missing X-Tenant-ID → 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 when tenant header missing', () => pm.expect(pm.response.code).to.equal(400));",
+                  "pm.test('error envelope', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.have.property('error');",
+                  "  pm.expect(j.error).to.have.property('code');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "❌ Negative — unknown role → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "unknown_role",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 with unknown role', () => pm.expect(pm.response.code).to.equal(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "/api/alerts",
+      "description": "1 route(s) under /api/alerts",
+      "item": [
+        {
+          "name": "GET /api/alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/api/alerts",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "api",
+                "alerts"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /api/alerts",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "/api (internal BFF — T3.10)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts",
+      "description": "1 route(s) under /v1/alerts",
+      "item": [
+        {
+          "name": "GET /v1/alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts"
+              ]
+            },
+            "description": "response in the bank-grade envelope and gates on tenant context."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "/v1/alerts — same data + filters as /api/alerts; T4.24 wraps the"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/:alert_id",
+      "description": "4 route(s) under /v1/alerts/:alert_id",
+      "item": [
+        {
+          "name": "GET /v1/alerts/{alert_id}/ack",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/:alert_id/ack",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                ":alert_id",
+                "ack"
+              ],
+              "variable": [
+                {
+                  "key": "alert_id",
+                  "value": "{{alert_id}}",
+                  "description": "Path parameter: alert_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/{alert_id}/ack",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "(an alert that was never touched returns status='open'). */"
+        },
+        {
+          "name": "POST /v1/alerts/{alert_id}/ack",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/:alert_id/ack",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                ":alert_id",
+                "ack"
+              ],
+              "variable": [
+                {
+                  "key": "alert_id",
+                  "value": "{{alert_id}}",
+                  "description": "Path parameter: alert_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/{alert_id}/ack",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/alerts/:alert_id/ack — auto-discovered (server.ts:3403)"
+        },
+        {
+          "name": "GET /v1/alerts/{alert_id}/ack/history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/:alert_id/ack/history",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                ":alert_id",
+                "ack",
+                "history"
+              ],
+              "variable": [
+                {
+                  "key": "alert_id",
+                  "value": "{{alert_id}}",
+                  "description": "Path parameter: alert_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/{alert_id}/ack/history",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/alerts/:alert_id/ack/history — auto-discovered (server.ts:3557)"
+        },
+        {
+          "name": "POST /v1/alerts/{alert_id}/unack",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/:alert_id/unack",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                ":alert_id",
+                "unack"
+              ],
+              "variable": [
+                {
+                  "key": "alert_id",
+                  "value": "{{alert_id}}",
+                  "description": "Path parameter: alert_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/{alert_id}/unack",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/alerts/:alert_id/unack — auto-discovered (server.ts:3470)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/ack",
+      "description": "1 route(s) under /v1/alerts/ack",
+      "item": [
+        {
+          "name": "GET /v1/alerts/ack/actor-activity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/ack/actor-activity",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "ack",
+                "actor-activity"
+              ]
+            },
+            "description": "ack_count, unack_count, ack_rate, distinct_alerts, alert_ids[]\ncap 50 sorted asc, first/most_recent timestamps. Envelope:\nmost_active_actor (canonical username asc tie-break) +\nexcessive_unackers[] (unack_rate >= 0.5 AND total >= 3 — flags\noperators whose acks get reversed often) + by_action_totals\nmarginal. Mirror of M15.8 / M9.16 / M9.14 per-actor pattern.\nTenant-scoped via store.listForTenant. Mounted at literal path\n(4 segments) — distinct from `/v1/alerts/:alert_id/ack` (3\nsegments) + `/v1/alerts/:alert_id/ack/history` (4 segments\nbut literal `history` ≠ `actor-activity`). */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/ack/actor-activity",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "over the M8.3 AlertAckStore. For each operator: total_actions,"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/ack-time",
+      "description": "1 route(s) under /v1/alerts/ack-time",
+      "item": [
+        {
+          "name": "GET /v1/alerts/ack-time/histogram",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/ack-time/histogram",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "ack-time",
+                "histogram"
+              ]
+            },
+            "description": "ledger. Where M8.11 classifies by SLA-relative status, M8.12\nbuckets by wall-clock duration: under_1h / 1_to_4h / 4_to_24h /\n24h_plus / still_open / monitor_only. Per-bucket count + top-3\nsamples (fastest in acked buckets; oldest-waiting in still_open).\nEnvelope: total_records, total_acked + total_still_open +\ntotal_monitor_only, mean_ack_ms, median_ack_ms, p95_ack_ms (over\nacked only), peak_bucket (canonical tie-break). Mirror of M9.11\nage-buckets pattern for the alert ack-time surface. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/ack-time/histogram",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "ABSOLUTE wall-clock ack-time histogram over the M8.6 routing"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/auto-ack",
+      "description": "4 route(s) under /v1/alerts/auto-ack",
+      "item": [
+        {
+          "name": "POST /v1/alerts/auto-ack/evaluate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/auto-ack/evaluate",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "auto-ack",
+                "evaluate"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/auto-ack/evaluate",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "— return matching rule (if any). */"
+        },
+        {
+          "name": "GET /v1/alerts/auto-ack/rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/auto-ack/rules",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "auto-ack",
+                "rules"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/auto-ack/rules",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/alerts/auto-ack/rules — auto-discovered (server.ts:4274)"
+        },
+        {
+          "name": "POST /v1/alerts/auto-ack/rules",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/auto-ack/rules",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "auto-ack",
+                "rules"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/auto-ack/rules",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/alerts/auto-ack/rules — auto-discovered (server.ts:4286)"
+        },
+        {
+          "name": "DELETE /v1/alerts/auto-ack/rules/{rule_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/auto-ack/rules/:rule_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "auto-ack",
+                "rules",
+                ":rule_id"
+              ],
+              "variable": [
+                {
+                  "key": "rule_id",
+                  "value": "{{rule_id}}",
+                  "description": "Path parameter: rule_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/alerts/auto-ack/rules/{rule_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/alerts/auto-ack/rules/:rule_id — auto-discovered (server.ts:4328)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/by-class",
+      "description": "1 route(s) under /v1/alerts/by-class",
+      "item": [
+        {
+          "name": "GET /v1/alerts/by-class/{class}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/by-class/:class",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "by-class",
+                ":class"
+              ],
+              "variable": [
+                {
+                  "key": "class",
+                  "value": "<class>",
+                  "description": "Path parameter: class"
+                }
+              ]
+            },
+            "description": "class ∈ {red, orange, yellow, green}\nReturns the same item shape as /v1/alerts but filtered to alerts\nwhose severity classifies into the requested BIL class. Each item\nis decorated with `bil_class` + `bil_metadata` so the SPA can\nrender badges directly."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/by-class/{class}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/alerts/by-class/:class"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/channel-distribution",
+      "description": "1 route(s) under /v1/alerts/channel-distribution",
+      "item": [
+        {
+          "name": "GET /v1/alerts/channel-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/channel-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "channel-distribution"
+              ]
+            },
+            "description": "channel: dispatch_count (Σ across records), distinct_alerts,\nby_class (4 keys), acked_count + open_count + monitor_only_count.\nEnvelope: channels[] canonical order, most_used_channel\n(canonical tie-break: email > sms > in_app > push), unused_channels.\nDefault window=50, max=200. Mirror of M14.27 / M7.13 / M3.13\ndistribution pattern for the alerts surface. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/channel-distribution",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "pivot the M8.6 routing ledger by NotificationChannel. Per"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/class-channel-matrix",
+      "description": "1 route(s) under /v1/alerts/class-channel-matrix",
+      "item": [
+        {
+          "name": "GET /v1/alerts/class-channel-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/class-channel-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "class-channel-matrix"
+              ]
+            },
+            "description": "(M8.1) × channel (M8.13). Rows = 4 BilAlertClass (canonical\nred → orange → yellow → green) × cols = 4 NotificationChannel\n(canonical email → sms → in_app → push) = 16 cells. Cells\ncount DISPATCHES not unique alerts — a record with channels=\n['email','sms'] contributes 1 to (class, email) AND 1 to\n(class, sms). Per-row {class, total, by_channel, channels_without[]\ncanonical}. Per-col {channel, total, by_class, classes_without[]\ncanonical}. Envelope: peak_cell (canonical iteration tie-break;\nnull on empty), empty_cells[] in canonical class × channel\nrow-major order, most_diverse_class + most_universal_channel\n(highest distinct non-zero span; canonical-order tie-break).\nMirror of M7.14 / M5.17 / M13.15 / M14.28 matrix pattern. Same\nwindow semantics as M8.6/M8.11/M8.12/M8.13 (default 50, max 200). */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/class-channel-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "2D cross-tab over the M8.6 routing ledger combining class"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/classification",
+      "description": "1 route(s) under /v1/alerts/classification",
+      "item": [
+        {
+          "name": "GET /v1/alerts/classification/spec",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/classification/spec",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "classification",
+                "spec"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/classification/spec",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/alerts/classification/spec — auto-discovered (server.ts:3050)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/classify",
+      "description": "1 route(s) under /v1/alerts/classify",
+      "item": [
+        {
+          "name": "POST /v1/alerts/classify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/classify",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "classify"
+              ]
+            },
+            "description": "body: { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL' (case-insensitive) }\nReturns the BIL class + action metadata for the supplied severity.\nStateless — no alert lookup, just the pure mapping.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/classify",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/alerts/classify"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/daily-volume",
+      "description": "1 route(s) under /v1/alerts/daily-volume",
+      "item": [
+        {
+          "name": "GET /v1/alerts/daily-volume",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/daily-volume",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "daily-volume"
+              ]
+            },
+            "description": "N days (default 30, [1, 365]): {date, total, by_class (every\nBilAlertClass key at 0 when absent), acked_count, open_count,\nmonitor_only_count}. Every day always emitted at 0 — stable\nSPA chart axis. Envelope: peak_day (earliest-day-wins tie-break\nvia strict >; null on empty), peak_count, mean_per_day (rounded),\ngrowth_rate (second-half mean − first-half mean / first-half\nmean; null when first-half=0 OR days<2), busiest_class (highest\ntotal across window + canonical tie-break red > orange > yellow\n> green; null on empty). Drains the routing ledger via the\nRoutingLedger.list interface. Mirror of M12.13 / M15.11 / M10.15\n/ M1.9 daily-volume pattern for the alerts surface. Distinct\nfrom M8.6 (window aggregate not time-bucketed). */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/daily-volume",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "over the M8.6 alert routing ledger. Per UTC calendar day across"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/dow-hour-heatmap",
+      "description": "1 route(s) under /v1/alerts/dow-hour-heatmap",
+      "item": [
+        {
+          "name": "GET /v1/alerts/dow-hour-heatmap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/dow-hour-heatmap",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "dow-hour-heatmap"
+              ]
+            },
+            "description": "alert in the window (newest-first), bucket created_at UTC into\na 7-day × 24-hour grid (ISO Mon=0..Sun=6 × hour 0..23 = 168\ncells). Per cell {dow, hour, count, by_class (4 keys at 0:\nred/orange/yellow/green)}. Marginals: by_dow[7] + by_hour[24]\neach with total + by_class. Envelope: peak_cell (canonical dow\nasc × hour asc tie-break), peak_dow (Mon-first tie-break),\npeak_hour (earliest-hour-wins tie-break), most_active_class\n(canonical BIL_CLASS_ORDER tie-break: red wins). Distinct from\nM8.15 (linear N-day trend) by being cyclic intraday pattern.\nMirror of M14.22 / M15.7 dow×hour heatmap pattern. Same window\nsemantics as M8.6 family (default 50, max 200). */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/dow-hour-heatmap",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "INTRADAY heatmap over the M8.6 routing ledger. For each routed"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/ingest",
+      "description": "1 route(s) under /v1/alerts/ingest",
+      "item": [
+        {
+          "name": "POST /v1/alerts/ingest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/ingest",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "ingest"
+              ]
+            },
+            "description": "{ alert_id, bil_class, source_system?, tags?, target_username? }\n→ returns the resolved policy decision + live ack state.\nM10.8 extension: when `target_username` is provided and the named\nuser is currently inside their M10.7 quiet-hours window, and the\nM8.4 rule didn't already auto-ack, the alert is auto-muted with\nreason \"quiet hours\". RED severity bypasses (operator pages on\ncritical even at night). The decision is reported under the\n`quiet_hours_mute` field on the response. */",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/ingest",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "auto-ack it if a tenant rule matches. body"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/quiet-hours-muted",
+      "description": "3 route(s) under /v1/alerts/quiet-hours-muted",
+      "item": [
+        {
+          "name": "GET /v1/alerts/quiet-hours-muted/analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/quiet-hours-muted/analytics",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "quiet-hours-muted",
+                "analytics"
+              ]
+            },
+            "description": "sample size, distinct users, class mix (RED never appears since\nM10.8 bypasses it by design), per-day buckets oldest-first, top\n10 muted users (sorted by count desc, tie-broken by username asc).\naudit:read RBAC; mounted before any /:username wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/quiet-hours-muted/analytics",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "— tenant-wide rollup over the M10.8 quiet-hours mute event log:"
+        },
+        {
+          "name": "DELETE /v1/alerts/quiet-hours-muted/me",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/quiet-hours-muted/me",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "quiet-hours-muted",
+                "me"
+              ]
+            },
+            "description": "reviewed it). Returns the number of cleared rows. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/alerts/quiet-hours-muted/me",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "caller's quiet-hours-mute audit history (e.g. after the user"
+        },
+        {
+          "name": "GET /v1/alerts/quiet-hours-muted/me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/quiet-hours-muted/me",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "quiet-hours-muted",
+                "me"
+              ]
+            },
+            "description": "hours, newest-first. Caller is identified by X-APEX-USER. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/quiet-hours-muted/me",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "list alerts auto-muted for the calling user during their quiet"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/routing",
+      "description": "9 route(s) under /v1/alerts/routing",
+      "item": [
+        {
+          "name": "GET /v1/alerts/routing/analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/analytics",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "analytics"
+              ]
+            },
+            "description": "mix, ack rate, time-to-ack percentiles, SLA breach count, escalation\ndue count. Pulls from the routing ledger populated at /v1/alerts/ingest. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/routing/analytics",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "routing performance over the recent window: class mix, channel"
+        },
+        {
+          "name": "GET /v1/alerts/routing/channel-coverage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/channel-coverage",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "channel-coverage"
+              ]
+            },
+            "description": "in its `channels[]` has a wired M10 transport. Surfaces gaps\nlike 'in_app' (no out-of-process transport — it's a SPA bell\nbadge). Per-rule {class, channels[]: {channel, wired},\nhas_unwired_channel, unwired_channels[]}; envelope adds\nfully_wired_count + partially_wired_count + all_wired bool +\ndistinct_unwired_channels[] union. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/routing/channel-coverage",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "validator: for each routing rule, check whether every channel"
+        },
+        {
+          "name": "POST /v1/alerts/routing/decide",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/decide",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "decide"
+              ]
+            },
+            "description": "body: { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL' (case-insensitive) }\nReturns the RoutingDecision for the supplied severity given the\ntenant's effective rules.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/routing/decide",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/alerts/routing/decide"
+        },
+        {
+          "name": "GET /v1/alerts/routing/diff",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/diff",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "diff"
+              ]
+            },
+            "description": "is_default, changed_field_count, changed_fields[]: {field,\ndefault_value, effective_value}. Envelope adds total_overrides\n+ most_customised_class + pristine_classes[]. Companion to\nM8.8 (matrix snapshot) — same engine, adds field-level diff\ndetail. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/routing/diff",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "tenant's effective routing rule and DEFAULT_RULES. Per-class:"
+        },
+        {
+          "name": "GET /v1/alerts/routing/matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "matrix"
+              ]
+            },
+            "description": "canonical encoding. Lets the SPA detect \"routing has been\nedited since I last viewed\" in one round-trip rather than\ndiffing field-by-field. Per-row source annotation\n('platform_default'|'tenant_override') so the SPA can badge\neach row without a separate resolution-chain call. Mounted\nBEFORE /:class catch-alls. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/routing/matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "matrix snapshot for the tenant + SHA-256 fingerprint of the"
+        },
+        {
+          "name": "POST /v1/alerts/routing/preview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/preview",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "preview"
+              ]
+            },
+            "description": "+ escalation_deadline ISO timestamps and an ordered\nnotifications_chain[] of {channel, assignee_role, tier} pairs.\nBody { severity, at? }. `at` defaults to now(); accepts any\nISO-8601 timestamp. `audit:read` RBAC matches the rest of M8. */",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/alerts/routing/preview",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "decorates the M8.2 routing decision with computed sla_deadline"
+        },
+        {
+          "name": "GET /v1/alerts/routing/rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/rules",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "rules"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/routing/rules",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/alerts/routing/rules — auto-discovered (server.ts:3225)"
+        },
+        {
+          "name": "DELETE /v1/alerts/routing/rules/{class}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/rules/:class",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "rules",
+                ":class"
+              ],
+              "variable": [
+                {
+                  "key": "class",
+                  "value": "<class>",
+                  "description": "Path parameter: class"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/alerts/routing/rules/{class}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/alerts/routing/rules/:class — auto-discovered (server.ts:4590)"
+        },
+        {
+          "name": "PUT /v1/alerts/routing/rules/{class}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/routing/rules/:class",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "routing",
+                "rules",
+                ":class"
+              ],
+              "variable": [
+                {
+                  "key": "class",
+                  "value": "<class>",
+                  "description": "Path parameter: class"
+                }
+              ]
+            },
+            "description": "body: Partial<RoutingRule> (sans `class` — taken from path)\nSet/update the tenant's override. Validates the rule (sla > escalation,\nmonitor_only ⇒ null SLA, etc).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for PUT /v1/alerts/routing/rules/{class}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PUT /v1/alerts/routing/rules/:class"
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/sla-breaches",
+      "description": "1 route(s) under /v1/alerts/sla-breaches",
+      "item": [
+        {
+          "name": "GET /v1/alerts/sla-breaches/detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/sla-breaches/detail",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "sla-breaches",
+                "detail"
+              ]
+            },
+            "description": "M8.6 returns aggregate COUNTS; M8.11 returns the actual ROW\nlist with status (acked_on_time / acked_late / open_within_sla /\nopen_escalation_due / open_breached / monitor_only /\nno_sla_configured), age_ms, sla_deadline_at, escalation_\ndeadline_at, ms_past_sla (signed). Envelope: by_status,\nbreaching_by_class, breaching[] (open_breached + acked_late,\nworst-first by ms_past_sla), escalation_due[] (open + past\nescalate but within SLA, oldest-first), worst_offender. Drives\nthe SPA's supervisor escalation panel. Mirror of M9.5 (case SLA\nbreach) for the alert surface. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/sla-breaches/detail",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "per-alert SLA breach detail over the recent ledger window."
+        }
+      ]
+    },
+    {
+      "name": "/v1/alerts/sla-compliance-by-class",
+      "description": "1 route(s) under /v1/alerts/sla-compliance-by-class",
+      "item": [
+        {
+          "name": "GET /v1/alerts/sla-compliance-by-class",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/alerts/sla-compliance-by-class",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "alerts",
+                "sla-compliance-by-class"
+              ]
+            },
+            "description": "Distinct from M8.11 (worst-offender row list) by being aggregate\nrate-per-class. Per-class: {class, total, sla_eligible_count\n(excludes monitor_only + sla_hours=null), on_time_count\n(acked-within-SLA + open-within-SLA), late_count (acked past\nSLA), open_breached_count (open past SLA), total_breach_count\n(late + open_breached), compliance_rate (on_time / eligible),\nbreach_rate (total_breach / eligible)}. Envelope: total_records,\ntotal_sla_eligible, total_breaches, overall_compliance_rate,\nworst_class + best_class (canonical worst-first tie-break;\nnull when zero eligible). Mirror of M14.26 SLA budget for the\nalert surface. Drives \"what's our SLA compliance per class?\nis red dropping below 90%?\" view. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/alerts/sla-compliance-by-class",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PER-CLASS SLA compliance rate over the M8.6 routing ledger."
+        }
+      ]
+    },
+    {
+      "name": "/v1/aml/correlate",
+      "description": "2 route(s) under /v1/aml/correlate",
+      "item": [
+        {
+          "name": "POST /v1/aml/correlate/{match_id}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlate/:match_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlate",
+                ":match_id"
+              ],
+              "variable": [
+                {
+                  "key": "match_id",
+                  "value": "<match_id>",
+                  "description": "Path parameter: match_id"
+                }
+              ]
+            },
+            "description": "Forward correlation. For a given AML match, returns the same-customer\nEWS alerts + cases + investigations + recommended action.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/correlate/{match_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/correlate/:match_id"
+        },
+        {
+          "name": "POST /v1/aml/correlate/by-alert/{alert_id}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlate/by-alert/:alert_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlate",
+                "by-alert",
+                ":alert_id"
+              ],
+              "variable": [
+                {
+                  "key": "alert_id",
+                  "value": "{{alert_id}}",
+                  "description": "Path parameter: alert_id"
+                }
+              ]
+            },
+            "description": "Reverse correlation. For a given EWS alert, returns AML matches on\nthe same customer + recommended action.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/correlate/by-alert/{alert_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/correlate/by-alert/:alert_id"
+        }
+      ]
+    },
+    {
+      "name": "/v1/aml/correlation",
+      "description": "9 route(s) under /v1/aml/correlation",
+      "item": [
+        {
+          "name": "GET /v1/aml/correlation/entity/{kind}/{id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/entity/:kind/:id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "entity",
+                ":kind",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "kind",
+                  "value": "<kind>",
+                  "description": "Path parameter: kind"
+                },
+                {
+                  "key": "id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/correlation/entity/{kind}/{id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/correlation/entity/:kind/:id — auto-discovered (server.ts:20112)"
+        },
+        {
+          "name": "GET /v1/aml/correlation/enums",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/enums",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "enums"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/correlation/enums",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/correlation/enums — auto-discovered (server.ts:20003)"
+        },
+        {
+          "name": "GET /v1/aml/correlation/links",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/links",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "links"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/correlation/links",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/correlation/links — auto-discovered (server.ts:20045)"
+        },
+        {
+          "name": "POST /v1/aml/correlation/links",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/links",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "links"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/correlation/links",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/correlation/links — auto-discovered (server.ts:20277)"
+        },
+        {
+          "name": "DELETE /v1/aml/correlation/links/{link_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/links/:link_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "links",
+                ":link_id"
+              ],
+              "variable": [
+                {
+                  "key": "link_id",
+                  "value": "<link_id>",
+                  "description": "Path parameter: link_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/aml/correlation/links/{link_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/aml/correlation/links/:link_id — auto-discovered (server.ts:20336)"
+        },
+        {
+          "name": "GET /v1/aml/correlation/links/{link_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/links/:link_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "links",
+                ":link_id"
+              ],
+              "variable": [
+                {
+                  "key": "link_id",
+                  "value": "<link_id>",
+                  "description": "Path parameter: link_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/correlation/links/{link_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/correlation/links/:link_id — auto-discovered (server.ts:20256)"
+        },
+        {
+          "name": "GET /v1/aml/correlation/summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/summary",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "summary"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/correlation/summary",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/correlation/summary — auto-discovered (server.ts:20024)"
+        },
+        {
+          "name": "POST /v1/aml/correlation/timeline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/timeline",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "timeline"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/correlation/timeline",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/correlation/timeline — auto-discovered (server.ts:20203)"
+        },
+        {
+          "name": "POST /v1/aml/correlation/traverse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/correlation/traverse",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "correlation",
+                "traverse"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/correlation/traverse",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/correlation/traverse — auto-discovered (server.ts:20149)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/aml/dashboard",
+      "description": "1 route(s) under /v1/aml/dashboard",
+      "item": [
+        {
+          "name": "GET /v1/aml/dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/dashboard",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "dashboard"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/dashboard",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/dashboard — auto-discovered (server.ts:23093)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/aml/str-reports",
+      "description": "8 route(s) under /v1/aml/str-reports",
+      "item": [
+        {
+          "name": "GET /v1/aml/str-reports",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/str-reports",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/str-reports — auto-discovered (server.ts:23185)"
+        },
+        {
+          "name": "POST /v1/aml/str-reports",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/str-reports",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/str-reports — auto-discovered (server.ts:23245)"
+        },
+        {
+          "name": "DELETE /v1/aml/str-reports/{str_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/:str_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                ":str_id"
+              ],
+              "variable": [
+                {
+                  "key": "str_id",
+                  "value": "<str_id>",
+                  "description": "Path parameter: str_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/aml/str-reports/{str_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "(only allowed in draft / ready_for_review per FIU-IND retention). */"
+        },
+        {
+          "name": "GET /v1/aml/str-reports/{str_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/:str_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                ":str_id"
+              ],
+              "variable": [
+                {
+                  "key": "str_id",
+                  "value": "<str_id>",
+                  "description": "Path parameter: str_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/str-reports/{str_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/str-reports/:str_id — auto-discovered (server.ts:23225)"
+        },
+        {
+          "name": "PATCH /v1/aml/str-reports/{str_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/:str_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                ":str_id"
+              ],
+              "variable": [
+                {
+                  "key": "str_id",
+                  "value": "<str_id>",
+                  "description": "Path parameter: str_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for PATCH /v1/aml/str-reports/{str_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PATCH /v1/aml/str-reports/:str_id — auto-discovered (server.ts:23304)"
+        },
+        {
+          "name": "POST /v1/aml/str-reports/{str_id}/transition",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/:str_id/transition",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                ":str_id",
+                "transition"
+              ],
+              "variable": [
+                {
+                  "key": "str_id",
+                  "value": "<str_id>",
+                  "description": "Path parameter: str_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/aml/str-reports/{str_id}/transition",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/aml/str-reports/:str_id/transition — auto-discovered (server.ts:23362)"
+        },
+        {
+          "name": "GET /v1/aml/str-reports/summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/summary",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                "summary"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/str-reports/summary",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/str-reports/summary — auto-discovered (server.ts:23173)"
+        },
+        {
+          "name": "GET /v1/aml/str-reports/taxonomy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/aml/str-reports/taxonomy",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "aml",
+                "str-reports",
+                "taxonomy"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/aml/str-reports/taxonomy",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/aml/str-reports/taxonomy — auto-discovered (server.ts:23157)"
+        }
+      ]
+    }
+  ]
+}

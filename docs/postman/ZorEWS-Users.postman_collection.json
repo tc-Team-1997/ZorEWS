@@ -1,0 +1,1529 @@
+{
+  "info": {
+    "_postman_id": "b5ac5fa5-8f1f-4dfe-879f-80231fb23168",
+    "name": "ZorEWS — Users APIs",
+    "description": "Users routes from the ZorEWS BFF + auth-svc surface. 31 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Collection-level pre-request — log the active environment + tenant for visibility",
+          "if (!pm.environment.get('access_token') && pm.request.url.toString().indexOf('/auth/login') === -1 && pm.request.url.toString().indexOf('/oauth/token') === -1 && pm.request.url.toString().indexOf('/healthz') === -1 && pm.request.url.toString().indexOf('/.well-known/') === -1) {",
+          "  console.warn('access_token is empty — run the Smoke > Login request first to capture a token.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [],
+  "item": [
+    {
+      "name": "00 — Smoke tests",
+      "description": "Happy-path + negative-test sanity checks. Run this folder first to verify the local stack + auth flow.",
+      "item": [
+        {
+          "name": "✅ Happy path — GET /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/me",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('2xx or 401 (no auth in env)', () => {",
+                  "  pm.expect([200, 201, 401, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "/auth",
+      "description": "31 route(s) under /auth",
+      "item": [
+        {
+          "name": "GET /auth/audit-log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/audit-log",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "audit-log"
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nReturns auth events newest-first. In this prototype the buffer is\nin-memory and capped at 1000 — production would page over a persistent\nappend-only table. Filters are AND-combined."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/audit-log",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/audit-log?type=...&target_username=...&limit=..."
+        },
+        {
+          "name": "GET /auth/dashboard-widgets/{role}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/dashboard-widgets/:role",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "dashboard-widgets",
+                ":role"
+              ],
+              "variable": [
+                {
+                  "key": "role",
+                  "value": "<role>",
+                  "description": "Path parameter: role"
+                }
+              ]
+            },
+            "description": "GET /auth/dashboard-widgets/:role\nOpen to any signed-in user — analysts call this to render their own\ndashboard. Returns the configured widgets sorted by sort_order.\nEmpty array means \"no override; use catalogue defaults\"."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/dashboard-widgets/{role}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Dashboard widgets per-role config (T4.23, BAC-A §3.1.9.1.4)"
+        },
+        {
+          "name": "PUT /auth/dashboard-widgets/{role}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/dashboard-widgets/:role",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "dashboard-widgets",
+                ":role"
+              ],
+              "variable": [
+                {
+                  "key": "role",
+                  "value": "<role>",
+                  "description": "Path parameter: role"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nbody: { widgets: [{ widget_id, sort_order, is_visible }] }\nAtomically replace the role's full widget layout. Wipes any prior\nrows for the role and inserts the new ones. updated_by is taken\nfrom the caller's username (looked up via the JWT sub claim).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for PUT /auth/dashboard-widgets/{role}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PUT /auth/dashboard-widgets/:role"
+        },
+        {
+          "name": "POST /auth/first-login/complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/first-login/complete",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "first-login",
+                "complete"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nbody: { new_password: string, accept_terms: true }\nUsed by the first-login wizard the SPA shows when a user logs in\nwith must_change_password=true. Rotates the password through the\nusual setPassword gates (complexity + history) and records T&C\nacceptance. Idempotent guard: if the user has already completed it\n(must_change_password === false), returns 409 to surface a clear\n\"no longer needed\" rather than silently letting the call succeed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/first-login/complete",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/first-login/complete"
+        },
+        {
+          "name": "GET /auth/leave-covers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/leave-covers",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "leave-covers"
+              ]
+            },
+            "description": "Non-admins can only see covers where they're the applicant or the\ncoverer. Admins can pass any filter. `active_only` defaults to true\n(cancelled covers excluded)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/leave-covers",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/leave-covers?applicant_user=&leave_coverer=&active_on=&active_only="
+        },
+        {
+          "name": "POST /auth/leave-covers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/leave-covers",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "leave-covers"
+              ]
+            },
+            "description": "body: { applicant_user?, leave_coverer, role, start_date, end_date, in_office?, comments? }\nSelf-service for any signed-in user — `applicant_user` defaults to\nthe caller's user_id. Non-admins can only file leave for themselves;\nadmin can file on behalf of any user (rare admin-override case).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/leave-covers",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/leave-covers"
+        },
+        {
+          "name": "DELETE /auth/leave-covers/{cover_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/leave-covers/:cover_id",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "leave-covers",
+                ":cover_id"
+              ],
+              "variable": [
+                {
+                  "key": "cover_id",
+                  "value": "<cover_id>",
+                  "description": "Path parameter: cover_id"
+                }
+              ]
+            },
+            "description": "Caller must be the applicant, the coverer, or admin. Cancelling an\nalready-cancelled cover returns 404 (treat as missing — same shape\nas the team delete-member route)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/leave-covers/{cover_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/leave-covers/:cover_id — cancel a cover."
+        },
+        {
+          "name": "POST /auth/login/verify-2fa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/login/verify-2fa",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "login",
+                "verify-2fa"
+              ]
+            },
+            "description": "body: { partial_token, code, backup_code? }\nStep-up flow. /auth/login returns a partial_token + requires_2fa=true\nfor enrolled users; this endpoint exchanges the partial for the\nfull access + refresh pair after verifying the TOTP code (or a\nsingle-use backup code).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{otp_code}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/login/verify-2fa",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/login/verify-2fa"
+        },
+        {
+          "name": "GET /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/me",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/me",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/me — auto-discovered (server.ts:1117)"
+        },
+        {
+          "name": "GET /auth/me/activity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/me/activity",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "me",
+                "activity"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nSelf-service view of the caller's own auth events. Unlike\n/auth/audit-log (admin/supervisor only), this is open to every\nsigned-in user — the filter is forced server-side to the caller's\nsub so they only ever see their own row stream. Banking apps\nuniversally surface this to users so they can spot account\ncompromise (logins from unfamiliar IPs / devices) themselves."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/me/activity",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/me/activity?limit=..."
+        },
+        {
+          "name": "POST /auth/password/admin-reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/password/admin-reset",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "password",
+                "admin-reset"
+              ]
+            },
+            "description": "Authorization: Bearer <admin access token>\nbody: { username, password }\nAdmin-only manual reset — for cases where the token-based flow isn't\nworkable (lost email). Distinct from the self-service flow: no token,\nno email, just direct replacement. Auth check is the JWT role claim\n(no separate RBAC matrix lookup — auth-svc is the matrix's source of\ntruth here).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/password/admin-reset",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/password/admin-reset"
+        },
+        {
+          "name": "POST /auth/password/reset-confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/password/reset-confirm",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "password",
+                "reset-confirm"
+              ]
+            },
+            "description": "body: { token, password }\nConsumes the token (single-use; revoked even on failure) and sets\nthe user's password. 400 on invalid/expired token or weak password.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/password/reset-confirm",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/password/reset-confirm"
+        },
+        {
+          "name": "POST /auth/password/reset-request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/password/reset-request",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "password",
+                "reset-request"
+              ]
+            },
+            "description": "body: { username?: string, email?: string }\nEither field is accepted — useful for users who remember one but not\nthe other. If both are passed, email takes precedence (more specific).\nAlways returns 202 with the same shape regardless of whether the\nlookup hit, to prevent enumeration via this endpoint. For existing\naccounts: issues a single-use reset token (15-min TTL) and logs a\n\"reset link\" via the fastify logger (no SMTP in this prototype —\noperators read the link out of `.logs/auth-svc.log` and paste it\ninto the SPA's reset-password page).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/password/reset-request",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/password/reset-request"
+        },
+        {
+          "name": "POST /auth/recovery/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/recovery/restore",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "recovery",
+                "restore"
+              ]
+            },
+            "description": "Called BY the BFF when an admin clicks \"Restore\" on a Recycle Bin\nrow that belongs to auth-svc. Shared-secret auth, NOT user-JWT:\nthis is a service-to-service path, and the BFF is the trust\nanchor (it already verified the operator's admin role via M1.2\nRBAC on /v1/recovery/:id/restore).\nDispatches by entity_type — adding a future auth-svc entity type\n(dashboard_widget / service_client / user) is one switch case.\nWhen AUTH_SVC_RECOVERY_RESTORE_KEY is unset the endpoint refuses\nALL calls with 503 (disabled by config) — failing closed beats\naccidentally accepting unauthenticated restore calls in a\nmisconfigured environment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/recovery/restore",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Body:    { entity_type, original_id, payload }"
+        },
+        {
+          "name": "POST /auth/register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/register",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/register",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/register — auto-discovered (server.ts:440)"
+        },
+        {
+          "name": "GET /auth/service-clients",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/service-clients",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "service-clients"
+              ]
+            },
+            "description": "Admin-only management of OAuth client_credentials principals stored\nin app_iam.service_clients. Mirrors the webhook subscription pattern:\ncreate returns the plaintext secret ONCE (never retrievable again);\nlist strips the secret hash; delete by composite (tenant_id, client_id).\nGET /auth/service-clients?tenant_id=...\nAuthorization: Bearer <admin>\nLists service clients (without secret hash). Optional `tenant_id`\nquery param filters by tenant; omit to list every client across all\ntenants (platform-admin view)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/service-clients",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Service-client CRUD (T4.24 Phase 11)"
+        },
+        {
+          "name": "POST /auth/service-clients",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/service-clients",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "service-clients"
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nbody: { tenant_id, client_id, display_name, scopes? }\nCreates a new OAuth client_credentials principal. Generates the\nclient_secret server-side and returns it ONCE in the response — the\ncaller must persist or display it; subsequent reads never include it.\n409 on duplicate (tenant_id, client_id).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/service-clients",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/service-clients"
+        },
+        {
+          "name": "DELETE /auth/service-clients/{tenant_id}/{client_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/service-clients/:tenant_id/:client_id",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "service-clients",
+                ":tenant_id",
+                ":client_id"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenant_id}}",
+                  "description": "Path parameter: tenant_id"
+                },
+                {
+                  "key": "client_id",
+                  "value": "<client_id>",
+                  "description": "Path parameter: client_id"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nRemoves a service client. 204 on success. 404 when the client doesn't\nexist for that tenant. Cross-tenant attempts return 404 (no enumeration\nleak across tenants)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/service-clients/{tenant_id}/{client_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/service-clients/:tenant_id/:client_id"
+        },
+        {
+          "name": "DELETE /auth/sessions",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/sessions",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "sessions"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\n\"Sign out everywhere else\" — revokes every session for the caller\nexcept their current one. Pass `?except=` (or omit) to revoke every\nsession including the caller's, which forces a re-login."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/sessions",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/sessions?except=current"
+        },
+        {
+          "name": "GET /auth/sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/sessions",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "sessions"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nReturns the caller's active sessions. The current session is flagged\nwith `is_current: true` so the SPA can render a clear \"this device\"\nindicator."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/sessions",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/sessions"
+        },
+        {
+          "name": "DELETE /auth/sessions/{sid}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/sessions/:sid",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "sessions",
+                ":sid"
+              ],
+              "variable": [
+                {
+                  "key": "sid",
+                  "value": "{{session_id}}",
+                  "description": "Path parameter: sid"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nRevokes one of the caller's own sessions. Returns 404 if the sid\nisn't theirs (or doesn't exist), so an attacker can't enumerate other\nusers' sids by status code."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/sessions/{sid}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/sessions/:sid"
+        },
+        {
+          "name": "GET /auth/teams",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams"
+              ]
+            },
+            "description": "BAC-A manual §3.1.7.1.5. Team CRUD is admin-only since membership +\nleadership govern who CAPs route to. List/get is open to any signed-in\nuser (analysts need to see teams when picking an issue_owner_group).\nGET /auth/teams?branch=...&role=...\nAuthorization: Bearer <access token>\nReturns all teams, optionally filtered by branch or role. Open to any\nauthenticated user — analysts need this when picking the issue_owner_group\nfor a CAP. Admins can also see it via the same route."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/teams",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Teams (Issue Owner Groups + branch teams, T4.21)"
+        },
+        {
+          "name": "POST /auth/teams",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams"
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nbody: { name, branch, role, team_leader, email?, description?, members? }\nCreates a team. team_leader and any initial members must be valid\nuser_ids — pg enforces this via FK; in-memory mode trusts the caller\n(the route is admin-only anyway).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/teams",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/teams"
+        },
+        {
+          "name": "DELETE /auth/teams/{team_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams/:team_id",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams",
+                ":team_id"
+              ],
+              "variable": [
+                {
+                  "key": "team_id",
+                  "value": "<team_id>",
+                  "description": "Path parameter: team_id"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nHard-deletes a team. CASCADE on the FK takes care of the membership\nrows. 404 when the team doesn't exist.\nPhase 2c: archives the full team row (including members[] so the\nSPA Recycle Bin restore can re-establish the membership join in\none shot) BEFORE the delete. Restore-side plumbing follows in a\nlater ticket (each cross-service adopter registers a BFF adapter\nthat HTTP-calls back to a future POST /auth/teams/restore route)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/teams/{team_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/teams/:team_id"
+        },
+        {
+          "name": "GET /auth/teams/{team_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams/:team_id",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams",
+                ":team_id"
+              ],
+              "variable": [
+                {
+                  "key": "team_id",
+                  "value": "<team_id>",
+                  "description": "Path parameter: team_id"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <access token>"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/teams/{team_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/teams/:team_id"
+        },
+        {
+          "name": "POST /auth/teams/{team_id}/members",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams/:team_id/members",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams",
+                ":team_id",
+                "members"
+              ],
+              "variable": [
+                {
+                  "key": "team_id",
+                  "value": "<team_id>",
+                  "description": "Path parameter: team_id"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nbody: { user_id }\nAdds a user to a team. Idempotent — returns 200 with `added: false`\nwhen the user is already a member, 200 with `added: true` otherwise.\n404 when the team doesn't exist.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/teams/{team_id}/members",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/teams/:team_id/members"
+        },
+        {
+          "name": "DELETE /auth/teams/{team_id}/members/{user_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/teams/:team_id/members/:user_id",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "teams",
+                ":team_id",
+                "members",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "team_id",
+                  "value": "<team_id>",
+                  "description": "Path parameter: team_id"
+                },
+                {
+                  "key": "user_id",
+                  "value": "<user_id>",
+                  "description": "Path parameter: user_id"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nRemoves a user from a team. 404 when team or member doesn't exist.\n409 when trying to remove the team_leader (reassign leader first\nvia a future PATCH /auth/teams/:id endpoint — not implemented yet)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/teams/{team_id}/members/{user_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/teams/:team_id/members/:user_id"
+        },
+        {
+          "name": "GET /auth/users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/users",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "users"
+              ]
+            },
+            "description": "Authorization: Bearer <admin access token>\nAdmin-only — backs the SPA's Users admin page. Returns every user's\npublic projection (id, username, display_name, role). No\npasswordHash."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/users",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/users"
+        },
+        {
+          "name": "POST /auth/users",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/users",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "users"
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nbody: { username, email, password, display_name, role }\nAdmin creates a user directly. Same validation gate as /auth/register\n(delegates to UserStore.register), but admin-only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/users",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/users"
+        },
+        {
+          "name": "GET /auth/users/{user_id}/active-cover",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/users/:user_id/active-cover",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ":user_id",
+                "active-cover"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "<user_id>",
+                  "description": "Path parameter: user_id"
+                }
+              ]
+            },
+            "description": "Returns the active cover row for `user_id` on the given date (default:\ntoday, in the server's UTC). 204 No Content when no active cover.\nUsed by the SPA assignment dropdown to auto-route work to the\ncoverer when the intended assignee is on cover.\nOpen to any signed-in user — they need this to do their job."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/users/{user_id}/active-cover",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/users/:user_id/active-cover?date=YYYY-MM-DD"
+        },
+        {
+          "name": "DELETE /auth/users/{username}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/users/:username",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ":username"
+              ],
+              "variable": [
+                {
+                  "key": "username",
+                  "value": "{{apex_user}}",
+                  "description": "Path parameter: username"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nHard-delete a user. Refuses to delete the caller (you can't lock\nyourself out by deleting your own admin account). 404 if unknown."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/users/{username}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/users/:username"
+        }
+      ]
+    }
+  ]
+}

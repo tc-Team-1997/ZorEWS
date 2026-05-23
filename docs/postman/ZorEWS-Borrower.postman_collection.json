@@ -1,0 +1,694 @@
+{
+  "info": {
+    "_postman_id": "a2658944-fa1a-4623-80eb-7a58b998a184",
+    "name": "ZorEWS — Borrower APIs",
+    "description": "Borrower routes from the ZorEWS BFF + auth-svc surface. 8 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Collection-level pre-request — log the active environment + tenant for visibility",
+          "if (!pm.environment.get('access_token') && pm.request.url.toString().indexOf('/auth/login') === -1 && pm.request.url.toString().indexOf('/oauth/token') === -1 && pm.request.url.toString().indexOf('/healthz') === -1 && pm.request.url.toString().indexOf('/.well-known/') === -1) {",
+          "  console.warn('access_token is empty — run the Smoke > Login request first to capture a token.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [],
+  "item": [
+    {
+      "name": "00 — Smoke tests",
+      "description": "Happy-path + negative-test sanity checks. Run this folder first to verify the local stack + auth flow.",
+      "item": [
+        {
+          "name": "✅ Happy path — GET /api/customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/api/customers",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('2xx or 401 (no auth in env)', () => {",
+                  "  pm.expect([200, 201, 401, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "/api/customers",
+      "description": "2 route(s) under /api/customers",
+      "item": [
+        {
+          "name": "GET /api/customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/api/customers",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Each row is a thin summary; the detail page hydrates via /api/customers/:id/risk."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /api/customers",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "/api/customers — list of monitored customers (SPA Customers page)."
+        },
+        {
+          "name": "GET /api/customers/{id}/risk",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/api/customers/:id/risk",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                ":id",
+                "risk"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /api/customers/{id}/risk",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "/api/customers/:id/risk — full risk profile for the SPA Customer 360 page."
+        }
+      ]
+    },
+    {
+      "name": "/v1/customers/:customer_id",
+      "description": "1 route(s) under /v1/customers/:customer_id",
+      "item": [
+        {
+          "name": "GET /v1/customers/{customer_id}/360",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/customers/:customer_id/360",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                ":customer_id",
+                "360"
+              ],
+              "variable": [
+                {
+                  "key": "customer_id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: customer_id"
+                }
+              ]
+            },
+            "description": "Single endpoint that orchestrates 6 integration adapters\n(insurance, ifrs9, aml, dms, bureau, finance) + the M9.1\ninvestigation store into one consolidated customer view. Panel\nlevel degradation: if any adapter throws, that panel comes back\nnull + the panel name is added to `degraded[]` in the response,\nbut the call still 200s — partial answers beat hard failures\nwhen the SPA needs to render *something* on the customer page."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/customers/{customer_id}/360",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Per-customer 360 drill-through (T6 M11.6)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/risk-profile/:customer_id",
+      "description": "1 route(s) under /v1/risk-profile/:customer_id",
+      "item": [
+        {
+          "name": "GET /v1/risk-profile/{customer_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/risk-profile/:customer_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "risk-profile",
+                ":customer_id"
+              ],
+              "variable": [
+                {
+                  "key": "customer_id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: customer_id"
+                }
+              ]
+            },
+            "description": "404 returns the §11 error envelope; success returns SUCCESS envelope."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/risk-profile/{customer_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/risk-profile/:customer_id — T4.24 envelope + tenant."
+        }
+      ]
+    },
+    {
+      "name": "/v1/watchlist",
+      "description": "2 route(s) under /v1/watchlist",
+      "item": [
+        {
+          "name": "GET /v1/watchlist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/watchlist",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "watchlist"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/watchlist",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/watchlist — auto-discovered (server.ts:14434)"
+        },
+        {
+          "name": "POST /v1/watchlist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/watchlist",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "watchlist"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/watchlist",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "body { customer_id, reason, vertical? }. */"
+        }
+      ]
+    },
+    {
+      "name": "/v1/watchlist/:customer_id",
+      "description": "1 route(s) under /v1/watchlist/:customer_id",
+      "item": [
+        {
+          "name": "DELETE /v1/watchlist/{customer_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/watchlist/:customer_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "watchlist",
+                ":customer_id"
+              ],
+              "variable": [
+                {
+                  "key": "customer_id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: customer_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/watchlist/{customer_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/watchlist/:customer_id — auto-discovered (server.ts:14551)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/watchlist/scan",
+      "description": "1 route(s) under /v1/watchlist/scan",
+      "item": [
+        {
+          "name": "POST /v1/watchlist/scan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/watchlist/scan",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "watchlist",
+                "scan"
+              ]
+            },
+            "description": "result envelope (not 4xx) since \"no one to watch\" is valid. */",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/watchlist/scan",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "every watched customer. Empty watchlist returns an empty"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2613 @@
+{
+  "info": {
+    "_postman_id": "7ce058cd-2a4c-4b30-8029-93145a717862",
+    "name": "ZorEWS — Auth APIs",
+    "description": "Auth routes from the ZorEWS BFF + auth-svc surface. 33 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Collection-level pre-request — log the active environment + tenant for visibility",
+          "if (!pm.environment.get('access_token') && pm.request.url.toString().indexOf('/auth/login') === -1 && pm.request.url.toString().indexOf('/oauth/token') === -1 && pm.request.url.toString().indexOf('/healthz') === -1 && pm.request.url.toString().indexOf('/.well-known/') === -1) {",
+          "  console.warn('access_token is empty — run the Smoke > Login request first to capture a token.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [],
+  "item": [
+    {
+      "name": "00 — Smoke tests",
+      "description": "Happy-path + negative-test sanity checks. Run this folder first to verify the local stack + auth flow.",
+      "item": [
+        {
+          "name": "✅ 1. Login (captures access_token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/login",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{apex_user}}\",\n  \"password\": \"Admin!Pass1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.requires_2fa) {",
+                  "  pm.environment.set('partial_token', j.partial_token);",
+                  "  console.log('2FA required — partial_token saved. Run /auth/login/verify-2fa next.');",
+                  "} else if (j.access_token) {",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "  if (j.refresh_token) pm.environment.set('refresh_token', j.refresh_token);",
+                  "  console.log('access_token captured (' + j.access_token.slice(0, 24) + '…)');",
+                  "}",
+                  "pm.test('token present', () => {",
+                  "  pm.expect(j.access_token || j.partial_token).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "✅ 2. JWKS available (no auth needed)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/.well-known/jwks.json",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                ".well-known",
+                "jwks.json"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('has keys[]', () => pm.expect(pm.response.json().keys).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "✅ 3. /healthz (BFF + auth)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{bff_url}}/healthz",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('< 1s', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "❌ Login with bad creds → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/login",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice.admin\",\n  \"password\": \"WRONG!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 or 423 expected on bad password', () => {",
+                  "  pm.expect([401, 423]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "❌ Login missing username → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/login",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"Admin!Pass1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('4xx on missing field', () => pm.expect(pm.response.code).to.be.within(400, 499));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "/.well-known",
+      "description": "1 route(s) under /.well-known",
+      "item": [
+        {
+          "name": "GET /.well-known/jwks.json",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/.well-known/jwks.json",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                ".well-known",
+                "jwks.json"
+              ]
+            },
+            "description": "RFC 7517 — Resource servers (the BFF, partner integrations) fetch this\nendpoint to verify RS256-signed access tokens minted by /auth/login,\n/auth/refresh, and /oauth/token. Anonymous (no auth required); the\npublic key is, by definition, not a secret.\nLocal dev: ephemeral keypair generated on first signer load. Production:\nthe same kid points at KMS alias/apex-ews-secret; verifiers fetch the\npublic key from KMS or from this endpoint (mirrors KMS for resource\nservers that can't reach KMS directly)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /.well-known/jwks.json",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "JWKS publication (T4.24 Phase 7)"
+        }
+      ]
+    },
+    {
+      "name": "/auth",
+      "description": "7 route(s) under /auth",
+      "item": [
+        {
+          "name": "DELETE /auth/2fa",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/2fa",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "2fa"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nUser disables their own 2FA. Admin can disable anyone's by passing\n`?username=...` (gated to admin-only). Idempotent — 204 either way."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /auth/2fa",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /auth/2fa"
+        },
+        {
+          "name": "POST /auth/2fa/setup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/2fa/setup",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "setup"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nGenerates a fresh TOTP secret (RFC 6238) and stashes it as PENDING.\nReturns the secret_base32 + otpauth:// URL — the client renders\nthe URL as a QR code so the user can scan it. The user must then\ncall /auth/2fa/verify with the first code from their authenticator\nto complete enrolment; a pending secret expires in 10 minutes.\nIdempotent for the same user — re-calling overwrites the pending\nrow and returns a fresh secret. Already-enrolled users get 409\n(must call /auth/2fa/disable first to re-enrol).",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/2fa/setup",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/2fa/setup"
+        },
+        {
+          "name": "GET /auth/2fa/status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/2fa/status",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "status"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nReturns whether the caller has 2FA enrolled + how many backup\ncodes remain. SPA polls this to decide whether to show the\n\"Set up two-factor\" CTA in the user menu."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/2fa/status",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/2fa/status"
+        },
+        {
+          "name": "POST /auth/2fa/verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/2fa/verify",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "verify"
+              ]
+            },
+            "description": "Authorization: Bearer <access token>\nbody: { code: \"123456\" }\nCompletes enrolment when called against a PENDING secret. Mints\n10 single-use backup codes and returns them ONCE in the response.\nThe codes will not be retrievable later — admin disable + re-enrol\nis the recovery path.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{otp_code}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/2fa/verify",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/2fa/verify"
+        },
+        {
+          "name": "GET /auth/captcha/challenge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/captcha/challenge",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "captcha",
+                "challenge"
+              ]
+            },
+            "description": "Anonymous endpoint — issues a fresh math captcha challenge so the\nSPA can render it inline next to the login form when the backend\nhas flagged the (IP+username) combination as `captcha_required`.\nSingle-use: each issue() returns a new id; the next login attempt\nmust reference that id + the answer."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/captcha/challenge",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /auth/captcha/challenge"
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/login",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{apex_user}}\",\n  \"password\": \"Admin!Pass1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.requires_2fa) {",
+                  "  pm.environment.set('partial_token', j.partial_token);",
+                  "  console.log('2FA required — partial_token saved. Run /auth/login/verify-2fa next.');",
+                  "} else if (j.access_token) {",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "  if (j.refresh_token) pm.environment.set('refresh_token', j.refresh_token);",
+                  "  console.log('access_token captured (' + j.access_token.slice(0, 24) + '…)');",
+                  "}",
+                  "pm.test('token present', () => {",
+                  "  pm.expect(j.access_token || j.partial_token).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/login — auto-discovered (server.ts:198)"
+        },
+        {
+          "name": "POST /auth/refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/refresh",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/refresh",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/refresh — auto-discovered (server.ts:408)"
+        }
+      ]
+    },
+    {
+      "name": "/oauth",
+      "description": "1 route(s) under /oauth",
+      "item": [
+        {
+          "name": "POST /oauth/token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/oauth/token",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "body or x-www-form-urlencoded:\ngrant_type=client_credentials\nclient_id=<id>\nclient_secret=<secret>\ntenant_id=<id>             (also accepted via X-Tenant-ID header)\nReturns the OAuth 2 RFC 6749 §5.1 shape:\n{ access_token, token_type, expires_in, scope }\nThe access token is RS256-signed with the same signer as user\nsessions; the protected payload carries `tenant_id` + `client_id`\n(not `sub`/`role`). Resource servers (BFF) can decode and validate\ntenant membership directly off the token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"apex-mobile-bank-demo\",\n  \"client_secret\": \"{{oauth_client_secret}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('oauth 200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "if (j.access_token) {",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "  console.log('oauth access_token captured');",
+                  "}",
+                  "pm.test('token issued', () => {",
+                  "  pm.expect(j.access_token).to.be.a('string');",
+                  "  pm.expect(j.token_type).to.equal('Bearer');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /oauth/token"
+        }
+      ]
+    },
+    {
+      "name": "/v1/admin/api-keys",
+      "description": "21 route(s) under /v1/admin/api-keys",
+      "item": [
+        {
+          "name": "GET /v1/admin/api-keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/admin/api-keys — auto-discovered (server.ts:24347)"
+        },
+        {
+          "name": "POST /v1/admin/api-keys",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman test key\",\n  \"scopes\": [\n    \"alerts:read\",\n    \"audit:read\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/admin/api-keys",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/admin/api-keys — auto-discovered (server.ts:24304)"
+        },
+        {
+          "name": "DELETE /v1/admin/api-keys/{key_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/:key_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                ":key_id"
+              ],
+              "variable": [
+                {
+                  "key": "key_id",
+                  "value": "{{config_key}}",
+                  "description": "Path parameter: key_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/admin/api-keys/{key_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([204, 200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/admin/api-keys/:key_id — auto-discovered (server.ts:25132)"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/{key_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/:key_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                ":key_id"
+              ],
+              "variable": [
+                {
+                  "key": "key_id",
+                  "value": "{{config_key}}",
+                  "description": "Path parameter: key_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/{key_id}",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/admin/api-keys/:key_id — auto-discovered (server.ts:25067)"
+        },
+        {
+          "name": "POST /v1/admin/api-keys/{key_id}/revoke",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/:key_id/revoke",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                ":key_id",
+                "revoke"
+              ],
+              "variable": [
+                {
+                  "key": "key_id",
+                  "value": "{{config_key}}",
+                  "description": "Path parameter: key_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/admin/api-keys/{key_id}/revoke",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/admin/api-keys/:key_id/revoke — auto-discovered (server.ts:25088)"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/by-creator",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/by-creator",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "by-creator"
+              ]
+            },
+            "description": "{creator_username, total_keys, active_keys, revoked_keys, scopes\n(union sorted asc, defensive dedup), most_recent_creation_at,\nkey_names[] sorted asc cap 50}. Envelope {total_keys,\ntotal_active_keys, total_revoked_keys, total_creators,\ncreators_with_active_keys, creators[] sorted by total_keys desc +\ncreator_username asc tie-break, most_prolific_creator,\nlargest_active_provisioner}. Mirror of M11.15 dashboard authorship\n+ M15.8 audit per-actor pivot pattern. Drives the SPA \"audit who\ncreated what\" + quarterly access-review flow.\nMounted BEFORE /:key_id so the literal `/by-creator` segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/by-creator",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "view over the M1.2 redacted ApiKeyEntry surface. Per-creator row"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/creator-lifecycle-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/creator-lifecycle-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "creator-lifecycle-matrix"
+              ]
+            },
+            "description": "Rows = creators (open set, sorted by total_keys desc + username\nasc tie-break) × cols = 7 canonical lifecycle stages. Per-row\n{created_by, total_keys, by_stage (every stage at 0),\nstages_without[], attention_count (sum of expired + expiring_\nsoon + idle_never_used + dormant)}. Per-col {stage, total,\ntop_creators[] cap 10, distinct_creators}. Envelope: peak_cell +\ntop_attention_creator (most rotation/cleanup work). Mirror of\nM14.28 / M12.14 / M3.14 / M15.14 / M8.14 matrix pattern.\nMounted BEFORE /:key_id wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/creator-lifecycle-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "2D cross-tab combining M1.10 lifecycle stages × M1.6 creators."
+        },
+        {
+          "name": "GET /v1/admin/api-keys/creator-scope-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/creator-scope-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "creator-scope-matrix"
+              ]
+            },
+            "description": "(open set, sorted by total_keys desc + username asc tie-break) ×\ncols = 7 canonical scopes (VALID_SCOPES order). Cells count\nKEY-SCOPE PAIRS across this creator's ACTIVE keys (a multi-scope\nkey contributes to each scope it carries). Active-only — revoked\nkeys don't represent live granted permission surface. Per-row\n{created_by, total_keys, by_scope (every scope at 0),\ntotal_permissions (= Σ by_scope), scopes_without[], distinct_\nscopes}. Per-col {scope, total, top_creators[] cap 10,\ndistinct_creators}. Envelope: broadest_grant_creator (largest\ntotal_permissions footprint — natural quarterly access-review\nstarting point), unused_scopes[] (tenant-wide coverage gap),\npeak_cell. Mirror of M1.11 (creator × lifecycle) pivot pattern\nfor the permission surface. Mounted BEFORE /:key_id wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/creator-scope-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "cross-tab combining M1.6 creators × M1.5 scopes. Rows = creators"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/creator-status-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/creator-status-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "creator-status-matrix"
+              ]
+            },
+            "description": "(compact — only creators with > 0 keys in this status), distinct_creators,\ntop_creators[] cap 3 with canonical asc tie-break}. Envelope:\npeak_cell (canonical iteration tie-break: creators asc × statuses\ncanonical; null on empty), most_revoked_creator (highest revoked\ncount + canonical username asc tie-break; null when zero\nrevocations), highest_revocation_rate_creator (highest revocation_rate\n+ canonical asc tie-break; null when no creator has > 0\nrevocations), creators_with_zero_revocations[] (subset sorted asc\n— clean ops surface), empty_cells[] in canonical creator × status\nrow-major order. Distinct from M1.6 (by-creator 1D), M1.8 (scope ×\nstatus matrix), M1.11 (creator × lifecycle), M1.12 (scope ×\ncreator) by axis combination. Mirror of M15.17 / M9.17 / M1.11\nOPEN × CLOSED matrix pattern. Drives BIL audit \"which creators\nhave highest revocation rates?\" governance views. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/creator-status-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "key_ids[] cap 50 sorted asc}. Per-col {status, total, by_creator"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/daily-volume",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/daily-volume",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "daily-volume"
+              ]
+            },
+            "description": "Per-day bucket {date, total, by_status (active + revoked at 0\nwhen absent)}. Every day in [window_start, window_end] emitted\neven when zero — stable SPA chart axis. Envelope\n{tenant_id, generated_at, days, window_start, window_end,\ntotal_created_in_window, total_keys_observed, by_day[],\npeak_day (earliest-day-wins tie-break; null when zero\ncreations), peak_count, mean_per_day, growth_rate (second-half\nvs first-half mean; null when first-half=0 or days<2),\ntotal_active_in_window + total_revoked_in_window (convenience)}.\nDefault days=30, bounds [1, 365] enforced via\nApiKeyDailyVolumeError → 400 EWS_400_invalid_input. Mirror of\nM12.13/M15.11/M10.15 daily volume pattern for API keys. Mounted\nBEFORE `/:key_id` so the literal `/daily-volume` segment isn't\ncaptured. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/daily-volume",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "LINE view of API key creations across the last N UTC days."
+        },
+        {
+          "name": "GET /v1/admin/api-keys/expiry-forecast",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/expiry-forecast",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "expiry-forecast"
+              ]
+            },
+            "description": "Per UTC day bucket: {date, expiring_count, sample_keys (cap 5,\nname asc)}. Envelope counts active keys + classifies edge cases\n(no_expiry / already_expired / beyond_window) + already_expired_keys[]\n(sorted by expires_at asc — most-overdue first; cap 20) +\nbeyond_window_keys[] (sorted asc — soonest first; cap 20) +\npeak_day with earliest-day-wins tie-break. Revoked keys excluded\n(can't be rotated). Mirror of M12.13/M15.11 daily volume but\nforward-looking. Default days=30, bounds [1, 365]. Drives the SPA\n\"rotation calendar\" + \"already expired — rotate now\" alerts.\nMounted BEFORE /:key_id so the literal `/expiry-forecast` wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/expiry-forecast",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "looking timeline of API key expirations across the next N days."
+        },
+        {
+          "name": "GET /v1/admin/api-keys/lifecycle-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/lifecycle-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "lifecycle-distribution"
+              ]
+            },
+            "description": "priority order: revoked > expired > expiring_soon >\nidle_never_used > dormant > fresh > mature_active. Each key\nclassified into exactly ONE stage (first-match-wins for\noverlapping flags). Per-stage {count, sample_key_ids (cap 5\nsorted asc), sample_names}. Envelope: peak_stage (canonical\niteration tie-break) + empty_stages + attention_stages[]\n(subset that needs ops action: expired + expiring_soon +\nidle_never_used + dormant). Mirror of M9.11 / M4.15 / M7.15\nbucketing pattern. Drives \"how many keys need rotation? how\nmany are dormant?\" view. Mounted BEFORE /:key_id wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/lifecycle-distribution",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "per-key lifecycle stage classification. 7 canonical stages in"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/lifecycle-scope-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/lifecycle-scope-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "lifecycle-scope-matrix"
+              ]
+            },
+            "description": "Per-cell {count, sample_key_ids cap 5 sorted asc}. Per-row\n{stage, total, by_scope (every scope at 0 when absent),\nscopes_without[] canonical, distinct_scopes}. Per-col {scope,\ntotal, by_stage (every stage at 0), stages_without[],\ndistinct_stages}. Envelope: peak_cell (canonical iteration\ntie-break: stages × scopes canonical), empty_cells[] in\nrow-major canonical order, most_diverse_stage (row with most\ndistinct non-zero scopes + canonical-order tie-break),\nmost_universal_scope (col with most distinct non-zero stages +\ncanonical tie-break). Drives \"are dormant keys concentrated in\nspecific scopes? which scopes have keys nearing expiry?\"\ngovernance views. Distinct from M1.5/M1.8/M1.10/M1.11 by axis\ncombination. Mirror of M1.8/M1.11/M1.12/M1.14 matrix pattern.\nMounted BEFORE /:key_id wildcard so literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/lifecycle-scope-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "scope dedup via Set + closed-enum filter via VALID_SCOPES."
+        },
+        {
+          "name": "GET /v1/admin/api-keys/revocation-daily-volume",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/revocation-daily-volume",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "revocation-daily-volume"
+              ]
+            },
+            "description": "window mechanics (default 30, [1, 365]). Per UTC day: {date,\ntotal_revocations, by_scope (7 keys at 0 — multi-scope key\ncontributes to each; defensive intra-key dedup), distinct_revokers\n(per-day Set-dedup of revoked_by)}. Envelope: peak_day (earliest\nday-wins tie-break) + mean_per_day + growth_rate (second-half vs\nfirst-half; null when first-half=0 OR days<2) + most_revoked_scope\n(canonical VALID_SCOPES tie-break) + total_revocations_in_window\n+ total_revocations_observed (incl. outside-window — gap signal).\nDistinct from M1.9 (creation timeline) by surface — answers \"are\nwe revoking faster than creating? has revocation activity spiked?\".\nMirror of M1.9 / M3.17 / M7.17 / M8.15 daily-volume pattern. 400\nEWS_400_invalid_input on out-of-range days. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/revocation-daily-volume",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "— TREND-LINE over `revoked_at` (vs M1.9's `created_at`). Same"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/revoker-rollup",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/revoker-rollup",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "revoker-rollup"
+              ]
+            },
+            "description": "by-creator pattern but pivots by REVOKER (revoked_by). Per-row\n{revoker_username, total_revocations, distinct_creators_revoked,\ndistinct_scopes_revoked, key_ids[] cap 50 sorted asc,\nfirst_revoked_at, last_revoked_at}. Envelope: most_active_revoker\n+ mass_revocation_events[] (revokers with > 5 revocations within\na 1-hour rolling window — surfaces incident-response patterns +\nrogue-actor forensics; sorted count desc + username asc\ntie-break). Distinct from M1.6 (by-CREATOR), M1.14 (creator ×\nstatus matrix), M1.15 (revocation daily volume — time axis, not\nactor-pivoted). Drives \"who revoked which keys?\" governance\nviews + security-incident post-mortems. Mounted BEFORE\n/:key_id wildcard so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/revoker-rollup",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "pivot over the M1.2 redacted ApiKeyEntry surface. Mirror of M1.6"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/scope-creator-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/scope-creator-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "scope-creator-matrix"
+              ]
+            },
+            "description": "A key with [alerts:read, audit:read] on alice → 2 cell\ncontributions (one per scope, both keyed to alice). Per-row\n{scope, total_bindings, by_creator (compact — only present\ncreators), distinct_creators, top_creators[] cap 3}. Per-col\n{created_by, total_bindings, total_keys, by_scope (every scope\nat 0), scopes_without[], distinct_scopes}. Envelope: peak_cell\n+ most_versatile_creator (highest distinct_scopes) +\nunused_scopes[] (zero-binding subset — operator hygiene flag).\nDefensive intra-key scope dedup + closed-enum filter. Mirror of\nM1.11 / M14.28 / M12.14 / M3.14 / M15.14 / M8.14 matrix pattern.\nDrives \"who has webhooks:dispatch?\" governance question. Mounted\nBEFORE /:key_id wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/scope-creator-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "cross-tab combining 7 closed ApiKeyScope × N creators (open)."
+        },
+        {
+          "name": "GET /v1/admin/api-keys/scope-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/scope-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "scope-distribution"
+              ]
+            },
+            "description": "scope: total_keys (active+revoked), active_keys, revoked_keys,\never_used_count, latest_active_created_at, most_recently_used_*.\nEnvelope: scopes[] in canonical VALID_SCOPES order, most_used_scope\n(canonical tie-break), unused_scopes[] (zero active_keys subset),\nscope_coverage_rate. Mirror of M5.16 / M11.11 / M12.11 / M7.12\npivot pattern. Mounted BEFORE /:key_id so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/scope-distribution",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "pivot over the M1.2 store (inverts M1.4's BY-KEY view). Per"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/scope-status-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/scope-status-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "scope-status-matrix"
+              ]
+            },
+            "description": "at 0 when absent), statuses_without[] canonical}. Per-col\n{status, total, by_scope (every scope at 0 when absent),\nscopes_without[] canonical}. Envelope {tenant_id, generated_at,\ntotal_keys (= entries.length), total_dispatches (Σ all cells),\nrows[], columns[], peak_cell (canonical iteration tie-break;\nnull on empty), empty_cells[] in canonical scope × status\nrow-major order, most_distributed_scope (highest distinct\nnon-zero by_status entries; canonical-order tie-break; null on\nempty), total_active_dispatches + total_revoked_dispatches\n(convenience top-level — Σ active column / Σ revoked column)}.\nMirror of M14.28 / M15.14 / M12.14 / M3.14 / M8.14 matrix\npattern. Drives \"which scopes are revoked-heavy (cleanup\ncandidates)? which are active-only?\". Mounted BEFORE `/:key_id`\nso the literal `/scope-status-matrix` segment isn't captured. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/scope-status-matrix",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "key scope dedup. Per-row {scope, total, by_status (every status"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/time-to-revocation-histogram",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/time-to-revocation-histogram",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "time-to-revocation-histogram"
+              ]
+            },
+            "description": "lifespan? are we revoking prematurely? are most revocations\ncleanup of never-used keys?\". 5 canonical buckets in priority\norder: under_1d / 1_to_7d / 7_to_30d / 30_to_90d / 90d_plus\n(strict-< upper bounds). Per-bucket {count, by_scope (every\nApiKeyScope at 0 — stable grid), by_revoker (compact), sample_keys\ncap 5 sorted lifetime_days asc}. Envelope: peak_bucket (canonical\niteration tie-break) + mean/median/p95 lifetime_days +\nshortest_lived + longest_lived + unused_at_revocation_count\n(never-used keys → likely cleanup signal). Distinct from M1.13\n(usage RECENCY histogram — active keys' last_used_at), M1.15\n(revocation DAILY VOLUME — time-axis trend), M1.17 (per-REVOKER\nrollup — actor pivot). Mirror of M1.13 / M9.11 / M8.12 / M7.15\nbucketing pattern. Mounted BEFORE /:key_id wildcard so the\nliteral segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/time-to-revocation-histogram",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "(revoked_at − created_at). Answers \"what's our typical key"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/usage",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/usage",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "usage"
+              ]
+            },
+            "description": "/ days_until_expiry / ever_used + 4 classification flags\n(expires_soon / is_dormant / is_idle_never_used / is_expired).\nEnvelope adds totals for each bucket + by_scope counts (active\nkeys only) + most_recent_use + expiring_soon leaderboard\n(soonest first) + dormant_keys leaderboard (most-dormant first).\nDrives the SPA's \"API keys\" status chip strip + drill-downs.\nMounted BEFORE /:key_id so the literal `/usage` segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/usage",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "over the M1.2 API key store. Per-key row carries days_since_last_use"
+        },
+        {
+          "name": "GET /v1/admin/api-keys/usage-recency-histogram",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/admin/api-keys/usage-recency-histogram",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "api-keys",
+                "usage-recency-histogram"
+              ]
+            },
+            "description": "Orthogonal to M1.10 (rule-based first-match lifecycle stages).\n6 canonical buckets in priority order: revoked / never_used /\nused_within_7d / used_within_30d / used_within_90d / stale (90d+).\nPer-bucket {count, by_scope (every VALID_SCOPES at 0; multi-scope\nkeys contribute to each), distinct_creators (Set-deduped),\nsample_key_ids cap 5 sorted asc}. Envelope: peak_bucket (canonical\niteration tie-break: revoked wins at tied count; null on empty),\nunused_buckets[], total_active_used_recently_count (used_within_*\nbuckets), total_active_stale_or_never_count (never_used + stale —\nattention surface). Mirror of M9.11 / M8.12 / M7.15 / M4.15 / M5.18\nhistogram pattern. Drives \"what fraction of active keys are\nACTUALLY being used recently?\" governance view. Mounted BEFORE\n/:key_id wildcard. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/admin/api-keys/usage-recency-histogram",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "pure time-based recency histogram over the M1.2 ApiKeyEntry list."
+        }
+      ]
+    },
+    {
+      "name": "/v1/svc/audit",
+      "description": "1 route(s) under /v1/svc/audit",
+      "item": [
+        {
+          "name": "GET /v1/svc/audit/integrity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/svc/audit/integrity",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "svc",
+                "audit",
+                "integrity"
+              ]
+            },
+            "description": "scope on the key. Demonstrates requireScope on a real route. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/svc/audit/integrity",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "the M15.2 chain-verification surface. Requires `audit:read`"
+        }
+      ]
+    },
+    {
+      "name": "/v1/svc/recovery",
+      "description": "1 route(s) under /v1/svc/recovery",
+      "item": [
+        {
+          "name": "POST /v1/svc/recovery/archive",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/svc/recovery/archive",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "svc",
+                "recovery",
+                "archive"
+              ]
+            },
+            "description": "prior_status?:    string\n}\n'bff' is rejected — in-process callers must call recoveryStore\ndirectly rather than HTTP-loopback. Saves a round-trip and\navoids ambiguous audit attribution.\nRestore for cross-service entities happens via per-entity_type\nadapters registered in BFF that HTTP-call back to the source\nservice's restore endpoint. The archive endpoint is the\nwrite-side foundation; restore plumbing lands per-adopter.\nResponse: 201 { recovery_id, archived: DeletedRecord }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/svc/recovery/archive",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "source_action?:   string,"
+        }
+      ]
+    },
+    {
+      "name": "/v1/svc/whoami",
+      "description": "1 route(s) under /v1/svc/whoami",
+      "item": [
+        {
+          "name": "GET /v1/svc/whoami",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/svc/whoami",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "svc",
+                "whoami"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/svc/whoami",
+                  "pm.test('status is documented (200/201/204 success OR 4xx envelope)', () => {",
+                  "  pm.expect([200, 400, 401, 403, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'success');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (pm.response.code >= 400) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Requires only that the caller be authenticated (no scope). */"
+        }
+      ]
+    }
+  ]
+}
