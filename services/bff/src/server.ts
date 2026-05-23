@@ -8522,6 +8522,73 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/template-freshness?fresh_days=&stale_days=
+   *  (T6 M10.19) — per-template staleness rollup across the M10.1
+   *  email + M10.2 SMS + M10.3 push ledgers. Per-row {channel,
+   *  template_id, description, last_sent_at, days_since_last_send,
+   *  freshness ∈ recent/stable/stale/never_sent, total_sends_observed}.
+   *  Bucket: recent (< fresh_days), stable (in range), stale (>
+   *  stale_days), never_sent (no send ever). Strict-< on fresh
+   *  boundary + strict-> on stale boundary (exact = stable; matches
+   *  M11.18 + M13.11 + M7.18 semantics). Envelope: 4-bucket counts
+   *  (sum = total_templates) + mean_days_since_send over sent
+   *  templates only + templates_needing_attention[] (never_sent first
+   *  then stale, cap 20). Default thresholds fresh_days=14 / stale_
+   *  days=60 (weekly cadence — tighter than M11.18 since canned
+   *  templates fire more often than dashboards get updated); both
+   *  bounded to non-negative integers + stale_days >= fresh_days.
+   *  Distinct from M10.11 (catalog snapshot), M10.12 (cross-channel
+   *  analytics), M10.13 (variable cross-reference), M10.14 (per-
+   *  recipient), M10.15 (daily volume), M10.16 (usage analytics),
+   *  M10.17 (push platform distribution), M10.18 (variable × channel
+   *  matrix). Mirror of M11.18 dashboard freshness + M7.18 model
+   *  performance freshness + M13.11 admin config override age pattern
+   *  for the notification templates surface. Drives BIL ops review
+   *  per docs/bau-runbook.md monthly checklist: "templates declared
+   *  but never used? — drop them; OTP_LOGIN last fired 90d ago?
+   *  — verify SMS flow not broken". */
+  app.get(
+    '/v1/notifications/template-freshness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const freshRaw = req.query.fresh_days as string | undefined;
+      const staleRaw = req.query.stale_days as string | undefined;
+      const fresh_days =
+        freshRaw === undefined ? 14 : Number.parseInt(freshRaw, 10);
+      const stale_days =
+        staleRaw === undefined ? 60 : Number.parseInt(staleRaw, 10);
+      const {
+        summarizeNotificationTemplateFreshnessFromTransports,
+        TemplateFreshnessError,
+      } = require('./notification_template_freshness') as
+        typeof import('./notification_template_freshness');
+      try {
+        const out = summarizeNotificationTemplateFreshnessFromTransports(
+          emailTransport,
+          smsTransport,
+          pushTransport,
+          req.tenant!.tenant_id,
+          now(),
+          fresh_days,
+          stale_days,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof TemplateFreshnessError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/notifications/per-recipient (T6 M10.14) — UNIFIED
    *  per-recipient list across all 3 channels. Email recipients,
    *  SMS phones, and push user_ids surface as separate rows
