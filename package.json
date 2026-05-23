@@ -1,0 +1,24 @@
+{
+  "name": "zorews",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ZorEWS — Early Warning System (banking + insurance). Multi-workspace repo; convenience scripts only.",
+  "scripts": {
+    "openapi:generate": "node scripts/gen-openapi.js",
+    "openapi:validate": "node scripts/validate-openapi.js",
+    "openapi": "npm run openapi:generate && npm run openapi:validate",
+    "dev": "cd services/bff && npm run dev",
+    "dev:bff": "cd services/bff && npm run dev",
+    "dev:auth": "cd services/auth-svc && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "test:bff": "cd services/bff && npm test",
+    "test:auth": "cd services/auth-svc && npm test",
+    "smoke": "./scripts/smoke-local.sh",
+    "up": "make up",
+    "down": "make down",
+    "docs:open": "open http://localhost:8084/docs/"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
