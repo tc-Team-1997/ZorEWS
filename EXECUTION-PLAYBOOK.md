@@ -7,6 +7,8 @@
 
 > Single sequential playbook. Each step has a pre-flight check, exact command, expected output marker, validation, rollback, and failure diagnostic. Copy-paste from top to bottom in a working terminal. No planning here — execution only.
 
+> **Scope note (added 2026-05-23):** This playbook covers the 4 Terraform layers on the **critical path** to a serving cluster: `00-landing-zone` (Step 1) · `10-network` (Step 2) · `20-eks` (Step 3) · `30-data` (Step 4). The repository also ships **`05-vpn`** (bank VPN — required only when bank-side endpoint URLs land; Year-2 Theme C dependency) and **`40-edge`** (ALB + CloudFront + WAF + Route53 — applies in parallel with Step 4 when public edge is required). Neither is on this playbook's critical path. Operators applying either layer should reference the layer's own IaC + the runbook materials in the operationalisation thread.
+
 ## Hidden blockers already resolved by this commit
 
 Audited the existing artifacts before writing this playbook. 4 blockers fixed:
