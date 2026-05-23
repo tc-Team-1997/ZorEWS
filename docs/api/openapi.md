@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T17:53:12.883Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T18:00:16.962Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **780** route declarations auto-discovered: 739 from BFF + 41 from auth-svc
+- **787** route declarations auto-discovered: 746 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -621,7 +621,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**314 routes.** Routes sorted by path.
+**321 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -696,6 +696,13 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/audit/severity-distribution` | pivoted rollup. Per-severity: total_count + by_resource_type |
 | `GET` | `/v1/audit/severity-outcome-matrix` | AuditSeverity (canonical critical → warning → info) × cols = 3 |
 | `GET` | `/v1/audit/summary` | GET /v1/audit/summary?days=30 |
+| `POST` | `/v1/banking/cma/pack` |  |
+| `GET` | `/v1/banking/ratios/customer/:customer_id` |  |
+| `GET` | `/v1/banking/ratios/master` |  |
+| `GET` | `/v1/banking/ratios/sector-benchmark` |  |
+| `GET` | `/v1/banking/ratios/thresholds` |  |
+| `DELETE` | `/v1/banking/ratios/thresholds/:code` |  |
+| `PUT` | `/v1/banking/ratios/thresholds/:code` |  |
 | `GET` | `/v1/banking/sma/drill` |  |
 | `GET` | `/v1/banking/sma/movements` |  |
 | `POST` | `/v1/banking/sma/run-classification` |  |

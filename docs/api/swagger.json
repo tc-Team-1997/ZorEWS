@@ -81457,6 +81457,766 @@
         ]
       }
     },
+    "/v1/banking/ratios/master": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "GET /v1/banking/ratios/master — auto-discovered (server.ts:32300)",
+        "operationId": "get_v1_banking_ratios_master",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/banking/ratios/thresholds": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "GET /v1/banking/ratios/thresholds — auto-discovered (server.ts:32311)",
+        "operationId": "get_v1_banking_ratios_thresholds",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/banking/ratios/thresholds/{code}": {
+      "put": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "PUT /v1/banking/ratios/thresholds/:code — auto-discovered (server.ts:32322)",
+        "operationId": "put_v1_banking_ratios_thresholds_code",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "description": "Path parameter `code`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "description": "Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps automatically.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "$ref": "#/components/schemas/RequestEnvelope"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "DELETE /v1/banking/ratios/thresholds/:code — auto-discovered (server.ts:32368)",
+        "operationId": "delete_v1_banking_ratios_thresholds_code",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "description": "Path parameter `code`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content — resource deleted."
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/banking/ratios/customer/{customer_id}": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "GET /v1/banking/ratios/customer/:customer_id — auto-discovered (server.ts:32386)",
+        "operationId": "get_v1_banking_ratios_customer_customer_id",
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "description": "Path parameter `customer_id`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/banking/ratios/sector-benchmark": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "GET /v1/banking/ratios/sector-benchmark — auto-discovered (server.ts:32411)",
+        "operationId": "get_v1_banking_ratios_sectorbenchmark",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/banking/cma/pack": {
+      "post": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "POST /v1/banking/cma/pack — auto-discovered (server.ts:32435)",
+        "operationId": "post_v1_banking_cma_pack",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                },
+                "example": {
+                  "$ref": "#/components/examples/EnvelopeSuccess/value"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created (enveloped) — for POSTs that mint a new resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "description": "Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps automatically.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "$ref": "#/components/schemas/RequestEnvelope"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "tags": [

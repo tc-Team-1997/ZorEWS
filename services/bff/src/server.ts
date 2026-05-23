@@ -32284,6 +32284,189 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Banking — Financial Ratios + CMA Pack ─────────────────────────────
+  //
+  // Per §2.1.2 of ZorEWS_Pending_Gap_Analysis.md. 5 endpoints:
+  //   GET    /v1/banking/ratios/master              — catalog
+  //   GET    /v1/banking/ratios/customer/:id        — per-borrower
+  //   GET    /v1/banking/ratios/sector-benchmark    — sector aggregates
+  //   GET    /v1/banking/ratios/thresholds          — overrides list
+  //   PUT    /v1/banking/ratios/thresholds/:code    — set override
+  //   DELETE /v1/banking/ratios/thresholds/:code    — clear override
+  //   POST   /v1/banking/cma/pack                   — CMA Forms II/III/IV/V
+
+  const { defaultRatioThresholdStore } = require('./banking_ratios') as typeof import('./banking_ratios');
+
+  app.get(
+    '/v1/banking/ratios/master',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { RATIO_CATALOG } = require('./banking_ratios') as typeof import('./banking_ratios');
+      return res.json(wrapResponse({ total: RATIO_CATALOG.length, ratios: RATIO_CATALOG }, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/banking/ratios/thresholds',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const list = defaultRatioThresholdStore.list(req.tenant!.tenant_id);
+      return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, total: list.length, entries: list }, ctx));
+    },
+  );
+
+  app.put(
+    '/v1/banking/ratios/thresholds/:code',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { isRatioCode, RatiosError } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const code = (req.params.code ?? '').toUpperCase();
+        if (!isRatioCode(code)) {
+          return res
+            .status(400)
+            .json(
+              wrapError(
+                { code: 'EWS_400_invalid_ratio_code', message: `unknown ratio: ${code}`, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+        }
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const body = (inner ?? {}) as { warning?: number; critical?: number };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const entry = defaultRatioThresholdStore.set(
+          req.tenant!.tenant_id,
+          code,
+          Number(body.warning),
+          Number(body.critical),
+          actor,
+          now(),
+        );
+        return res.json(wrapResponse(entry, ctx));
+        void RatiosError;
+      } catch (e) {
+        const isRatiosErr = (e as { name?: string }).name === 'RatiosError';
+        const msg = e instanceof Error ? e.message : 'threshold_set_failed';
+        const code = isRatiosErr ? 400 : 500;
+        const ews = isRatiosErr ? `EWS_400_invalid_input` : 'EWS_500';
+        return res.status(code).json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/banking/ratios/thresholds/:code',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { isRatioCode } = require('./banking_ratios') as typeof import('./banking_ratios');
+      const code = (req.params.code ?? '').toUpperCase();
+      if (!isRatioCode(code)) {
+        return res
+          .status(400)
+          .json(wrapError({ code: 'EWS_400_invalid_ratio_code', message: `unknown ratio: ${code}`, severity: 'MEDIUM' }, ctx));
+      }
+      const entry = defaultRatioThresholdStore.reset(req.tenant!.tenant_id, code);
+      return res.json(wrapResponse(entry, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/banking/ratios/customer/:customer_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildCustomerRatios } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const cid = req.params.customer_id ?? '';
+        if (!cid) {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_missing_customer_id', message: 'customer_id required', severity: 'MEDIUM' }, ctx));
+        }
+        const overrides = defaultRatioThresholdStore.resolve(req.tenant!.tenant_id);
+        const out = buildCustomerRatios(req.tenant!.tenant_id, cid, overrides, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return res
+          .status(500)
+          .json(wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'failed', severity: 'HIGH' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/ratios/sector-benchmark',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSectorBenchmark } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const sector = (req.query.sector as string | undefined) ?? '';
+        if (!sector) {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_missing_sector', message: 'sector required', severity: 'MEDIUM' }, ctx));
+        }
+        const out = buildSectorBenchmark(req.tenant!.tenant_id, sector, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return res
+          .status(500)
+          .json(wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'failed', severity: 'HIGH' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/banking/cma/pack',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildCmaPack } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const overrides = defaultRatioThresholdStore.resolve(req.tenant!.tenant_id);
+        const out = buildCmaPack(
+          req.tenant!.tenant_id,
+          (inner ?? {}) as import('./banking_ratios').CmaPackInput,
+          actor,
+          overrides,
+          now(),
+        );
+        return res.status(201).json(wrapResponse(out, ctx));
+      } catch (e) {
+        const isRatiosErr = (e as { name?: string }).name === 'RatiosError';
+        const msg = e instanceof Error ? e.message : 'cma_pack_failed';
+        const code = isRatiosErr ? 400 : 500;
+        const ews = isRatiosErr ? `EWS_400_invalid_input` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 

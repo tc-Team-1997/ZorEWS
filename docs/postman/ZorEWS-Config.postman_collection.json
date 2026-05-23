@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "968da455-1e2e-4898-83d3-64d7d59e4fdc",
     "name": "ZorEWS — Config APIs",
-    "description": "Config routes from the ZorEWS BFF + auth-svc surface. 313 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Config routes from the ZorEWS BFF + auth-svc surface. 320 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -6366,6 +6366,651 @@
           ],
           "response": [],
           "_summary": "GET /v1/audit/summary?days=30"
+        }
+      ]
+    },
+    {
+      "name": "/v1/banking/cma",
+      "description": "1 route(s) under /v1/banking/cma",
+      "item": [
+        {
+          "name": "POST /v1/banking/cma/pack",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/cma/pack",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "cma",
+                "pack"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/banking/cma/pack",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/banking/cma/pack — auto-discovered (server.ts:32435)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/banking/ratios",
+      "description": "6 route(s) under /v1/banking/ratios",
+      "item": [
+        {
+          "name": "GET /v1/banking/ratios/customer/{customer_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/customer/:customer_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "customer",
+                ":customer_id"
+              ],
+              "variable": [
+                {
+                  "key": "customer_id",
+                  "value": "{{customer_id}}",
+                  "description": "Path parameter: customer_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/banking/ratios/customer/{customer_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/banking/ratios/customer/:customer_id — auto-discovered (server.ts:32386)"
+        },
+        {
+          "name": "GET /v1/banking/ratios/master",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/master",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "master"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/banking/ratios/master",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/banking/ratios/master — auto-discovered (server.ts:32300)"
+        },
+        {
+          "name": "GET /v1/banking/ratios/sector-benchmark",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/sector-benchmark",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "sector-benchmark"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/banking/ratios/sector-benchmark",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/banking/ratios/sector-benchmark — auto-discovered (server.ts:32411)"
+        },
+        {
+          "name": "GET /v1/banking/ratios/thresholds",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/thresholds",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "thresholds"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/banking/ratios/thresholds",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/banking/ratios/thresholds — auto-discovered (server.ts:32311)"
+        },
+        {
+          "name": "DELETE /v1/banking/ratios/thresholds/{code}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/thresholds/:code",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "thresholds",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "<code>",
+                  "description": "Path parameter: code"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/banking/ratios/thresholds/{code}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([204, 200, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/banking/ratios/thresholds/:code — auto-discovered (server.ts:32368)"
+        },
+        {
+          "name": "PUT /v1/banking/ratios/thresholds/{code}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/banking/ratios/thresholds/:code",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "banking",
+                "ratios",
+                "thresholds",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "<code>",
+                  "description": "Path parameter: code"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for PUT /v1/banking/ratios/thresholds/{code}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PUT /v1/banking/ratios/thresholds/:code — auto-discovered (server.ts:32322)"
         }
       ]
     },
