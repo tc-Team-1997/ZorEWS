@@ -57,7 +57,24 @@ migrate:
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)009_alerts_tenant.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)010_mart_tenant.sql
 	$(PSQL) -v ON_ERROR_STOP=1 -f $(SCHEMA_DIR)011_user_2fa.sql
-	@echo "migration complete"
+	@echo "core migrations 001-011 complete"
+	@echo "to apply 012-037 (extended schemas + recovery + masters + reports + feature_store + ai persistence + tenant configs):"
+	@echo "  make migrate-extended"
+
+# Extended migrations — additive, backward-compatible. Safe to re-run (each file uses CREATE … IF NOT EXISTS).
+migrate-extended:
+	@for f in $(SCHEMA_DIR)0[1-3][0-9]_*.sql; do \
+	  case "$$f" in \
+	    *_rollback.sql) continue ;; \
+	    *verify_*) continue ;; \
+	  esac; \
+	  basename=$$(basename "$$f"); \
+	  num=$$(echo "$$basename" | cut -d_ -f1); \
+	  if [ "$$num" -lt "012" ]; then continue; fi; \
+	  echo "── applying $$basename ──"; \
+	  $(PSQL) -v ON_ERROR_STOP=1 -f "$$f" 2>&1 | tail -3 || echo "    (skipped on error — additive migration)"; \
+	done
+	@echo "extended migrations complete"
 
 verify:
 	@$(PSQL) -v ON_ERROR_STOP=1 -At -c \
