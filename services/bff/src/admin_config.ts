@@ -319,3 +319,210 @@ export class InMemoryConfigStore implements ConfigStore {
 
 /** Module-level singleton used by routes when no override is supplied. */
 export const defaultConfigStore: ConfigStore = new InMemoryConfigStore();
+
+// ─── PgConfigStore — pg-backed mirror of InMemoryConfigStore ────────────────
+//
+// Closes M13.x persistence gap from docs/database-gap-analysis.md. Migration
+// 037_tenant_configs.sql created app_admin.tenant_configs; this class wires it.
+//
+// Design: cache-on-init + sync reads + write-through fire-and-forget pg.
+// Mirrors the established pattern in services/bff/src/webhooks/pg_store.ts
+// and services/bff/src/scenario/pg_store.ts.
+//
+//   - init() fetches every (tenant_id, config_key) row WHERE deleted_at IS NULL
+//     into the in-memory `overrides` Map.
+//   - list/get serve from cache — SYNC, same shape as InMemoryConfigStore.
+//   - set updates cache synchronously, then fires UPSERT to pg in background.
+//   - reset deletes from cache synchronously, then soft-deletes the row in pg.
+//
+// Backward-compat: ConfigStore interface unchanged. Routes don't know which
+// impl they got. Existing tests that pass InMemoryConfigStore directly still
+// work — they bypass the factory.
+//
+// JSONB serialization: PG accepts top-level scalars (`42`, `true`, `"foo"`)
+// in JSONB columns since PG 9.4. node-pg's pg driver auto-parses jsonb to
+// the equivalent JS value on read. Both encode + decode are no-op pass-through.
+
+// Minimal Pool interface — kept loose to dodge requiring `import { Pool } from 'pg'`
+// at the top of admin_config.ts (which would couple this module to the pg dep
+// at compile time even when running in-memory mode).
+interface PgPoolLike {
+  query<T = unknown>(text: string, values?: unknown[]): Promise<{ rows: T[]; rowCount: number | null }>;
+}
+
+interface OverrideRow {
+  tenant_id: string;
+  config_key: string;
+  value: ConfigValue;
+  updated_at: Date | string;
+  updated_by: string;
+}
+
+export class PgConfigStore implements ConfigStore {
+  /** tenant_id → key → Override. Hydrated by init(). */
+  private readonly overrides = new Map<string, Map<string, Override>>();
+  private initialised = false;
+  private initPromise: Promise<void> | null = null;
+
+  constructor(private readonly pool: PgPoolLike) {}
+
+  /** Hydrate cache from pg. Idempotent. */
+  async init(): Promise<void> {
+    if (this.initialised) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      const { rows } = await this.pool.query<OverrideRow>(
+        `SELECT tenant_id, config_key, value, updated_at, updated_by
+         FROM app_admin.tenant_configs
+         WHERE deleted_at IS NULL`
+      );
+      for (const r of rows) {
+        let t = this.overrides.get(r.tenant_id);
+        if (!t) {
+          t = new Map();
+          this.overrides.set(r.tenant_id, t);
+        }
+        t.set(r.config_key, {
+          value: r.value,
+          updated_at: typeof r.updated_at === 'string' ? r.updated_at : r.updated_at.toISOString(),
+          updated_by: r.updated_by,
+        });
+      }
+      this.initialised = true;
+    })();
+    return this.initPromise;
+  }
+
+  list(tenant_id: string): ConfigEntry[] {
+    const tMap = this.overrides.get(tenant_id);
+    return DEFAULTS.map((d) => this.composeEntry(d, tMap?.get(d.key)));
+  }
+
+  get(tenant_id: string, key: string): ConfigEntry | null {
+    const def = DEFAULTS_BY_KEY.get(key);
+    if (!def) return null;
+    const ov = this.overrides.get(tenant_id)?.get(key);
+    return this.composeEntry(def, ov);
+  }
+
+  set(
+    tenant_id: string,
+    key: string,
+    value: ConfigValue,
+    updated_by: string,
+    now: Date,
+  ): ConfigEntry {
+    const def = DEFAULTS_BY_KEY.get(key);
+    if (!def) {
+      throw new ConfigValidationError('unknown_key', `unknown config key: ${key}`);
+    }
+    const validated = validateValue(def, value);
+
+    // 1. Update cache synchronously — readers see the new value immediately
+    let tMap = this.overrides.get(tenant_id);
+    if (!tMap) {
+      tMap = new Map();
+      this.overrides.set(tenant_id, tMap);
+    }
+    const override: Override = {
+      value: validated,
+      updated_at: now.toISOString(),
+      updated_by,
+    };
+    tMap.set(key, override);
+
+    // 2. Fire-and-forget pg UPSERT — does not block the caller
+    this.pool
+      .query(
+        `INSERT INTO app_admin.tenant_configs
+           (tenant_id, config_key, value_type, value, category, updated_at, updated_by, deleted_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, NULL)
+         ON CONFLICT (tenant_id, config_key) DO UPDATE SET
+           value_type = EXCLUDED.value_type,
+           value      = EXCLUDED.value,
+           category   = EXCLUDED.category,
+           updated_at = EXCLUDED.updated_at,
+           updated_by = EXCLUDED.updated_by,
+           deleted_at = NULL`,
+        [
+          tenant_id,
+          key,
+          def.type,
+          JSON.stringify(validated),
+          def.category,
+          now,
+          updated_by,
+        ],
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[admin_config] PgConfigStore.set pg write failed:', err);
+      });
+
+    return this.composeEntry(def, override);
+  }
+
+  reset(tenant_id: string, key: string): ConfigEntry {
+    const def = DEFAULTS_BY_KEY.get(key);
+    if (!def) {
+      throw new ConfigValidationError('unknown_key', `unknown config key: ${key}`);
+    }
+
+    // 1. Remove from cache synchronously
+    this.overrides.get(tenant_id)?.delete(key);
+
+    // 2. Soft-delete the pg row in background
+    this.pool
+      .query(
+        `UPDATE app_admin.tenant_configs
+         SET deleted_at = NOW()
+         WHERE tenant_id = $1 AND config_key = $2 AND deleted_at IS NULL`,
+        [tenant_id, key],
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[admin_config] PgConfigStore.reset pg write failed:', err);
+      });
+
+    return this.composeEntry(def, undefined);
+  }
+
+  private composeEntry(def: ConfigDef, ov: Override | undefined): ConfigEntry {
+    return {
+      ...def,
+      value: ov?.value ?? def.default_value,
+      is_default: ov === undefined,
+      updated_at: ov?.updated_at ?? null,
+      updated_by: ov?.updated_by ?? null,
+    };
+  }
+}
+
+/**
+ * Env-gated factory.
+ *
+ * - BFF_PG_URL set  → return PgConfigStore connected to that pg instance.
+ *   The store's init() fires synchronously after construction; until it
+ *   completes any list/get returns platform defaults (no overrides) which
+ *   is correct behavior for a freshly-restarted process.
+ * - BFF_PG_URL unset → return the existing InMemoryConfigStore.
+ *
+ * Tests pass their own InMemoryConfigStore via AppDeps.configStore and
+ * never hit this factory.
+ *
+ * Lazy-imports pg only when needed so the pg dep doesn't load in
+ * in-memory test runs.
+ */
+export function makeConfigStore(env: NodeJS.ProcessEnv = process.env): ConfigStore {
+  const pgUrl = env.BFF_PG_URL;
+  if (!pgUrl) return new InMemoryConfigStore();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pgModule = require('pg') as { Pool: new (opts: { connectionString: string; max?: number }) => PgPoolLike };
+  const pool = new pgModule.Pool({ connectionString: pgUrl, max: 5 });
+  const store = new PgConfigStore(pool);
+  store.init().catch((e) => {
+    // eslint-disable-next-line no-console
+    console.error('[admin_config] PgConfigStore.init failed:', e);
+  });
+  return store;
+}
