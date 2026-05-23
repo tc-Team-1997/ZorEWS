@@ -28664,6 +28664,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/processing-time-histogram (T6 M12.19) —
+   *  per-tenant histogram bucketing every report job by processing
+   *  duration (completed_at − requested_at for completed). 7 canonical
+   *  buckets in resolution-speed order: under_1s / 1_to_5s / 5_to_30s
+   *  / 30s_to_5m / 5m_plus / failed / in_flight. Strict-< upper bound
+   *  semantics on completion buckets (1s → 1_to_5s, 5s → 5_to_30s,
+   *  30s → 30s_to_5m, 5m → 5m_plus). Per-bucket {count, samples cap 3
+   *  — completion buckets sort duration desc (slowest first); failed
+   *  sorts requested_at desc (newest first); in_flight sorts requested_at
+   *  asc (oldest first)}. Envelope: peak_bucket (canonical iteration
+   *  tie-break — under_1s wins over 1_to_5s at tied; null on empty),
+   *  mean/median/p95_duration_ms over COMPLETED only via M3.5
+   *  linearPercentile (null when no completed), slowest_job (max
+   *  duration), newest_failed (most recent failure), oldest_in_flight
+   *  (longest waiting), empty_buckets[] canonical. Distinct from M12.10
+   *  (per-report trend over time), M12.11 (format distribution), M12.13
+   *  (daily volume timeline), M12.14 (format × status matrix), M12.18
+   *  (hourly volume cycle). Mirror of M9.19 / M8.12 / M7.15 histogram
+   *  pattern for the report job surface. Drives "what's our typical
+   *  report processing time? any formats hitting > 5min consistently?
+   *  how many jobs failed today?" governance. Mounted BEFORE catch-
+   *  all /v1/reports/jobs/:job_id so the literal segment wins. */
+  app.get(
+    '/v1/reports/jobs/processing-time-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportJobProcessingTimeHistogramFromStore } =
+        require('./report_job_processing_time_histogram') as
+        typeof import('./report_job_processing_time_histogram');
+      const out = buildReportJobProcessingTimeHistogramFromStore(
+        reportJobStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/hourly-volume (T6 M12.18) — CYCLIC INTRADAY
    *  distribution: every job in the tenant's history bucketed by UTC
    *  hour-of-day 0..23. Distinct from M12.13 (linear daily trend over
