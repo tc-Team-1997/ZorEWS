@@ -15129,6 +15129,59 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/onboarding/velocity (T6 M2.19) — per-tenant
+   *  velocity rollup. For each tenant computes duration_days between
+   *  first + last completed step (or first → now for in-progress).
+   *  5 canonical velocity buckets: fast (< 7d) / normal ([7d, 30d))
+   *  / slow ([30d, 90d)) / stalled (≥ 90d; whether complete or in-
+   *  progress) / not_started (no completed/skipped steps). Strict-<
+   *  upper bound semantics. Per-bucket {count, sample_tenant_ids cap
+   *  3 — fast/normal/slow sorted duration asc (fastest first); stalled
+   *  sorted desc (worst first); not_started sorted tenant_id asc}.
+   *  Envelope: peak_bucket (canonical iteration tie-break — fast wins
+   *  over normal at tied), mean/min/max_completion_days (over COMPLETE
+   *  tenants only; null when no complete), fastest_tenant + slowest_
+   *  tenant + most_stalled_tenant samples + per-tenant tenants[] full
+   *  list. Distinct from M2.6 (snapshot completeness), M2.8 (forward
+   *  ETA), M2.11 (milestone stage), M2.12 (fleet snapshot), M2.13
+   *  (per-step ranking), M2.15 (per-actor pivot), M2.16 (cross-tenant
+   *  daily timeline), M2.17 (stage × vertical matrix), M2.18 (skip
+   *  reasons). Mirror of M9.19 (investigation duration histogram) for
+   *  the tenant onboarding surface. Async since tenantLookup.all()
+   *  may be async. Mounted BEFORE /v1/tenants/:tenant_id catch-all
+   *  so the literal segment wins. */
+  app.get(
+    '/v1/tenants/onboarding/velocity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(
+          wrapError(
+            {
+              code: 'EWS_501_not_implemented',
+              message: 'tenant lookup does not expose all()',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      const tenants = await lookup.all();
+      const fleet = tenants.map((t) => ({
+        tenant: t,
+        state: onboardingStore.get(t.tenant_id),
+      }));
+      const { summarizeOnboardingVelocity } =
+        require('./tenant_onboarding_velocity') as
+        typeof import('./tenant_onboarding_velocity');
+      const out = summarizeOnboardingVelocity(fleet, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/tenants/me/onboarding — caller's tenant onboarding state. */
   app.get(
     '/v1/tenants/me/onboarding',
