@@ -12,16 +12,20 @@
 
 set -euo pipefail
 
-# Service port map — matches `make up` defaults in services/*/package.json
-BFF_PORT="${BFF_PORT:-8084}"
+# Service port map — canonical from /Users/chuadhary_taniya/ZorEWS/Makefile
+# TS_SERVICES variable. Keep these in sync with that file.
+#
+# Note: audit-svc + notification-svc + pipeline-svc + ai-copilot-svc are NOT in
+# `make up` RUNNABLE — they're Python/FastAPI services started separately.
+# This smoke script only probes the 8 TS services that `make up` actually starts.
 AUTH_PORT="${AUTH_PORT:-8080}"
-AUDIT_PORT="${AUDIT_PORT:-8081}"
+RULES_PORT="${RULES_PORT:-8081}"
+INDICATORS_PORT="${INDICATORS_PORT:-8082}"
 CASES_PORT="${CASES_PORT:-8083}"
-ALERTS_PORT="${ALERTS_PORT:-8082}"
-RULES_PORT="${RULES_PORT:-8088}"
-INDICATORS_PORT="${INDICATORS_PORT:-8087}"
+BFF_PORT="${BFF_PORT:-8084}"
 COLLECTION_PORT="${COLLECTION_PORT:-8085}"
-INTEGRATION_MOCKS_PORT="${INTEGRATION_MOCKS_PORT:-8086}"
+ALERTS_PORT="${ALERTS_PORT:-8086}"
+INTEGRATION_MOCKS_PORT="${INTEGRATION_MOCKS_PORT:-8091}"
 PG_PORT="${PG_PORT:-55432}"
 PG_DB="${PG_DB:-zorews}"
 PG_USER="${PG_USER:-zorews_user}"
@@ -71,15 +75,14 @@ for t in "app_iam.users" "app_iam.tenants" "app_cases.cases" "app_alerts.alerts"
 done
 
 echo ""
-echo "=== Service /healthz probes ==="
+echo "=== Service /healthz probes (8 services, RUNNABLE per Makefile) ==="
 probe_health "auth-svc"           "${AUTH_PORT}"
-probe_health "audit-svc"          "${AUDIT_PORT}"
-probe_health "bff"                "${BFF_PORT}"
-probe_health "cases"              "${CASES_PORT}"
-probe_health "alerts"             "${ALERTS_PORT}"
 probe_health "rules"              "${RULES_PORT}"
 probe_health "indicators"         "${INDICATORS_PORT}"
+probe_health "cases"              "${CASES_PORT}"
+probe_health "bff"                "${BFF_PORT}"
 probe_health "collection-adapter" "${COLLECTION_PORT}"
+probe_health "alerts"             "${ALERTS_PORT}"
 probe_health "integration-mocks"  "${INTEGRATION_MOCKS_PORT}"
 
 echo ""
