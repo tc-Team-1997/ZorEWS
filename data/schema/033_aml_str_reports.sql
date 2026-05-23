@@ -91,9 +91,9 @@ CREATE INDEX IF NOT EXISTS str_reports_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_aml.str_reports IS
-    'Phase C.1 — AML STR Reporting (FIU-IND). Maker-checker workflow ' ||
-    'with draft → ready_for_review → submitted → acknowledged/rejected. ' ||
-    'RBI segregation of duties: maker ≠ checker on submit. Only ' ||
-    'draft/ready_for_review can be soft-deleted; submitted/acked/rejected ' ||
-    'are immutable per FIU-IND retention. Recovery adapter ' ||
+    'Phase C.1 — AML STR Reporting (FIU-IND). Maker-checker workflow '
+    'with draft → ready_for_review → submitted → acknowledged/rejected. '
+    'RBI segregation of duties: maker ≠ checker on submit. Only '
+    'draft/ready_for_review can be soft-deleted; submitted/acked/rejected '
+    'are immutable per FIU-IND retention. Recovery adapter '
     'entity_type=str_report.';

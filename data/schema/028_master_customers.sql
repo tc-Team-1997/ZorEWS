@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS customer_master_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.customers IS
-    'Phase B.1 — Customer Master Setup. Compliance-grade admin overlay ' ||
-    'on top of mart.customer_360 carrying KYC + PEP + risk_category ' ||
-    'overrides. Soft-delete via deleted_at/_by; Recovery Center adapter ' ||
+    'Phase B.1 — Customer Master Setup. Compliance-grade admin overlay '
+    'on top of mart.customer_360 carrying KYC + PEP + risk_category '
+    'overrides. Soft-delete via deleted_at/_by; Recovery Center adapter '
     'entity_type=customer_master re-inserts on restore.';

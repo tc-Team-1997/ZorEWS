@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS sectors_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.sectors IS
-    'Phase A.1 Sector & Industry Master Setup. Tenant-scoped master-data ' ||
-    'table for industry sectors. risk_weight ∈ (0, 1] interchangeable with ' ||
-    'M6.2 scoring inputs. Soft-delete via deleted_at/_by; Recovery Center ' ||
+    'Phase A.1 Sector & Industry Master Setup. Tenant-scoped master-data '
+    'table for industry sectors. risk_weight ∈ (0, 1] interchangeable with '
+    'M6.2 scoring inputs. Soft-delete via deleted_at/_by; Recovery Center '
     'adapter (entity_type=sector_master) re-inserts on restore.';

@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS geographies_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.geographies IS
-    'Phase A.2 Geography & Risk Region Master Setup. Tenant-scoped ' ||
-    'master data for country risk + sanctions. Soft-delete via ' ||
-    'deleted_at/_by; Recovery Center adapter (entity_type=geography_master) ' ||
+    'Phase A.2 Geography & Risk Region Master Setup. Tenant-scoped '
+    'master data for country risk + sanctions. Soft-delete via '
+    'deleted_at/_by; Recovery Center adapter (entity_type=geography_master) '
     're-inserts on restore. Consumed by AML M14.3 + EWS scoring overlays.';

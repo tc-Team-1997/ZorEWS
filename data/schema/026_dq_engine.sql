@@ -80,10 +80,10 @@ CREATE INDEX IF NOT EXISTS dq_executions_tenant_status_idx
     ON app_dq.executions (tenant_id, status, started_at DESC);
 
 COMMENT ON TABLE app_dq.rules IS
-    'Phase A.3 — DQ Engine rule master. 6 kinds (not_null/unique/range/' ||
-    'regex/enum/freshness). Soft-delete via deleted_at/_by; Recovery ' ||
+    'Phase A.3 — DQ Engine rule master. 6 kinds (not_null/unique/range/'
+    'regex/enum/freshness). Soft-delete via deleted_at/_by; Recovery '
     'Center adapter entity_type=dq_rule re-inserts on restore.';
 
 COMMENT ON TABLE app_dq.executions IS
-    'Phase A.3 — DQ Engine execution history. Append-only audit trail; ' ||
+    'Phase A.3 — DQ Engine execution history. Append-only audit trail; '
     'no soft-delete (kept for compliance evidence).';

@@ -86,10 +86,10 @@ CREATE INDEX IF NOT EXISTS recon_runs_tenant_status_idx
     ON app_recon.runs (tenant_id, status, started_at DESC);
 
 COMMENT ON TABLE app_recon.definitions IS
-    'Phase A.4 — Reconciliation definition master. 3 kinds (count_only/' ||
-    'amount_match/set_diff). Soft-delete via deleted_at/_by; Recovery ' ||
+    'Phase A.4 — Reconciliation definition master. 3 kinds (count_only/'
+    'amount_match/set_diff). Soft-delete via deleted_at/_by; Recovery '
     'Center adapter entity_type=recon_definition re-inserts on restore.';
 
 COMMENT ON TABLE app_recon.runs IS
-    'Phase A.4 — Reconciliation run history. Append-only audit trail; ' ||
+    'Phase A.4 — Reconciliation run history. Append-only audit trail; '
     'no soft-delete (compliance evidence retention).';

@@ -51,6 +51,6 @@ CREATE INDEX IF NOT EXISTS bureau_master_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.bureaus IS
-    'Phase B.2 — External Bureau Master config. Per-tenant CIBIL/CRIF/' ||
-    'EXPERIAN/EQUIFAX setup with score weights for the M6.x scoring ' ||
+    'Phase B.2 — External Bureau Master config. Per-tenant CIBIL/CRIF/'
+    'EXPERIAN/EQUIFAX setup with score weights for the M6.x scoring '
     'overlay. Soft-delete + Recovery (entity_type=bureau_master).';

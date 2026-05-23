@@ -68,6 +68,6 @@ CREATE INDEX IF NOT EXISTS account_master_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.accounts IS
-    'Phase B.3 — Account & Exposure Master. Tenant-scoped catalog of ' ||
-    'account_type + loan_type + default credit limits + max exposure ' ||
+    'Phase B.3 — Account & Exposure Master. Tenant-scoped catalog of '
+    'account_type + loan_type + default credit limits + max exposure '
     'caps. Soft-delete + Recovery Center (entity_type=account_master).';

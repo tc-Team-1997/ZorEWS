@@ -71,8 +71,8 @@ CREATE INDEX IF NOT EXISTS policy_master_tenant_deleted_idx
     WHERE deleted_at IS NOT NULL;
 
 COMMENT ON TABLE app_master.policies IS
-    'Phase B.4 — Product & Policy Master (Insurance). Per-tenant catalog ' ||
-    'of TERM_LIFE/ENDOWMENT/ULIP/GENERAL_HEALTH policy types with premium ' ||
-    '+ coverage ranges, waiting + grace periods, renewal type. ' ||
-    'Soft-delete + Recovery (entity_type=policy_master). Categories ' ||
+    'Phase B.4 — Product & Policy Master (Insurance). Per-tenant catalog '
+    'of TERM_LIFE/ENDOWMENT/ULIP/GENERAL_HEALTH policy types with premium '
+    '+ coverage ranges, waiting + grace periods, renewal type. '
+    'Soft-delete + Recovery (entity_type=policy_master). Categories '
     'aligned to M14.1 InsuranceAdapter convention.';
