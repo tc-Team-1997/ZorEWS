@@ -32989,6 +32989,942 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Module #17 — Notice generation (§2.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/notices/templates',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listNoticeTemplates } = require('./notices') as typeof import('./notices');
+      const cat = req.query.category as import('./notices').NoticeCategory | undefined;
+      return res.json(wrapResponse({ templates: listNoticeTemplates(cat) }, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/notices/templates/:template_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getNoticeTemplate } = require('./notices') as typeof import('./notices');
+      const tpl = getNoticeTemplate(req.params.template_id);
+      if (!tpl) {
+        return res
+          .status(404)
+          .json(
+            wrapError(
+              { code: 'EWS_404_unknown_template', message: `unknown ${req.params.template_id}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+      }
+      return res.json(wrapResponse(tpl, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/notices/preview',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { previewNotice } = require('./notices') as typeof import('./notices');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(wrapResponse(previewNotice(inner as import('./notices').NoticePreviewInput), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_template' ? 404 : 400;
+        const ews =
+          code === 'unknown_template' ? 'EWS_404_unknown_template'
+          : code === 'invalid_channel' ? 'EWS_400_invalid_channel'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'preview_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/notices/issue',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { issueNotices } = require('./notices') as typeof import('./notices');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const out = issueNotices(
+          req.tenant!.tenant_id,
+          inner as import('./notices').NoticeIssueInput,
+          actor,
+          now(),
+        );
+        return res.status(201).json(wrapResponse(out, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_template' ? 404
+          : code === 'cohort_too_large' ? 413
+          : 400;
+        const ews =
+          code === 'unknown_template' ? 'EWS_404_unknown_template'
+          : code === 'cohort_too_large' ? 'EWS_413_cohort_too_large'
+          : code === 'invalid_channel' ? 'EWS_400_invalid_channel'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'issue_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/notices/issued',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listIssuedRuns } = require('./notices') as typeof import('./notices');
+      return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, runs: listIssuedRuns(req.tenant!.tenant_id) }, ctx));
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #16 — DQ Standardisation pipelines + dictionaries (§2.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/dq/standardisation/pipelines',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listPipelines } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+      return res.json(wrapResponse({ pipelines: listPipelines(req.tenant!.tenant_id) }, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/dq/standardisation/pipelines',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createPipeline } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(
+            createPipeline(
+              req.tenant!.tenant_id,
+              inner as { name: string; description?: string; target_column: string; steps: import('./dq_standardisation').StandardisationStep[] },
+              actor,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const ews = code === 'invalid_step' ? 'EWS_400_invalid_step' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'create_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/dq/standardisation/pipelines/:pipeline_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getPipeline } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+      const found = getPipeline(req.tenant!.tenant_id, req.params.pipeline_id);
+      if (!found)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_pipeline', message: `unknown ${req.params.pipeline_id}`, severity: 'MEDIUM' }, ctx));
+      return res.json(wrapResponse(found, ctx));
+    },
+  );
+
+  app.patch(
+    '/v1/dq/standardisation/pipelines/:pipeline_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { updatePipeline } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(updatePipeline(req.tenant!.tenant_id, req.params.pipeline_id, inner as Record<string, unknown>, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_pipeline' ? 404 : 400;
+        const ews = code === 'unknown_pipeline' ? 'EWS_404_unknown_pipeline'
+          : code === 'invalid_step' ? 'EWS_400_invalid_step'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'update_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/dq/standardisation/pipelines/:pipeline_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { deletePipeline } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+      const ok = deletePipeline(req.tenant!.tenant_id, req.params.pipeline_id);
+      if (!ok)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_pipeline', message: `unknown ${req.params.pipeline_id}`, severity: 'MEDIUM' }, ctx));
+      return res.status(204).end();
+    },
+  );
+
+  app.post(
+    '/v1/dq/standardisation/pipelines/:pipeline_id/run',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { runPipelineOnSample } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const samples = (inner as { samples?: unknown })?.samples as string[];
+        if (!Array.isArray(samples))
+          return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: 'samples[] required', severity: 'MEDIUM' }, ctx));
+        return res.json(wrapResponse(runPipelineOnSample(req.tenant!.tenant_id, req.params.pipeline_id, samples), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_pipeline' ? 404 : 400;
+        const ews = code === 'unknown_pipeline' ? 'EWS_404_unknown_pipeline' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'run_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/dq/standardisation/dictionaries',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listDictionaries } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+      return res.json(wrapResponse({ dictionaries: listDictionaries(req.tenant!.tenant_id) }, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/dq/standardisation/dictionaries',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createDictionary } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.status(201).json(
+          wrapResponse(
+            createDictionary(
+              req.tenant!.tenant_id,
+              inner as { name: string; description?: string; entries?: { from: string; to: string }[] },
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'dictionary_create_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/dq/standardisation/dictionaries/:dictionary_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getDictionary } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+      const found = getDictionary(req.tenant!.tenant_id, req.params.dictionary_id);
+      if (!found)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_dictionary', message: `unknown ${req.params.dictionary_id}`, severity: 'MEDIUM' }, ctx));
+      return res.json(wrapResponse(found, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/dq/standardisation/dictionaries/:dictionary_id/entries',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { addDictionaryEntry } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(
+            addDictionaryEntry(req.tenant!.tenant_id, req.params.dictionary_id, inner as { from: string; to: string }, now()),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_dictionary' ? 404
+          : code === 'dictionary_full' ? 409
+          : 400;
+        const ews = code === 'unknown_dictionary' ? 'EWS_404_unknown_dictionary'
+          : code === 'dictionary_full' ? 'EWS_409_dictionary_full'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'entry_add_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/dq/standardisation/dictionaries/:dictionary_id/entries/:from',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { removeDictionaryEntry } = require('./dq_standardisation') as typeof import('./dq_standardisation');
+        return res.json(
+          wrapResponse(
+            removeDictionaryEntry(req.tenant!.tenant_id, req.params.dictionary_id, decodeURIComponent(req.params.from), now()),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_dictionary' || code === 'unknown_entry' ? 404 : 400;
+        const ews = code === 'unknown_dictionary' ? 'EWS_404_unknown_dictionary'
+          : code === 'unknown_entry' ? 'EWS_404_unknown_entry'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'entry_remove_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #18 — Banking Fraud full surface (§2.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/fraud/cases',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { listFraudCases } = require('./banking_fraud') as typeof import('./banking_fraud');
+        return res.json(
+          wrapResponse(
+            { tenant_id: req.tenant!.tenant_id, cases: listFraudCases(req.tenant!.tenant_id, {
+              status: req.query.status as import('./banking_fraud').FraudCaseStatus | undefined,
+              priority: req.query.priority as import('./banking_fraud').FraudPriority | undefined,
+              assignee: req.query.assignee as string | undefined,
+            }) },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'list_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/fraud/cases',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createFraudCase } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(
+            createFraudCase(
+              req.tenant!.tenant_id,
+              inner as Parameters<typeof import('./banking_fraud').createFraudCase>[1],
+              actor,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const ews = code === 'invalid_category' ? 'EWS_400_invalid_category'
+          : code === 'invalid_priority' ? 'EWS_400_invalid_priority'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'create_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/fraud/cases/:case_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getFraudCase } = require('./banking_fraud') as typeof import('./banking_fraud');
+      const found = getFraudCase(req.tenant!.tenant_id, req.params.case_id);
+      if (!found)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_case', message: `unknown ${req.params.case_id}`, severity: 'MEDIUM' }, ctx));
+      return res.json(wrapResponse(found, ctx));
+    },
+  );
+
+  app.patch(
+    '/v1/fraud/cases/:case_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { updateFraudCase } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(updateFraudCase(req.tenant!.tenant_id, req.params.case_id, inner as Record<string, unknown>, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_case' ? 404
+          : code === 'invalid_transition' ? 409
+          : 400;
+        const ews = code === 'unknown_case' ? 'EWS_404_unknown_case'
+          : code === 'invalid_transition' ? 'EWS_409_invalid_transition'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'update_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/fraud/rules',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listFraudRules } = require('./banking_fraud') as typeof import('./banking_fraud');
+      const enabledOnly = String(req.query.enabled_only ?? '').toLowerCase() === 'true';
+      return res.json(wrapResponse({ rules: listFraudRules(req.tenant!.tenant_id, enabledOnly) }, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/fraud/rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createFraudRule } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(
+            createFraudRule(
+              req.tenant!.tenant_id,
+              inner as Parameters<typeof import('./banking_fraud').createFraudRule>[1],
+              actor,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const ews = code === 'invalid_category' ? 'EWS_400_invalid_category' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'rule_create_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.patch(
+    '/v1/fraud/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { updateFraudRule } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(updateFraudRule(req.tenant!.tenant_id, req.params.rule_id, inner as Record<string, unknown>, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_rule' ? 404 : 400;
+        const ews = code === 'unknown_rule' ? 'EWS_404_unknown_rule' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'rule_update_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/fraud/rules/:rule_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { deleteFraudRule } = require('./banking_fraud') as typeof import('./banking_fraud');
+      const ok = deleteFraudRule(req.tenant!.tenant_id, req.params.rule_id);
+      if (!ok)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_rule', message: `unknown ${req.params.rule_id}`, severity: 'MEDIUM' }, ctx));
+      return res.status(204).end();
+    },
+  );
+
+  app.post(
+    '/v1/fraud/cases/:case_id/sar',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { submitSar } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const summary = (inner as { summary?: string })?.summary ?? '';
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(submitSar(req.tenant!.tenant_id, req.params.case_id, actor, summary, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_case' ? 404
+          : code === 'sar_already_submitted' ? 409
+          : 400;
+        const ews = code === 'unknown_case' ? 'EWS_404_unknown_case'
+          : code === 'sar_already_submitted' ? 'EWS_409_sar_already_submitted'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'sar_submit_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/fraud/cases/:case_id/vigilance',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { referToVigilance } = require('./banking_fraud') as typeof import('./banking_fraud');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const reason = (inner as { reason?: string })?.reason ?? '';
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(referToVigilance(req.tenant!.tenant_id, req.params.case_id, actor, reason, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_case' ? 404
+          : code === 'vigilance_already_referred' ? 409
+          : 400;
+        const ews = code === 'unknown_case' ? 'EWS_404_unknown_case'
+          : code === 'vigilance_already_referred' ? 'EWS_409_vigilance_already_referred'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'vigilance_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #20 — Workflow templates non-case (§2.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/workflows/templates',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { listWorkflowTemplates } = require('./workflows_templates') as typeof import('./workflows_templates');
+        const domain = req.query.domain as import('./workflows_templates').WorkflowDomain | undefined;
+        return res.json(wrapResponse({ templates: listWorkflowTemplates(req.tenant!.tenant_id, domain) }, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'list_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/workflows/templates',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(
+            createWorkflowTemplate(
+              req.tenant!.tenant_id,
+              inner as Parameters<typeof import('./workflows_templates').createWorkflowTemplate>[1],
+              actor,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const ews = code === 'invalid_domain' ? 'EWS_400_invalid_domain'
+          : code === 'invalid_step' ? 'EWS_400_invalid_step'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'create_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/workflows/templates/:template_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+      const found = getWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
+      if (!found)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_template', message: `unknown ${req.params.template_id}`, severity: 'MEDIUM' }, ctx));
+      return res.json(wrapResponse(found, ctx));
+    },
+  );
+
+  app.patch(
+    '/v1/workflows/templates/:template_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { updateWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(
+            updateWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id, inner as Record<string, unknown>, now()),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_template' ? 404 : 400;
+        const ews = code === 'unknown_template' ? 'EWS_404_unknown_template'
+          : code === 'invalid_step' ? 'EWS_400_invalid_step'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'update_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/workflows/templates/:template_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { deleteWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+      const ok = deleteWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
+      if (!ok)
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_template', message: `unknown ${req.params.template_id}`, severity: 'MEDIUM' }, ctx));
+      return res.status(204).end();
+    },
+  );
+
+  app.post(
+    '/v1/workflows/templates/:template_id/clone',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { cloneWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const newName = (inner as { name?: string })?.name ?? '';
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(cloneWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id, newName, actor, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_template' ? 404 : 400;
+        const ews = code === 'unknown_template' ? 'EWS_404_unknown_template' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'clone_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #19 — Missing master-data screens (12 types) (§2.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/master/:master_type',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { listMasterRecords, isMissingMasterType } = require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_master_type', message: `unknown master_type ${type}`, severity: 'MEDIUM' }, ctx));
+        }
+        return res.json(
+          wrapResponse(
+            {
+              master_type: type,
+              records: listMasterRecords(req.tenant!.tenant_id, type, {
+                enabled_only: String(req.query.enabled_only ?? '').toLowerCase() === 'true',
+                q: req.query.q as string | undefined,
+              }),
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'list_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/master/:master_type',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { createMasterRecord, isMissingMasterType } = require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_master_type', message: `unknown ${type}`, severity: 'MEDIUM' }, ctx));
+        }
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(
+          wrapResponse(
+            createMasterRecord(
+              req.tenant!.tenant_id,
+              type,
+              inner as Parameters<typeof import('./missing_masters').createMasterRecord>[2],
+              actor,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'duplicate_code' ? 409 : 400;
+        const ews = code === 'duplicate_code' ? 'EWS_409_duplicate_code'
+          : code === 'invalid_code' ? 'EWS_400_invalid_code'
+          : code === 'invalid_name' ? 'EWS_400_invalid_name'
+          : code === 'invalid_attribute' ? 'EWS_400_invalid_attribute'
+          : code === 'missing_required_attribute' ? 'EWS_400_missing_required_attribute'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'master_create_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/master/:master_type/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { getMasterRecord, isMissingMasterType } = require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_master_type', message: `unknown ${type}`, severity: 'MEDIUM' }, ctx));
+        }
+        const found = getMasterRecord(req.tenant!.tenant_id, type, req.params.record_id);
+        if (!found)
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_record', message: `unknown ${req.params.record_id}`, severity: 'MEDIUM' }, ctx));
+        return res.json(wrapResponse(found, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'get_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.patch(
+    '/v1/master/:master_type/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { updateMasterRecord, isMissingMasterType } = require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_master_type', message: `unknown ${type}`, severity: 'MEDIUM' }, ctx));
+        }
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        return res.json(
+          wrapResponse(updateMasterRecord(req.tenant!.tenant_id, type, req.params.record_id, inner as Record<string, unknown>, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_record' ? 404 : 400;
+        const ews = code === 'unknown_record' ? 'EWS_404_unknown_record'
+          : code === 'invalid_name' ? 'EWS_400_invalid_name'
+          : code === 'invalid_attribute' ? 'EWS_400_invalid_attribute'
+          : code === 'missing_required_attribute' ? 'EWS_400_missing_required_attribute'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'master_update_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/master/:master_type/:record_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { deleteMasterRecord, isMissingMasterType } = require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_master_type', message: `unknown ${type}`, severity: 'MEDIUM' }, ctx));
+        }
+        const ok = deleteMasterRecord(req.tenant!.tenant_id, type, req.params.record_id);
+        if (!ok)
+          return res
+            .status(404)
+            .json(wrapError({ code: 'EWS_404_unknown_record', message: `unknown ${req.params.record_id}`, severity: 'MEDIUM' }, ctx));
+        return res.status(204).end();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'delete_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 

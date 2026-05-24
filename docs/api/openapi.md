@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T01:54:30.678Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T02:20:54.636Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **809** route declarations auto-discovered: 768 from BFF + 41 from auth-svc
+- **846** route declarations auto-discovered: 805 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -623,7 +623,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**341 routes.** Routes sorted by path.
+**378 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -742,6 +742,17 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/dq/rules/:rule_id` |  |
 | `PATCH` | `/v1/dq/rules/:rule_id` |  |
 | `POST` | `/v1/dq/rules/:rule_id/run` | record set. Returns the recorded DqExecution. |
+| `GET` | `/v1/dq/standardisation/dictionaries` |  |
+| `POST` | `/v1/dq/standardisation/dictionaries` |  |
+| `GET` | `/v1/dq/standardisation/dictionaries/:dictionary_id` |  |
+| `POST` | `/v1/dq/standardisation/dictionaries/:dictionary_id/entries` |  |
+| `DELETE` | `/v1/dq/standardisation/dictionaries/:dictionary_id/entries/:from` |  |
+| `GET` | `/v1/dq/standardisation/pipelines` | Module #16 — DQ Standardisation pipelines + dictionaries (§2.3) |
+| `POST` | `/v1/dq/standardisation/pipelines` |  |
+| `DELETE` | `/v1/dq/standardisation/pipelines/:pipeline_id` |  |
+| `GET` | `/v1/dq/standardisation/pipelines/:pipeline_id` |  |
+| `PATCH` | `/v1/dq/standardisation/pipelines/:pipeline_id` |  |
+| `POST` | `/v1/dq/standardisation/pipelines/:pipeline_id/run` |  |
 | `GET` | `/v1/dr/game-days` |  |
 | `POST` | `/v1/dr/game-days` |  |
 | `DELETE` | `/v1/dr/game-days/:record_id` |  |
@@ -749,7 +760,17 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `PATCH` | `/v1/dr/game-days/:record_id` |  |
 | `GET` | `/v1/dr/runbook` |  |
 | `GET` | `/v1/finops/dashboard` | + cost-per-alert + cost-per-customer efficiency metrics per |
+| `GET` | `/v1/fraud/cases` | Module #18 — Banking Fraud full surface (§2.3) |
+| `POST` | `/v1/fraud/cases` |  |
+| `GET` | `/v1/fraud/cases/:case_id` |  |
+| `PATCH` | `/v1/fraud/cases/:case_id` |  |
+| `POST` | `/v1/fraud/cases/:case_id/sar` |  |
+| `POST` | `/v1/fraud/cases/:case_id/vigilance` |  |
 | `GET` | `/v1/fraud/dashboard` |  |
+| `GET` | `/v1/fraud/rules` |  |
+| `POST` | `/v1/fraud/rules` |  |
+| `DELETE` | `/v1/fraud/rules/:rule_id` |  |
+| `PATCH` | `/v1/fraud/rules/:rule_id` |  |
 | `GET` | `/v1/ifrs9/ecl-overrides` |  |
 | `POST` | `/v1/ifrs9/ecl-overrides` |  |
 | `DELETE` | `/v1/ifrs9/ecl-overrides/:override_id` |  |
@@ -848,6 +869,11 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/integrations/insurance/claims/:claim_id` |  |
 | `GET` | `/v1/integrations/insurance/policies` |  |
 | `GET` | `/v1/integrations/insurance/policies/:policy_id` |  |
+| `GET` | `/v1/master/:master_type` | Module #19 — Missing master-data screens (12 types) (§2.3) |
+| `POST` | `/v1/master/:master_type` |  |
+| `DELETE` | `/v1/master/:master_type/:record_id` |  |
+| `GET` | `/v1/master/:master_type/:record_id` |  |
+| `PATCH` | `/v1/master/:master_type/:record_id` |  |
 | `GET` | `/v1/master/accounts` |  |
 | `POST` | `/v1/master/accounts` |  |
 | `DELETE` | `/v1/master/accounts/:account_type_id` |  |
@@ -891,6 +917,11 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/metadata/lineage/datasets/:dataset_id/downstream` |  |
 | `GET` | `/v1/metadata/lineage/datasets/:dataset_id/impact` |  |
 | `GET` | `/v1/metadata/lineage/datasets/:dataset_id/upstream` |  |
+| `POST` | `/v1/notices/issue` |  |
+| `GET` | `/v1/notices/issued` |  |
+| `POST` | `/v1/notices/preview` |  |
+| `GET` | `/v1/notices/templates` | Module #17 — Notice generation (§2.3) |
+| `GET` | `/v1/notices/templates/:template_id` |  |
 | `GET` | `/v1/notifications/daily-volume` | LINE view across N consecutive UTC calendar days. Per-day bucket: |
 | `GET` | `/v1/notifications/email/log` | GET /v1/notifications/email/log?limit=50 |
 | `POST` | `/v1/notifications/email/preview` | POST /v1/notifications/email/preview |
@@ -968,6 +999,12 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `DELETE` | `/v1/webhooks/:id` |  |
 | `GET` | `/v1/webhooks/:id/deliveries` |  |
 | `POST` | `/v1/webhooks/:id/test` | POST /v1/webhooks/:id/test |
+| `GET` | `/v1/workflows/templates` | Module #20 — Workflow templates non-case (§2.3) |
+| `POST` | `/v1/workflows/templates` |  |
+| `DELETE` | `/v1/workflows/templates/:template_id` |  |
+| `GET` | `/v1/workflows/templates/:template_id` |  |
+| `PATCH` | `/v1/workflows/templates/:template_id` |  |
+| `POST` | `/v1/workflows/templates/:template_id/clone` |  |
 
 ## Example curl invocations
 

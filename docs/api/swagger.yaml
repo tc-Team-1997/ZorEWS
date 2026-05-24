@@ -48770,6 +48770,2398 @@ paths:
       security:
         - bearerAuth: []
         - apiKeyAuth: []
+  /v1/notices/templates:
+    get:
+      tags:
+        - Config
+      summary: 'Module #17 — Notice generation (§2.3)'
+      operationId: get_v1_notices_templates
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/notices/templates/{template_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/notices/templates/:template_id — auto-discovered (server.ts:33008)'
+      operationId: get_v1_notices_templates_template_id
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: Path parameter `template_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/notices/preview:
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/notices/preview — auto-discovered (server.ts:33030)'
+      operationId: post_v1_notices_preview
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/notices/issue:
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/notices/issue — auto-discovered (server.ts:33057)'
+      operationId: post_v1_notices_issue
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/notices/issued:
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/notices/issued — auto-discovered (server.ts:33094)'
+      operationId: get_v1_notices_issued
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/dq/standardisation/pipelines:
+    get:
+      tags:
+        - Config
+      summary: 'Module #16 — DQ Standardisation pipelines + dictionaries (§2.3)'
+      operationId: get_v1_dq_standardisation_pipelines
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/dq/standardisation/pipelines — auto-discovered (server.ts:33120)'
+      operationId: post_v1_dq_standardisation_pipelines
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/dq/standardisation/pipelines/{pipeline_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33154)'
+      operationId: get_v1_dq_standardisation_pipelines_pipeline_id
+      parameters:
+        - name: pipeline_id
+          in: path
+          required: true
+          description: Path parameter `pipeline_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    patch:
+      tags:
+        - Config
+      summary: 'PATCH /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33168)'
+      operationId: patch_v1_dq_standardisation_pipelines_pipeline_id
+      parameters:
+        - name: pipeline_id
+          in: path
+          required: true
+          description: Path parameter `pipeline_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    delete:
+      tags:
+        - Config
+      summary: 'DELETE /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33196)'
+      operationId: delete_v1_dq_standardisation_pipelines_pipeline_id
+      parameters:
+        - name: pipeline_id
+          in: path
+          required: true
+          description: Path parameter `pipeline_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '204':
+          description: No content — resource deleted.
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/dq/standardisation/pipelines/{pipeline_id}/run':
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/dq/standardisation/pipelines/:pipeline_id/run — auto-discovered (server.ts:33210)'
+      operationId: post_v1_dq_standardisation_pipelines_pipeline_id_run
+      parameters:
+        - name: pipeline_id
+          in: path
+          required: true
+          description: Path parameter `pipeline_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/dq/standardisation/dictionaries:
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33237)'
+      operationId: get_v1_dq_standardisation_dictionaries
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33248)'
+      operationId: post_v1_dq_standardisation_dictionaries
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/dq/standardisation/dictionaries/{dictionary_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/dq/standardisation/dictionaries/:dictionary_id — auto-discovered (server.ts:33278)'
+      operationId: get_v1_dq_standardisation_dictionaries_dictionary_id
+      parameters:
+        - name: dictionary_id
+          in: path
+          required: true
+          description: Path parameter `dictionary_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/dq/standardisation/dictionaries/{dictionary_id}/entries':
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/dq/standardisation/dictionaries/:dictionary_id/entries — auto-discovered (server.ts:33292)'
+      operationId: post_v1_dq_standardisation_dictionaries_dictionary_id_entries
+      parameters:
+        - name: dictionary_id
+          in: path
+          required: true
+          description: Path parameter `dictionary_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/dq/standardisation/dictionaries/{dictionary_id}/entries/{from}':
+    delete:
+      tags:
+        - Config
+      summary: 'DELETE /v1/dq/standardisation/dictionaries/:dictionary_id/entries/:from — auto-discovered (server.ts:33325)'
+      operationId: delete_v1_dq_standardisation_dictionaries_dictionary_id_entries_from
+      parameters:
+        - name: dictionary_id
+          in: path
+          required: true
+          description: Path parameter `dictionary_id`.
+          schema:
+            type: string
+        - name: from
+          in: path
+          required: true
+          description: Path parameter `from`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '204':
+          description: No content — resource deleted.
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/fraud/cases:
+    get:
+      tags:
+        - Config
+      summary: 'Module #18 — Banking Fraud full surface (§2.3)'
+      operationId: get_v1_fraud_cases
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/fraud/cases — auto-discovered (server.ts:33380)'
+      operationId: post_v1_fraud_cases
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/fraud/cases/{case_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/fraud/cases/:case_id — auto-discovered (server.ts:33416)'
+      operationId: get_v1_fraud_cases_case_id
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          description: Path parameter `case_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    patch:
+      tags:
+        - Config
+      summary: 'PATCH /v1/fraud/cases/:case_id — auto-discovered (server.ts:33430)'
+      operationId: patch_v1_fraud_cases_case_id
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          description: Path parameter `case_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/fraud/rules:
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/fraud/rules — auto-discovered (server.ts:33460)'
+      operationId: get_v1_fraud_rules
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/fraud/rules — auto-discovered (server.ts:33472)'
+      operationId: post_v1_fraud_rules
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/fraud/rules/{rule_id}':
+    patch:
+      tags:
+        - Config
+      summary: 'PATCH /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33506)'
+      operationId: patch_v1_fraud_rules_rule_id
+      parameters:
+        - name: rule_id
+          in: path
+          required: true
+          description: Path parameter `rule_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    delete:
+      tags:
+        - Config
+      summary: 'DELETE /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33532)'
+      operationId: delete_v1_fraud_rules_rule_id
+      parameters:
+        - name: rule_id
+          in: path
+          required: true
+          description: Path parameter `rule_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '204':
+          description: No content — resource deleted.
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/fraud/cases/{case_id}/sar':
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/fraud/cases/:case_id/sar — auto-discovered (server.ts:33546)'
+      operationId: post_v1_fraud_cases_case_id_sar
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          description: Path parameter `case_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/fraud/cases/{case_id}/vigilance':
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/fraud/cases/:case_id/vigilance — auto-discovered (server.ts:33578)'
+      operationId: post_v1_fraud_cases_case_id_vigilance
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          description: Path parameter `case_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  /v1/workflows/templates:
+    get:
+      tags:
+        - Config
+      summary: 'Module #20 — Workflow templates non-case (§2.3)'
+      operationId: get_v1_workflows_templates
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/workflows/templates — auto-discovered (server.ts:33631)'
+      operationId: post_v1_workflows_templates
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/workflows/templates/{template_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/workflows/templates/:template_id — auto-discovered (server.ts:33667)'
+      operationId: get_v1_workflows_templates_template_id
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: Path parameter `template_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    patch:
+      tags:
+        - Config
+      summary: 'PATCH /v1/workflows/templates/:template_id — auto-discovered (server.ts:33681)'
+      operationId: patch_v1_workflows_templates_template_id
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: Path parameter `template_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    delete:
+      tags:
+        - Config
+      summary: 'DELETE /v1/workflows/templates/:template_id — auto-discovered (server.ts:33712)'
+      operationId: delete_v1_workflows_templates_template_id
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: Path parameter `template_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '204':
+          description: No content — resource deleted.
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/workflows/templates/{template_id}/clone':
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/workflows/templates/:template_id/clone — auto-discovered (server.ts:33726)'
+      operationId: post_v1_workflows_templates_template_id_clone
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: Path parameter `template_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/master/{master_type}':
+    get:
+      tags:
+        - Config
+      summary: 'Module #19 — Missing master-data screens (12 types) (§2.3)'
+      operationId: get_v1_master_master_type
+      parameters:
+        - name: master_type
+          in: path
+          required: true
+          description: Path parameter `master_type`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    post:
+      tags:
+        - Config
+      summary: 'POST /v1/master/:master_type — auto-discovered (server.ts:33791)'
+      operationId: post_v1_master_master_type
+      parameters:
+        - name: master_type
+          in: path
+          required: true
+          description: Path parameter `master_type`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: Successful response (enveloped).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              example:
+                $ref: '#/components/examples/EnvelopeSuccess/value'
+        '201':
+          description: Created (enveloped) — for POSTs that mint a new resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+  '/v1/master/{master_type}/{record_id}':
+    get:
+      tags:
+        - Config
+      summary: 'GET /v1/master/:master_type/:record_id — auto-discovered (server.ts:33838)'
+      operationId: get_v1_master_master_type_record_id
+      parameters:
+        - name: master_type
+          in: path
+          required: true
+          description: Path parameter `master_type`.
+          schema:
+            type: string
+        - name: record_id
+          in: path
+          required: true
+          description: Path parameter `record_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    patch:
+      tags:
+        - Config
+      summary: 'PATCH /v1/master/:master_type/:record_id — auto-discovered (server.ts:33865)'
+      operationId: patch_v1_master_master_type_record_id
+      parameters:
+        - name: master_type
+          in: path
+          required: true
+          description: Path parameter `master_type`.
+          schema:
+            type: string
+        - name: record_id
+          in: path
+          required: true
+          description: Path parameter `record_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '200':
+          description: 'Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    additionalProperties: true
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      requestBody:
+        description: >-
+          Request body — `/v1/*` routes accept both raw and `{header, body}` enveloped bodies; the BFF unwraps
+          automatically.
+        required: false
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - $ref: '#/components/schemas/RequestEnvelope'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+    delete:
+      tags:
+        - Config
+      summary: 'DELETE /v1/master/:master_type/:record_id — auto-discovered (server.ts:33901)'
+      operationId: delete_v1_master_master_type_record_id
+      parameters:
+        - name: master_type
+          in: path
+          required: true
+          description: Path parameter `master_type`.
+          schema:
+            type: string
+        - name: record_id
+          in: path
+          required: true
+          description: Path parameter `record_id`.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/XChannel'
+        - $ref: '#/components/parameters/XApexUser'
+        - $ref: '#/components/parameters/XApexRole'
+      responses:
+        '204':
+          description: No content — resource deleted.
+        '400':
+          description: Bad request — code-routed `EWS_400_<code>` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '401':
+          description: Unauthenticated — missing or invalid bearer token / API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '403':
+          description: Forbidden — role lacks the required RBAC scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '404':
+          description: Not found — tenant-scoped lookup miss.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeError'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
   /auth/login:
     post:
       tags:
