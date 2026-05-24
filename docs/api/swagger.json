@@ -83404,6 +83404,107 @@
         ]
       }
     },
+    "/v1/banking/npa/portfolio-drivers": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "M7.19 — Portfolio-level NPA driver aggregation",
+        "operationId": "get_v1_banking_npa_portfoliodrivers",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XChannel"
+          },
+          {
+            "$ref": "#/components/parameters/XApexUser"
+          },
+          {
+            "$ref": "#/components/parameters/XApexRole"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response (enveloped for `/v1/*`, raw JSON for `/api/*`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — code-routed `EWS_400_<code>` envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated — missing or invalid bearer token / API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — role lacks the required RBAC scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — tenant-scoped lookup miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    },
     "/v1/ai/predictions/{prediction_id}/explanation": {
       "get": {
         "tags": [
@@ -83519,7 +83620,7 @@
         "tags": [
           "AI"
         ],
-        "summary": "GET /v1/ai/predictions/:prediction_id/trust-signals — auto-discovered (server.ts:32769)",
+        "summary": "GET /v1/ai/predictions/:prediction_id/trust-signals — auto-discovered (server.ts:32793)",
         "operationId": "get_v1_ai_predictions_prediction_id_trustsignals",
         "parameters": [
           {
@@ -83739,7 +83840,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/dq/profile/:source_id/columns/:column/distribution — auto-discovered (server.ts:32811)",
+        "summary": "GET /v1/dq/profile/:source_id/columns/:column/distribution — auto-discovered (server.ts:32835)",
         "operationId": "get_v1_dq_profile_source_id_columns_column_distribution",
         "parameters": [
           {
@@ -83858,7 +83959,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/profile/:source_id/suggest-rules — auto-discovered (server.ts:32837)",
+        "summary": "POST /v1/dq/profile/:source_id/suggest-rules — auto-discovered (server.ts:32861)",
         "operationId": "post_v1_dq_profile_source_id_suggestrules",
         "parameters": [
           {
@@ -83992,7 +84093,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/profile/:source_id/rules/:rule_id/promote — auto-discovered (server.ts:32857)",
+        "summary": "POST /v1/dq/profile/:source_id/rules/:rule_id/promote — auto-discovered (server.ts:32881)",
         "operationId": "post_v1_dq_profile_source_id_rules_rule_id_promote",
         "parameters": [
           {
@@ -84236,7 +84337,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/anomalies/patterns/config — auto-discovered (server.ts:32913)",
+        "summary": "GET /v1/anomalies/patterns/config — auto-discovered (server.ts:32937)",
         "operationId": "get_v1_anomalies_patterns_config",
         "parameters": [
           {
@@ -84335,7 +84436,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/anomalies/patterns/config — auto-discovered (server.ts:32924)",
+        "summary": "POST /v1/anomalies/patterns/config — auto-discovered (server.ts:32948)",
         "operationId": "post_v1_anomalies_patterns_config",
         "parameters": [
           {
@@ -84460,7 +84561,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/anomalies/rerun — auto-discovered (server.ts:32953)",
+        "summary": "POST /v1/anomalies/rerun — auto-discovered (server.ts:32977)",
         "operationId": "post_v1_anomalies_rerun",
         "parameters": [
           {
@@ -84585,7 +84686,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/anomalies/:anomaly_id — auto-discovered (server.ts:32970)",
+        "summary": "GET /v1/anomalies/:anomaly_id — auto-discovered (server.ts:32994)",
         "operationId": "get_v1_anomalies_anomaly_id",
         "parameters": [
           {
@@ -84796,7 +84897,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/notices/templates/:template_id — auto-discovered (server.ts:33008)",
+        "summary": "GET /v1/notices/templates/:template_id — auto-discovered (server.ts:33032)",
         "operationId": "get_v1_notices_templates_template_id",
         "parameters": [
           {
@@ -84906,7 +85007,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/notices/preview — auto-discovered (server.ts:33030)",
+        "summary": "POST /v1/notices/preview — auto-discovered (server.ts:33054)",
         "operationId": "post_v1_notices_preview",
         "parameters": [
           {
@@ -85031,7 +85132,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/notices/issue — auto-discovered (server.ts:33057)",
+        "summary": "POST /v1/notices/issue — auto-discovered (server.ts:33081)",
         "operationId": "post_v1_notices_issue",
         "parameters": [
           {
@@ -85156,7 +85257,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/notices/issued — auto-discovered (server.ts:33094)",
+        "summary": "GET /v1/notices/issued — auto-discovered (server.ts:33118)",
         "operationId": "get_v1_notices_issued",
         "parameters": [
           {
@@ -85356,7 +85457,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/standardisation/pipelines — auto-discovered (server.ts:33120)",
+        "summary": "POST /v1/dq/standardisation/pipelines — auto-discovered (server.ts:33144)",
         "operationId": "post_v1_dq_standardisation_pipelines",
         "parameters": [
           {
@@ -85481,7 +85582,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33154)",
+        "summary": "GET /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33178)",
         "operationId": "get_v1_dq_standardisation_pipelines_pipeline_id",
         "parameters": [
           {
@@ -85589,7 +85690,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33168)",
+        "summary": "PATCH /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33192)",
         "operationId": "patch_v1_dq_standardisation_pipelines_pipeline_id",
         "parameters": [
           {
@@ -85716,7 +85817,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33196)",
+        "summary": "DELETE /v1/dq/standardisation/pipelines/:pipeline_id — auto-discovered (server.ts:33220)",
         "operationId": "delete_v1_dq_standardisation_pipelines_pipeline_id",
         "parameters": [
           {
@@ -85811,7 +85912,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/standardisation/pipelines/:pipeline_id/run — auto-discovered (server.ts:33210)",
+        "summary": "POST /v1/dq/standardisation/pipelines/:pipeline_id/run — auto-discovered (server.ts:33234)",
         "operationId": "post_v1_dq_standardisation_pipelines_pipeline_id_run",
         "parameters": [
           {
@@ -85945,7 +86046,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33237)",
+        "summary": "GET /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33261)",
         "operationId": "get_v1_dq_standardisation_dictionaries",
         "parameters": [
           {
@@ -86044,7 +86145,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33248)",
+        "summary": "POST /v1/dq/standardisation/dictionaries — auto-discovered (server.ts:33272)",
         "operationId": "post_v1_dq_standardisation_dictionaries",
         "parameters": [
           {
@@ -86169,7 +86270,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/dq/standardisation/dictionaries/:dictionary_id — auto-discovered (server.ts:33278)",
+        "summary": "GET /v1/dq/standardisation/dictionaries/:dictionary_id — auto-discovered (server.ts:33302)",
         "operationId": "get_v1_dq_standardisation_dictionaries_dictionary_id",
         "parameters": [
           {
@@ -86279,7 +86380,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/dq/standardisation/dictionaries/:dictionary_id/entries — auto-discovered (server.ts:33292)",
+        "summary": "POST /v1/dq/standardisation/dictionaries/:dictionary_id/entries — auto-discovered (server.ts:33316)",
         "operationId": "post_v1_dq_standardisation_dictionaries_dictionary_id_entries",
         "parameters": [
           {
@@ -86413,7 +86514,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/dq/standardisation/dictionaries/:dictionary_id/entries/:from — auto-discovered (server.ts:33325)",
+        "summary": "DELETE /v1/dq/standardisation/dictionaries/:dictionary_id/entries/:from — auto-discovered (server.ts:33349)",
         "operationId": "delete_v1_dq_standardisation_dictionaries_dictionary_id_entries_from",
         "parameters": [
           {
@@ -86616,7 +86717,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/fraud/cases — auto-discovered (server.ts:33380)",
+        "summary": "POST /v1/fraud/cases — auto-discovered (server.ts:33404)",
         "operationId": "post_v1_fraud_cases",
         "parameters": [
           {
@@ -86741,7 +86842,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/fraud/cases/:case_id — auto-discovered (server.ts:33416)",
+        "summary": "GET /v1/fraud/cases/:case_id — auto-discovered (server.ts:33440)",
         "operationId": "get_v1_fraud_cases_case_id",
         "parameters": [
           {
@@ -86849,7 +86950,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/fraud/cases/:case_id — auto-discovered (server.ts:33430)",
+        "summary": "PATCH /v1/fraud/cases/:case_id — auto-discovered (server.ts:33454)",
         "operationId": "patch_v1_fraud_cases_case_id",
         "parameters": [
           {
@@ -86978,7 +87079,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/fraud/rules — auto-discovered (server.ts:33460)",
+        "summary": "GET /v1/fraud/rules — auto-discovered (server.ts:33484)",
         "operationId": "get_v1_fraud_rules",
         "parameters": [
           {
@@ -87077,7 +87178,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/fraud/rules — auto-discovered (server.ts:33472)",
+        "summary": "POST /v1/fraud/rules — auto-discovered (server.ts:33496)",
         "operationId": "post_v1_fraud_rules",
         "parameters": [
           {
@@ -87202,7 +87303,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33506)",
+        "summary": "PATCH /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33530)",
         "operationId": "patch_v1_fraud_rules_rule_id",
         "parameters": [
           {
@@ -87329,7 +87430,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33532)",
+        "summary": "DELETE /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33556)",
         "operationId": "delete_v1_fraud_rules_rule_id",
         "parameters": [
           {
@@ -87424,7 +87525,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/fraud/cases/:case_id/sar — auto-discovered (server.ts:33546)",
+        "summary": "POST /v1/fraud/cases/:case_id/sar — auto-discovered (server.ts:33570)",
         "operationId": "post_v1_fraud_cases_case_id_sar",
         "parameters": [
           {
@@ -87558,7 +87659,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/fraud/cases/:case_id/vigilance — auto-discovered (server.ts:33578)",
+        "summary": "POST /v1/fraud/cases/:case_id/vigilance — auto-discovered (server.ts:33602)",
         "operationId": "post_v1_fraud_cases_case_id_vigilance",
         "parameters": [
           {
@@ -87791,7 +87892,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/workflows/templates — auto-discovered (server.ts:33631)",
+        "summary": "POST /v1/workflows/templates — auto-discovered (server.ts:33655)",
         "operationId": "post_v1_workflows_templates",
         "parameters": [
           {
@@ -87916,7 +88017,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/workflows/templates/:template_id — auto-discovered (server.ts:33667)",
+        "summary": "GET /v1/workflows/templates/:template_id — auto-discovered (server.ts:33691)",
         "operationId": "get_v1_workflows_templates_template_id",
         "parameters": [
           {
@@ -88024,7 +88125,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/workflows/templates/:template_id — auto-discovered (server.ts:33681)",
+        "summary": "PATCH /v1/workflows/templates/:template_id — auto-discovered (server.ts:33705)",
         "operationId": "patch_v1_workflows_templates_template_id",
         "parameters": [
           {
@@ -88151,7 +88252,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/workflows/templates/:template_id — auto-discovered (server.ts:33712)",
+        "summary": "DELETE /v1/workflows/templates/:template_id — auto-discovered (server.ts:33736)",
         "operationId": "delete_v1_workflows_templates_template_id",
         "parameters": [
           {
@@ -88246,7 +88347,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/workflows/templates/:template_id/clone — auto-discovered (server.ts:33726)",
+        "summary": "POST /v1/workflows/templates/:template_id/clone — auto-discovered (server.ts:33750)",
         "operationId": "post_v1_workflows_templates_template_id_clone",
         "parameters": [
           {
@@ -88488,7 +88589,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/master/:master_type — auto-discovered (server.ts:33791)",
+        "summary": "POST /v1/master/:master_type — auto-discovered (server.ts:33815)",
         "operationId": "post_v1_master_master_type",
         "parameters": [
           {
@@ -88622,7 +88723,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/master/:master_type/:record_id — auto-discovered (server.ts:33838)",
+        "summary": "GET /v1/master/:master_type/:record_id — auto-discovered (server.ts:33862)",
         "operationId": "get_v1_master_master_type_record_id",
         "parameters": [
           {
@@ -88739,7 +88840,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/master/:master_type/:record_id — auto-discovered (server.ts:33865)",
+        "summary": "PATCH /v1/master/:master_type/:record_id — auto-discovered (server.ts:33889)",
         "operationId": "patch_v1_master_master_type_record_id",
         "parameters": [
           {
@@ -88875,7 +88976,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/master/:master_type/:record_id — auto-discovered (server.ts:33901)",
+        "summary": "DELETE /v1/master/:master_type/:record_id — auto-discovered (server.ts:33925)",
         "operationId": "delete_v1_master_master_type_record_id",
         "parameters": [
           {
@@ -89078,7 +89179,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/testing/tests — auto-discovered (server.ts:33953)",
+        "summary": "POST /v1/testing/tests — auto-discovered (server.ts:33977)",
         "operationId": "post_v1_testing_tests",
         "parameters": [
           {
@@ -89203,7 +89304,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/testing/tests/:test_id — auto-discovered (server.ts:33977)",
+        "summary": "GET /v1/testing/tests/:test_id — auto-discovered (server.ts:34001)",
         "operationId": "get_v1_testing_tests_test_id",
         "parameters": [
           {
@@ -89311,7 +89412,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "PATCH /v1/testing/tests/:test_id — auto-discovered (server.ts:33985)",
+        "summary": "PATCH /v1/testing/tests/:test_id — auto-discovered (server.ts:34009)",
         "operationId": "patch_v1_testing_tests_test_id",
         "parameters": [
           {
@@ -89438,7 +89539,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "DELETE /v1/testing/tests/:test_id — auto-discovered (server.ts:34006)",
+        "summary": "DELETE /v1/testing/tests/:test_id — auto-discovered (server.ts:34030)",
         "operationId": "delete_v1_testing_tests_test_id",
         "parameters": [
           {
@@ -89533,7 +89634,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/testing/tests/bulk-upload — auto-discovered (server.ts:34014)",
+        "summary": "POST /v1/testing/tests/bulk-upload — auto-discovered (server.ts:34038)",
         "operationId": "post_v1_testing_tests_bulkupload",
         "parameters": [
           {
@@ -89658,7 +89759,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/testing/tests/:test_id/run — auto-discovered (server.ts:34032)",
+        "summary": "POST /v1/testing/tests/:test_id/run — auto-discovered (server.ts:34056)",
         "operationId": "post_v1_testing_tests_test_id_run",
         "parameters": [
           {
@@ -89792,7 +89893,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/testing/runs — auto-discovered (server.ts:34049)",
+        "summary": "GET /v1/testing/runs — auto-discovered (server.ts:34073)",
         "operationId": "get_v1_testing_runs",
         "parameters": [
           {
@@ -89893,7 +89994,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/testing/runs/:run_id — auto-discovered (server.ts:34063)",
+        "summary": "GET /v1/testing/runs/:run_id — auto-discovered (server.ts:34087)",
         "operationId": "get_v1_testing_runs_run_id",
         "parameters": [
           {
@@ -90003,7 +90104,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/testing/schedule — auto-discovered (server.ts:34071)",
+        "summary": "GET /v1/testing/schedule — auto-discovered (server.ts:34095)",
         "operationId": "get_v1_testing_schedule",
         "parameters": [
           {
@@ -90102,7 +90203,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/testing/schedule — auto-discovered (server.ts:34077)",
+        "summary": "POST /v1/testing/schedule — auto-discovered (server.ts:34101)",
         "operationId": "post_v1_testing_schedule",
         "parameters": [
           {
@@ -90328,7 +90429,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/glossary/categories — auto-discovered (server.ts:34124)",
+        "summary": "GET /v1/glossary/categories — auto-discovered (server.ts:34148)",
         "operationId": "get_v1_glossary_categories",
         "parameters": [
           {
@@ -90429,7 +90530,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "GET /v1/glossary/terms/:term_id — auto-discovered (server.ts:34130)",
+        "summary": "GET /v1/glossary/terms/:term_id — auto-discovered (server.ts:34154)",
         "operationId": "get_v1_glossary_terms_term_id",
         "parameters": [
           {
@@ -90640,7 +90741,7 @@
         "tags": [
           "AI"
         ],
-        "summary": "GET /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34164)",
+        "summary": "GET /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34188)",
         "operationId": "get_v1_ai_prompts_prompt_id",
         "parameters": [
           {
@@ -90748,7 +90849,7 @@
         "tags": [
           "AI"
         ],
-        "summary": "PATCH /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34198)",
+        "summary": "PATCH /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34222)",
         "operationId": "patch_v1_ai_prompts_prompt_id",
         "parameters": [
           {
@@ -90875,7 +90976,7 @@
         "tags": [
           "AI"
         ],
-        "summary": "DELETE /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34225)",
+        "summary": "DELETE /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34249)",
         "operationId": "delete_v1_ai_prompts_prompt_id",
         "parameters": [
           {
@@ -90970,7 +91071,7 @@
         "tags": [
           "AI"
         ],
-        "summary": "POST /v1/ai/prompts — auto-discovered (server.ts:34172)",
+        "summary": "POST /v1/ai/prompts — auto-discovered (server.ts:34196)",
         "operationId": "post_v1_ai_prompts",
         "parameters": [
           {
@@ -91220,7 +91321,7 @@
         "tags": [
           "Config"
         ],
-        "summary": "POST /v1/export/pdf — auto-discovered (server.ts:34256)",
+        "summary": "POST /v1/export/pdf — auto-discovered (server.ts:34280)",
         "operationId": "post_v1_export_pdf",
         "parameters": [
           {

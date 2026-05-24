@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T02:35:01.329Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T04:17:17.491Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **867** route declarations auto-discovered: 826 from BFF + 41 from auth-svc
+- **868** route declarations auto-discovered: 827 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -628,7 +628,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**394 routes.** Routes sorted by path.
+**395 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -714,6 +714,7 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `POST` | `/v1/banking/cma/pack` |  |
 | `GET` | `/v1/banking/npa/backtest/latest` |  |
 | `GET` | `/v1/banking/npa/high-risk` | Module #5 — NPA Prediction wrap (§2.1.5) |
+| `GET` | `/v1/banking/npa/portfolio-drivers` | M7.19 — Portfolio-level NPA driver aggregation |
 | `GET` | `/v1/banking/npa/predictions/:prediction_id/why` |  |
 | `GET` | `/v1/banking/ratios/customer/:customer_id` |  |
 | `GET` | `/v1/banking/ratios/master` |  |

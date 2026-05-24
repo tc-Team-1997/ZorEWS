@@ -2710,7 +2710,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ai/predictions/:prediction_id/trust-signals — auto-discovered (server.ts:32769)"
+          "_summary": "GET /v1/ai/predictions/:prediction_id/trust-signals — auto-discovered (server.ts:32793)"
         }
       ]
     },
@@ -3545,7 +3545,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/ai/prompts — auto-discovered (server.ts:34172)"
+          "_summary": "POST /v1/ai/prompts — auto-discovered (server.ts:34196)"
         },
         {
           "name": "DELETE /v1/ai/prompts/{prompt_id}",
@@ -3635,7 +3635,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34225)"
+          "_summary": "DELETE /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34249)"
         },
         {
           "name": "GET /v1/ai/prompts/{prompt_id}",
@@ -3725,7 +3725,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34164)"
+          "_summary": "GET /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34188)"
         },
         {
           "name": "PATCH /v1/ai/prompts/{prompt_id}",
@@ -3829,7 +3829,7 @@
             }
           ],
           "response": [],
-          "_summary": "PATCH /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34198)"
+          "_summary": "PATCH /v1/ai/prompts/:prompt_id — auto-discovered (server.ts:34222)"
         },
         {
           "name": "GET /v1/ai/prompts/library",

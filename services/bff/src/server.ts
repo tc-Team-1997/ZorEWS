@@ -32743,6 +32743,30 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // M7.19 — Portfolio-level NPA driver aggregation
+  app.get(
+    '/v1/banking/npa/portfolio-drivers',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { summarizePortfolioNpaDrivers } =
+          require('./portfolio_npa_drivers') as typeof import('./portfolio_npa_drivers');
+        const h = parseInt(req.query.horizon as string, 10);
+        const horizon = Number.isFinite(h) ? (h as 30 | 60 | 90 | 180) : 90;
+        return res.json(
+          wrapResponse(summarizePortfolioNpaDrivers(req.tenant!.tenant_id, horizon, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const ews = code === 'invalid_horizon' ? 'EWS_400_invalid_horizon' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'portfolio_drivers_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   // ──────────────────────────────────────────────────────────────────
   // Module #6 — AI Explainability (§2.1.6)
   // ──────────────────────────────────────────────────────────────────
