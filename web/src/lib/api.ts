@@ -1874,7 +1874,149 @@ export const api = {
     http
       .delete<EnvelopeBody<void>>(`/v1/watchlist/${encodeURIComponent(customer_id)}`)
       .then((r) => r.data),
+
+  // ── M2.2 — Account Behaviour ────────────────────────────────────────
+  accountSignals: (q: { customer_id?: string; watchlist_only?: boolean; status?: 'new' | 'reviewed' | 'dismissed' } = {}) => {
+    const params = new URLSearchParams();
+    if (q.customer_id) params.set('customer_id', q.customer_id);
+    if (q.watchlist_only) params.set('watchlist_only', 'true');
+    if (q.status) params.set('status', q.status);
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<AccountSignalsReportShape>>(`/v1/banking/accounts/signals${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+  accountPatterns: (account_id: string) =>
+    http
+      .get<EnvelopeBody<AccountPatternsReportShape>>(
+        `/v1/banking/accounts/${encodeURIComponent(account_id)}/patterns`,
+      )
+      .then((r) => r.data),
+  accountTransactions: (account_id: string, q: { since?: string; until?: string; page?: number; page_size?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.since) params.set('since', q.since);
+    if (q.until) params.set('until', q.until);
+    if (q.page) params.set('page', String(q.page));
+    if (q.page_size) params.set('page_size', String(q.page_size));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<AccountTransactionsShape>>(
+        `/v1/banking/accounts/${encodeURIComponent(account_id)}/transactions${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  accountSignalDismiss: (signal_id: string) =>
+    http
+      .post<EnvelopeBody<SignalStatusUpdateShape>>(
+        `/v1/banking/accounts/signals/${encodeURIComponent(signal_id)}/dismiss`,
+        {},
+      )
+      .then((r) => r.data),
+  accountSignalReview: (signal_id: string) =>
+    http
+      .post<EnvelopeBody<SignalStatusUpdateShape>>(
+        `/v1/banking/accounts/signals/${encodeURIComponent(signal_id)}/review`,
+        {},
+      )
+      .then((r) => r.data),
+  accountBlockPropose: (account_id: string, reason: string) =>
+    http
+      .post<EnvelopeBody<AccountBlockRequestShape>>(
+        `/v1/banking/accounts/${encodeURIComponent(account_id)}/block`,
+        { reason },
+      )
+      .then((r) => r.data),
+  accountBlockReview: (account_id: string, request_id: string, decision: 'approve' | 'reject') =>
+    http
+      .post<EnvelopeBody<AccountBlockRequestShape>>(
+        `/v1/banking/accounts/${encodeURIComponent(account_id)}/block`,
+        { request_id, decision },
+      )
+      .then((r) => r.data),
 };
+
+// ── M2.2 — Account Behaviour shapes ───────────────────────────────────
+export type AccountSignalSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type AccountSignalStatus = 'new' | 'reviewed' | 'dismissed';
+export interface AccountSignalShape {
+  signal_id: string;
+  account_id: string;
+  customer_id: string;
+  customer_name: string;
+  signal_type: string;
+  severity: AccountSignalSeverity;
+  score: number;
+  observed_at: string;
+  description: string;
+  is_watchlisted: boolean;
+  status: AccountSignalStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+export interface AccountSignalsReportShape {
+  tenant_id: string;
+  generated_at: string;
+  customer_id: string | null;
+  watchlist_only: boolean;
+  status_filter: AccountSignalStatus | null;
+  total: number;
+  by_severity: Record<AccountSignalSeverity, number>;
+  by_status: Record<AccountSignalStatus, number>;
+  by_type: Record<string, number>;
+  signals: AccountSignalShape[];
+}
+export interface AccountPatternShape {
+  pattern_type: 'monthly_balance' | 'channel_mix' | 'txn_velocity' | 'cheque_returns';
+  label: string;
+  series: { date: string; value: number }[];
+  anomaly_score: number;
+}
+export interface AccountPatternsReportShape {
+  tenant_id: string;
+  generated_at: string;
+  account_id: string;
+  customer_id: string;
+  patterns: AccountPatternShape[];
+}
+export interface LedgerEntryShape {
+  entry_id: string;
+  account_id: string;
+  type: 'credit' | 'debit';
+  amount_kes: number;
+  currency: string;
+  narrative: string;
+  posted_at: string;
+  balance_kes_after: number;
+}
+export interface AccountTransactionsShape {
+  // Re-uses the M14.7 finance adapter ledger shape: items[] not entries[].
+  account_id: string;
+  total: number;
+  page: number;
+  page_size: number;
+  since?: string;
+  until?: string;
+  items: LedgerEntryShape[];
+}
+export interface SignalStatusUpdateShape {
+  signal_id: string;
+  tenant_id: string;
+  status: AccountSignalStatus;
+  reviewed_by: string;
+  reviewed_at: string;
+}
+export interface AccountBlockRequestShape {
+  request_id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requested_by: string;
+  requested_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
 
 // ── Demo §2.1 response shapes ──
 export interface NpaHighRiskRow {

@@ -33457,20 +33457,25 @@ export function makeApp(deps: AppDeps = {}) {
           require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
         const customer_id = req.query.customer_id as string | undefined;
         const watchlist_only = String(req.query.watchlist_only ?? '').toLowerCase() === 'true';
+        const statusRaw = (req.query.status as string | undefined)?.trim();
+        const status = statusRaw && statusRaw.length > 0
+          ? (statusRaw as 'new' | 'reviewed' | 'dismissed')
+          : undefined;
         const out = buildAccountSignals(
           req.tenant!.tenant_id,
-          { customer_id, watchlist_only },
+          { customer_id, watchlist_only, status },
           now(),
         );
         return res.json(wrapResponse(out, ctx));
       } catch (e) {
         const isAB = (e as { name?: string }).name === 'AccountBehaviourError';
+        const code = (e as { code?: string }).code ?? 'invalid_input';
         const msg = e instanceof Error ? e.message : 'signals_failed';
         return res
           .status(isAB ? 400 : 500)
           .json(
             wrapError(
-              { code: isAB ? 'EWS_400_invalid_input' : 'EWS_500', message: msg, severity: isAB ? 'MEDIUM' : 'HIGH' },
+              { code: isAB ? `EWS_400_${code}` : 'EWS_500', message: msg, severity: isAB ? 'MEDIUM' : 'HIGH' },
               ctx,
             ),
           );
@@ -33550,6 +33555,136 @@ export function makeApp(deps: AppDeps = {}) {
           .json(wrapError({ code: ews, message: msg, severity: httpStatus >= 500 ? 'HIGH' : 'MEDIUM' }, ctx));
       }
     },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // M2.2 — additive routes for the Account Behaviour screen
+  //  GET  /v1/banking/accounts/:account_id/transactions    (thin alias to M14.7 finance ledger — no duplication)
+  //  POST /v1/banking/accounts/signals/:signal_id/dismiss  (mark false-positive + audit fan-out)
+  //  POST /v1/banking/accounts/signals/:signal_id/review   (mark reviewed + audit fan-out)
+  // ──────────────────────────────────────────────────────────────────
+
+  /** GET /v1/banking/accounts/:account_id/transactions — spec-named alias that re-uses M14.7 finance ledger. */
+  app.get(
+    '/v1/banking/accounts/:account_id/transactions',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.account_id ?? '';
+      const since = req.query.since as string | undefined;
+      const until = req.query.until as string | undefined;
+      const page = req.query.page ? Math.max(1, Number(req.query.page) || 1) : 1;
+      const page_size = req.query.page_size
+        ? Math.max(1, Math.min(200, Number(req.query.page_size) || 50))
+        : 50;
+      try {
+        const out = await financeAdapter.listLedger(
+          req.tenant!.tenant_id,
+          id,
+          { since, until, page, page_size },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof FinanceError) {
+          if (e.code === 'unknown_account') {
+            return res
+              .status(404)
+              .json(
+                wrapError(
+                  { code: 'EWS_404_unknown_account', message: e.message, severity: 'LOW' },
+                  ctx,
+                ),
+              );
+          }
+          return res
+            .status(400)
+            .json(
+              wrapError(
+                { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+        }
+        return res
+          .status(502)
+          .json(
+            wrapError(
+              { code: 'EWS_502', message: e instanceof Error ? e.message : 'finance adapter failed', severity: 'HIGH' },
+              ctx,
+            ),
+          );
+      }
+    },
+  );
+
+  /** Shared handler for signal status transitions (dismiss / review). */
+  function handleSignalStatusUpdate(
+    req: Request,
+    res: Response,
+    status: 'reviewed' | 'dismissed',
+  ) {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updateSignalStatus } =
+        require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const out = updateSignalStatus(
+        req.tenant!.tenant_id,
+        req.params.signal_id,
+        status,
+        actor,
+        now(),
+      );
+      // Audit fan-out (cross-cutting #6)
+      const role = ((req.headers['x-apex-role'] as string | undefined) ?? '').trim() || 'unknown';
+      const channel = (req as Request & { channel?: string }).channel ?? null;
+      auditTrailStore.record(
+        req.tenant!.tenant_id,
+        {
+          actor_username: actor,
+          actor_role: role,
+          action: status === 'dismissed' ? 'account_signal.dismiss' : 'account_signal.review',
+          resource_type: 'alert',
+          resource_id: req.params.signal_id,
+          outcome: 'success',
+          severity: 'info',
+          metadata: { status, channel },
+        },
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_signal' ? 404 : 400;
+      const ews = code === 'unknown_signal' ? 'EWS_404_unknown_signal' : `EWS_400_${code}`;
+      const msg = e instanceof Error ? e.message : 'status update failed';
+      return res
+        .status(httpStatus)
+        .json(
+          wrapError(
+            { code: ews, message: msg, severity: httpStatus >= 500 ? 'HIGH' : 'MEDIUM' },
+            ctx,
+          ),
+        );
+    }
+  }
+
+  /** POST /v1/banking/accounts/signals/:signal_id/dismiss — mark false-positive. */
+  app.post(
+    '/v1/banking/accounts/signals/:signal_id/dismiss',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => handleSignalStatusUpdate(req, res, 'dismissed'),
+  );
+
+  /** POST /v1/banking/accounts/signals/:signal_id/review — mark reviewed. */
+  app.post(
+    '/v1/banking/accounts/signals/:signal_id/review',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => handleSignalStatusUpdate(req, res, 'reviewed'),
   );
 
   // ──────────────────────────────────────────────────────────────────

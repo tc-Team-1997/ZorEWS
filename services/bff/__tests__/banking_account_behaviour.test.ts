@@ -20,10 +20,16 @@ describe('catalog + enums', () => {
   it('ALL_SIGNAL_SEVERITIES is the canonical 4-value enum', () => {
     expect(ALL_SIGNAL_SEVERITIES).toEqual(['low', 'medium', 'high', 'critical']);
   });
-  it('ACCOUNT_SIGNAL_TYPES has 10 BIL signal types', () => {
-    expect(ACCOUNT_SIGNAL_TYPES).toHaveLength(10);
+  it('ACCOUNT_SIGNAL_TYPES has the BIL signal types', () => {
+    // M2.2 extended from 10 to 14 — keep the assertion forward-compatible.
+    expect(ACCOUNT_SIGNAL_TYPES.length).toBeGreaterThanOrEqual(10);
     expect(ACCOUNT_SIGNAL_TYPES).toContain('salary_disappeared');
     expect(ACCOUNT_SIGNAL_TYPES).toContain('cheque_bounce_repeated');
+    // M2.2 spec-mandated additions
+    expect(ACCOUNT_SIGNAL_TYPES).toContain('cash_flow_drop_mom');
+    expect(ACCOUNT_SIGNAL_TYPES).toContain('od_frequency_high');
+    expect(ACCOUNT_SIGNAL_TYPES).toContain('eod_balance_trend_negative');
+    expect(ACCOUNT_SIGNAL_TYPES).toContain('large_unusual_debit');
   });
 });
 

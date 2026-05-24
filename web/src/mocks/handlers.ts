@@ -9177,3 +9177,184 @@ const __mswBwHandlers = [
 ];
 
 handlers.push(...__mswBwHandlers);
+
+// ── M2.2 — Account Behaviour ────────────────────────────────────────
+//
+// In-memory dev fixtures. Mirror the BFF deterministic synth at a small
+// scale (6 fake signals on 4 customers) — enough for the SPA page tests +
+// the dev-mode interactions. Real BFF is wired via vite proxy.
+
+const __mswAbSignals: Array<{
+  signal_id: string;
+  account_id: string;
+  customer_id: string;
+  customer_name: string;
+  signal_type: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  score: number;
+  observed_at: string;
+  description: string;
+  is_watchlisted: boolean;
+  status: 'new' | 'reviewed' | 'dismissed';
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}> = [
+  { signal_id: 'sig-BANK_DEMO-c-101-0-2026-05-24', account_id: 'a-101-00', customer_id: 'c-101', customer_name: 'Alice Patel', signal_type: 'cash_flow_drop_mom', severity: 'critical', score: 0.92, observed_at: '2026-05-23T08:12:00.000Z', description: 'Net cash-flow dropped 38% MoM vs trailing 6-month mean (score 92).', is_watchlisted: true, status: 'new', reviewed_by: null, reviewed_at: null },
+  { signal_id: 'sig-BANK_DEMO-c-101-1-2026-05-24', account_id: 'a-101-01', customer_id: 'c-101', customer_name: 'Alice Patel', signal_type: 'salary_disappeared', severity: 'high', score: 0.78, observed_at: '2026-05-22T11:30:00.000Z', description: 'Salary credit missing for 2 consecutive months (anomaly score 78).', is_watchlisted: true, status: 'new', reviewed_by: null, reviewed_at: null },
+  { signal_id: 'sig-BANK_DEMO-c-106-0-2026-05-24', account_id: 'a-106-00', customer_id: 'c-106', customer_name: 'Rajesh Kumar', signal_type: 'large_unusual_debit', severity: 'high', score: 0.74, observed_at: '2026-05-23T14:45:00.000Z', description: 'Single debit 6.1× 90-day average outflow (score 74).', is_watchlisted: false, status: 'new', reviewed_by: null, reviewed_at: null },
+  { signal_id: 'sig-BANK_DEMO-c-115-0-2026-05-24', account_id: 'a-115-00', customer_id: 'c-115', customer_name: 'Priya Sharma', signal_type: 'od_frequency_high', severity: 'medium', score: 0.61, observed_at: '2026-05-23T09:15:00.000Z', description: 'Overdraft frequency 4.3σ above 90-day baseline (score 61).', is_watchlisted: true, status: 'new', reviewed_by: null, reviewed_at: null },
+  { signal_id: 'sig-BANK_DEMO-c-115-1-2026-05-24', account_id: 'a-115-01', customer_id: 'c-115', customer_name: 'Priya Sharma', signal_type: 'eod_balance_trend_negative', severity: 'medium', score: 0.55, observed_at: '2026-05-22T16:00:00.000Z', description: 'EOD balance trending -22% over rolling 30d window (score 55).', is_watchlisted: true, status: 'new', reviewed_by: null, reviewed_at: null },
+  { signal_id: 'sig-BANK_DEMO-c-118-0-2026-05-24', account_id: 'a-118-00', customer_id: 'c-118', customer_name: 'Mohan Singh', signal_type: 'cheque_bounce_repeated', severity: 'low', score: 0.42, observed_at: '2026-05-21T10:20:00.000Z', description: 'Cheque return ratio 12% over 60 days (score 42).', is_watchlisted: false, status: 'new', reviewed_by: null, reviewed_at: null },
+];
+
+const __mswAbBlockReqs: Array<{ request_id: string; account_id: string; status: 'pending' | 'approved' | 'rejected'; requested_by: string; reason: string }> = [];
+let __mswAbBlockSeq = 0;
+
+function __mswAbWrap(body: unknown, status = 200) {
+  return HttpResponse.json(
+    {
+      header: { status: 'success', code: status === 201 ? 'EWS_201' : 'EWS_200', message: 'ok', requestId: `req-msw-${Date.now()}`, timestamp: new Date().toISOString() },
+      body,
+    },
+    { status },
+  );
+}
+
+const __mswAbHandlers = [
+  http.get('/v1/banking/accounts/signals', ({ request }) => {
+    const u = new URL(request.url);
+    const customer_id = u.searchParams.get('customer_id');
+    const watchlist_only = u.searchParams.get('watchlist_only') === 'true';
+    const status = u.searchParams.get('status') as 'new' | 'reviewed' | 'dismissed' | null;
+    let filtered = __mswAbSignals.slice();
+    if (customer_id) filtered = filtered.filter((s) => s.customer_id === customer_id);
+    if (watchlist_only) filtered = filtered.filter((s) => s.is_watchlisted);
+    if (status) filtered = filtered.filter((s) => s.status === status);
+    const sevRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    filtered.sort((a, b) => (sevRank[a.severity] - sevRank[b.severity]) || (b.score - a.score));
+    const bySev = { low: 0, medium: 0, high: 0, critical: 0 };
+    const byStatus = { new: 0, reviewed: 0, dismissed: 0 };
+    const byType: Record<string, number> = {};
+    for (const s of filtered) {
+      bySev[s.severity]++;
+      byStatus[s.status]++;
+      byType[s.signal_type] = (byType[s.signal_type] ?? 0) + 1;
+    }
+    return __mswAbWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      customer_id: customer_id ?? null,
+      watchlist_only,
+      status_filter: status,
+      total: filtered.length,
+      by_severity: bySev,
+      by_status: byStatus,
+      by_type: byType,
+      signals: filtered,
+    });
+  }),
+
+  http.get('/v1/banking/accounts/:account_id/patterns', ({ params }) => {
+    const account_id = String(params.account_id);
+    const m = account_id.match(/^a-(\d+)-\d+$/);
+    const customer_id = m ? `c-${m[1]}` : 'c-unknown';
+    const series = (mult: number, base: number) => Array.from({ length: 12 }, (_, i) => ({
+      date: new Date(Date.now() - (11 - i) * 30 * 86_400_000).toISOString().slice(0, 10),
+      value: Math.round(base * mult * (0.85 + (i / 11) * 0.4)),
+    }));
+    return __mswAbWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      account_id,
+      customer_id,
+      patterns: [
+        { pattern_type: 'monthly_balance', label: 'Monthly average balance (₹)', series: series(1, 150000), anomaly_score: 0.42 },
+        { pattern_type: 'channel_mix', label: 'Mobile channel usage (% txns)', series: series(0.001, 700), anomaly_score: 0.18 },
+        { pattern_type: 'txn_velocity', label: 'Daily transaction count', series: series(0.01, 1200), anomaly_score: 0.55 },
+        { pattern_type: 'cheque_returns', label: 'Cheque returns per 30 days', series: series(0.0005, 6000), anomaly_score: 0.31 },
+      ],
+    });
+  }),
+
+  http.get('/v1/banking/accounts/:account_id/transactions', ({ params, request }) => {
+    const account_id = String(params.account_id);
+    const u = new URL(request.url);
+    const page = Number(u.searchParams.get('page') ?? '1');
+    const page_size = Number(u.searchParams.get('page_size') ?? '50');
+    const entries = Array.from({ length: Math.min(page_size, 24) }, (_, i) => {
+      const days = i + 1;
+      const debit = i % 3 === 0;
+      return {
+        entry_id: `le-${account_id}-${String(i).padStart(4, '0')}`,
+        account_id,
+        type: (debit ? 'debit' : 'credit') as 'debit' | 'credit',
+        amount_kes: debit ? 12_500 + i * 1100 : 45_000 - i * 350,
+        currency: 'INR',
+        narrative: debit ? `UPI debit txn #${i}` : `Salary/Credit txn #${i}`,
+        posted_at: new Date(Date.now() - days * 86_400_000).toISOString(),
+        balance_kes_after: 250_000 - i * 1200,
+      };
+    });
+    return __mswAbWrap({
+      tenant_id: 'BANK_DEMO',
+      account_id,
+      total: 24,
+      page,
+      page_size,
+      items: entries,
+    });
+  }),
+
+  http.post('/v1/banking/accounts/signals/:signal_id/dismiss', ({ params }) => {
+    const id = String(params.signal_id);
+    const sig = __mswAbSignals.find((s) => s.signal_id === id);
+    if (!sig) {
+      return HttpResponse.json(
+        { header: { status: 'error', code: 'EWS_404_unknown_signal', message: 'signal not found', requestId: 'req-msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_signal', message: 'signal not found', severity: 'LOW' } },
+        { status: 404 },
+      );
+    }
+    sig.status = 'dismissed';
+    sig.reviewed_by = 'admin';
+    sig.reviewed_at = new Date().toISOString();
+    return __mswAbWrap({ signal_id: id, tenant_id: 'BANK_DEMO', status: 'dismissed', reviewed_by: 'admin', reviewed_at: sig.reviewed_at });
+  }),
+
+  http.post('/v1/banking/accounts/signals/:signal_id/review', ({ params }) => {
+    const id = String(params.signal_id);
+    const sig = __mswAbSignals.find((s) => s.signal_id === id);
+    if (!sig) {
+      return HttpResponse.json(
+        { header: { status: 'error', code: 'EWS_404_unknown_signal', message: 'signal not found', requestId: 'req-msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_signal', message: 'signal not found', severity: 'LOW' } },
+        { status: 404 },
+      );
+    }
+    sig.status = 'reviewed';
+    sig.reviewed_by = 'admin';
+    sig.reviewed_at = new Date().toISOString();
+    return __mswAbWrap({ signal_id: id, tenant_id: 'BANK_DEMO', status: 'reviewed', reviewed_by: 'admin', reviewed_at: sig.reviewed_at });
+  }),
+
+  http.post('/v1/banking/accounts/:account_id/block', async ({ params, request }) => {
+    const account_id = String(params.account_id);
+    const body = (await request.json()) as { reason?: string; request_id?: string; decision?: 'approve' | 'reject' };
+    if (body.request_id && body.decision) {
+      const req = __mswAbBlockReqs.find((r) => r.request_id === body.request_id);
+      if (!req) return HttpResponse.json({ error: { code: 'EWS_404_unknown_request' } }, { status: 404 });
+      req.status = body.decision === 'approve' ? 'approved' : 'rejected';
+      return __mswAbWrap({ ...req, reviewed_by: 'admin', reviewed_at: new Date().toISOString() });
+    }
+    __mswAbBlockSeq++;
+    const entry = {
+      request_id: `blk-BANK_DEMO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(__mswAbBlockSeq).padStart(4, '0')}`,
+      account_id,
+      status: 'pending' as const,
+      requested_by: 'admin',
+      reason: body.reason ?? '',
+    };
+    __mswAbBlockReqs.push(entry);
+    return __mswAbWrap({ ...entry, tenant_id: 'BANK_DEMO', customer_id: 'c-unknown', requested_at: new Date().toISOString(), reviewed_by: null, reviewed_at: null }, 201);
+  }),
+];
+
+handlers.push(...__mswAbHandlers);

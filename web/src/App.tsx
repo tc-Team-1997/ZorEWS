@@ -44,6 +44,7 @@ import { AnomalyDetectionPage } from '@/modules/admin/AnomalyDetectionPage';
 import { ReconciliationPage } from '@/modules/admin/ReconciliationPage';
 import { DqScorePage } from '@/modules/admin/DqScorePage';
 import { BorrowerWatchPage } from '@/modules/customers/BorrowerWatchPage';
+import { AccountBehaviourPage } from '@/modules/customers/AccountBehaviourPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -129,6 +130,7 @@ export function App() {
             <Route path="admin/reconciliation" element={<ReconciliationPage />} />
             <Route path="admin/dq-score" element={<DqScorePage />} />
             <Route path="borrower-watch" element={<BorrowerWatchPage />} />
+            <Route path="account-behaviour" element={<AccountBehaviourPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

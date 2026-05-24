@@ -45,9 +45,17 @@ export const ACCOUNT_SIGNAL_TYPES = [
   'channel_anomaly',
   'unusual_atm_geo_velocity',
   'dormant_reactivation_high_value',
+  // ── M2.2 spec-mandated additions ─────────────────────────────────────
+  'cash_flow_drop_mom',          // MoM net-flow drop > 30% (spec acceptance criterion #2)
+  'od_frequency_high',           // Overdraft frequency above 90d baseline
+  'eod_balance_trend_negative',  // EOD balance declining over rolling 30d
+  'large_unusual_debit',         // Single debit > 5× 90d average
 ] as const;
 
 export type AccountSignalType = (typeof ACCOUNT_SIGNAL_TYPES)[number];
+
+export const ALL_SIGNAL_STATUSES = ['new', 'reviewed', 'dismissed'] as const;
+export type SignalStatus = (typeof ALL_SIGNAL_STATUSES)[number];
 
 export interface AccountSignal {
   signal_id: string;
@@ -60,6 +68,9 @@ export interface AccountSignal {
   observed_at: string;
   description: string;
   is_watchlisted: boolean;
+  status: SignalStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
 }
 
 export interface AccountSignalsReport {
@@ -67,8 +78,10 @@ export interface AccountSignalsReport {
   generated_at: string;
   customer_id: string | null;
   watchlist_only: boolean;
+  status_filter: SignalStatus | null;
   total: number;
   by_severity: Record<SignalSeverity, number>;
+  by_status: Record<SignalStatus, number>;
   by_type: Partial<Record<AccountSignalType, number>>;
   signals: AccountSignal[];
 }
@@ -128,23 +141,35 @@ function descriptionFor(type: AccountSignalType, score: number): string {
       return `ATM withdrawals 800km apart within 4h (score ${pct}).`;
     case 'dormant_reactivation_high_value':
       return `2-yr-dormant account reactivated with INR 15L transfer (score ${pct}).`;
+    case 'cash_flow_drop_mom':
+      return `Net cash-flow dropped 38% MoM vs trailing 6-month mean (score ${pct}).`;
+    case 'od_frequency_high':
+      return `Overdraft frequency 4.3σ above 90-day baseline (score ${pct}).`;
+    case 'eod_balance_trend_negative':
+      return `EOD balance trending -22% over rolling 30d window (score ${pct}).`;
+    case 'large_unusual_debit':
+      return `Single debit 6.1× 90-day average outflow (score ${pct}).`;
   }
 }
 
 export function buildAccountSignals(
   tenant_id: string,
-  filter: { customer_id?: string; watchlist_only?: boolean },
+  filter: { customer_id?: string; watchlist_only?: boolean; status?: SignalStatus },
   now: Date,
 ): AccountSignalsReport {
   if (!tenant_id) throw new AccountBehaviourError('invalid_input', 'tenant_id is required');
+  if (filter.status !== undefined && !ALL_SIGNAL_STATUSES.includes(filter.status))
+    throw new AccountBehaviourError('invalid_status', `unknown status ${filter.status}`);
 
   const day = now.toISOString().slice(0, 10);
   const signals: AccountSignal[] = [];
   const byType: Partial<Record<AccountSignalType, number>> = {};
   const bySev: Record<SignalSeverity, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+  const byStatus: Record<SignalStatus, number> = { new: 0, reviewed: 0, dismissed: 0 };
 
   const customerFilter = filter.customer_id ?? null;
   const watchlistOnly = !!filter.watchlist_only;
+  const statusFilter = filter.status ?? null;
 
   for (let i = 0; i < customerCount(tenant_id); i++) {
     const { customer_id, name } = customerSeed(tenant_id, i);
@@ -158,8 +183,11 @@ export function buildAccountSignals(
       const sev = severityFromScore(score);
       const isWl = tRng() < 0.35;
       if (watchlistOnly && !isWl) continue;
+      const signal_id = `sig-${tenant_id}-${customer_id}-${s}-${day}`;
+      // M2.2 — review state-machine overlay on top of deterministic synth
+      const override = signalStatusOverrides.get(`${tenant_id}|${signal_id}`);
       const sig: AccountSignal = {
-        signal_id: `sig-${tenant_id}-${customer_id}-${s}-${day}`,
+        signal_id,
         account_id: `a-${customer_id.slice(2)}-${String(s).padStart(2, '0')}`,
         customer_id,
         customer_name: name,
@@ -169,9 +197,14 @@ export function buildAccountSignals(
         observed_at: new Date(now.getTime() - Math.floor(tRng() * 86_400_000)).toISOString(),
         description: descriptionFor(type, score),
         is_watchlisted: isWl,
+        status: override?.status ?? 'new',
+        reviewed_by: override?.reviewed_by ?? null,
+        reviewed_at: override?.reviewed_at ?? null,
       };
+      if (statusFilter && sig.status !== statusFilter) continue;
       signals.push(sig);
       bySev[sev]++;
+      byStatus[sig.status]++;
       byType[type] = (byType[type] ?? 0) + 1;
     }
   }
@@ -185,8 +218,10 @@ export function buildAccountSignals(
     generated_at: now.toISOString(),
     customer_id: customerFilter,
     watchlist_only: watchlistOnly,
+    status_filter: statusFilter,
     total: signals.length,
     by_severity: bySev,
+    by_status: byStatus,
     by_type: byType,
     signals: signals.slice(0, 200),
   };
@@ -346,4 +381,144 @@ export function reviewBlockRequest(
 export function _resetBlockStore() {
   blockStore.clear();
   _blockSeq = 0;
+}
+
+// ─── M2.2 Signal review state machine (additive) ───────────────────────
+//
+// The deterministic synth above always emits status='new' on a fresh build.
+// The dismiss/review mutators record an OVERRIDE keyed by `${tenant}|${signal_id}`
+// that buildAccountSignals consults so subsequent reads reflect the human action.
+
+interface SignalStatusOverride {
+  status: SignalStatus;
+  reviewed_by: string;
+  reviewed_at: string;
+}
+
+const signalStatusOverrides = new Map<string, SignalStatusOverride>();
+
+export function updateSignalStatus(
+  tenant_id: string,
+  signal_id: string,
+  status: 'reviewed' | 'dismissed',
+  actor: string,
+  now: Date,
+): SignalStatusOverride & { signal_id: string; tenant_id: string } {
+  if (!tenant_id) throw new AccountBehaviourError('invalid_input', 'tenant_id required');
+  if (!signal_id) throw new AccountBehaviourError('invalid_input', 'signal_id required');
+  if (status !== 'reviewed' && status !== 'dismissed')
+    throw new AccountBehaviourError('invalid_status', 'status must be reviewed or dismissed');
+  if (!actor) throw new AccountBehaviourError('invalid_input', 'actor required');
+  // Defensive: signal_id should look like sig-<TEN>-<cust>-<idx>-<YYYY-MM-DD>
+  if (!signal_id.startsWith('sig-'))
+    throw new AccountBehaviourError('invalid_input', 'malformed signal_id');
+  const override: SignalStatusOverride = {
+    status,
+    reviewed_by: actor,
+    reviewed_at: now.toISOString(),
+  };
+  signalStatusOverrides.set(`${tenant_id}|${signal_id}`, override);
+  return { ...override, signal_id, tenant_id };
+}
+
+export function _resetSignalStatusOverrides() {
+  signalStatusOverrides.clear();
+}
+
+// ─── M2.2 Pure detector helpers (acceptance criteria targets) ──────────
+
+export interface SalaryStoppedResult {
+  detected: boolean;
+  days_since_last_salary: number | null;
+  last_salary_at: string | null;
+  threshold_days: number;
+}
+
+/**
+ * Spec acceptance #1: "Salary-credit-stopped detection fires within 7 days
+ * of last credit." Pure function. Returns detected=true iff the most recent
+ * salary credit is OLDER than `threshold_days` (default 7) — i.e. by day 8
+ * we report it stopped.
+ *
+ * `credits` is the customer's salary-credit dates oldest→newest; we look at
+ * the newest and compare to `now`.
+ */
+export function detectSalaryStopped(
+  credits: { credited_at: string; amount_inr: number }[],
+  now: Date,
+  threshold_days = 7,
+): SalaryStoppedResult {
+  if (threshold_days < 0) throw new AccountBehaviourError('invalid_input', 'threshold_days < 0');
+  if (credits.length === 0) {
+    return { detected: true, days_since_last_salary: null, last_salary_at: null, threshold_days };
+  }
+  // newest credit
+  let newestMs = -Infinity;
+  let newestIso: string | null = null;
+  for (const c of credits) {
+    const ms = new Date(c.credited_at).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (ms > newestMs) {
+      newestMs = ms;
+      newestIso = c.credited_at;
+    }
+  }
+  if (newestIso === null) {
+    return { detected: true, days_since_last_salary: null, last_salary_at: null, threshold_days };
+  }
+  const days = Math.floor((now.getTime() - newestMs) / 86_400_000);
+  return {
+    detected: days > threshold_days,
+    days_since_last_salary: days,
+    last_salary_at: newestIso,
+    threshold_days,
+  };
+}
+
+export interface CashFlowDropResult {
+  detected: boolean;
+  threshold_pct: number;
+  mom_drop_pct: number | null;     // signed; positive means net flow shrank
+  prev_month_net_flow: number;
+  current_month_net_flow: number;
+}
+
+/**
+ * Spec acceptance #2: "Cash-flow-drop detector triggers when MoM net-flow
+ * drops >30%." Pure function. `prev_month_net_flow` is the trailing month's
+ * net cash flow (credits − debits); `current_month_net_flow` is the latest
+ * month's. We measure the relative drop versus the prior month.
+ *
+ * `threshold_pct` defaults to 0.30. Edge cases:
+ *  - prev_month_net_flow = 0 → mom_drop_pct=null (no baseline), detected=false
+ *  - prev_month_net_flow < 0 → also no signal (account was already cash-negative;
+ *    a further drop isn't the spec's intent)
+ *  - current >= prev → no drop, detected=false
+ */
+export function detectCashFlowDropMoM(
+  prev_month_net_flow: number,
+  current_month_net_flow: number,
+  threshold_pct = 0.3,
+): CashFlowDropResult {
+  if (!Number.isFinite(prev_month_net_flow) || !Number.isFinite(current_month_net_flow))
+    throw new AccountBehaviourError('invalid_input', 'net flows must be finite');
+  if (threshold_pct <= 0 || threshold_pct >= 1)
+    throw new AccountBehaviourError('invalid_input', 'threshold_pct must be in (0,1)');
+  if (prev_month_net_flow <= 0) {
+    return {
+      detected: false,
+      threshold_pct,
+      mom_drop_pct: null,
+      prev_month_net_flow,
+      current_month_net_flow,
+    };
+  }
+  const drop = (prev_month_net_flow - current_month_net_flow) / prev_month_net_flow;
+  return {
+    detected: drop > threshold_pct,
+    threshold_pct,
+    mom_drop_pct: Math.round(drop * 10000) / 10000,
+    prev_month_net_flow,
+    current_month_net_flow,
+  };
 }
