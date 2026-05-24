@@ -33952,6 +33952,27 @@ export function makeApp(deps: AppDeps = {}) {
             : raw;
         const sector = (inner as { sector?: string })?.sector ?? '';
         const updated = addToWatchlist(req.tenant!.tenant_id, sector as import('./banking_sector_watch').SectorCode);
+        // M2.7 SW-3 — audit fan-out (success path only — unknown_sector throws before this).
+        try {
+          const actor = (req.header('x-apex-user') ?? 'admin').trim() || 'admin';
+          const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: role,
+              action: 'sector.watchlist.added',
+              resource_type: 'system',
+              resource_id: sector,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { sector, watchlist_size: updated.length },
+            },
+            now(),
+          );
+        } catch {
+          /* swallow */
+        }
         return res.status(201).json(wrapResponse({ tenant_id: req.tenant!.tenant_id, watchlist: updated }, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code;
@@ -33971,11 +33992,64 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const { removeFromWatchlist } =
         require('./banking_sector_watch') as typeof import('./banking_sector_watch');
-      const updated = removeFromWatchlist(
-        req.tenant!.tenant_id,
-        req.params.sector_id as import('./banking_sector_watch').SectorCode,
-      );
+      const sector = req.params.sector_id as import('./banking_sector_watch').SectorCode;
+      const updated = removeFromWatchlist(req.tenant!.tenant_id, sector);
+      // M2.7 SW-3 — audit fan-out. removeFromWatchlist is total (never throws for
+      // unknown sectors — it's a no-op delete) so we record unconditionally.
+      try {
+        const actor = (req.header('x-apex-user') ?? 'admin').trim() || 'admin';
+        const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: role,
+            action: 'sector.watchlist.removed',
+            resource_type: 'system',
+            resource_id: sector,
+            outcome: 'success',
+            severity: 'info',
+            metadata: { sector, watchlist_size: updated.length },
+          },
+          now(),
+        );
+      } catch {
+        /* swallow */
+      }
       return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, watchlist: updated }, ctx));
+    },
+  );
+
+  // M2.7 SW-3 — bare single-sector summary (lighter than deep-dive).
+  // MUST be registered AFTER the /watchlist routes — Express matches in
+  // declaration order so /:sector_id would otherwise capture the literal
+  // `watchlist` segment and 404 it as an unknown sector.
+  app.get(
+    '/v1/banking/sectors/:sector_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSectorSummary } =
+          require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+        return res.json(
+          wrapResponse(
+            buildSectorSummary(
+              req.tenant!.tenant_id,
+              req.params.sector_id as import('./banking_sector_watch').SectorCode,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_sector' ? 404 : 400;
+        const ews = code === 'unknown_sector' ? 'EWS_404_unknown_sector' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'sector_summary_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
     },
   );
 

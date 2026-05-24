@@ -6942,23 +6942,113 @@ export const handlers = [
   }),
 
   // G3 — Dashboard widgets MSW handlers (Playbook H2)
-  http.get('/v1/banking/sectors/heatmap', () =>
-    HttpResponse.json(
-      envelope({
-        tenant_id: 'BANK_DEMO',
-        generated_at: new Date().toISOString(),
-        total_sectors: 5,
-        by_heat_level: { critical: 2, high: 1, medium: 1, low: 1 },
-        cells: [
-          { sector: 'Power', npa_ratio_pct: 10.49, total_customers: 59, total_outstanding_kes: 3_727_254_105, delta_30d_pct: -1.4, heat_level: 'critical', is_watchlisted: false },
-          { sector: 'Real_Estate', npa_ratio_pct: 8.21, total_customers: 84, total_outstanding_kes: 5_113_220_000, delta_30d_pct: 1.8, heat_level: 'critical', is_watchlisted: true },
-          { sector: 'Manufacturing', npa_ratio_pct: 5.6, total_customers: 142, total_outstanding_kes: 8_900_000_000, delta_30d_pct: 0.3, heat_level: 'high', is_watchlisted: false },
-          { sector: 'Retail_Trade', npa_ratio_pct: 3.8, total_customers: 220, total_outstanding_kes: 1_450_000_000, delta_30d_pct: -0.4, heat_level: 'medium', is_watchlisted: false },
-          { sector: 'IT_Services', npa_ratio_pct: 1.2, total_customers: 91, total_outstanding_kes: 2_300_000_000, delta_30d_pct: -0.6, heat_level: 'low', is_watchlisted: false },
-        ],
+  // M2.7 SW-4 — sector cells with in-memory watchlist round-trip for add/remove
+  ...(() => {
+    const KNOWN = ['Power', 'Real_Estate', 'Manufacturing', 'Retail_Trade', 'IT_Services'] as const;
+    const watchlist = new Set<string>(['Real_Estate']);
+    const baseCells = (): Array<{
+      sector: string;
+      npa_ratio_pct: number;
+      total_customers: number;
+      total_outstanding_kes: number;
+      delta_30d_pct: number;
+      heat_level: 'critical' | 'high' | 'medium' | 'low';
+    }> => [
+      { sector: 'Power', npa_ratio_pct: 10.49, total_customers: 59, total_outstanding_kes: 3_727_254_105, delta_30d_pct: -1.4, heat_level: 'critical' },
+      { sector: 'Real_Estate', npa_ratio_pct: 8.21, total_customers: 84, total_outstanding_kes: 5_113_220_000, delta_30d_pct: 1.8, heat_level: 'critical' },
+      { sector: 'Manufacturing', npa_ratio_pct: 5.6, total_customers: 142, total_outstanding_kes: 8_900_000_000, delta_30d_pct: 0.3, heat_level: 'high' },
+      { sector: 'Retail_Trade', npa_ratio_pct: 3.8, total_customers: 220, total_outstanding_kes: 1_450_000_000, delta_30d_pct: -0.4, heat_level: 'medium' },
+      { sector: 'IT_Services', npa_ratio_pct: 1.2, total_customers: 91, total_outstanding_kes: 2_300_000_000, delta_30d_pct: -0.6, heat_level: 'low' },
+    ];
+    const annotate = () =>
+      baseCells().map((c) => ({ ...c, is_watchlisted: watchlist.has(c.sector) }));
+    const fail = (code: string, status: number, msg: string) =>
+      HttpResponse.json(
+        {
+          header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() },
+          error: { code, message: msg, severity: 'MEDIUM' },
+        },
+        { status },
+      );
+    return [
+      http.get('/v1/banking/sectors/heatmap', () =>
+        HttpResponse.json(
+          envelope({
+            tenant_id: 'BANK_DEMO',
+            generated_at: new Date().toISOString(),
+            total_sectors: 5,
+            by_heat_level: { critical: 2, high: 1, medium: 1, low: 1 },
+            cells: annotate(),
+          }),
+        ),
+      ),
+      http.get('/v1/banking/sectors/watchlist', () =>
+        HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', watchlist: Array.from(watchlist).sort() })),
+      ),
+      http.post('/v1/banking/sectors/watchlist', async ({ request }) => {
+        const body = (await request.json().catch(() => null)) as { sector?: string } | null;
+        const sector = body?.sector ?? '';
+        if (!KNOWN.includes(sector as (typeof KNOWN)[number]))
+          return fail('EWS_404_unknown_sector', 404, `unknown sector ${sector}`);
+        watchlist.add(sector);
+        return HttpResponse.json(
+          envelope({ tenant_id: 'BANK_DEMO', watchlist: Array.from(watchlist).sort() }),
+          { status: 201 },
+        );
       }),
-    ),
-  ),
+      http.delete('/v1/banking/sectors/watchlist/:sector_id', ({ params }) => {
+        watchlist.delete(String(params.sector_id));
+        return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', watchlist: Array.from(watchlist).sort() }));
+      }),
+      // M2.7 — bare /:sector_id summary
+      http.get('/v1/banking/sectors/:sector_id/deep-dive', ({ params }) => {
+        const sid = String(params.sector_id);
+        if (!KNOWN.includes(sid as (typeof KNOWN)[number]))
+          return fail('EWS_404_unknown_sector', 404, `unknown sector ${sid}`);
+        const cell = baseCells().find((c) => c.sector === sid)!;
+        const months = Array.from({ length: 12 }, (_, i) => {
+          const d = new Date();
+          d.setUTCMonth(d.getUTCMonth() - (11 - i));
+          const base = Math.max(0.5, cell.npa_ratio_pct - 3 + i * 0.18 + (i % 3) * 0.4);
+          return { month: d.toISOString().slice(0, 7), npa_pct: Math.round(base * 100) / 100 };
+        });
+        months[months.length - 1].npa_pct = cell.npa_ratio_pct;
+        return HttpResponse.json(
+          envelope({
+            tenant_id: 'BANK_DEMO',
+            sector: sid,
+            generated_at: new Date().toISOString(),
+            npa_ratio_pct: cell.npa_ratio_pct,
+            total_customers: cell.total_customers,
+            total_outstanding_kes: cell.total_outstanding_kes,
+            heat_level: cell.heat_level,
+            npa_trend_12m: months,
+            top_at_risk_customers: [
+              { customer_id: 'c-200001', name: 'Alice Patel', pd: 0.87, outstanding_kes: 42_000_000 },
+              { customer_id: 'c-200002', name: 'Rajesh Kumar', pd: 0.76, outstanding_kes: 31_500_000 },
+              { customer_id: 'c-200003', name: 'Priya Sharma', pd: 0.61, outstanding_kes: 18_900_000 },
+              { customer_id: 'c-200004', name: 'Mohan Singh', pd: 0.55, outstanding_kes: 14_200_000 },
+              { customer_id: 'c-200005', name: 'Meera Nair', pd: 0.49, outstanding_kes: 11_750_000 },
+            ],
+            contributing_rules: [
+              { rule_id: 'R-100', rule_name: 'DPD-cliff-30d', firings_30d: 38 },
+              { rule_id: 'R-101', rule_name: 'EMI-bounce-3-in-30', firings_30d: 27 },
+              { rule_id: 'R-102', rule_name: 'Cash-velocity-spike', firings_30d: 19 },
+              { rule_id: 'R-103', rule_name: 'Stock-statement-overdue', firings_30d: 14 },
+              { rule_id: 'R-104', rule_name: 'Sector-overexposure', firings_30d: 9 },
+            ],
+          }),
+        );
+      }),
+      http.get('/v1/banking/sectors/:sector_id', ({ params }) => {
+        const sid = String(params.sector_id);
+        if (!KNOWN.includes(sid as (typeof KNOWN)[number]))
+          return fail('EWS_404_unknown_sector', 404, `unknown sector ${sid}`);
+        const cell = annotate().find((c) => c.sector === sid)!;
+        return HttpResponse.json(envelope({ ...cell, generated_at: new Date().toISOString() }));
+      }),
+    ];
+  })(),
 
   // Module 1.2 — Data Profiling MSW handlers
   http.get('/v1/dq/profile/:source_id/columns', ({ params }) => {

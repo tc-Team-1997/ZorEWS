@@ -209,6 +209,21 @@ export function buildSectorDeepDive(tenant_id: string, sector: SectorCode, now: 
   };
 }
 
+// SW-2 — Single-sector summary (lighter than deep-dive). Reuses buildSectorHeatmap
+// so synthesis stays deterministic across summary + heatmap + deep-dive.
+export function buildSectorSummary(
+  tenant_id: string,
+  sector: SectorCode,
+  now: Date,
+): SectorHeatmapCell & { generated_at: string } {
+  if (!tenant_id) throw new SectorWatchError('invalid_input', 'tenant_id required');
+  if (!SECTOR_CODES.includes(sector))
+    throw new SectorWatchError('unknown_sector', `unknown sector ${sector}`);
+  const hm = buildSectorHeatmap(tenant_id, now);
+  const cell = hm.cells.find((c) => c.sector === sector)!;
+  return { ...cell, generated_at: hm.generated_at };
+}
+
 export function listWatchlist(tenant_id: string): SectorCode[] {
   if (!tenant_id) throw new SectorWatchError('invalid_input', 'tenant_id required');
   const wl = watchlist.get(tenant_id);

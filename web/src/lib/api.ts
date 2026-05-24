@@ -1705,6 +1705,34 @@ export const api = {
   sectorHeatmap: () =>
     http.get<EnvelopeBody<SectorHeatmapReport>>('/v1/banking/sectors/heatmap').then((r) => r.data),
 
+  // M2.7 SW-4 — single-sector summary
+  sectorDetail: (sector_id: string) =>
+    http
+      .get<EnvelopeBody<SectorSummary>>(`/v1/banking/sectors/${encodeURIComponent(sector_id)}`)
+      .then((r) => r.data),
+
+  // M2.7 SW-4 — sector deep-dive (12m trend, top customers, rules)
+  sectorDeepDive: (sector_id: string) =>
+    http
+      .get<EnvelopeBody<SectorDeepDiveReport>>(
+        `/v1/banking/sectors/${encodeURIComponent(sector_id)}/deep-dive`,
+      )
+      .then((r) => r.data),
+
+  // M2.7 SW-4 — watchlist CRUD
+  sectorWatchlistList: () =>
+    http.get<EnvelopeBody<SectorWatchlistResponse>>('/v1/banking/sectors/watchlist').then((r) => r.data),
+  sectorWatchlistAdd: (sector: string) =>
+    http
+      .post<EnvelopeBody<SectorWatchlistResponse>>('/v1/banking/sectors/watchlist', { sector })
+      .then((r) => r.data),
+  sectorWatchlistRemove: (sector_id: string) =>
+    http
+      .delete<EnvelopeBody<SectorWatchlistResponse>>(
+        `/v1/banking/sectors/watchlist/${encodeURIComponent(sector_id)}`,
+      )
+      .then((r) => r.data),
+
   // G3 — Dashboard portfolio-insights widgets (Monday Playbook H2)
   ingestionHealth: () =>
     http.get<EnvelopeBody<IngestionHealthReport>>('/v1/ingestion/health').then((r) => r.data),
@@ -2959,20 +2987,48 @@ export interface SmaMovementsReport {
   }[];
 }
 
+export type SectorHeatLevel = 'low' | 'medium' | 'high' | 'critical';
+
+export interface SectorHeatmapCell {
+  sector: string;
+  npa_ratio_pct: number;
+  total_customers: number;
+  total_outstanding_kes: number;
+  delta_30d_pct: number;
+  heat_level: SectorHeatLevel;
+  is_watchlisted: boolean;
+}
+
 export interface SectorHeatmapReport {
   tenant_id: string;
   generated_at: string;
   total_sectors: number;
   by_heat_level: Record<string, number>;
-  cells: {
-    sector: string;
-    npa_ratio_pct: number;
-    total_customers: number;
-    total_outstanding_kes: number;
-    delta_30d_pct: number;
-    heat_level: 'low' | 'medium' | 'high' | 'critical';
-    is_watchlisted: boolean;
-  }[];
+  cells: SectorHeatmapCell[];
+}
+
+// M2.7 SW-4 — single-sector summary (cell + generated_at)
+export interface SectorSummary extends SectorHeatmapCell {
+  generated_at: string;
+}
+
+// M2.7 SW-4 — full sector deep-dive (NPA 12m trend + top at-risk customers + contributing rules)
+export interface SectorDeepDiveReport {
+  tenant_id: string;
+  sector: string;
+  generated_at: string;
+  npa_ratio_pct: number;
+  total_customers: number;
+  total_outstanding_kes: number;
+  heat_level: SectorHeatLevel;
+  npa_trend_12m: { month: string; npa_pct: number }[];
+  top_at_risk_customers: { customer_id: string; name: string; pd: number; outstanding_kes: number }[];
+  contributing_rules: { rule_id: string; rule_name: string; firings_30d: number }[];
+}
+
+export interface SectorWatchlistResponse {
+  tenant_id: string;
+  watchlist: string[];
 }
 
 // ── T3.3 correlation response shapes (mirror BFF aml_alert_correlation.ts) ──
