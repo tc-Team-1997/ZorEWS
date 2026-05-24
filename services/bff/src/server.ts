@@ -9839,6 +9839,174 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /**
+   * POST /v1/cms/cases/auto-escalate-sla
+   *
+   * Module 3.1 — auto-escalate non-closed CMS cases when SLA progress
+   * (elapsed / total) reaches the configured threshold fraction.
+   *
+   * Threshold resolution (highest precedence first):
+   *   1. body.threshold_pct_override (caller-supplied, 0..1)
+   *   2. M13.1 config key `cases.auto_escalate_at_pct`
+   *   3. default 0.8
+   *
+   * Body: { dry_run?: boolean, threshold_pct_override?: number 0..1 }
+   * Returns: { threshold_pct, total_considered, candidates[], escalated[],
+   *            skipped[], errors[], dry_run }
+   *
+   * Audit fan-out — for each successful escalation we call
+   * writeCmsAuditEvents(tenant, 'escalate', actor, case, { auto:true, ... })
+   * which writes BOTH the M15.1 trail (`case.escalate`) and the M9.4
+   * case-event journal. The reason field carries
+   * `auto_sla_breach@<pct>%: progress=<p>%` so forensics knows the
+   * threshold + observed progress that triggered the escalation.
+   *
+   * RBAC: cases:list (analyst+). The escalate primitive itself is
+   * cases:list-gated; this batch wrapper follows suit.
+   */
+  app.post(
+    '/v1/cms/cases/auto-escalate-sla',
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as {
+        dry_run?: unknown;
+        threshold_pct_override?: unknown;
+      };
+      const dry_run = w.dry_run === true;
+
+      // 1. Resolve threshold: body override > M13.1 config > 0.8 default.
+      let threshold_fraction: number;
+      if (w.threshold_pct_override !== undefined && w.threshold_pct_override !== null) {
+        if (
+          typeof w.threshold_pct_override !== 'number' ||
+          !Number.isFinite(w.threshold_pct_override) ||
+          w.threshold_pct_override < 0 ||
+          w.threshold_pct_override > 1
+        ) {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: 'threshold_pct_override must be a finite number in [0, 1]',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        threshold_fraction = w.threshold_pct_override;
+      } else {
+        const cfg = configStore.get(req.tenant!.tenant_id, 'cases.auto_escalate_at_pct');
+        threshold_fraction =
+          cfg && typeof cfg.value === 'number' && Number.isFinite(cfg.value)
+            ? Math.max(0, Math.min(1, cfg.value))
+            : 0.8;
+      }
+
+      // 2. Build the plan.
+      const allCases = cmsCaseStore.list(req.tenant!.tenant_id, {});
+      const { findAutoEscalationCandidates, autoEscalateReason } =
+        require('./cms_cases') as typeof import('./cms_cases');
+      let plan;
+      try {
+        plan = findAutoEscalationCandidates(allCases, threshold_fraction, now());
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
+
+      // 3. Dry-run? Return the plan without mutating.
+      if (dry_run) {
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              generated_at: now().toISOString(),
+              dry_run: true,
+              threshold_fraction: plan.threshold_fraction,
+              threshold_pct: plan.threshold_pct,
+              total_considered: plan.total_considered,
+              would_escalate: plan.candidates.length,
+              candidates: plan.candidates,
+              skipped: plan.skipped,
+              escalated: [],
+              errors: [],
+            },
+            ctx,
+          ),
+        );
+      }
+
+      // 4. Real run — escalate each candidate. Failures (race conditions
+      //    where the case status changed between plan + execute) surface
+      //    in errors[] rather than aborting the whole batch.
+      const actor = cmsApexUser(req);
+      const escalated: Array<{
+        case_id: string;
+        case_number: string;
+        progress_pct: number;
+        reason: string;
+      }> = [];
+      const errors: Array<{ case_id: string; code: string; message: string }> = [];
+
+      for (const cand of plan.candidates) {
+        const reason = autoEscalateReason(cand.threshold_pct, cand.current_progress_pct);
+        try {
+          const updated = cmsCaseStore.escalate(
+            req.tenant!.tenant_id,
+            cand.case_id,
+            actor,
+            reason,
+            now(),
+          );
+          writeCmsAuditEvents(req.tenant!.tenant_id, 'escalate', actor, updated, {
+            auto: true,
+            trigger: 'sla_breach',
+            threshold_pct: cand.threshold_pct,
+            progress_pct: cand.current_progress_pct,
+            reason,
+          });
+          escalated.push({
+            case_id: updated.case_id,
+            case_number: updated.case_number,
+            progress_pct: cand.current_progress_pct,
+            reason,
+          });
+        } catch (e) {
+          const code = e instanceof CmsCaseError ? e.code : 'internal_error';
+          const message = e instanceof Error ? e.message : String(e);
+          errors.push({ case_id: cand.case_id, code, message });
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            dry_run: false,
+            threshold_fraction: plan.threshold_fraction,
+            threshold_pct: plan.threshold_pct,
+            total_considered: plan.total_considered,
+            would_escalate: plan.candidates.length,
+            candidates: plan.candidates,
+            escalated,
+            skipped: plan.skipped,
+            errors,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
   /** GET /v1/cms/cases — list with filters. */
   app.get(
     '/v1/cms/cases',

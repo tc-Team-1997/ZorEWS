@@ -9,13 +9,17 @@ import {
   RefreshCw,
   Search,
   UserPlus,
+  Zap,
+  X,
 } from 'lucide-react';
 import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { useAuth } from '@/store/auth';
 import {
   cmsApi,
   PRIORITY_TONE,
   STATUS_TONE,
+  type CmsAutoEscalateResult,
   type CmsCase,
   type CmsCaseState,
   type CmsListFilters,
@@ -40,6 +44,14 @@ export function CmsCaseListPage() {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAssignee, setBulkAssignee] = useState('');
+  const [showAutoEscalate, setShowAutoEscalate] = useState(false);
+
+  // M3.1 — auto-escalate is admin / supervisor only (matches the
+  // RBAC posture on M13.1 cases.auto_escalate_at_pct config + the
+  // sensitivity of bulk state transitions).
+  const user = useAuth((s) => s.user);
+  const canAutoEscalate =
+    user?.roles.some((r) => ['admin', 'supervisor'].includes(r)) ?? false;
 
   // Read deep-link filters now so the server-side `breached` flag flows
   // into the query before client-side narrowing happens.
@@ -139,12 +151,32 @@ export function CmsCaseListPage() {
             <Link to="/cms/cases/kanban">
               <Button variant="ghost">Kanban view</Button>
             </Link>
+            {canAutoEscalate && (
+              <Button
+                variant="ghost"
+                onClick={() => setShowAutoEscalate(true)}
+                data-testid="cms-auto-escalate-btn"
+              >
+                <Zap size={14} /> Auto-escalate SLA
+              </Button>
+            )}
             <Button onClick={() => void qc.invalidateQueries({ queryKey: ['cms-cases'] })}>
               <RefreshCw size={14} /> Refresh
             </Button>
           </div>
         }
       />
+
+      {showAutoEscalate && (
+        <AutoEscalateSlaModal
+          onClose={() => setShowAutoEscalate(false)}
+          onExecuted={() => {
+            void qc.invalidateQueries({ queryKey: ['cms-cases'] });
+            void qc.invalidateQueries({ queryKey: ['cms-stats'] });
+            void qc.invalidateQueries({ queryKey: ['cms-sla'] });
+          }}
+        />
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -389,6 +421,233 @@ function StatCard({
         <div className="text-xs uppercase">{title}</div>
         <div className="text-2xl font-semibold">{value}</div>
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// M3.1 — Auto-escalate SLA modal
+//
+// Two-step UX: dry-run preview (mandatory first click) → operator
+// reviews would-escalate count + candidates → "Execute" runs the
+// real mutation. Escape-to-close. Per-row severity badge + threshold
+// override slider (0..100% in 5pt steps; defaults to M13.1 config).
+// ──────────────────────────────────────────────────────────────────
+
+function AutoEscalateSlaModal({
+  onClose,
+  onExecuted,
+}: {
+  onClose: () => void;
+  onExecuted: () => void;
+}) {
+  const [thresholdPct, setThresholdPct] = useState<number | null>(null); // null = use server default
+  const [plan, setPlan] = useState<CmsAutoEscalateResult | null>(null);
+  const [result, setResult] = useState<CmsAutoEscalateResult | null>(null);
+
+  const dryRunMut = useMutation({
+    mutationFn: () =>
+      cmsApi.autoEscalateSla({
+        dry_run: true,
+        threshold_pct_override: thresholdPct !== null ? thresholdPct / 100 : undefined,
+      }),
+    onSuccess: (data) => setPlan(data),
+  });
+  const executeMut = useMutation({
+    mutationFn: () =>
+      cmsApi.autoEscalateSla({
+        dry_run: false,
+        threshold_pct_override: thresholdPct !== null ? thresholdPct / 100 : undefined,
+      }),
+    onSuccess: (data) => {
+      setResult(data);
+      onExecuted();
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const view = result ?? plan;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Auto-escalate SLA breaches"
+      data-testid="cms-auto-escalate-modal"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-4xl rounded-lg border border-slate-300 bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Auto-escalate SLA breaches</h2>
+          <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-slate-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <p className="text-sm text-slate-600">
+          Walks non-closed cases and escalates those whose SLA progress
+          (elapsed ÷ total) reaches the threshold. Default lives at the
+          M13.1 config key <code>cases.auto_escalate_at_pct</code> (typically 80%).
+          Override below for a one-off run.{' '}
+          <strong>Run a dry-run first</strong> to preview the impact.
+        </p>
+
+        <div className="mt-4 flex items-center gap-3" data-testid="cms-auto-escalate-threshold-row">
+          <label className="text-sm font-medium">Threshold override:</label>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={thresholdPct ?? 80}
+            onChange={(e) => setThresholdPct(Number(e.target.value))}
+            disabled={result !== null}
+            className="w-48"
+          />
+          <span className="text-sm tabular-nums" data-testid="cms-auto-escalate-threshold-value">
+            {thresholdPct !== null ? `${thresholdPct}%` : 'config default'}
+          </span>
+          {thresholdPct !== null && result === null && (
+            <Button variant="ghost" onClick={() => setThresholdPct(null)}>
+              Reset
+            </Button>
+          )}
+        </div>
+
+        {!view ? (
+          <div className="mt-6 rounded border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+            Click <strong>Preview</strong> to see which cases would escalate.
+          </div>
+        ) : (
+          <div className="mt-6 space-y-4" data-testid="cms-auto-escalate-result">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <SummaryStat label="Threshold" value={`${view.threshold_pct}%`} />
+              <SummaryStat label="Considered" value={view.total_considered.toString()} />
+              <SummaryStat
+                label={result ? 'Escalated' : 'Would escalate'}
+                value={(result ? result.escalated.length : view.would_escalate).toString()}
+                tone={result ? 'success' : 'warning'}
+              />
+              <SummaryStat
+                label="Skipped"
+                value={view.skipped.length.toString()}
+              />
+            </div>
+
+            {view.candidates.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Candidates</h3>
+                <div className="max-h-64 overflow-y-auto rounded border border-slate-200">
+                  <table className="min-w-full text-sm" data-testid="cms-auto-escalate-candidates">
+                    <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Case</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Priority</th>
+                        <th className="px-3 py-2">Progress</th>
+                        <th className="px-3 py-2">Severity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.candidates.map((c) => (
+                        <tr key={c.case_id} className="border-t border-slate-200">
+                          <td className="px-3 py-2 font-medium">{c.case_number}</td>
+                          <td className="px-3 py-2">
+                            <Badge tone={STATUS_TONE[c.status] as never}>{c.status}</Badge>
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge tone={PRIORITY_TONE[c.priority] as never}>{c.priority}</Badge>
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">{c.current_progress_pct}%</td>
+                          <td className="px-3 py-2">
+                            <Badge tone={c.breach_severity === 'breached' ? 'danger' : 'warning'}>
+                              {c.breach_severity}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {result && result.errors.length > 0 && (
+              <div
+                className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700"
+                data-testid="cms-auto-escalate-errors"
+              >
+                <strong>{result.errors.length} error(s):</strong>
+                <ul className="mt-1 list-disc pl-5">
+                  {result.errors.map((e) => (
+                    <li key={e.case_id}>
+                      {e.case_id}: {e.code} — {e.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-2 border-t border-slate-200 pt-4">
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          {!plan && (
+            <Button
+              onClick={() => dryRunMut.mutate()}
+              disabled={dryRunMut.isPending}
+              data-testid="cms-auto-escalate-preview"
+            >
+              {dryRunMut.isPending ? 'Previewing…' : 'Preview'}
+            </Button>
+          )}
+          {plan && !result && plan.candidates.length > 0 && (
+            <Button
+              onClick={() => executeMut.mutate()}
+              disabled={executeMut.isPending}
+              data-testid="cms-auto-escalate-execute"
+            >
+              {executeMut.isPending ? 'Escalating…' : `Execute (${plan.candidates.length})`}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success' | 'warning';
+}) {
+  const toneClass =
+    tone === 'success'
+      ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+      : tone === 'warning'
+        ? 'border-amber-300 bg-amber-50 text-amber-700'
+        : 'border-slate-200 bg-white text-slate-700';
+  return (
+    <div className={`rounded border p-3 ${toneClass}`}>
+      <div className="text-xs uppercase opacity-70">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>
   );
 }

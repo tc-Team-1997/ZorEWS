@@ -59,9 +59,10 @@ describe('DEFAULTS schema', () => {
     expect(listDefaultKeys().length).toBe(DEFAULTS.length);
   });
 
-  test('listCategories enumerates the 5 categories in stable order', () => {
+  test('listCategories enumerates the 6 categories in stable order', () => {
+    // M3.1 added 'cases' next to 'alerts' (insertion order in DEFAULTS).
     const cats = listCategories();
-    expect(cats).toEqual(['alerts', 'notifications', 'reporting', 'scoring', 'features']);
+    expect(cats).toEqual(['alerts', 'cases', 'notifications', 'reporting', 'scoring', 'features']);
   });
 
   test('every category has at least one entry', () => {
@@ -229,12 +230,14 @@ describe('InMemoryConfigStore', () => {
 // ─── Routes ────────────────────────────────────────────────────────────
 
 describe('GET /v1/admin/config/categories', () => {
-  test('admin: returns the 5 categories', async () => {
+  test('admin: returns the 6 categories', async () => {
+    // M3.1 added 'cases' (cases.auto_escalate_at_pct config key).
     const { app } = makeCfgApp('admin');
     const r = await request(app).get('/v1/admin/config/categories').set(TH_BIL);
     expect(r.status).toBe(200);
     expect(r.body.body.items).toEqual([
       'alerts',
+      'cases',
       'notifications',
       'reporting',
       'scoring',

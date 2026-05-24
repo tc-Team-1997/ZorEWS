@@ -28,6 +28,7 @@ export type ConfigValue = number | string | boolean | Record<string, unknown>;
 
 export type ConfigCategory =
   | 'alerts'
+  | 'cases'
   | 'notifications'
   | 'reporting'
   | 'scoring'
@@ -104,6 +105,17 @@ export const DEFAULTS: readonly ConfigDef[] = [
     type: 'number',
     description: 'SLA in hours for Yellow (Medium) alerts',
     default_value: 72,
+  },
+
+  // cases — Module 3.1 SLA auto-escalation threshold.
+  {
+    key: 'cases.auto_escalate_at_pct',
+    category: 'cases',
+    type: 'number',
+    description:
+      'Auto-escalate non-closed CMS cases when (now - created_at) / (sla_due_at - created_at) ≥ this fraction. ' +
+      'Range [0, 1]. Default 0.8 = escalate at 80% of SLA elapsed.',
+    default_value: 0.8,
   },
 
   // notifications — channel toggles + addressing.

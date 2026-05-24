@@ -96,6 +96,141 @@ export function isSlaBreached(now: Date, sla_due_at: Date): boolean {
  *  surfaces in yellow before the SLA is fully breached. */
 export const CMS_SLA_WARNING_PCT = 80;
 
+// ─── M3.1 SW-3 — Auto-escalate on SLA breach ─────────────────────────
+//
+// Module 3.1 acceptance: "escalation auto-triggers when SLA breaches by
+// configured percentage." Configured fraction lives at the M13.1 key
+// `cases.auto_escalate_at_pct` (default 0.8). Eligibility is derived
+// from the legal transition map (only states that can legally → ESCALATED
+// are considered) so the pure helper stays in lock-step with the state
+// machine — no drift if ALLOWED ever gains a new state.
+
+export type AutoEscalateSkipReason =
+  | 'already_escalated' // status === 'ESCALATED'
+  | 'closed' // status === 'CLOSED'
+  | 'unassigned_open' // OPEN — must be ASSIGNED before escalation per state machine
+  | 'illegal_transition' // covers REOPENED + any future non-escalatable state
+  | 'locked' // is_locked === true
+  | 'below_threshold'; // eligible but progress < threshold
+
+export interface AutoEscalateCandidate {
+  case_id: string;
+  case_number: string;
+  status: CmsCaseState;
+  priority: CmsPriority;
+  assigned_to: string | null;
+  created_at: string;
+  sla_due_at: string;
+  /** 0..100+ — values ≥ 100 mean the SLA is already breached. */
+  current_progress_pct: number;
+  threshold_pct: number;
+  breach_severity: 'imminent' | 'breached';
+}
+
+export interface AutoEscalateSkipped {
+  case_id: string;
+  status: CmsCaseState;
+  reason: AutoEscalateSkipReason;
+}
+
+export interface AutoEscalatePlan {
+  threshold_fraction: number; // 0..1, the config input
+  threshold_pct: number; // threshold_fraction × 100, rounded
+  total_considered: number;
+  candidates: AutoEscalateCandidate[];
+  skipped: AutoEscalateSkipped[];
+}
+
+/** Pure. Walks cases + returns those eligible to be auto-escalated.
+ *  Eligible = (status legally → ESCALATED) AND (not locked) AND
+ *  (slaProgressPct ≥ threshold_pct). Every non-eligible case surfaces
+ *  in skipped[] with a code so the SPA dry-run preview is transparent.
+ *  Candidates sorted worst-first by progress, ties broken by oldest
+ *  created_at — most-urgent first. */
+export function findAutoEscalationCandidates(
+  cases: readonly CmsCase[],
+  threshold_fraction: number,
+  now: Date,
+): AutoEscalatePlan {
+  if (!Number.isFinite(threshold_fraction) || threshold_fraction < 0 || threshold_fraction > 1) {
+    throw new CmsCaseError(
+      'invalid_input',
+      'threshold_fraction must be a finite number in [0, 1]',
+    );
+  }
+  const threshold_pct = Math.round(threshold_fraction * 100);
+  const candidates: AutoEscalateCandidate[] = [];
+  const skipped: AutoEscalateSkipped[] = [];
+
+  for (const c of cases) {
+    if (c.status === 'ESCALATED') {
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'already_escalated' });
+      continue;
+    }
+    if (c.status === 'CLOSED') {
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'closed' });
+      continue;
+    }
+    if (c.is_locked) {
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'locked' });
+      continue;
+    }
+    if (c.status === 'OPEN') {
+      // OPEN can only legally → ASSIGNED or CLOSED per the state machine.
+      // Surface separately so ops knows to assign first.
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'unassigned_open' });
+      continue;
+    }
+    if (!isLegalCmsTransition(c.status, 'ESCALATED')) {
+      // Catches REOPENED + any future non-escalatable state.
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'illegal_transition' });
+      continue;
+    }
+    const progress = slaProgressPct(
+      now,
+      new Date(c.created_at),
+      new Date(c.sla_due_at),
+    );
+    if (progress < threshold_pct) {
+      skipped.push({ case_id: c.case_id, status: c.status, reason: 'below_threshold' });
+      continue;
+    }
+    candidates.push({
+      case_id: c.case_id,
+      case_number: c.case_number,
+      status: c.status,
+      priority: c.priority,
+      assigned_to: c.assigned_to,
+      created_at: c.created_at,
+      sla_due_at: c.sla_due_at,
+      current_progress_pct: progress,
+      threshold_pct,
+      breach_severity: progress >= 100 ? 'breached' : 'imminent',
+    });
+  }
+  // Sort worst-first (highest progress) — ties broken by oldest created_at.
+  candidates.sort(
+    (a, b) =>
+      b.current_progress_pct - a.current_progress_pct ||
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+
+  return {
+    threshold_fraction,
+    threshold_pct,
+    total_considered: cases.length,
+    candidates,
+    skipped,
+  };
+}
+
+/** Builds the M13.1 audit-trail reason string the route writes per
+ *  successful escalation. Encodes the threshold + observed progress so
+ *  the audit chain is self-describing. */
+export function autoEscalateReason(threshold_pct: number, progress_pct: number): string {
+  return `auto_sla_breach@${threshold_pct}%: progress=${progress_pct}%`;
+}
+
 // ─── Resolution categories ───────────────────────────────────────────
 
 export const CMS_RESOLUTION_CATEGORIES = [

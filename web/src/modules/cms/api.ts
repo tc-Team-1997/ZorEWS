@@ -183,6 +183,49 @@ export interface CmsSlaBreach {
   progress_pct: number;
 }
 
+// Module 3.1 — auto-escalate SLA result envelope (mirrors BFF
+// services/bff/src/cms_cases.ts AutoEscalatePlan + route additions).
+export type AutoEscalateSkipReason =
+  | 'already_escalated'
+  | 'closed'
+  | 'unassigned_open'
+  | 'illegal_transition'
+  | 'locked'
+  | 'below_threshold';
+
+export interface CmsAutoEscalateCandidate {
+  case_id: string;
+  case_number: string;
+  status: CmsCaseState;
+  priority: CmsPriority;
+  assigned_to: string | null;
+  created_at: string;
+  sla_due_at: string;
+  current_progress_pct: number;
+  threshold_pct: number;
+  breach_severity: 'imminent' | 'breached';
+}
+
+export interface CmsAutoEscalateSkipped {
+  case_id: string;
+  status: CmsCaseState;
+  reason: AutoEscalateSkipReason;
+}
+
+export interface CmsAutoEscalateResult {
+  tenant_id: string;
+  generated_at: string;
+  dry_run: boolean;
+  threshold_fraction: number;
+  threshold_pct: number;
+  total_considered: number;
+  would_escalate: number;
+  candidates: CmsAutoEscalateCandidate[];
+  skipped: CmsAutoEscalateSkipped[];
+  escalated: Array<{ case_id: string; case_number: string; progress_pct: number; reason: string }>;
+  errors: Array<{ case_id: string; code: string; message: string }>;
+}
+
 export interface CmsListFilters {
   status?: CmsCaseState;
   priority?: CmsPriority;
@@ -287,6 +330,20 @@ export const cmsApi = {
   stats: () => unwrap<CmsStats>(http.get(`${cmsBase}/stats`)),
   slaBreaches: () =>
     unwrap<{ items: CmsSlaBreach[]; total: number }>(http.get(`${cmsBase}/sla-breaches`)),
+
+  // Module 3.1 — auto-escalate non-closed cases whose SLA progress
+  // crosses the configured threshold. dry_run=true returns the plan
+  // without mutating. threshold_pct_override overrides M13.1 config
+  // for one-off triggering at a tighter/looser threshold.
+  autoEscalateSla: (
+    opts: { dry_run?: boolean; threshold_pct_override?: number } = {},
+  ) =>
+    unwrap<CmsAutoEscalateResult>(
+      http.post(`${cmsBase}/auto-escalate-sla`, {
+        dry_run: opts.dry_run ?? false,
+        threshold_pct_override: opts.threshold_pct_override,
+      }),
+    ),
 
   bulkAssign: (case_ids: string[], assigned_to: string, reason?: string) =>
     unwrap<{
