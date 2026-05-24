@@ -42,6 +42,7 @@ import { DataIngestionPage } from '@/modules/admin/DataIngestionPage';
 import { DataProfilingPage } from '@/modules/admin/DataProfilingPage';
 import { AnomalyDetectionPage } from '@/modules/admin/AnomalyDetectionPage';
 import { ReconciliationPage } from '@/modules/admin/ReconciliationPage';
+import { DqScorePage } from '@/modules/admin/DqScorePage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -125,6 +126,7 @@ export function App() {
             <Route path="admin/data-profiling" element={<DataProfilingPage />} />
             <Route path="admin/anomalies" element={<AnomalyDetectionPage />} />
             <Route path="admin/reconciliation" element={<ReconciliationPage />} />
+            <Route path="admin/dq-score" element={<DqScorePage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

@@ -1781,6 +1781,41 @@ export const api = {
     http
       .get<EnvelopeBody<ReconDashboardRollupShape>>('/v1/recon/dashboard')
       .then((r) => r.data),
+
+  // ── Module 1.7 — Data Quality Score ─────────────────────────────────
+  dqScoreDashboard: () =>
+    http
+      .get<EnvelopeBody<DqScoreDashboardShape>>('/v1/dq/dashboard')
+      .then((r) => r.data),
+
+  dqBySource: (source_id: string, window: number = 30) =>
+    http
+      .get<EnvelopeBody<DqBySourceShape>>(`/v1/dq/by-source/${encodeURIComponent(source_id)}?window=${window}`)
+      .then((r) => r.data),
+
+  dqByAttribute: (source_id: string, attribute?: string) => {
+    const sp = new URLSearchParams({ source_id });
+    if (attribute) sp.set('attribute', attribute);
+    return http
+      .get<EnvelopeBody<DqByAttributeShape>>(`/v1/dq/by-attribute?${sp.toString()}`)
+      .then((r) => r.data);
+  },
+
+  dqExecutionsList: (q: { rule_id?: string; status?: string; limit?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (q.rule_id) sp.set('rule_id', q.rule_id);
+    if (q.status) sp.set('status', q.status);
+    if (q.limit !== undefined) sp.set('limit', String(q.limit));
+    const qs = sp.toString();
+    return http
+      .get<EnvelopeBody<{ items: DqExecutionShape[]; total: number; tenant_id: string; generated_at: string }>>(`/v1/dq/executions${qs ? `?${qs}` : ''}`)
+      .then((r) => r.data);
+  },
+
+  dqExecutionGet: (id: string) =>
+    http
+      .get<EnvelopeBody<DqExecutionShape>>(`/v1/dq/executions/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -3203,4 +3238,116 @@ export interface ReconDashboardRollupShape {
     runs_total: number;
     breaks_24h: number;
   }>;
+}
+
+// ── Module 1.7 — Data Quality Score response shapes ────────────────────
+export type DqDimension = 'completeness' | 'validity' | 'consistency' | 'uniqueness' | 'timeliness';
+export type DqScoreSource =
+  | 'cbs_loans' | 'cbs_repayments' | 'cbs_txns'
+  | 'mart_customer_360' | 'mart_loan_360' | 'bureau_score';
+export type DimensionWeights = Record<DqDimension, number>;
+
+export interface DqDimensionScoreShape {
+  dimension: DqDimension;
+  score: number;
+  weight: number;
+  samples: number;
+}
+
+export interface DqSourceScoreShape {
+  source_id: DqScoreSource;
+  composite_score: number;
+  dimensions: DqDimensionScoreShape[];
+  attributes: number;
+  last_evaluated_at: string;
+  rows_evaluated: number;
+}
+
+export interface DqAttributeScoreShape {
+  source_id: DqScoreSource;
+  attribute: string;
+  composite_score: number;
+  dimensions: DqDimensionScoreShape[];
+  last_evaluated_at: string;
+  format_detected?: string | null;
+}
+
+export interface DqTrendPointShape {
+  date: string;
+  composite_score: number;
+  dimensions: Record<DqDimension, number>;
+}
+
+export interface DqSourceTrendShape {
+  source_id: DqScoreSource;
+  window_days: number;
+  trend: DqTrendPointShape[];
+  start_date: string;
+  end_date: string;
+}
+
+export interface DqBySourceShape {
+  tenant_id: string;
+  generated_at: string;
+  weights: DimensionWeights;
+  score: DqSourceScoreShape;
+  trend: DqSourceTrendShape;
+}
+
+export interface DqByAttributeShape {
+  tenant_id: string;
+  source_id: DqScoreSource;
+  attribute: string | null;
+  generated_at: string;
+  weights: DimensionWeights;
+  total: number;
+  items: DqAttributeScoreShape[];
+}
+
+export interface DqScoreDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  total_rules: number;
+  active_rules: number;
+  total_executions: number;
+  total_passed: number;
+  total_failed: number;
+  total_error: number;
+  rules_status: Array<{
+    rule_id: string;
+    name: string;
+    kind: string;
+    severity: string;
+    latest_status: string | null;
+    latest_pass_rate: number | null;
+    latest_at: string | null;
+    executions_total: number;
+    failures_24h: number;
+  }>;
+  score_overlay: {
+    tenant_id: string;
+    generated_at: string;
+    weights: DimensionWeights;
+    by_source: DqSourceScoreShape[];
+    fleet_composite_score: number;
+    worst_source: { source_id: DqScoreSource; composite_score: number } | null;
+    best_source: { source_id: DqScoreSource; composite_score: number } | null;
+  };
+}
+
+export interface DqExecutionShape {
+  execution_id: string;
+  rule_id: string;
+  rule_name: string;
+  rule_kind: string;
+  rule_severity: string;
+  started_at: string;
+  finished_at: string;
+  status: string;
+  total_records: number;
+  passed_records: number;
+  failed_records: number;
+  sample_failures?: Array<Record<string, unknown>>;
+  error_message?: string | null;
+  triggered_by: string;
 }

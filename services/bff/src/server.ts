@@ -23887,7 +23887,13 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** GET /v1/dq/dashboard — pre-computed rollup. */
+  /** GET /v1/dq/dashboard — pre-computed rollup.
+   *
+   *  Module 1.7 additive: response now carries a `score_overlay` field
+   *  with the 5-dimension composite per source, plus a fleet-wide score.
+   *  Weights are read from M13.1 admin config under the key
+   *  `scoring.dq.dimension_weights`. Backward-compat: existing
+   *  rules_status / by_severity / by_kind shape is unchanged. */
   app.get(
     '/v1/dq/dashboard',
     requireTenantMw,
@@ -23895,7 +23901,136 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const dashboard = buildDqDashboard(dqStore, req.tenant!.tenant_id, now());
-      return res.json(wrapResponse(dashboard, ctx));
+      // Read weights from admin config (M13.1). Fall back to defaults
+      // when the entry doesn't exist OR isn't JSON-shaped.
+      const { buildDqScoreDashboard, normaliseWeights, DEFAULT_DIMENSION_WEIGHTS } =
+        require('./dq_score') as typeof import('./dq_score');
+      const cfg = configStore.get(req.tenant!.tenant_id, 'scoring.dq.dimension_weights');
+      const weights = cfg && typeof cfg.value === 'object'
+        ? normaliseWeights(cfg.value)
+        : DEFAULT_DIMENSION_WEIGHTS;
+      const score_overlay = buildDqScoreDashboard(req.tenant!.tenant_id, weights, now());
+      return res.json(wrapResponse({ ...dashboard, score_overlay }, ctx));
+    },
+  );
+
+  /** Module 1.7 — GET /v1/dq/by-source/:source_id?window=N
+   *  Composite score for a single source + 30-day (configurable) trend.
+   *  Returns 404 EWS_404_unknown_source on bad source. */
+  app.get(
+    '/v1/dq/by-source/:source_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sourceId = req.params.source_id ?? '';
+      const {
+        buildSourceScore,
+        buildSourceTrend,
+        normaliseWeights,
+        DEFAULT_DIMENSION_WEIGHTS,
+        isDqScoreSource,
+      } = require('./dq_score') as typeof import('./dq_score');
+      if (!isDqScoreSource(sourceId)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_source', message: `unknown source: ${sourceId}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const windowRaw = req.query.window as string | undefined;
+      const window = windowRaw ? Number(windowRaw) : 30;
+      if (windowRaw !== undefined && (!Number.isFinite(window) || window < 1 || window > 90)) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_window', message: 'window must be in [1, 90]', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const cfg = configStore.get(req.tenant!.tenant_id, 'scoring.dq.dimension_weights');
+      const weights = cfg && typeof cfg.value === 'object'
+        ? normaliseWeights(cfg.value)
+        : DEFAULT_DIMENSION_WEIGHTS;
+      const score = buildSourceScore(req.tenant!.tenant_id, sourceId, weights, now());
+      const trend = buildSourceTrend(req.tenant!.tenant_id, sourceId, window, weights, now());
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            weights,
+            score,
+            trend,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** Module 1.7 — GET /v1/dq/by-attribute?source_id=&attribute=
+   *  Per-attribute composite scores. Optional `attribute` filter narrows
+   *  to a single column. Returns 404 on bad source. */
+  app.get(
+    '/v1/dq/by-attribute',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const sourceId = (req.query.source_id as string | undefined) ?? '';
+      const attribute = req.query.attribute as string | undefined;
+      const {
+        syntheticAttributeScores,
+        normaliseWeights,
+        DEFAULT_DIMENSION_WEIGHTS,
+        isDqScoreSource,
+      } = require('./dq_score') as typeof import('./dq_score');
+      if (!sourceId) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'source_id required', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      if (!isDqScoreSource(sourceId)) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_source', message: `unknown source: ${sourceId}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const cfg = configStore.get(req.tenant!.tenant_id, 'scoring.dq.dimension_weights');
+      const weights = cfg && typeof cfg.value === 'object'
+        ? normaliseWeights(cfg.value)
+        : DEFAULT_DIMENSION_WEIGHTS;
+      const all = syntheticAttributeScores(req.tenant!.tenant_id, sourceId, weights, now());
+      const items = attribute ? all.filter((a) => a.attribute === attribute) : all;
+      if (attribute && items.length === 0) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_attribute', message: `unknown attribute: ${attribute}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            source_id: sourceId,
+            attribute: attribute ?? null,
+            generated_at: now().toISOString(),
+            weights,
+            total: items.length,
+            items,
+          },
+          ctx,
+        ),
+      );
     },
   );
 

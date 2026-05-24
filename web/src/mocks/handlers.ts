@@ -8760,3 +8760,223 @@ export function __resetMswReconStore() {
   __mswReconRuns.clear();
   __mswReconDrops.clear();
 }
+
+// ── Module 1.7 — Data Quality Score MSW handlers ──────────────────────
+const __mswDqWeights = new Map<string, Record<string, number>>(); // tenant → weights
+const __mswDqDefaultWeights: Record<string, number> = {
+  completeness: 0.30, validity: 0.30, consistency: 0.15, uniqueness: 0.15, timeliness: 0.10,
+};
+const __mswDqSources = ['cbs_loans', 'cbs_repayments', 'cbs_txns', 'mart_customer_360', 'mart_loan_360', 'bureau_score'];
+const __mswDqDimensions = ['completeness', 'validity', 'consistency', 'uniqueness', 'timeliness'] as const;
+const __mswDqAttrsBySource: Record<string, Array<{ name: string; format?: string | null }>> = {
+  cbs_loans: [
+    { name: 'loan_id' }, { name: 'customer_id', format: 'numeric_id' }, { name: 'product_code' },
+    { name: 'sanctioned_amount' }, { name: 'outstanding' }, { name: 'worst_dpd' },
+    { name: 'onboarded_at', format: 'iso_date' }, { name: 'has_npa' },
+  ],
+  cbs_repayments: [{ name: 'repayment_id' }, { name: 'loan_id' }, { name: 'paid_at', format: 'iso_date' }, { name: 'amount' }, { name: 'dpd_at_payment' }],
+  cbs_txns: [{ name: 'txn_id' }, { name: 'account_id' }, { name: 'txn_at', format: 'iso_datetime' }, { name: 'amount' }, { name: 'channel' }],
+  mart_customer_360: [{ name: 'customer_id' }, { name: 'pan', format: 'pan' }, { name: 'phone', format: 'phone_in' }, { name: 'email', format: 'email' }, { name: 'risk_rating' }, { name: 'monthly_income' }],
+  mart_loan_360: [{ name: 'loan_id' }, { name: 'customer_id' }, { name: 'product_code' }, { name: 'outstanding' }, { name: 'worst_dpd' }, { name: 'has_npa' }],
+  bureau_score: [{ name: 'customer_id' }, { name: 'score' }, { name: 'reported_at', format: 'iso_date' }],
+};
+
+function __mswDqHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h >>> 0;
+}
+function __mswDqRng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+  };
+}
+function __mswDqBaseline(source: string): { center: number; spread: number } {
+  if (source.startsWith('mart_')) return { center: 93, spread: 6 };
+  if (source.startsWith('cbs_')) return { center: 88, spread: 8 };
+  return { center: 80, spread: 10 };
+}
+function __mswDqScoreInBand(rng: () => number, source: string): number {
+  const { center, spread } = __mswDqBaseline(source);
+  const raw = center + (rng() - 0.5) * 2 * spread;
+  return Math.round(Math.max(60, Math.min(99, raw)) * 10) / 10;
+}
+function __mswDqCompose(scores: Record<string, number>, weights: Record<string, number>): number {
+  let sum = 0, w = 0;
+  for (const d of __mswDqDimensions) {
+    const ww = Math.max(0, weights[d] ?? 0);
+    if (ww === 0) continue;
+    sum += (scores[d] ?? 0) * ww;
+    w += ww;
+  }
+  if (w === 0) return 0;
+  return Math.round((sum / w) * 10) / 10;
+}
+function __mswDqGetWeights(tenant_id: string): Record<string, number> {
+  return __mswDqWeights.get(tenant_id) ?? __mswDqDefaultWeights;
+}
+function __mswDqSourceScore(tenant_id: string, source: string, weights: Record<string, number>, day: string) {
+  const raw: Record<string, { score: number; samples: number }> = {};
+  for (const d of __mswDqDimensions) {
+    const rng = __mswDqRng(__mswDqHash(`${tenant_id}|${source}|${d}|${day}`));
+    raw[d] = { score: __mswDqScoreInBand(rng, source), samples: Math.round(10000 + rng() * 90000) };
+  }
+  const scoresOnly: Record<string, number> = {};
+  for (const d of __mswDqDimensions) scoresOnly[d] = raw[d].score;
+  return {
+    source_id: source,
+    composite_score: __mswDqCompose(scoresOnly, weights),
+    dimensions: __mswDqDimensions.map((d) => ({ dimension: d, score: raw[d].score, weight: weights[d], samples: raw[d].samples })),
+    attributes: (__mswDqAttrsBySource[source] ?? []).length,
+    last_evaluated_at: new Date().toISOString(),
+    rows_evaluated: __mswDqDimensions.reduce((acc, d) => acc + raw[d].samples, 0),
+  };
+}
+
+const __mswDqHandlers = [
+  http.get('/v1/dq/dashboard', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const weights = __mswDqGetWeights(tenant_id);
+    const day = new Date().toISOString().slice(0, 10);
+    const by_source = __mswDqSources.map((s) => __mswDqSourceScore(tenant_id, s, weights, day));
+    let wSum = 0, weighted = 0;
+    for (const s of by_source) { wSum += s.attributes; weighted += s.composite_score * s.attributes; }
+    const fleet = wSum === 0 ? 0 : Math.round((weighted / wSum) * 10) / 10;
+    let worst: { source_id: string; composite_score: number } | null = null;
+    let best: { source_id: string; composite_score: number } | null = null;
+    for (const s of by_source) {
+      if (!worst || s.composite_score < worst.composite_score) worst = { source_id: s.source_id, composite_score: s.composite_score };
+      if (!best || s.composite_score > best.composite_score) best = { source_id: s.source_id, composite_score: s.composite_score };
+    }
+    return HttpResponse.json(envelope({
+      tenant_id,
+      generated_at: new Date().toISOString(),
+      total_rules: 12,
+      active_rules: 10,
+      total_executions: 250,
+      total_passed: 234,
+      total_failed: 14,
+      total_error: 2,
+      rules_status: [],
+      score_overlay: {
+        tenant_id,
+        generated_at: new Date().toISOString(),
+        weights,
+        by_source,
+        fleet_composite_score: fleet,
+        worst_source: worst,
+        best_source: best,
+      },
+    }));
+  }),
+
+  http.get('/v1/dq/by-source/:source_id', ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const source = String(params.source_id ?? '');
+    if (!__mswDqSources.includes(source)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_source', message: `unknown source: ${source}`, severity: 'LOW' } }, { status: 404 });
+    }
+    const url = new URL(request.url);
+    const windowParam = url.searchParams.get('window');
+    const window = windowParam ? Number(windowParam) : 30;
+    if (windowParam !== null && (!Number.isFinite(window) || window < 1 || window > 90)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_window', message: 'window must be in [1, 90]', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const weights = __mswDqGetWeights(tenant_id);
+    const today = new Date();
+    const day = today.toISOString().slice(0, 10);
+    const score = __mswDqSourceScore(tenant_id, source, weights, day);
+    const days = Math.max(1, Math.min(90, Math.floor(window)));
+    const start = new Date(today.getTime() - (days - 1) * 86_400_000);
+    const trend = Array.from({ length: days }, (_, i) => {
+      const d = new Date(start.getTime() + i * 86_400_000).toISOString().slice(0, 10);
+      const raw: Record<string, { score: number; samples: number }> = {};
+      for (const dim of __mswDqDimensions) {
+        const rng = __mswDqRng(__mswDqHash(`${tenant_id}|${source}|${dim}|${d}`));
+        raw[dim] = { score: __mswDqScoreInBand(rng, source), samples: 0 };
+      }
+      const dimsOnly: Record<string, number> = {};
+      for (const dim of __mswDqDimensions) dimsOnly[dim] = raw[dim].score;
+      return { date: d, composite_score: __mswDqCompose(dimsOnly, weights), dimensions: dimsOnly };
+    });
+    return HttpResponse.json(envelope({
+      tenant_id,
+      generated_at: today.toISOString(),
+      weights,
+      score,
+      trend: { source_id: source, window_days: days, trend, start_date: start.toISOString().slice(0, 10), end_date: today.toISOString().slice(0, 10) },
+    }));
+  }),
+
+  http.get('/v1/dq/by-attribute', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const url = new URL(request.url);
+    const source = url.searchParams.get('source_id') ?? '';
+    const attribute = url.searchParams.get('attribute');
+    if (!source) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'source_id required', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    if (!__mswDqSources.includes(source)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_source', message: `unknown source: ${source}`, severity: 'LOW' } }, { status: 404 });
+    }
+    const weights = __mswDqGetWeights(tenant_id);
+    const day = new Date().toISOString().slice(0, 10);
+    const attrs = __mswDqAttrsBySource[source] ?? [];
+    const items = attrs.map((a) => {
+      const raw: Record<string, { score: number; samples: number }> = {};
+      for (const dim of __mswDqDimensions) {
+        const rng = __mswDqRng(__mswDqHash(`${tenant_id}|${source}|${a.name}|${dim}|${day}`));
+        raw[dim] = { score: __mswDqScoreInBand(rng, source), samples: Math.round(1000 + rng() * 9000) };
+      }
+      const dimsOnly: Record<string, number> = {};
+      for (const dim of __mswDqDimensions) dimsOnly[dim] = raw[dim].score;
+      return {
+        source_id: source,
+        attribute: a.name,
+        composite_score: __mswDqCompose(dimsOnly, weights),
+        dimensions: __mswDqDimensions.map((d) => ({ dimension: d, score: raw[d].score, weight: weights[d], samples: raw[d].samples })),
+        last_evaluated_at: new Date().toISOString(),
+        format_detected: a.format ?? null,
+      };
+    });
+    const filtered = attribute ? items.filter((i) => i.attribute === attribute) : items;
+    if (attribute && filtered.length === 0) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_attribute', message: `unknown attribute: ${attribute}`, severity: 'LOW' } }, { status: 404 });
+    }
+    return HttpResponse.json(envelope({
+      tenant_id, source_id: source, attribute: attribute ?? null,
+      generated_at: new Date().toISOString(), weights, total: filtered.length, items: filtered,
+    }));
+  }),
+
+  http.get('/v1/dq/executions', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const now = new Date();
+    const items = Array.from({ length: 6 }, (_, i) => ({
+      execution_id: `exec-${tenant_id}-${String(i).padStart(4, '0')}`,
+      rule_id: `dq-rule-${(i % 3) + 1}`,
+      rule_name: `Rule ${(i % 3) + 1}`,
+      rule_kind: ['not_null', 'unique', 'range'][i % 3],
+      rule_severity: ['high', 'medium', 'low'][i % 3],
+      started_at: new Date(now.getTime() - i * 3_600_000).toISOString(),
+      finished_at: new Date(now.getTime() - i * 3_600_000 + 1000).toISOString(),
+      status: i % 4 === 0 ? 'failed' : 'passed',
+      total_records: 10000,
+      passed_records: i % 4 === 0 ? 9500 : 10000,
+      failed_records: i % 4 === 0 ? 500 : 0,
+      triggered_by: 'system',
+    }));
+    return HttpResponse.json(envelope({ tenant_id, generated_at: now.toISOString(), total: items.length, items }));
+  }),
+];
+
+handlers.push(...__mswDqHandlers);
+
+export function __resetMswDqWeights() {
+  __mswDqWeights.clear();
+}

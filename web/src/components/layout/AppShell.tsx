@@ -78,6 +78,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/data-profiling', i18nKey: 'data_profiling', icon: BrainCircuit, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/anomalies', i18nKey: 'anomaly_detection', icon: Activity, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/reconciliation', i18nKey: 'reconciliation', icon: Database, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/dq-score', i18nKey: 'dq_score', icon: Gauge, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/activity', i18nKey: 'admin_activity', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/webhooks', i18nKey: 'webhooks', icon: Webhook, requireRole: ['admin'] },
   { to: '/admin/tenants', i18nKey: 'tenants', icon: Building2, requireRole: ['admin'] },

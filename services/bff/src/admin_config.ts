@@ -160,6 +160,20 @@ export const DEFAULTS: readonly ConfigDef[] = [
     description: 'Default medium_max threshold for the BIL risk-scoring engine',
     default_value: 70,
   },
+  // Module 1.7 — DQ score dimension weights (5 dimensions, sum ≈ 1.0).
+  {
+    key: 'scoring.dq.dimension_weights',
+    category: 'scoring',
+    type: 'json',
+    description: 'Weights for the 5 DQ dimensions (completeness, validity, consistency, uniqueness, timeliness). Sum must be > 0; values are normalised internally.',
+    default_value: {
+      completeness: 0.30,
+      validity: 0.30,
+      consistency: 0.15,
+      uniqueness: 0.15,
+      timeliness: 0.10,
+    },
+  },
 
   // features — UI / capability toggles.
   {
