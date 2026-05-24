@@ -9723,3 +9723,103 @@ const __mswSmaHandlers = [
 ];
 
 handlers.push(...__mswSmaHandlers);
+
+// ── M2.5 — NPA Prediction (3 net-new endpoints for the SPA in dev mode) ──
+//
+// Predictions list / why / backtest / portfolio-drivers come from the live
+// BFF via vite proxy in dev — those handlers aren't stubbed here. The 3
+// below cover the M2.5 additions: single-prediction lookup, AI model
+// detail (Manage Model modal), and dataset lineage (Data Lineage modal).
+
+function __mswNpaWrap(b: unknown, status = 200) {
+  return HttpResponse.json(
+    {
+      header: {
+        status: 'success',
+        code: status === 201 ? 'EWS_201' : 'EWS_200',
+        message: 'ok',
+        requestId: `req-msw-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+      body: b,
+    },
+    { status },
+  );
+}
+
+const __mswNpaHandlers = [
+  http.get('/v1/banking/npa/predictions/:account_id', ({ params }) => {
+    const account_id = String(params.account_id);
+    return __mswNpaWrap({
+      tenant_id: 'BANK_DEMO',
+      account_id,
+      customer_id: account_id.startsWith('a-') ? `c-${account_id.split('-')[1]}` : 'c-unknown',
+      generated_at: new Date().toISOString(),
+      model_id: 'pd-xgb-prod',
+      model_version: 'v3.2.0',
+      pd_30d: 0.42,
+      pd_60d: 0.61,
+      pd_90d: 0.78,
+      current_band: 'high',
+      recommended_actions: [
+        'Notify supervisor + watchlist',
+        'Request fresh stock statement (covenant due)',
+        'Review with relationship manager within 5 days',
+      ],
+    });
+  }),
+
+  http.get('/v1/ai/models/:model_id', ({ params }) => {
+    const model_id = String(params.model_id);
+    return __mswNpaWrap({
+      model_id,
+      type: 'pd',
+      name: 'NPA Prediction XGBoost',
+      version: 'v3.2.0',
+      framework: 'xgboost',
+      status: 'production',
+      trained_at: '2026-04-15T00:00:00.000Z',
+      deployed_at: '2026-04-22T00:00:00.000Z',
+      metrics: {
+        auc: 0.847,
+        training_rows: 124_500,
+        evaluated_at: '2026-04-20T00:00:00.000Z',
+      },
+      key_features: [
+        'dpd_max_90d',
+        'utilization_pct',
+        'emi_bounce_rate_180d',
+        'bureau_score',
+        'cash_withdrawal_velocity',
+        'account_age_months',
+      ],
+    });
+  }),
+
+  http.get('/v1/metadata/lineage/datasets/:dataset_id', ({ params }) => {
+    const dataset_id = String(params.dataset_id);
+    return __mswNpaWrap({
+      dataset_id,
+      name: dataset_id,
+      schema: 'mart',
+      description: 'Daily NPA predictions per account — written by the pd-xgb-prod model batch.',
+      owner: 'agent-ai',
+      pii: false,
+      retention_days: 365 * 7,
+      source_system: 'mart.npa_predictions',
+      upstream_dataset_ids: [
+        'mart.customer_360',
+        'mart.loan_360',
+        'mart.txn_features',
+        'mart.indicator_values',
+      ],
+      downstream_dataset_ids: [
+        'apex.regulatory.events',
+        'app_alerts.alerts',
+      ],
+      tags: ['npa', 'pd', 'ai'],
+    });
+  }),
+];
+
+handlers.push(...__mswNpaHandlers);

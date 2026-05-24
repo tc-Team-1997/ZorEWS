@@ -188,6 +188,60 @@ export function explainNpaPrediction(tenant_id: string, account_id: string, now:
   };
 }
 
+// ─── M2.5 — Single-prediction lookup (per spec) ────────────────────────
+//
+// Re-uses explainNpaPrediction internally and projects out just the prediction
+// fields (model id/version + PD across 30/60/90d horizons + recommended actions).
+// The /why endpoint surfaces the full feature-importance breakdown; this one
+// is the lightweight "what's the score?" view the SPA's row-detail uses.
+
+export interface NpaPredictionPerAccount {
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  pd_30d: number;
+  pd_60d: number;
+  pd_90d: number;
+  current_band: 'low' | 'medium' | 'high' | 'critical';
+  recommended_actions: string[];
+}
+
+export function getNpaPredictionForAccount(
+  tenant_id: string,
+  account_id: string,
+  now: Date,
+): NpaPredictionPerAccount {
+  // Re-use the existing explainer — the same deterministic synth path
+  // owns model_id/version + band derivation. We pull the 90d PD then
+  // derive 30d / 60d via the same family of seeds at shorter horizons.
+  const e = explainNpaPrediction(tenant_id, account_id, now);
+  const rng30 = mulberry32(fnv1a(`${tenant_id}|${account_id}|pd30`));
+  const rng60 = mulberry32(fnv1a(`${tenant_id}|${account_id}|pd60`));
+  // Shorter horizons → lower PD as a class — PD grows with horizon.
+  // We clamp to keep pd_30d ≤ pd_60d ≤ pd_90d (the canonical monotonic
+  // invariant the SPA renders as a ▲ trend chip).
+  const base = e.pd;
+  const pd_90d = base;
+  const pd_60d = Math.round(Math.max(0, Math.min(pd_90d, pd_90d * (0.85 + rng60() * 0.1))) * 1000) / 1000;
+  const pd_30d = Math.round(Math.max(0, Math.min(pd_60d, pd_60d * (0.7 + rng30() * 0.15))) * 1000) / 1000;
+  return {
+    tenant_id: e.tenant_id,
+    account_id: e.account_id,
+    customer_id: e.customer_id,
+    generated_at: e.generated_at,
+    model_id: e.model_id,
+    model_version: e.model_version,
+    pd_30d,
+    pd_60d,
+    pd_90d,
+    current_band: e.band,
+    recommended_actions: e.recommended_actions,
+  };
+}
+
 export interface NpaBacktestSummary {
   tenant_id: string;
   generated_at: string;

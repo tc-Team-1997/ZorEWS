@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
-import { AlertTriangle, BrainCircuit, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, BrainCircuit, Cpu, Database, Sparkles, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   api,
@@ -17,6 +17,8 @@ import {
   type NpaPredictionExplanation,
   type NpaBacktestSummary,
   type PortfolioDriverReport,
+  type AiModelDetailShape,
+  type LineageDatasetShape,
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -36,6 +38,8 @@ export function NpaPredictionPage() {
   const [horizon, setHorizon] = useState<Horizon>(90);
   const [whyOpenId, setWhyOpenId] = useState<string | null>(null);
   const [backtestOpen, setBacktestOpen] = useState(false);
+  const [manageModelOpen, setManageModelOpen] = useState(false);
+  const [lineageOpen, setLineageOpen] = useState(false);
 
   const { data: list, isLoading } = useQuery({
     queryKey: ['npa.highRisk', horizon],
@@ -53,9 +57,17 @@ export function NpaPredictionPage() {
         title="NPA Prediction"
         subtitle="AI-driven probability of default over 30 / 60 / 90 / 180 day horizons. Every prediction is explainable."
         actions={
-          <Button variant="ghost" onClick={() => setBacktestOpen(true)}>
-            <Sparkles className="size-4" aria-hidden /> Backtest report
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setBacktestOpen(true)} data-testid="npa-open-backtest">
+              <Sparkles className="size-4" aria-hidden /> Backtest report
+            </Button>
+            <Button variant="ghost" onClick={() => setManageModelOpen(true)} data-testid="npa-open-manage-model">
+              <Cpu className="size-4" aria-hidden /> Manage model
+            </Button>
+            <Button variant="ghost" onClick={() => setLineageOpen(true)} data-testid="npa-open-lineage">
+              <Database className="size-4" aria-hidden /> Data lineage
+            </Button>
+          </div>
         }
       />
 
@@ -169,6 +181,250 @@ export function NpaPredictionPage() {
 
       {/* Backtest modal */}
       {backtestOpen && <BacktestModal onClose={() => setBacktestOpen(false)} />}
+
+      {/* M2.5 — Manage Model modal (resolves model_id from /backtest/latest) */}
+      {manageModelOpen && <ManageModelModal onClose={() => setManageModelOpen(false)} />}
+
+      {/* M2.5 — Data Lineage modal */}
+      {lineageOpen && (
+        <DataLineageModal datasetId="mart.npa_predictions" onClose={() => setLineageOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── M2.5 — Manage Model modal ─────────────────────────────────────────
+//
+// Renders the active NPA model record from /v1/ai/models/:id (M7.1). The
+// "Jump to Model Registry" link points operators at the admin model surface
+// when present; otherwise the inline detail is enough for the credit
+// committee's read-only review.
+
+function ManageModelModal({ onClose }: { onClose: () => void }) {
+  // Resolve the active NPA model id via the backtest payload (which carries
+  // model_id + version). Then look up the M7.1 registry detail. Two queries
+  // chained — the second is `enabled` on `modelId` so it doesn't fire until
+  // we know what to fetch.
+  const backtestQ = useQuery({
+    queryKey: ['npa.backtest-for-model'],
+    queryFn: () => api.npaBacktest(),
+  });
+  const modelId = backtestQ.data?.model_id ?? '';
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['npa.manage-model', modelId],
+    queryFn: () => api.aiModelById(modelId) as Promise<AiModelDetailShape>,
+    enabled: modelId.length > 0,
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        className="bg-surface rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        data-testid="npa-manage-model-modal"
+      >
+        <div className="sticky top-0 bg-surface border-b border-divider px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <Cpu className="h-4 w-4" /> Manage model — {modelId || '…'}
+            </h3>
+            <div className="text-xs text-ink-subtle">
+              Active NPA prediction model {modelId ? `· /v1/ai/models/${modelId}` : '· resolving…'}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" data-testid="npa-manage-model-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          {(backtestQ.isLoading || isLoading) && (
+            <div className="text-sm text-ink-subtle">Loading model registry…</div>
+          )}
+          {isError && (
+            <div className="text-sm text-danger" data-testid="npa-manage-model-error">
+              Model not found in registry ({modelId}): {(error as Error).message ?? 'unknown error'}
+            </div>
+          )}
+          {data && (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-ink-subtle">Name</div>
+                  <div className="font-medium">{data.name}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-ink-subtle">Version</div>
+                  <div className="font-mono">{data.version}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-ink-subtle">Status</div>
+                  <Badge tone={data.status === 'production' ? 'success' : data.status === 'retired' ? 'danger' : 'warning'}>
+                    {data.status}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-xs text-ink-subtle">Framework</div>
+                  <div>{data.framework}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-ink-subtle">Trained at</div>
+                  <div className="font-mono text-xs">{new Date(data.trained_at).toLocaleDateString()}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-ink-subtle">Deployed at</div>
+                  <div className="font-mono text-xs">
+                    {data.deployed_at ? new Date(data.deployed_at).toLocaleDateString() : '—'}
+                  </div>
+                </div>
+              </div>
+
+              {data.metrics && (
+                <div>
+                  <div className="text-xs text-ink-subtle mb-1">Performance metrics</div>
+                  <div className="rounded border border-divider p-2 grid grid-cols-3 gap-3 text-sm">
+                    {data.metrics.auc !== undefined && (
+                      <div>
+                        <div className="text-xs text-ink-subtle">AUC</div>
+                        <div className="font-mono">{data.metrics.auc.toFixed(3)}</div>
+                      </div>
+                    )}
+                    {data.metrics.mae !== undefined && (
+                      <div>
+                        <div className="text-xs text-ink-subtle">MAE</div>
+                        <div className="font-mono">{data.metrics.mae.toFixed(2)}</div>
+                      </div>
+                    )}
+                    {data.metrics.training_rows !== undefined && (
+                      <div>
+                        <div className="text-xs text-ink-subtle">Training rows</div>
+                        <div className="font-mono">{data.metrics.training_rows.toLocaleString()}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {data.key_features && data.key_features.length > 0 && (
+                <div>
+                  <div className="text-xs text-ink-subtle mb-1">Key features</div>
+                  <div className="flex flex-wrap gap-1">
+                    {data.key_features.map((f) => (
+                      <span
+                        key={f}
+                        className="text-xs px-2 py-0.5 rounded bg-surface-2 border border-divider"
+                      >
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── M2.5 — Data Lineage modal ─────────────────────────────────────────
+//
+// Renders the raw → mart → predictions chain via /v1/metadata/lineage
+// (M14.x metadata). Operators inspecting an NPA prediction can trace the
+// source datasets that fed it.
+
+function DataLineageModal({ datasetId, onClose }: { datasetId: string; onClose: () => void }) {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['npa.lineage', datasetId],
+    queryFn: () => api.metadataLineageDataset(datasetId) as Promise<LineageDatasetShape>,
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        className="bg-surface rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+        data-testid="npa-lineage-modal"
+      >
+        <div className="sticky top-0 bg-surface border-b border-divider px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <Database className="h-4 w-4" /> Data lineage — {datasetId}
+            </h3>
+            <div className="text-xs text-ink-subtle">Raw feed → mart → prediction chain</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" data-testid="npa-lineage-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          {isLoading && <div className="text-sm text-ink-subtle">Loading lineage…</div>}
+          {isError && (
+            <div className="text-sm text-danger" data-testid="npa-lineage-error">
+              Lineage not available: {(error as Error).message ?? 'unknown error'}
+            </div>
+          )}
+          {data && (
+            <div className="space-y-4 text-sm">
+              <div className="rounded border border-divider p-3">
+                <div className="font-medium">{data.name}</div>
+                {data.description && (
+                  <div className="text-xs text-ink-subtle mt-1">{data.description}</div>
+                )}
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                  {data.owner && (
+                    <div>
+                      <span className="text-ink-subtle">Owner:</span> {data.owner}
+                    </div>
+                  )}
+                  {data.source_system && (
+                    <div>
+                      <span className="text-ink-subtle">Source:</span> {data.source_system}
+                    </div>
+                  )}
+                  {data.pii !== undefined && (
+                    <div>
+                      <span className="text-ink-subtle">PII:</span> {data.pii ? 'yes' : 'no'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {data.upstream_dataset_ids && data.upstream_dataset_ids.length > 0 && (
+                <div>
+                  <div className="text-xs text-ink-subtle mb-1">Upstream feeds</div>
+                  <ul className="space-y-1" data-testid="npa-lineage-upstream">
+                    {data.upstream_dataset_ids.map((id) => (
+                      <li key={id} className="rounded border border-divider px-2 py-1 font-mono text-xs">
+                        {id}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {data.downstream_dataset_ids && data.downstream_dataset_ids.length > 0 && (
+                <div>
+                  <div className="text-xs text-ink-subtle mb-1">Downstream consumers</div>
+                  <ul className="space-y-1" data-testid="npa-lineage-downstream">
+                    {data.downstream_dataset_ids.map((id) => (
+                      <li key={id} className="rounded border border-divider px-2 py-1 font-mono text-xs">
+                        {id}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {data.tags && data.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {data.tags.map((t) => (
+                    <span key={t} className="text-xs px-2 py-0.5 rounded bg-surface-2 border border-divider">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1548,6 +1548,24 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // ── M2.5 — NPA Prediction additions ──────────────────────────────────
+  npaPredictionForAccount: (account_id: string) =>
+    http
+      .get<EnvelopeBody<NpaPredictionPerAccountShape>>(
+        `/v1/banking/npa/predictions/${encodeURIComponent(account_id)}`,
+      )
+      .then((r) => r.data),
+  aiModelById: (model_id: string) =>
+    http
+      .get<EnvelopeBody<AiModelDetailShape>>(`/v1/ai/models/${encodeURIComponent(model_id)}`)
+      .then((r) => r.data),
+  metadataLineageDataset: (dataset_id: string) =>
+    http
+      .get<EnvelopeBody<LineageDatasetShape>>(
+        `/v1/metadata/lineage/datasets/${encodeURIComponent(dataset_id)}`,
+      )
+      .then((r) => r.data),
+
   // G2 — M15.1 audit trail surface (Monday Playbook H9)
   auditEvents: (params: AuditEventQuery = {}) => {
     const qs = new URLSearchParams();
@@ -2390,6 +2408,52 @@ export interface NpaBacktestSummary {
   recall_at_top_decile: number;
   confusion: { tp: number; fp: number; tn: number; fn: number };
   by_segment: { segment: string; auc: number; cohort_size: number }[];
+}
+
+// ── M2.5 — NPA single-prediction lookup + Manage Model + Data Lineage ──
+export interface NpaPredictionPerAccountShape {
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  pd_30d: number;
+  pd_60d: number;
+  pd_90d: number;
+  current_band: 'low' | 'medium' | 'high' | 'critical';
+  recommended_actions: string[];
+}
+export interface AiModelDetailShape {
+  model_id: string;
+  type: string;
+  name: string;
+  version: string;
+  framework: string;
+  status: 'experimental' | 'staging' | 'production' | 'shadow' | 'retired';
+  trained_at: string;
+  deployed_at?: string | null;
+  retired_at?: string | null;
+  metrics?: {
+    auc?: number;
+    mae?: number;
+    training_rows?: number;
+    evaluated_at?: string;
+  };
+  key_features?: string[];
+}
+export interface LineageDatasetShape {
+  dataset_id: string;
+  name: string;
+  schema?: string;
+  description?: string;
+  owner?: string;
+  pii?: boolean;
+  retention_days?: number | null;
+  upstream_dataset_ids?: string[];
+  downstream_dataset_ids?: string[];
+  tags?: string[];
+  source_system?: string;
 }
 
 // M7.19 — Portfolio-level NPA driver aggregation

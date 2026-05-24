@@ -34004,6 +34004,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /**
+   * M2.5 — GET /v1/banking/npa/predictions/:account_id
+   *
+   * Single-prediction lookup. Re-uses the explainNpaPrediction synth path
+   * but projects only the prediction fields (PD across 30/60/90d horizons +
+   * current band + recommended actions) — the SPA row-expand view. The
+   * full feature importance lives on the sibling /why endpoint.
+   */
+  app.get(
+    '/v1/banking/npa/predictions/:account_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { getNpaPredictionForAccount } =
+          require('./banking_npa_prediction') as typeof import('./banking_npa_prediction');
+        const out = getNpaPredictionForAccount(req.tenant!.tenant_id, req.params.account_id, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'prediction_failed';
+        return res
+          .status(400)
+          .json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   app.get(
     '/v1/banking/npa/predictions/:prediction_id/why',
     requireTenantMw,
