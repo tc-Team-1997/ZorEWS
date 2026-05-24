@@ -33124,6 +33124,34 @@ export function makeApp(deps: AppDeps = {}) {
     return d;
   }
 
+  /**
+   * M2.4 — GET /v1/banking/sma/framework?framework=
+   *
+   * Returns the currently-active framework + the full catalog of available
+   * country-specific frameworks (RBI India / RMA Bhutan / CBK Kenya, ...).
+   * Drives the SPA's framework banner + Master → Regulators picker.
+   */
+  app.get(
+    '/v1/banking/sma/framework',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildFrameworkCatalog } = require('./banking_sma') as typeof import('./banking_sma');
+        const active = pickFramework(req);
+        return res.json(wrapResponse(buildFrameworkCatalog(req.tenant!.tenant_id, active, now()), ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'sma_framework_failed';
+        const code = msg.startsWith('invalid_') ? 400 : 500;
+        const ews = msg.startsWith('invalid_') ? `EWS_400_${msg}` : 'EWS_500';
+        return res
+          .status(code)
+          .json(wrapError({ code: ews, message: msg, severity: code === 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   /** GET /v1/banking/sma/movements?date=&framework= */
   app.get(
     '/v1/banking/sma/movements',
@@ -33234,7 +33262,13 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** POST /v1/banking/sma/run-classification?framework= */
+  /**
+   * POST /v1/banking/sma/run-classification?framework=&customer_count=
+   *
+   * M2.4 extends with optional `customer_count` query — caller-controlled
+   * cohort size for stress-testing the spec acceptance ("10k accounts <2 min").
+   * Default keeps tenant-scaled deterministic synth.
+   */
   app.post(
     '/v1/banking/sma/run-classification',
     requireTenantMw,
@@ -33246,7 +33280,40 @@ export function makeApp(deps: AppDeps = {}) {
         const framework = pickFramework(req);
         const actor =
           ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        const out = runSmaClassification(req.tenant!.tenant_id, framework, actor, now());
+        const ccRaw = req.query.customer_count as string | undefined;
+        const customer_count =
+          ccRaw !== undefined && ccRaw !== '' ? Number(ccRaw) : undefined;
+        if (customer_count !== undefined && !Number.isFinite(customer_count)) {
+          throw new Error('invalid_customer_count');
+        }
+        const out = runSmaClassification(req.tenant!.tenant_id, framework, actor, now(), {
+          customer_count,
+        });
+        // Audit fan-out (cross-cutting #6) — re-classification is a sensitive
+        // ops action; record actor + framework + cohort size.
+        const role =
+          ((req.headers['x-apex-role'] as string | undefined) ?? '').trim() || 'unknown';
+        const channel = (req as Request & { channel?: string }).channel ?? null;
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: role,
+            action: 'sma.run_classification',
+            resource_type: 'system',
+            resource_id: out.run_id,
+            outcome: 'success',
+            severity: 'info',
+            metadata: {
+              framework,
+              customers_evaluated: out.customers_evaluated,
+              customers_changed: out.customers_changed,
+              duration_ms: out.duration_ms,
+              channel,
+            },
+          },
+          now(),
+        );
         return res.status(201).json(wrapResponse(out, ctx));
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'sma_run_failed';

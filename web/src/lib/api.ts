@@ -1587,10 +1587,54 @@ export const api = {
       )
       .then((r) => r.data),
 
-  smaMovements: (date?: string) =>
+  smaMovements: (q: { date?: string; framework?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.date) p.set('date', q.date);
+    if (q.framework) p.set('framework', q.framework);
+    const qs = p.toString();
+    return http
+      .get<EnvelopeBody<SmaMovementsReport>>(`/v1/banking/sma/movements${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+
+  // ── M2.4 — SMA Classification (5 new endpoints over the pre-existing 1) ──
+  smaFramework: (framework?: string) =>
     http
-      .get<EnvelopeBody<SmaMovementsReport>>(`/v1/banking/sma/movements${date ? `?date=${date}` : ''}`)
+      .get<EnvelopeBody<FrameworkCatalogShape>>(`/v1/banking/sma/framework${framework ? `?framework=${framework}` : ''}`)
       .then((r) => r.data),
+  smaDrill: (q: { from?: string; to?: string; framework?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.from) p.set('from', q.from);
+    if (q.to) p.set('to', q.to);
+    if (q.framework) p.set('framework', q.framework);
+    const qs = p.toString();
+    return http
+      .get<EnvelopeBody<SmaDrillShape>>(`/v1/banking/sma/drill${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+  smaSectorView: (framework?: string) =>
+    http
+      .get<EnvelopeBody<SmaSectorViewShape>>(`/v1/banking/sma/sector-view${framework ? `?framework=${framework}` : ''}`)
+      .then((r) => r.data),
+  smaTrend: (customer_id: string, q: { framework?: string; from?: string; to?: string } = {}) => {
+    const p = new URLSearchParams();
+    p.set('customer_id', customer_id);
+    if (q.framework) p.set('framework', q.framework);
+    if (q.from) p.set('from', q.from);
+    if (q.to) p.set('to', q.to);
+    return http
+      .get<EnvelopeBody<SmaTrendShape>>(`/v1/banking/sma/trend?${p.toString()}`)
+      .then((r) => r.data);
+  },
+  smaRunClassification: (q: { framework?: string; customer_count?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.framework) p.set('framework', q.framework);
+    if (q.customer_count !== undefined) p.set('customer_count', String(q.customer_count));
+    const qs = p.toString();
+    return http
+      .post<EnvelopeBody<SmaRunResultShape>>(`/v1/banking/sma/run-classification${qs ? '?' + qs : ''}`, {})
+      .then((r) => r.data);
+  },
 
   sectorHeatmap: () =>
     http.get<EnvelopeBody<SectorHeatmapReport>>('/v1/banking/sectors/heatmap').then((r) => r.data),
@@ -2109,6 +2153,102 @@ export interface CmaPackResultShape {
   forms: ('II' | 'III' | 'IV' | 'V')[];
   html: string;
   size_bytes: number;
+}
+
+// ── M2.4 — SMA Classification shapes ───────────────────────────────────
+export type Framework = 'RBI' | 'RMA' | 'CBK';
+export type SmaCategory = 'SMA-0' | 'SMA-1' | 'SMA-2' | 'NPA';
+
+export interface FrameworkDefinitionShape {
+  code: Framework;
+  regulator: string;
+  country: string;
+  description: string;
+  sma1_min: number;
+  sma2_min: number;
+  npa_min: number;
+}
+export interface FrameworkCatalogShape {
+  tenant_id: string;
+  generated_at: string;
+  active_framework: Framework;
+  active_definition: FrameworkDefinitionShape;
+  frameworks: FrameworkDefinitionShape[];
+}
+
+export interface SmaMovementShape {
+  customer_id: string;
+  customer_name: string;
+  from_category: SmaCategory | 'CURRENT';
+  to_category: SmaCategory;
+  dpd: number;
+  outstanding_kes: number;
+  sector: string;
+  framework: Framework;
+  movement_at: string;
+  direction: 'deterioration' | 'improvement' | 'unchanged';
+}
+
+export interface SmaDrillRowShape extends SmaMovementShape {
+  reason: string;
+}
+export interface SmaDrillShape {
+  tenant_id: string;
+  generated_at: string;
+  from: string;
+  until: string;
+  framework: Framework;
+  total: number;
+  rows: SmaDrillRowShape[];
+}
+
+export interface SmaSectorRowShape {
+  sector: string;
+  total_customers: number;
+  by_category: Record<SmaCategory, number>;
+  total_outstanding_kes: number;
+  npa_outstanding_kes: number;
+  npa_ratio_pct: number;
+  worst_category: SmaCategory;
+}
+export interface SmaSectorViewShape {
+  tenant_id: string;
+  generated_at: string;
+  framework: Framework;
+  total_sectors: number;
+  total_customers: number;
+  total_outstanding_kes: number;
+  sectors: SmaSectorRowShape[];
+}
+
+export interface SmaTrendPointShape {
+  date: string;
+  category: SmaCategory;
+  dpd: number;
+  outstanding_kes: number;
+}
+export interface SmaTrendShape {
+  tenant_id: string;
+  generated_at: string;
+  customer_id: string;
+  framework: Framework;
+  point_count: number;
+  series: SmaTrendPointShape[];
+  current_category: SmaCategory;
+  worst_category: SmaCategory;
+  trend_direction: 'deteriorating' | 'improving' | 'stable';
+}
+
+export interface SmaRunResultShape {
+  tenant_id: string;
+  generated_at: string;
+  framework: Framework;
+  triggered_by: string;
+  run_id: string;
+  customers_evaluated: number;
+  customers_changed: number;
+  by_category_count: Record<SmaCategory, number>;
+  duration_ms: number;
 }
 
 // ── M2.2 — Account Behaviour shapes ───────────────────────────────────

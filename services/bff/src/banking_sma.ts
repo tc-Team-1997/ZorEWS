@@ -59,6 +59,94 @@ export function categoryForDpd(dpd: number): SmaCategory {
   return 'SMA-0';
 }
 
+// ─── M2.4 — Framework definitions (Master → Regulators) ───────────────
+//
+// The spec asks for country-specific SMA frameworks ("RBI India / RMA
+// Bhutan / CBK Kenya, etc."). The pre-existing `categoryForDpd` uses RBI's
+// 30/60/90 bands. We expose per-framework definitions here AND a
+// framework-aware classifier so future regulators can be swapped without
+// touching the RBI-default path.
+
+export interface FrameworkDefinition {
+  code: Framework;
+  regulator: string;
+  country: string;
+  description: string;
+  // DPD lower bound (inclusive) for each non-current category. SMA-0 is
+  // always [1, sma1_min); SMA-1 is [sma1_min, sma2_min); etc.
+  sma1_min: number;
+  sma2_min: number;
+  npa_min: number;
+}
+
+export const FRAMEWORK_DEFINITIONS: Readonly<Record<Framework, FrameworkDefinition>> = Object.freeze({
+  RBI: {
+    code: 'RBI',
+    regulator: 'Reserve Bank of India',
+    country: 'India',
+    description:
+      'Master Circular on IRACP — Special Mention Account: SMA-0 1-30d, SMA-1 31-60d, SMA-2 61-90d, NPA ≥ 91d.',
+    sma1_min: 31,
+    sma2_min: 61,
+    npa_min: 91,
+  },
+  RMA: {
+    code: 'RMA',
+    regulator: 'Royal Monetary Authority',
+    country: 'Bhutan',
+    description:
+      'RMA Bhutan Prudential Regulations — SMA-0 1-30d, SMA-1 31-60d, SMA-2 61-90d, NPA ≥ 91d (aligned with RBI bands).',
+    sma1_min: 31,
+    sma2_min: 61,
+    npa_min: 91,
+  },
+  CBK: {
+    code: 'CBK',
+    regulator: 'Central Bank of Kenya',
+    country: 'Kenya',
+    description:
+      'CBK Prudential Guideline CBK/PG/04 — Watch 1-30d, Substandard 31-90d, Doubtful 91-180d, Loss ≥ 181d.',
+    sma1_min: 31,
+    sma2_min: 91,
+    npa_min: 181,
+  },
+});
+
+export function getFrameworkDefinition(code: Framework): FrameworkDefinition {
+  return FRAMEWORK_DEFINITIONS[code];
+}
+
+/** Framework-aware DPD → SMA category. Falls back to RBI bands when `framework` is undefined. */
+export function categoryForDpdFramework(dpd: number, framework: Framework): SmaCategory {
+  const f = FRAMEWORK_DEFINITIONS[framework];
+  if (dpd >= f.npa_min) return 'NPA';
+  if (dpd >= f.sma2_min) return 'SMA-2';
+  if (dpd >= f.sma1_min) return 'SMA-1';
+  return 'SMA-0';
+}
+
+export interface FrameworkCatalog {
+  tenant_id: string;
+  generated_at: string;
+  active_framework: Framework;
+  active_definition: FrameworkDefinition;
+  frameworks: FrameworkDefinition[];
+}
+
+export function buildFrameworkCatalog(
+  tenant_id: string,
+  active: Framework,
+  now: Date,
+): FrameworkCatalog {
+  return {
+    tenant_id,
+    generated_at: now.toISOString(),
+    active_framework: active,
+    active_definition: FRAMEWORK_DEFINITIONS[active],
+    frameworks: ALL_FRAMEWORKS.map((f) => FRAMEWORK_DEFINITIONS[f]),
+  };
+}
+
 /** Movement = one customer's category change between two dates. */
 export interface SmaMovement {
   customer_id: string;
@@ -433,12 +521,17 @@ export function runSmaClassification(
   framework: Framework,
   triggered_by: string,
   now: Date,
+  opts: { customer_count?: number } = {},
 ): SmaClassificationRunResult {
   if (!tenant_id) throw new SmaError('invalid_input', 'tenant_id is required');
   if (!triggered_by) throw new SmaError('invalid_input', 'triggered_by is required');
+  if (opts.customer_count !== undefined) {
+    if (!Number.isFinite(opts.customer_count) || opts.customer_count < 0 || opts.customer_count > 1_000_000)
+      throw new SmaError('invalid_customer_count', 'customer_count must be 0..1_000_000');
+  }
 
   const start = Date.now();
-  const n = customerCountFor(tenant_id);
+  const n = opts.customer_count ?? customerCountFor(tenant_id);
   const yesterday = new Date(now.getTime() - 86_400_000);
   const byCategory: Record<SmaCategory, number> = { 'SMA-0': 0, 'SMA-1': 0, 'SMA-2': 0, NPA: 0 };
   let changed = 0;
@@ -447,7 +540,10 @@ export function runSmaClassification(
     const dpdNow = dpdForCustomer(tenant_id, cid, now);
     const dpdYesterday = dpdForCustomer(tenant_id, cid, yesterday);
     if (dpdNow !== dpdYesterday) changed++;
-    if (dpdNow > 0) byCategory[categoryForDpd(dpdNow)]++;
+    // Framework-aware classification per M2.4 — RBI / RMA share RBI bands;
+    // CBK uses CBK bands. The existing `categoryForDpd` (RBI-only) is
+    // preserved so legacy callers keep working.
+    if (dpdNow > 0) byCategory[categoryForDpdFramework(dpdNow, framework)]++;
   }
   _runSeq++;
   const runId = `sma-${tenant_id}-${now.toISOString().slice(0, 10)}-${String(_runSeq).padStart(4, '0')}`;

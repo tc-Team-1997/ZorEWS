@@ -9563,3 +9563,163 @@ const __mswFrHandlers = [
 ];
 
 handlers.push(...__mswFrHandlers);
+
+// ── M2.4 — SMA Classification ──────────────────────────────────────────
+//
+// Dev-mode fixtures mirror the BFF semantics at a small scale. Real BFF
+// (`services/bff/src/banking_sma.ts`) is wired via vite proxy in dev.
+
+const __mswSmaFrameworks = [
+  { code: 'RBI', regulator: 'Reserve Bank of India', country: 'India', description: 'RBI IRACP — SMA-0 1-30d, SMA-1 31-60d, SMA-2 61-90d, NPA ≥ 91d.', sma1_min: 31, sma2_min: 61, npa_min: 91 },
+  { code: 'RMA', regulator: 'Royal Monetary Authority', country: 'Bhutan', description: 'RMA Bhutan — aligned with RBI bands.', sma1_min: 31, sma2_min: 61, npa_min: 91 },
+  { code: 'CBK', regulator: 'Central Bank of Kenya', country: 'Kenya', description: 'CBK PG/04 — Watch 1-30d, Substandard 31-90d, Doubtful 91-180d, Loss ≥ 181d.', sma1_min: 31, sma2_min: 91, npa_min: 181 },
+] as const;
+
+function __mswSmaWrap(b: unknown, status = 200) {
+  return HttpResponse.json(
+    {
+      header: {
+        status: 'success',
+        code: status === 201 ? 'EWS_201' : 'EWS_200',
+        message: 'ok',
+        requestId: `req-msw-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+      body: b,
+    },
+    { status },
+  );
+}
+
+function __mswSmaMovements(framework: string) {
+  return {
+    tenant_id: 'BANK_DEMO',
+    generated_at: new Date().toISOString(),
+    date: new Date().toISOString().slice(0, 10),
+    framework,
+    total_movements: 6,
+    by_category_count: { 'SMA-0': 4, 'SMA-1': 1, 'SMA-2': 0, NPA: 1 },
+    deteriorations: 4,
+    improvements: 1,
+    unchanged: 1,
+    total_exposure_at_risk_kes: 17_500_000,
+    movements: [
+      { customer_id: 'c-101', customer_name: 'Alice Patel', from_category: 'CURRENT', to_category: 'SMA-0', dpd: 12, outstanding_kes: 250_000, sector: 'Manufacturing', framework, movement_at: new Date().toISOString(), direction: 'deterioration' },
+      { customer_id: 'c-106', customer_name: 'Rajesh Kumar', from_category: 'SMA-0', to_category: 'SMA-1', dpd: 35, outstanding_kes: 1_300_000, sector: 'Trade', framework, movement_at: new Date().toISOString(), direction: 'deterioration' },
+      { customer_id: 'c-115', customer_name: 'Priya Sharma', from_category: 'SMA-2', to_category: 'NPA', dpd: 95, outstanding_kes: 8_200_000, sector: 'Real Estate', framework, movement_at: new Date().toISOString(), direction: 'deterioration' },
+      { customer_id: 'c-118', customer_name: 'Mohan Singh', from_category: 'SMA-1', to_category: 'SMA-0', dpd: 22, outstanding_kes: 540_000, sector: 'Trade', framework, movement_at: new Date().toISOString(), direction: 'improvement' },
+      { customer_id: 'c-120', customer_name: 'Kavya Iyer', from_category: 'CURRENT', to_category: 'SMA-0', dpd: 8, outstanding_kes: 180_000, sector: 'Pharma', framework, movement_at: new Date().toISOString(), direction: 'deterioration' },
+      { customer_id: 'c-105', customer_name: 'Vikram Reddy', from_category: 'CURRENT', to_category: 'SMA-0', dpd: 5, outstanding_kes: 320_000, sector: 'IT Services', framework, movement_at: new Date().toISOString(), direction: 'deterioration' },
+    ],
+  };
+}
+
+const __mswSmaHandlers = [
+  http.get('/v1/banking/sma/framework', ({ request }) => {
+    const u = new URL(request.url);
+    const active = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    const def = __mswSmaFrameworks.find((f) => f.code === active) ?? __mswSmaFrameworks[0];
+    return __mswSmaWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      active_framework: def.code,
+      active_definition: def,
+      frameworks: __mswSmaFrameworks,
+    });
+  }),
+
+  http.get('/v1/banking/sma/movements', ({ request }) => {
+    const u = new URL(request.url);
+    const framework = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    return __mswSmaWrap(__mswSmaMovements(framework));
+  }),
+
+  http.get('/v1/banking/sma/drill', ({ request }) => {
+    const u = new URL(request.url);
+    const framework = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    const from = u.searchParams.get('from') ?? new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+    const to = u.searchParams.get('to') ?? new Date().toISOString().slice(0, 10);
+    const base = __mswSmaMovements(framework).movements;
+    const rows = base.map((m) => ({
+      ...m,
+      reason:
+        m.to_category === 'NPA' ? `Crossed ${m.dpd}d (≥ NPA threshold)`
+          : m.to_category === 'SMA-1' ? `Crossed 30 dpd today`
+          : m.direction === 'improvement' ? 'Improved by partial payment'
+          : 'New DPD observation',
+    }));
+    return __mswSmaWrap({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), from, until: to, framework, total: rows.length, rows });
+  }),
+
+  http.get('/v1/banking/sma/sector-view', ({ request }) => {
+    const u = new URL(request.url);
+    const framework = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    const sectors = ['Manufacturing', 'Trade', 'Real Estate', 'IT Services', 'Pharma'].map((sector, i) => ({
+      sector,
+      total_customers: 30 + i * 8,
+      by_category: { 'SMA-0': 18 + i, 'SMA-1': 6 + i, 'SMA-2': 3, NPA: 1 + Math.max(0, i - 1) },
+      total_outstanding_kes: (35 + i * 12) * 1_000_000,
+      npa_outstanding_kes: (3 + i) * 1_000_000,
+      npa_ratio_pct: 3 + i * 1.5,
+      worst_category: i >= 3 ? 'NPA' : 'SMA-2',
+    }));
+    return __mswSmaWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      framework,
+      total_sectors: sectors.length,
+      total_customers: sectors.reduce((a, s) => a + s.total_customers, 0),
+      total_outstanding_kes: sectors.reduce((a, s) => a + s.total_outstanding_kes, 0),
+      sectors,
+    });
+  }),
+
+  http.get('/v1/banking/sma/trend', ({ request }) => {
+    const u = new URL(request.url);
+    const customer_id = u.searchParams.get('customer_id') ?? 'c-101';
+    const framework = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    const points = Array.from({ length: 30 }, (_, i) => {
+      const dpd = Math.max(0, Math.round(i * 2 + (i % 7 === 0 ? -5 : 0)));
+      const category = dpd >= 91 ? 'NPA' : dpd >= 61 ? 'SMA-2' : dpd >= 31 ? 'SMA-1' : 'SMA-0';
+      return { date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10), category, dpd };
+    });
+    const current = points[points.length - 1]?.category ?? 'SMA-0';
+    const worst = points.reduce((acc, p) => {
+      const order = { 'SMA-0': 0, 'SMA-1': 1, 'SMA-2': 2, NPA: 3 } as const;
+      return order[p.category as keyof typeof order] > order[acc as keyof typeof order] ? p.category : acc;
+    }, 'SMA-0' as string);
+    const first = points[0]?.dpd ?? 0;
+    const last = points[points.length - 1]?.dpd ?? 0;
+    const trend_direction = last > first + 5 ? 'deteriorating' : last < first - 5 ? 'improving' : 'stable';
+    return __mswSmaWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      customer_id,
+      framework,
+      point_count: points.length,
+      series: points.map((p) => ({ ...p, outstanding_kes: 250_000 })),
+      current_category: current,
+      worst_category: worst,
+      trend_direction,
+    });
+  }),
+
+  http.post('/v1/banking/sma/run-classification', ({ request }) => {
+    const u = new URL(request.url);
+    const framework = (u.searchParams.get('framework') ?? 'RBI').toUpperCase();
+    const n = Number(u.searchParams.get('customer_count') ?? '200');
+    return __mswSmaWrap({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      framework,
+      triggered_by: 'admin',
+      run_id: `sma-BANK_DEMO-${Date.now()}`,
+      customers_evaluated: n,
+      customers_changed: Math.round(n * 0.04),
+      by_category_count: { 'SMA-0': Math.round(n * 0.6), 'SMA-1': Math.round(n * 0.18), 'SMA-2': Math.round(n * 0.08), NPA: Math.round(n * 0.04) },
+      duration_ms: Math.max(8, Math.round(n / 250)),
+    }, 201);
+  }),
+];
+
+handlers.push(...__mswSmaHandlers);
