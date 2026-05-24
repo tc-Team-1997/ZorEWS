@@ -5014,24 +5014,58 @@ export function makeApp(deps: AppDeps = {}) {
         .status(401)
         .json(wrapError({ code: 'EWS_401', message: 'authentication required', severity: 'MEDIUM' }, env));
     }
-    const raw = req.body as { header?: unknown; body?: unknown } | Partial<ChatRequest>;
+    const raw = req.body as { header?: unknown; body?: unknown } | (Partial<ChatRequest> & { prompt_id?: unknown });
     const inner = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw && raw.body && typeof raw.body === 'object'
-      ? (raw.body as Partial<ChatRequest>)
-      : (raw as Partial<ChatRequest>));
-    if (!inner || typeof inner.message !== 'string' || !inner.message.trim()) {
+      ? (raw.body as Partial<ChatRequest> & { prompt_id?: unknown })
+      : (raw as Partial<ChatRequest> & { prompt_id?: unknown }));
+    const userMessage = typeof inner?.message === 'string' ? inner.message : '';
+    const promptIdInput = (inner as { prompt_id?: unknown })?.prompt_id;
+
+    // M4.1 acceptance — "Adding a prompt makes it immediately available
+    // to the co-pilot." When prompt_id is supplied, resolve from the
+    // library + use the body as a template prefix. Caller's `message`
+    // (if any) is appended so operators can ask follow-ups against the
+    // template.
+    let resolvedPromptBody: string | null = null;
+    if (promptIdInput !== undefined && promptIdInput !== null) {
+      if (typeof promptIdInput !== 'string' || !promptIdInput.trim()) {
+        return res
+          .status(400)
+          .json(wrapError({ code: 'EWS_400_invalid_input', message: 'prompt_id must be a non-empty string', severity: 'MEDIUM' }, env));
+      }
+      const { getPrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+      const found = getPrompt(req.tenant!.tenant_id, promptIdInput);
+      if (!found) {
+        return res
+          .status(404)
+          .json(wrapError({ code: 'EWS_404_unknown_prompt', message: `unknown prompt_id: ${promptIdInput}`, severity: 'MEDIUM' }, env));
+      }
+      resolvedPromptBody = found.body;
+    }
+
+    // When prompt_id is supplied the message field is optional; otherwise
+    // require a typed message (preserves the existing contract).
+    if (!resolvedPromptBody && !userMessage.trim()) {
       return res
         .status(400)
-        .json(wrapError({ code: 'EWS_400', message: 'message is required', severity: 'MEDIUM' }, env));
+        .json(wrapError({ code: 'EWS_400', message: 'message or prompt_id is required', severity: 'MEDIUM' }, env));
     }
-    if (inner.message.length > 2000) {
+    if (userMessage.length > 2000) {
       return res
         .status(400)
         .json(wrapError({ code: 'EWS_400', message: 'message exceeds 2000 chars', severity: 'MEDIUM' }, env));
     }
+
+    const effectiveMessage = resolvedPromptBody
+      ? userMessage.trim()
+        ? `${resolvedPromptBody}\n\n${userMessage}`
+        : resolvedPromptBody
+      : userMessage;
+
     const role = getRole(req) ?? undefined;
-    const chatCtx = inner.context ?? {};
+    const chatCtx = inner?.context ?? {};
     const out = await copilotRespond({
-      message: inner.message,
+      message: effectiveMessage,
       context: { ...chatCtx, role: chatCtx.role ?? role },
     });
     res.json(wrapResponse(out, env));
@@ -5713,7 +5747,13 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** GET /v1/ai/models?type=&status= — list with filters. */
+  /** GET /v1/ai/models?type=&status= — list with filters.
+   *
+   *  M4.1 AI Workbench acceptance — supports a virtual ?status=deployed
+   *  filter that maps to models where actual status ∈ {production,
+   *  shadow}. "Deployed" is the operator-facing concept (a model that's
+   *  serving real or shadow traffic); the registry's ModelStatus enum
+   *  is more granular for governance + promotion workflows. */
   app.get(
     '/v1/ai/models',
     requireTenantMw,
@@ -5729,6 +5769,14 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+      // M4.1 — virtual 'deployed' filter
+      if (s === 'deployed') {
+        const items = [
+          ...aiModelRegistry.list({ type: t as ModelType | undefined, status: 'production' }),
+          ...aiModelRegistry.list({ type: t as ModelType | undefined, status: 'shadow' }),
+        ];
+        return res.json(wrapResponse({ items, total: items.length }, ctx));
       }
       if (s !== undefined && !isModelStatus(s)) {
         return res.status(400).json(
@@ -36503,6 +36551,64 @@ export function makeApp(deps: AppDeps = {}) {
     const ok = deletePrompt(req.tenant!.tenant_id, req.params.prompt_id);
     if (!ok) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_prompt', message: `unknown ${req.params.prompt_id}`, severity: 'MEDIUM' }, ctx));
     return res.status(204).end();
+  });
+
+  // M4.1 — Spec-shape aliases for AI Workbench. The spec asks for
+  // POST /v1/ai/prompts/library + PUT /v1/ai/prompts/:id; the existing
+  // routes are POST /v1/ai/prompts + PATCH /v1/ai/prompts/:id. Both
+  // semantic forms work — the aliases just match the spec verbatim
+  // for partner integrations + Postman collections.
+  app.post('/v1/ai/prompts/library', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { createPrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.status(201).json(
+        wrapResponse(
+          createPrompt(req.tenant!.tenant_id, inner as Parameters<typeof import('./ai_prompts').createPrompt>[1], actor, now()),
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const ews = code === 'invalid_category' ? 'EWS_400_invalid_category'
+        : code === 'invalid_name' ? 'EWS_400_invalid_name'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'prompt_create_failed';
+      return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.put('/v1/ai/prompts/:prompt_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updatePrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      return res.json(
+        wrapResponse(updatePrompt(req.tenant!.tenant_id, req.params.prompt_id, inner as Record<string, unknown>, now()), ctx),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_prompt' ? 404
+        : code === 'platform_immutable' ? 409
+        : 400;
+      const ews = code === 'unknown_prompt' ? 'EWS_404_unknown_prompt'
+        : code === 'platform_immutable' ? 'EWS_409_platform_immutable'
+        : code === 'invalid_name' ? 'EWS_400_invalid_name'
+        : code === 'invalid_category' ? 'EWS_400_invalid_category'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'prompt_update_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
   });
 
   // ──────────────────────────────────────────────────────────────────

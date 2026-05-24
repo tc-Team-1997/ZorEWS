@@ -1737,6 +1737,45 @@ export const api = {
   ingestionHealth: () =>
     http.get<EnvelopeBody<IngestionHealthReport>>('/v1/ingestion/health').then((r) => r.data),
 
+  // M4.1 — AI Workbench list with status filter (supports virtual
+  // 'deployed' value that returns production + shadow models).
+  aiModelsByStatus: (status?: string, type?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (type) params.set('type', type);
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+
+  // M4.1 — AI Workbench prompt library CRUD.
+  aiPromptsList: (opts: { category?: string; include_platform?: boolean; q?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.category) params.set('category', opts.category);
+    if (opts.include_platform === false) params.set('include_platform', 'false');
+    if (opts.q) params.set('q', opts.q);
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<{ prompts: AiPrompt[] }>>(`/v1/ai/prompts/library${qs ? '?' + qs : ''}`)
+      .then((r) => r.data.prompts);
+  },
+  aiPromptGet: (prompt_id: string) =>
+    http
+      .get<EnvelopeBody<AiPrompt>>(`/v1/ai/prompts/${encodeURIComponent(prompt_id)}`)
+      .then((r) => r.data),
+  aiPromptCreate: (body: { name: string; category: string; body: string; description?: string; tags?: string[] }) =>
+    http
+      .post<EnvelopeBody<AiPrompt>>('/v1/ai/prompts/library', body)
+      .then((r) => r.data),
+  // Use PUT per the M4.1 spec; the BFF accepts both PUT + PATCH.
+  aiPromptUpdate: (prompt_id: string, body: Partial<{ name: string; category: string; body: string; description: string; tags: string[] }>) =>
+    http
+      .put<EnvelopeBody<AiPrompt>>(`/v1/ai/prompts/${encodeURIComponent(prompt_id)}`, body)
+      .then((r) => r.data),
+  aiPromptDelete: (prompt_id: string) =>
+    http.delete(`/v1/ai/prompts/${encodeURIComponent(prompt_id)}`),
+
   aiModels: (type?: string) =>
     http
       .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${type ? `?type=${encodeURIComponent(type)}` : ''}`)
@@ -2756,6 +2795,30 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// M4.1 — AI Workbench prompt library row.
+export type PromptCategory =
+  | 'risk_analysis'
+  | 'reporting'
+  | 'investigation'
+  | 'compliance'
+  | 'modelling'
+  | 'data_quality'
+  | 'other';
+
+export interface AiPrompt {
+  prompt_id: string;
+  tenant_id: string;
+  name: string;
+  category: PromptCategory;
+  body: string;
+  description: string;
+  is_platform: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  tags: string[];
 }
 
 // Module 1.1 — Data Ingestion types
