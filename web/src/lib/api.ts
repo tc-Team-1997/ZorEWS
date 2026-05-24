@@ -1524,7 +1524,184 @@ export const api = {
         {},
       )
       .then((r) => r.data),
+
+  // ── Demo-prep §2.1 modules — NPA / Explainability / SMA / Sector ──
+  npaHighRisk: (horizon: 30 | 60 | 90 | 180 = 90) =>
+    http
+      .get<EnvelopeBody<NpaHighRiskReport>>(`/v1/banking/npa/high-risk?horizon=${horizon}`)
+      .then((r) => r.data),
+
+  npaWhy: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<NpaPredictionExplanation>>(
+        `/v1/banking/npa/predictions/${encodeURIComponent(prediction_id)}/why`,
+      )
+      .then((r) => r.data),
+
+  npaBacktest: () =>
+    http.get<EnvelopeBody<NpaBacktestSummary>>('/v1/banking/npa/backtest/latest').then((r) => r.data),
+
+  aiExplanation: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<PredictionExplanation>>(
+        `/v1/ai/predictions/${encodeURIComponent(prediction_id)}/explanation`,
+      )
+      .then((r) => r.data),
+
+  aiTrustSignals: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<TrustSignalReport>>(
+        `/v1/ai/predictions/${encodeURIComponent(prediction_id)}/trust-signals`,
+      )
+      .then((r) => r.data),
+
+  smaMovements: (date?: string) =>
+    http
+      .get<EnvelopeBody<SmaMovementsReport>>(`/v1/banking/sma/movements${date ? `?date=${date}` : ''}`)
+      .then((r) => r.data),
+
+  sectorHeatmap: () =>
+    http.get<EnvelopeBody<SectorHeatmapReport>>('/v1/banking/sectors/heatmap').then((r) => r.data),
 };
+
+// ── Demo §2.1 response shapes ──
+export interface NpaHighRiskRow {
+  prediction_id: string;
+  customer_id: string;
+  customer_name: string;
+  pd: number;
+  band: 'high' | 'critical';
+  predicted_at: string;
+  horizon_days: number;
+  outstanding_kes: number;
+  sector: string;
+  current_dpd: number;
+}
+
+export interface NpaHighRiskReport {
+  tenant_id: string;
+  generated_at: string;
+  horizon_days: number;
+  total_high_risk: number;
+  total_critical: number;
+  total_exposure_kes: number;
+  rows: NpaHighRiskRow[];
+}
+
+export interface NpaPredictionExplanation {
+  tenant_id: string;
+  account_id: string;
+  customer_id: string;
+  generated_at: string;
+  pd: number;
+  band: 'low' | 'medium' | 'high' | 'critical';
+  model_id: string;
+  model_version: string;
+  top_features: {
+    feature_name: string;
+    weight: number;
+    direction: 'up' | 'down';
+    value: string;
+  }[];
+  comparable_customers: { customer_id: string; pd: number; outcome: 'cured' | 'npa' | 'pending' }[];
+  recommended_actions: string[];
+}
+
+export interface NpaBacktestSummary {
+  tenant_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  back_to: string;
+  cohort_size: number;
+  auc: number;
+  ks: number;
+  precision_at_top_decile: number;
+  recall_at_top_decile: number;
+  confusion: { tp: number; fp: number; tn: number; fn: number };
+  by_segment: { segment: string; auc: number; cohort_size: number }[];
+}
+
+export interface PredictionExplanation {
+  tenant_id: string;
+  prediction_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  pd: number;
+  band: 'low' | 'medium' | 'high' | 'critical';
+  base_pd_population: number;
+  top_features: {
+    feature_name: string;
+    display_name: string;
+    weight: number;
+    base_value: number;
+    observed_value: string;
+    direction: 'up' | 'down';
+    group: 'credit' | 'behavioural' | 'transaction' | 'collateral' | 'macro';
+  }[];
+  counterfactual: {
+    description: string;
+    change_feature: string;
+    required_value: string;
+    resulting_pd: number;
+    resulting_band: 'low' | 'medium' | 'high' | 'critical';
+  };
+  feature_group_summary: { group: string; contribution: number; pct_of_total: number }[];
+}
+
+export interface TrustSignalReport {
+  tenant_id: string;
+  prediction_id: string;
+  generated_at: string;
+  overall: 'green' | 'amber' | 'red';
+  signals: {
+    signal: string;
+    status: 'green' | 'amber' | 'red';
+    value: string;
+    threshold: string;
+    description: string;
+  }[];
+}
+
+export interface SmaMovementsReport {
+  tenant_id: string;
+  generated_at: string;
+  framework: string;
+  date: string;
+  total_movements: number;
+  deteriorations: number;
+  improvements: number;
+  unchanged: number;
+  total_exposure_at_risk_kes: number;
+  by_category_count: Record<string, number>;
+  movements: {
+    customer_id: string;
+    customer_name: string;
+    loan_id: string;
+    from_category: string;
+    to_category: string;
+    dpd: number;
+    outstanding_kes: number;
+    sector: string;
+  }[];
+}
+
+export interface SectorHeatmapReport {
+  tenant_id: string;
+  generated_at: string;
+  total_sectors: number;
+  by_heat_level: Record<string, number>;
+  cells: {
+    sector: string;
+    npa_ratio_pct: number;
+    total_customers: number;
+    total_outstanding_kes: number;
+    delta_30d_pct: number;
+    heat_level: 'low' | 'medium' | 'high' | 'critical';
+    is_watchlisted: boolean;
+  }[];
+}
 
 // ── T3.3 correlation response shapes (mirror BFF aml_alert_correlation.ts) ──
 

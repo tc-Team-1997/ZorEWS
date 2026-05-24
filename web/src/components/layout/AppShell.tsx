@@ -29,6 +29,8 @@ import {
   BarChart3,
   Database,
   Gauge,
+  BrainCircuit,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -54,6 +56,9 @@ const NAV: readonly NavItem[] = [
   { to: '/rules', i18nKey: 'rules', icon: SlidersHorizontal },
   { to: '/rules/ews', i18nKey: 'ews_rules', icon: SlidersHorizontal },
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },
+  { to: '/banking/npa-prediction', i18nKey: 'npa_prediction', icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+  { to: '/banking/sma', i18nKey: 'sma_classification', icon: TrendingUp, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+  { to: '/banking/sectors', i18nKey: 'sector_watch', icon: BarChart3, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/scenario', i18nKey: 'scenario', icon: FlaskConical },
   { to: '/reports', i18nKey: 'reports', icon: FileBarChart },
   { to: '/reports/builder', i18nKey: 'report_builder', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'] },

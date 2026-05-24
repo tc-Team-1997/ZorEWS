@@ -31,6 +31,9 @@ import { ReportBuilderPage } from '@/modules/reports/builder/ReportBuilderPage';
 import { FeatureStorePage } from '@/modules/admin/featureStore/FeatureStorePage';
 import { StreamingLatencyPage } from '@/modules/admin/streamingLatency/StreamingLatencyPage';
 import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
+import { NpaPredictionPage } from '@/modules/banking/NpaPredictionPage';
+import { SmaClassificationPage } from '@/modules/banking/SmaClassificationPage';
+import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
@@ -104,6 +107,9 @@ export function App() {
             <Route path="admin/feature-store" element={<FeatureStorePage />} />
             <Route path="admin/streaming-latency" element={<StreamingLatencyPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
+            <Route path="banking/sma" element={<SmaClassificationPage />} />
+            <Route path="banking/sectors" element={<SectorWatchPage />} />
             <Route path="profile/sessions" element={<SessionsPage />} />
             <Route path="profile/activity" element={<LoginActivityPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
