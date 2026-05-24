@@ -11429,7 +11429,18 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** POST /v1/cases/maker-checker/:action_id/reject body: { decision_notes? } */
+  /**
+   * POST /v1/cases/maker-checker/:action_id/reject body: { decision_notes }
+   *
+   * M3.2 acceptance — "Rejection requires reason." The route now
+   * enforces a non-empty `decision_notes` (≥ 3 chars after trim) BEFORE
+   * the engine is called. Approve stays optional-reason (approvals are
+   * neutral); only rejection must carry a written justification per RBI
+   * Cyber Resilience §4.2 segregation-of-duties + audit chain
+   * traceability. The engine itself stays backward-compatible — pure-
+   * function tests that call `engine.reject(..., null, ...)` directly
+   * continue to work.
+   */
   app.post(
     '/v1/cases/maker-checker/:action_id/reject',
     requireTenantMw,
@@ -11442,16 +11453,30 @@ export function makeApp(deps: AppDeps = {}) {
         raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
           ? (raw as { body: unknown }).body
           : raw;
-      const notes =
+      const rawNotes =
         inner && typeof inner === 'object' && 'decision_notes' in (inner as object)
-          ? ((inner as { decision_notes: unknown }).decision_notes as string | null)
+          ? ((inner as { decision_notes: unknown }).decision_notes as unknown)
           : null;
+      // M3.2 — rejection requires a reason (≥ 3 chars after trim).
+      const trimmed = typeof rawNotes === 'string' ? rawNotes.trim() : '';
+      if (trimmed.length < 3) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'decision_notes is required on reject (non-empty, ≥ 3 chars)',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
       try {
         const action = makerCheckerEngine.reject(
           req.tenant!.tenant_id,
           id,
           makerCheckerActor(req),
-          notes ?? null,
+          trimmed,
           now(),
         );
         return res.json(wrapResponse(action, ctx));

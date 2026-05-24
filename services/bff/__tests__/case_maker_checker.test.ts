@@ -502,11 +502,15 @@ describe('POST /v1/cases/maker-checker/:id/reject', () => {
     const engine = new InMemoryMakerCheckerEngine();
     const a = engine.submit('BIL', VALID_INPUT, 'taniya', NOW);
     const { app } = makeMcApp('admin', engine);
+    // M3.2 made decision_notes required on reject — supply a valid
+    // reason so the self-approval check is the one that fires (the
+    // 409, not a 400 on missing notes). The test still asserts the
+    // engine-level segregation-of-duties enforcement.
     const r = await request(app)
       .post(`/v1/cases/maker-checker/${a.action_id}/reject`)
       .set(TH_BIL)
       .set('x-apex-user', 'taniya')
-      .send({});
+      .send({ decision_notes: 'self-attempt — should be forbidden' });
     expect(r.status).toBe(409);
     expect(r.body.error.code).toBe('EWS_409_self_approval_forbidden');
   });

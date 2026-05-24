@@ -22,6 +22,7 @@ import { EwsRuleDiffPage } from '@/modules/rules/EwsRuleDiffPage';
 import { CmsCaseListPage } from '@/modules/cms/CmsCaseListPage';
 import { CmsCaseKanbanPage } from '@/modules/cms/CmsCaseKanbanPage';
 import { CmsCaseDetailPage } from '@/modules/cms/CmsCaseDetailPage';
+import { CaseWorkflowPage } from '@/modules/cms/CaseWorkflowPage';
 import { CaseCausalAnalysisPage } from '@/modules/cms/CaseCausalAnalysisPage';
 import { CaseCapPage } from '@/modules/cms/CaseCapPage';
 import { ScenarioPage } from '@/modules/scenario/ScenarioPage';
@@ -107,6 +108,7 @@ export function App() {
             <Route path="rules/ews/:rule_id/diff" element={<EwsRuleDiffPage />} />
             <Route path="cms/cases" element={<CmsCaseListPage />} />
             <Route path="cms/cases/kanban" element={<CmsCaseKanbanPage />} />
+            <Route path="cms/workflow" element={<CaseWorkflowPage />} />
             <Route path="cms/cases/:id" element={<CmsCaseDetailPage />} />
             <Route path="cms/cases/:id/causal-analysis" element={<CaseCausalAnalysisPage />} />
             <Route path="cms/cases/:id/cap" element={<CaseCapPage />} />

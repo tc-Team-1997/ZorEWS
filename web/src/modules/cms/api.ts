@@ -183,6 +183,38 @@ export interface CmsSlaBreach {
   progress_pct: number;
 }
 
+// Module 3.2 — Maker-checker workflow types (mirror BFF
+// services/bff/src/case_maker_checker.ts surface). Distinct from the
+// M3.1 CMS case state machine — workflow actions are PROPOSALS that
+// the case state only moves to once a different user approves.
+export type WorkflowStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type SensitiveActionType =
+  | 'case.close'
+  | 'case.escalate'
+  | 'case.override_decision';
+
+export interface WorkflowAction {
+  action_id: string;
+  tenant_id: string;
+  case_id: string;
+  action_type: SensitiveActionType;
+  payload: Record<string, unknown>;
+  status: WorkflowStatus;
+  maker_username: string;
+  maker_at: string;
+  rationale: string;
+  checker_username: string | null;
+  checker_at: string | null;
+  decision_notes: string | null;
+}
+
+export interface WorkflowListResponse {
+  items: WorkflowAction[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 // Module 3.1 — auto-escalate SLA result envelope (mirrors BFF
 // services/bff/src/cms_cases.ts AutoEscalatePlan + route additions).
 export type AutoEscalateSkipReason =
@@ -344,6 +376,41 @@ export const cmsApi = {
         threshold_pct_override: opts.threshold_pct_override,
       }),
     ),
+
+  // Module 3.2 — maker-checker workflow (M9.3 surface; lives on
+  // /v1/cases/maker-checker* not /cms/cases). 4-eyes approval for
+  // sensitive case actions: case.close / case.escalate /
+  // case.override_decision. The "Pending Requests" table on the Case
+  // Workflow page (M3.2) reads workflowList(); admins approve/reject
+  // via workflowApprove() / workflowReject().
+  workflow: {
+    list: (params: {
+      status?: WorkflowStatus;
+      action_type?: SensitiveActionType;
+      case_id?: string;
+      maker_username?: string;
+      page?: number;
+      page_size?: number;
+    } = {}) =>
+      unwrap<WorkflowListResponse>(http.get('/v1/cases/maker-checker', { params })),
+    get: (action_id: string) =>
+      unwrap<WorkflowAction>(http.get(`/v1/cases/maker-checker/${action_id}`)),
+    submit: (body: {
+      case_id: string;
+      action_type: SensitiveActionType;
+      payload: Record<string, unknown>;
+      rationale: string;
+    }) => unwrap<WorkflowAction>(http.post('/v1/cases/maker-checker', body)),
+    approve: (action_id: string, decision_notes?: string) =>
+      unwrap<WorkflowAction>(
+        http.post(`/v1/cases/maker-checker/${action_id}/approve`, { decision_notes }),
+      ),
+    // M3.2 — decision_notes REQUIRED (≥ 3 chars) per acceptance.
+    reject: (action_id: string, decision_notes: string) =>
+      unwrap<WorkflowAction>(
+        http.post(`/v1/cases/maker-checker/${action_id}/reject`, { decision_notes }),
+      ),
+  },
 
   bulkAssign: (case_ids: string[], assigned_to: string, reason?: string) =>
     unwrap<{

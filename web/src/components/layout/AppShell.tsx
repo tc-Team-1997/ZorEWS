@@ -35,6 +35,7 @@ import {
   Activity,
   Sigma,
   ShieldAlert,
+  GitBranch,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -65,6 +66,7 @@ const NAV: readonly NavItem[] = [
   { to: '/rules', i18nKey: 'rules', icon: SlidersHorizontal },
   { to: '/rules/ews', i18nKey: 'ews_rules', icon: SlidersHorizontal },
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },
+  { to: '/cms/workflow', i18nKey: 'case_workflow', icon: GitBranch, requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'] },
   { to: '/banking/npa-prediction', i18nKey: 'npa_prediction', icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sma', i18nKey: 'sma_classification', icon: TrendingUp, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sectors', i18nKey: 'sector_watch', icon: BarChart3, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
