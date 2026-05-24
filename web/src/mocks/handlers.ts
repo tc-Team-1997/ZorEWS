@@ -9823,3 +9823,265 @@ const __mswNpaHandlers = [
 ];
 
 handlers.push(...__mswNpaHandlers);
+
+// ── M2.6 — Fraud Signals (8 endpoints; pre-existing BFF surface served
+//    via vite proxy in dev, but we mirror them here for offline/test mode)
+
+interface MswFraudCase {
+  case_id: string;
+  tenant_id: string;
+  customer_id: string | null;
+  account_id: string | null;
+  category: string;
+  priority: string;
+  status: string;
+  amount_kes: number;
+  description: string;
+  detected_at: string;
+  assignee: string | null;
+  opened_by: string;
+  opened_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  sar_id: string | null;
+  vigilance_ref: string | null;
+  rule_id: string | null;
+}
+
+const __mswFraudCases: MswFraudCase[] = [
+  {
+    case_id: 'fc-BANK_DEMO-20260524-0001',
+    tenant_id: 'BANK_DEMO', customer_id: 'c-101', account_id: 'a-100101-00',
+    category: 'cheque_fraud', priority: 'critical', status: 'open',
+    amount_kes: 4_500_000,
+    description: 'Cheque kiting cluster across 3 branches — 8 cheques in 5d, distinct beneficiaries, balance roundtripped.',
+    detected_at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+    assignee: null, opened_by: 'admin',
+    opened_at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 86_400_000).toISOString(),
+    closed_at: null, sar_id: null, vigilance_ref: null, rule_id: null,
+  },
+  {
+    case_id: 'fc-BANK_DEMO-20260524-0002',
+    tenant_id: 'BANK_DEMO', customer_id: 'c-106', account_id: 'a-100106-00',
+    category: 'account_takeover', priority: 'high', status: 'investigating',
+    amount_kes: 1_250_000,
+    description: 'Session token replay from 3 distinct ASNs in 4h, OTP suppressed via reset abuse.',
+    detected_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    assignee: 'bob.supervisor', opened_by: 'admin',
+    opened_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 86_400_000).toISOString(),
+    closed_at: null, sar_id: null, vigilance_ref: null, rule_id: null,
+  },
+  {
+    case_id: 'fc-BANK_DEMO-20260524-0003',
+    tenant_id: 'BANK_DEMO', customer_id: 'c-115', account_id: 'a-100115-00',
+    category: 'identity_theft', priority: 'medium', status: 'reported',
+    amount_kes: 850_000,
+    description: 'PAN/Aadhaar mismatch on KYC re-verify + address change request from new device.',
+    detected_at: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+    assignee: 'alice.admin', opened_by: 'admin',
+    opened_at: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    closed_at: null,
+    sar_id: 'sar-BANK_DEMO-20260520-0001', vigilance_ref: null, rule_id: null,
+  },
+];
+
+interface MswFraudRule {
+  rule_id: string; tenant_id: string; name: string; category: string;
+  condition_pseudocode: string; threshold: number; enabled: boolean;
+  created_at: string; updated_at: string; created_by: string;
+}
+
+const __mswFraudRules: MswFraudRule[] = [
+  {
+    rule_id: 'fr-BANK_DEMO-001', tenant_id: 'BANK_DEMO',
+    name: 'Cheque kiting cluster', category: 'cheque_fraud',
+    condition_pseudocode: 'distinct_branches_5d ≥ 3 AND roundtripped_amount_ratio > 0.6',
+    threshold: 0.75, enabled: true,
+    created_at: new Date(Date.now() - 90 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 90 * 86_400_000).toISOString(),
+    created_by: 'admin',
+  },
+  {
+    rule_id: 'fr-BANK_DEMO-002', tenant_id: 'BANK_DEMO',
+    name: 'Session token replay', category: 'account_takeover',
+    condition_pseudocode: 'distinct_asn_4h ≥ 3 AND otp_suppressed = true',
+    threshold: 0.85, enabled: true,
+    created_at: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+    created_by: 'admin',
+  },
+];
+
+let __mswFraudCaseSeq = __mswFraudCases.length;
+let __mswFraudRuleSeq = __mswFraudRules.length;
+let __mswFraudSarSeq = 1;
+let __mswFraudVigSeq = 0;
+
+function __mswFraudWrap(b: unknown, status = 200) {
+  return HttpResponse.json(
+    {
+      header: {
+        status: 'success',
+        code: status === 201 ? 'EWS_201' : 'EWS_200',
+        message: 'ok',
+        requestId: `req-msw-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+      body: b,
+    },
+    { status },
+  );
+}
+
+function __mswFraudErr(code: string, message: string, status = 400) {
+  return HttpResponse.json(
+    {
+      header: { status: 'error', code, message, requestId: 'req-msw', timestamp: new Date().toISOString() },
+      error: { code, message, severity: status >= 500 ? 'HIGH' : 'MEDIUM' },
+    },
+    { status },
+  );
+}
+
+const __mswFraudHandlers = [
+  http.get('/v1/fraud/cases', ({ request }) => {
+    const u = new URL(request.url);
+    const status = u.searchParams.get('status');
+    const priority = u.searchParams.get('priority');
+    let rows = __mswFraudCases.slice();
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (priority) rows = rows.filter((r) => r.priority === priority);
+    return __mswFraudWrap({ tenant_id: 'BANK_DEMO', cases: rows });
+  }),
+
+  http.get('/v1/fraud/cases/:case_id', ({ params }) => {
+    const c = __mswFraudCases.find((r) => r.case_id === String(params.case_id));
+    if (!c) return __mswFraudErr('EWS_404_unknown_case', `unknown ${params.case_id}`, 404);
+    return __mswFraudWrap(c);
+  }),
+
+  http.post('/v1/fraud/cases', async ({ request }) => {
+    const body = (await request.json()) as { description?: string; category?: string };
+    if (!body.description || !body.category) {
+      return __mswFraudErr('EWS_400_invalid_input', 'description + category required', 400);
+    }
+    __mswFraudCaseSeq++;
+    const now = new Date().toISOString();
+    const c: MswFraudCase = {
+      case_id: `fc-BANK_DEMO-20260524-${String(__mswFraudCaseSeq).padStart(4, '0')}`,
+      tenant_id: 'BANK_DEMO',
+      customer_id: null, account_id: null,
+      category: body.category,
+      priority: 'medium',
+      status: 'open',
+      amount_kes: 0,
+      description: body.description,
+      detected_at: now,
+      assignee: null,
+      opened_by: 'admin',
+      opened_at: now,
+      updated_at: now,
+      closed_at: null,
+      sar_id: null,
+      vigilance_ref: null,
+      rule_id: null,
+      ...(body as object),
+    };
+    __mswFraudCases.unshift(c);
+    return __mswFraudWrap(c, 201);
+  }),
+
+  http.patch('/v1/fraud/cases/:case_id', async ({ params, request }) => {
+    const c = __mswFraudCases.find((r) => r.case_id === String(params.case_id));
+    if (!c) return __mswFraudErr('EWS_404_unknown_case', 'unknown case', 404);
+    const patch = (await request.json()) as Partial<MswFraudCase>;
+    Object.assign(c, patch, { updated_at: new Date().toISOString() });
+    return __mswFraudWrap(c);
+  }),
+
+  http.get('/v1/fraud/rules', ({ request }) => {
+    const u = new URL(request.url);
+    const enabledOnly = u.searchParams.get('enabled_only') === 'true';
+    return __mswFraudWrap({
+      rules: enabledOnly ? __mswFraudRules.filter((r) => r.enabled) : __mswFraudRules,
+    });
+  }),
+
+  http.post('/v1/fraud/rules', async ({ request }) => {
+    const body = (await request.json()) as MswFraudRule;
+    __mswFraudRuleSeq++;
+    const now = new Date().toISOString();
+    const r: MswFraudRule = {
+      rule_id: `fr-BANK_DEMO-${String(__mswFraudRuleSeq).padStart(3, '0')}`,
+      tenant_id: 'BANK_DEMO',
+      created_at: now,
+      updated_at: now,
+      created_by: 'admin',
+      enabled: true,
+      threshold: 0.75,
+      ...body,
+    };
+    __mswFraudRules.push(r);
+    return __mswFraudWrap(r, 201);
+  }),
+
+  http.post('/v1/fraud/cases/:case_id/sar', async ({ params, request }) => {
+    const c = __mswFraudCases.find((r) => r.case_id === String(params.case_id));
+    if (!c) return __mswFraudErr('EWS_404_unknown_case', 'unknown case', 404);
+    if (c.sar_id) {
+      return __mswFraudErr('EWS_409_sar_already_submitted', `SAR already on file: ${c.sar_id}`, 409);
+    }
+    const body = (await request.json()) as { summary?: string };
+    if (!body.summary || body.summary.trim().length < 20) {
+      return __mswFraudErr('EWS_400_invalid_input', 'summary ≥ 20 chars', 400);
+    }
+    __mswFraudSarSeq++;
+    const now = new Date().toISOString();
+    const sar_id = `sar-BANK_DEMO-20260524-${String(__mswFraudSarSeq).padStart(4, '0')}`;
+    c.sar_id = sar_id;
+    c.status = 'reported';
+    c.updated_at = now;
+    return __mswFraudWrap(
+      {
+        sar_id,
+        case_id: c.case_id,
+        submitted_by: 'admin',
+        submitted_at: now,
+        fiu_reference: `FIU-IND-202605-${String(__mswFraudSarSeq).padStart(6, '0')}`,
+        summary: body.summary.trim(),
+      },
+      201,
+    );
+  }),
+
+  http.post('/v1/fraud/cases/:case_id/vigilance', async ({ params, request }) => {
+    const c = __mswFraudCases.find((r) => r.case_id === String(params.case_id));
+    if (!c) return __mswFraudErr('EWS_404_unknown_case', 'unknown case', 404);
+    if (c.vigilance_ref) {
+      return __mswFraudErr('EWS_409_vigilance_already_referred', `already referred: ${c.vigilance_ref}`, 409);
+    }
+    const body = (await request.json()) as { reason?: string };
+    if (!body.reason || body.reason.trim().length < 10) {
+      return __mswFraudErr('EWS_400_invalid_input', 'reason ≥ 10 chars', 400);
+    }
+    __mswFraudVigSeq++;
+    const vigilance_ref = `vig-BANK_DEMO-20260524-${String(__mswFraudVigSeq).padStart(4, '0')}`;
+    c.vigilance_ref = vigilance_ref;
+    c.updated_at = new Date().toISOString();
+    return __mswFraudWrap(
+      {
+        vigilance_ref,
+        case_id: c.case_id,
+        referred_by: 'admin',
+        referred_at: c.updated_at,
+        reason: body.reason.trim(),
+      },
+      201,
+    );
+  }),
+];
+
+handlers.push(...__mswFraudHandlers);

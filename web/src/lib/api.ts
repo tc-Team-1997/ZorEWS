@@ -1566,6 +1566,54 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // ── M2.6 — Fraud Signals (re-uses pre-existing /v1/fraud/* surface) ──
+  fraudCasesList: (q: { status?: string; priority?: string; assignee?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.status) p.set('status', q.status);
+    if (q.priority) p.set('priority', q.priority);
+    if (q.assignee) p.set('assignee', q.assignee);
+    const qs = p.toString();
+    return http
+      .get<EnvelopeBody<FraudCasesListShape>>(`/v1/fraud/cases${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+  fraudCaseGet: (case_id: string) =>
+    http
+      .get<EnvelopeBody<FraudCaseShape>>(`/v1/fraud/cases/${encodeURIComponent(case_id)}`)
+      .then((r) => r.data),
+  fraudCaseCreate: (input: FraudCaseCreateInput) =>
+    http
+      .post<EnvelopeBody<FraudCaseShape>>('/v1/fraud/cases', input)
+      .then((r) => r.data),
+  fraudCaseUpdate: (case_id: string, patch: Partial<FraudCaseCreateInput & { status: string; assignee: string | null }>) =>
+    http
+      .patch<EnvelopeBody<FraudCaseShape>>(`/v1/fraud/cases/${encodeURIComponent(case_id)}`, patch)
+      .then((r) => r.data),
+  fraudRulesList: (enabled_only = false) =>
+    http
+      .get<EnvelopeBody<FraudRulesListShape>>(
+        `/v1/fraud/rules${enabled_only ? '?enabled_only=true' : ''}`,
+      )
+      .then((r) => r.data),
+  fraudRuleCreate: (input: FraudRuleCreateInput) =>
+    http
+      .post<EnvelopeBody<FraudRuleShape>>('/v1/fraud/rules', input)
+      .then((r) => r.data),
+  fraudCaseSarSubmit: (case_id: string, summary: string) =>
+    http
+      .post<EnvelopeBody<FraudSarReceiptShape>>(
+        `/v1/fraud/cases/${encodeURIComponent(case_id)}/sar`,
+        { summary },
+      )
+      .then((r) => r.data),
+  fraudCaseVigilanceRefer: (case_id: string, reason: string) =>
+    http
+      .post<EnvelopeBody<FraudVigilanceReceiptShape>>(
+        `/v1/fraud/cases/${encodeURIComponent(case_id)}/vigilance`,
+        { reason },
+      )
+      .then((r) => r.data),
+
   // G2 — M15.1 audit trail surface (Monday Playbook H9)
   auditEvents: (params: AuditEventQuery = {}) => {
     const qs = new URLSearchParams();
@@ -2454,6 +2502,92 @@ export interface LineageDatasetShape {
   downstream_dataset_ids?: string[];
   tags?: string[];
   source_system?: string;
+}
+
+// ── M2.6 — Fraud Signals shapes ────────────────────────────────────────
+export type FraudCaseStatus = 'open' | 'investigating' | 'reported' | 'closed' | 'false_positive';
+export type FraudPriority = 'low' | 'medium' | 'high' | 'critical';
+export type FraudCategory =
+  | 'identity_theft'
+  | 'cheque_fraud'
+  | 'card_fraud'
+  | 'cyber_fraud'
+  | 'loan_fraud'
+  | 'account_takeover'
+  | 'staff_collusion'
+  | 'other';
+
+export interface FraudCaseShape {
+  case_id: string;
+  tenant_id: string;
+  customer_id: string | null;
+  account_id: string | null;
+  category: FraudCategory;
+  priority: FraudPriority;
+  status: FraudCaseStatus;
+  amount_kes: number;
+  description: string;
+  detected_at: string;
+  assignee: string | null;
+  opened_by: string;
+  opened_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  sar_id: string | null;
+  vigilance_ref: string | null;
+  rule_id: string | null;
+}
+export interface FraudCasesListShape {
+  tenant_id: string;
+  cases: FraudCaseShape[];
+}
+export interface FraudCaseCreateInput {
+  customer_id?: string | null;
+  account_id?: string | null;
+  category: FraudCategory;
+  priority?: FraudPriority;
+  amount_kes?: number;
+  description: string;
+  detected_at?: string;
+  assignee?: string | null;
+  rule_id?: string | null;
+}
+export interface FraudRuleShape {
+  rule_id: string;
+  tenant_id: string;
+  name: string;
+  category: FraudCategory;
+  condition_pseudocode: string;
+  threshold: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+export interface FraudRulesListShape {
+  rules: FraudRuleShape[];
+}
+export interface FraudRuleCreateInput {
+  name: string;
+  category: FraudCategory;
+  condition_pseudocode: string;
+  threshold: number;
+  enabled?: boolean;
+}
+export interface FraudSarReceiptShape {
+  sar_id: string;
+  case_id: string;
+  submitted_by: string;
+  submitted_at: string;
+  fiu_reference: string;
+  summary: string;
+}
+export interface FraudVigilanceReceiptShape {
+  vigilance_ref: string;
+  case_id: string;
+  referred_by: string;
+  referred_at: string;
+  reason: string;
 }
 
 // M7.19 — Portfolio-level NPA driver aggregation

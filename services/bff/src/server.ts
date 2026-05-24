@@ -35226,9 +35226,31 @@ export function makeApp(deps: AppDeps = {}) {
             : raw;
         const summary = (inner as { summary?: string })?.summary ?? '';
         const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        return res.status(201).json(
-          wrapResponse(submitSar(req.tenant!.tenant_id, req.params.case_id, actor, summary, now()), ctx),
+        const receipt = submitSar(req.tenant!.tenant_id, req.params.case_id, actor, summary, now());
+        // M2.6 spec acceptance: SAR submission writes an audit event.
+        // The pure-function submitSar already locks the SAR draft (any
+        // subsequent submission throws sar_already_submitted → 409 above).
+        const role = ((req.headers['x-apex-role'] as string | undefined) ?? '').trim() || 'unknown';
+        const channel = (req as Request & { channel?: string }).channel ?? null;
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: role,
+            action: 'fraud.sar.submitted',
+            resource_type: 'case',
+            resource_id: req.params.case_id,
+            outcome: 'success',
+            severity: 'critical',
+            metadata: {
+              sar_id: receipt.sar_id,
+              fiu_reference: receipt.fiu_reference,
+              channel,
+            },
+          },
+          now(),
         );
+        return res.status(201).json(wrapResponse(receipt, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code ?? 'invalid_input';
         const httpStatus = code === 'unknown_case' ? 404
@@ -35258,9 +35280,28 @@ export function makeApp(deps: AppDeps = {}) {
             : raw;
         const reason = (inner as { reason?: string })?.reason ?? '';
         const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        return res.status(201).json(
-          wrapResponse(referToVigilance(req.tenant!.tenant_id, req.params.case_id, actor, reason, now()), ctx),
+        const receipt = referToVigilance(req.tenant!.tenant_id, req.params.case_id, actor, reason, now());
+        // M2.6 — symmetric audit fan-out on vigilance referral.
+        const role = ((req.headers['x-apex-role'] as string | undefined) ?? '').trim() || 'unknown';
+        const channel = (req as Request & { channel?: string }).channel ?? null;
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: role,
+            action: 'fraud.vigilance.referred',
+            resource_type: 'case',
+            resource_id: req.params.case_id,
+            outcome: 'success',
+            severity: 'warning',
+            metadata: {
+              vigilance_ref: receipt.vigilance_ref,
+              channel,
+            },
+          },
+          now(),
         );
+        return res.status(201).json(wrapResponse(receipt, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code ?? 'invalid_input';
         const httpStatus = code === 'unknown_case' ? 404
