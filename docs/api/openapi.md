@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-23T18:00:16.962Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T01:54:30.678Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **787** route declarations auto-discovered: 746 from BFF + 41 from auth-svc
+- **809** route declarations auto-discovered: 768 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -461,7 +461,7 @@ _Cases, investigations, maker-checker approvals, action log, tenant onboarding_
 
 _AI/ML model registry, scoring, promotions, retraining, copilot, predictions_
 
-**71 routes.** Routes sorted by path.
+**73 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -491,6 +491,8 @@ _AI/ML model registry, scoring, promotions, retraining, copilot, predictions_
 | `GET` | `/v1/ai/models/types` |  |
 | `GET` | `/v1/ai/predictions` | AI prediction log (pg-ai-predictions) |
 | `GET` | `/v1/ai/predictions/:prediction_id` |  |
+| `GET` | `/v1/ai/predictions/:prediction_id/explanation` | Module #6 — AI Explainability (§2.1.6) |
+| `GET` | `/v1/ai/predictions/:prediction_id/trust-signals` |  |
 | `GET` | `/v1/ai/promotions` |  |
 | `POST` | `/v1/ai/promotions` |  |
 | `GET` | `/v1/ai/promotions/:request_id` |  |
@@ -621,7 +623,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**321 routes.** Routes sorted by path.
+**341 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -672,6 +674,11 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/analytics/pd-distribution` |  |
 | `GET` | `/v1/analytics/risk-trend` |  |
 | `GET` | `/v1/analytics/stage-migration` |  |
+| `GET` | `/v1/anomalies` | Module #8 — Anomaly Detection (§2.1.8) |
+| `GET` | `/v1/anomalies/:anomaly_id` |  |
+| `GET` | `/v1/anomalies/patterns/config` |  |
+| `POST` | `/v1/anomalies/patterns/config` |  |
+| `POST` | `/v1/anomalies/rerun` |  |
 | `GET` | `/v1/audit/action-prefix-distribution` | the audit chain by ACTION PREFIX (everything before the first |
 | `GET` | `/v1/audit/action-resource-matrix` | axis is OPEN (any action verb from observed events); resource_type |
 | `GET` | `/v1/audit/actions` |  |
@@ -696,13 +703,24 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/audit/severity-distribution` | pivoted rollup. Per-severity: total_count + by_resource_type |
 | `GET` | `/v1/audit/severity-outcome-matrix` | AuditSeverity (canonical critical → warning → info) × cols = 3 |
 | `GET` | `/v1/audit/summary` | GET /v1/audit/summary?days=30 |
+| `POST` | `/v1/banking/accounts/:account_id/block` |  |
+| `GET` | `/v1/banking/accounts/:account_id/patterns` |  |
+| `GET` | `/v1/banking/accounts/signals` | Module #3 — Account Behaviour signals (ZorEWS_Pending_Gap_Analysis §2.1.3) |
 | `POST` | `/v1/banking/cma/pack` |  |
+| `GET` | `/v1/banking/npa/backtest/latest` |  |
+| `GET` | `/v1/banking/npa/high-risk` | Module #5 — NPA Prediction wrap (§2.1.5) |
+| `GET` | `/v1/banking/npa/predictions/:prediction_id/why` |  |
 | `GET` | `/v1/banking/ratios/customer/:customer_id` |  |
 | `GET` | `/v1/banking/ratios/master` |  |
 | `GET` | `/v1/banking/ratios/sector-benchmark` |  |
 | `GET` | `/v1/banking/ratios/thresholds` |  |
 | `DELETE` | `/v1/banking/ratios/thresholds/:code` |  |
 | `PUT` | `/v1/banking/ratios/thresholds/:code` |  |
+| `GET` | `/v1/banking/sectors/:sector_id/deep-dive` |  |
+| `GET` | `/v1/banking/sectors/heatmap` | Module #4 — Sector Watch heatmap (§2.1.4) |
+| `GET` | `/v1/banking/sectors/watchlist` |  |
+| `POST` | `/v1/banking/sectors/watchlist` |  |
+| `DELETE` | `/v1/banking/sectors/watchlist/:sector_id` |  |
 | `GET` | `/v1/banking/sma/drill` |  |
 | `GET` | `/v1/banking/sma/movements` |  |
 | `POST` | `/v1/banking/sma/run-classification` |  |
@@ -713,6 +731,10 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/dq/dashboard` |  |
 | `GET` | `/v1/dq/executions` |  |
 | `GET` | `/v1/dq/executions/:execution_id` |  |
+| `GET` | `/v1/dq/profile/:source_id/columns` | Module #7 — Data Profiling AI (§2.1.7) |
+| `GET` | `/v1/dq/profile/:source_id/columns/:column/distribution` |  |
+| `POST` | `/v1/dq/profile/:source_id/rules/:rule_id/promote` |  |
+| `POST` | `/v1/dq/profile/:source_id/suggest-rules` |  |
 | `GET` | `/v1/dq/rule-kinds` |  |
 | `GET` | `/v1/dq/rules` |  |
 | `POST` | `/v1/dq/rules` |  |

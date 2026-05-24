@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "524d4545-5303-4ebf-8686-170297798882",
     "name": "ZorEWS — AI APIs",
-    "description": "AI routes from the ZorEWS BFF + auth-svc surface. 71 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "AI routes from the ZorEWS BFF + auth-svc surface. 73 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -2356,7 +2356,7 @@
     },
     {
       "name": "/v1/ai/predictions",
-      "description": "2 route(s) under /v1/ai/predictions",
+      "description": "4 route(s) under /v1/ai/predictions",
       "item": [
         {
           "name": "GET /v1/ai/predictions",
@@ -2529,6 +2529,188 @@
           ],
           "response": [],
           "_summary": "GET /v1/ai/predictions/:prediction_id — auto-discovered (server.ts:5968)"
+        },
+        {
+          "name": "GET /v1/ai/predictions/{prediction_id}/explanation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/ai/predictions/:prediction_id/explanation",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "ai",
+                "predictions",
+                ":prediction_id",
+                "explanation"
+              ],
+              "variable": [
+                {
+                  "key": "prediction_id",
+                  "value": "{{prediction_id}}",
+                  "description": "Path parameter: prediction_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/ai/predictions/{prediction_id}/explanation",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Module #6 — AI Explainability (§2.1.6)"
+        },
+        {
+          "name": "GET /v1/ai/predictions/{prediction_id}/trust-signals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/ai/predictions/:prediction_id/trust-signals",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "ai",
+                "predictions",
+                ":prediction_id",
+                "trust-signals"
+              ],
+              "variable": [
+                {
+                  "key": "prediction_id",
+                  "value": "{{prediction_id}}",
+                  "description": "Path parameter: prediction_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/ai/predictions/{prediction_id}/trust-signals",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/ai/predictions/:prediction_id/trust-signals — auto-discovered (server.ts:32769)"
         }
       ]
     },

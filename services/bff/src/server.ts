@@ -32467,6 +32467,528 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Module #3 — Account Behaviour signals (ZorEWS_Pending_Gap_Analysis §2.1.3)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/accounts/signals',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildAccountSignals } =
+          require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
+        const customer_id = req.query.customer_id as string | undefined;
+        const watchlist_only = String(req.query.watchlist_only ?? '').toLowerCase() === 'true';
+        const out = buildAccountSignals(
+          req.tenant!.tenant_id,
+          { customer_id, watchlist_only },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const isAB = (e as { name?: string }).name === 'AccountBehaviourError';
+        const msg = e instanceof Error ? e.message : 'signals_failed';
+        return res
+          .status(isAB ? 400 : 500)
+          .json(
+            wrapError(
+              { code: isAB ? 'EWS_400_invalid_input' : 'EWS_500', message: msg, severity: isAB ? 'MEDIUM' : 'HIGH' },
+              ctx,
+            ),
+          );
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/accounts/:account_id/patterns',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildAccountPatterns } =
+          require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
+        const out = buildAccountPatterns(req.tenant!.tenant_id, req.params.account_id, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'patterns_failed';
+        return res
+          .status(400)
+          .json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/banking/accounts/:account_id/block',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { proposeAccountBlock } =
+          require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const b = (inner ?? {}) as { reason?: string; decision?: 'approve' | 'reject'; request_id?: string };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        // If body has decision + request_id, treat as 4-eyes review
+        if (b.request_id && b.decision) {
+          const { reviewBlockRequest } =
+            require('./banking_account_behaviour') as typeof import('./banking_account_behaviour');
+          const reviewed = reviewBlockRequest(
+            req.tenant!.tenant_id,
+            b.request_id,
+            b.decision,
+            actor,
+            now(),
+          );
+          return res.json(wrapResponse(reviewed, ctx));
+        }
+        const proposed = proposeAccountBlock(
+          req.tenant!.tenant_id,
+          req.params.account_id,
+          b.reason ?? '',
+          actor,
+          now(),
+        );
+        return res.status(201).json(wrapResponse(proposed, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const httpStatus = code === 'unknown_request' ? 404
+          : code === 'already_decided' || code === 'self_approval_forbidden' ? 409
+          : 400;
+        const ews = code === 'unknown_request' ? 'EWS_404_unknown_request'
+          : code === 'already_decided' ? 'EWS_409_already_decided'
+          : code === 'self_approval_forbidden' ? 'EWS_409_self_approval_forbidden'
+          : `EWS_400_${code}`;
+        const msg = e instanceof Error ? e.message : 'block_failed';
+        return res
+          .status(httpStatus)
+          .json(wrapError({ code: ews, message: msg, severity: httpStatus >= 500 ? 'HIGH' : 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #4 — Sector Watch heatmap (§2.1.4)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/sectors/heatmap',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSectorHeatmap } =
+          require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+        return res.json(wrapResponse(buildSectorHeatmap(req.tenant!.tenant_id, now()), ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'heatmap_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/sectors/:sector_id/deep-dive',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildSectorDeepDive } =
+          require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+        return res.json(
+          wrapResponse(
+            buildSectorDeepDive(
+              req.tenant!.tenant_id,
+              req.params.sector_id as import('./banking_sector_watch').SectorCode,
+              now(),
+            ),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_sector' ? 404 : 400;
+        const ews = code === 'unknown_sector' ? 'EWS_404_unknown_sector' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'deep_dive_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/sectors/watchlist',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listWatchlist } =
+        require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+      return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, watchlist: listWatchlist(req.tenant!.tenant_id) }, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/banking/sectors/watchlist',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { addToWatchlist } =
+          require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const sector = (inner as { sector?: string })?.sector ?? '';
+        const updated = addToWatchlist(req.tenant!.tenant_id, sector as import('./banking_sector_watch').SectorCode);
+        return res.status(201).json(wrapResponse({ tenant_id: req.tenant!.tenant_id, watchlist: updated }, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_sector' ? 404 : 400;
+        const ews = code === 'unknown_sector' ? 'EWS_404_unknown_sector' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'watchlist_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.delete(
+    '/v1/banking/sectors/watchlist/:sector_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { removeFromWatchlist } =
+        require('./banking_sector_watch') as typeof import('./banking_sector_watch');
+      const updated = removeFromWatchlist(
+        req.tenant!.tenant_id,
+        req.params.sector_id as import('./banking_sector_watch').SectorCode,
+      );
+      return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, watchlist: updated }, ctx));
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #5 — NPA Prediction wrap (§2.1.5)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/npa/high-risk',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildNpaHighRisk } =
+          require('./banking_npa_prediction') as typeof import('./banking_npa_prediction');
+        const h = parseInt(req.query.horizon as string, 10);
+        const horizon = Number.isFinite(h) ? (h as 30 | 60 | 90 | 180) : 90;
+        return res.json(wrapResponse(buildNpaHighRisk(req.tenant!.tenant_id, horizon, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews = code === 'invalid_horizon' ? 'EWS_400_invalid_horizon' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'npa_high_risk_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/npa/predictions/:prediction_id/why',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { explainNpaPrediction } =
+          require('./banking_npa_prediction') as typeof import('./banking_npa_prediction');
+        return res.json(
+          wrapResponse(explainNpaPrediction(req.tenant!.tenant_id, req.params.prediction_id, now()), ctx),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'explain_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/npa/backtest/latest',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildNpaBacktest } =
+          require('./banking_npa_prediction') as typeof import('./banking_npa_prediction');
+        return res.json(wrapResponse(buildNpaBacktest(req.tenant!.tenant_id, now()), ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'backtest_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #6 — AI Explainability (§2.1.6)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/ai/predictions/:prediction_id/explanation',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { explainPrediction } =
+          require('./ai_explainability') as typeof import('./ai_explainability');
+        return res.json(
+          wrapResponse(explainPrediction(req.tenant!.tenant_id, req.params.prediction_id, now()), ctx),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'explanation_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/ai/predictions/:prediction_id/trust-signals',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildTrustSignals } =
+          require('./ai_explainability') as typeof import('./ai_explainability');
+        return res.json(
+          wrapResponse(buildTrustSignals(req.tenant!.tenant_id, req.params.prediction_id, now()), ctx),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'trust_signals_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #7 — Data Profiling AI (§2.1.7)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/dq/profile/:source_id/columns',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { profileSource } = require('./data_profiling') as typeof import('./data_profiling');
+        return res.json(wrapResponse(profileSource(req.tenant!.tenant_id, req.params.source_id, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_source' ? 404 : 400;
+        const ews = code === 'unknown_source' ? 'EWS_404_unknown_source' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'profile_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/dq/profile/:source_id/columns/:column/distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildColumnDistribution } = require('./data_profiling') as typeof import('./data_profiling');
+        return res.json(
+          wrapResponse(
+            buildColumnDistribution(req.tenant!.tenant_id, req.params.source_id, req.params.column, now()),
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_source' || code === 'unknown_column' ? 404 : 400;
+        const ews = code === 'unknown_source' ? 'EWS_404_unknown_source'
+          : code === 'unknown_column' ? 'EWS_404_unknown_column'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'distribution_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/dq/profile/:source_id/suggest-rules',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { suggestDqRules } = require('./data_profiling') as typeof import('./data_profiling');
+        const rules = suggestDqRules(req.tenant!.tenant_id, req.params.source_id, now());
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, source_id: req.params.source_id, count: rules.length, rules }, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_source' ? 404 : 400;
+        const ews = code === 'unknown_source' ? 'EWS_404_unknown_source' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'suggest_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/dq/profile/:source_id/rules/:rule_id/promote',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { promoteDqRule } = require('./data_profiling') as typeof import('./data_profiling');
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const promoted = promoteDqRule(req.tenant!.tenant_id, req.params.rule_id, actor, now());
+        return res.json(wrapResponse(promoted, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_rule' ? 404
+          : code === 'already_promoted' ? 409
+          : 400;
+        const ews = code === 'unknown_rule' ? 'EWS_404_unknown_rule'
+          : code === 'already_promoted' ? 'EWS_409_already_promoted'
+          : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'promote_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #8 — Anomaly Detection (§2.1.8)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/anomalies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { listAnomalies } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const out = listAnomalies(
+          req.tenant!.tenant_id,
+          {
+            pattern: req.query.pattern as import('./anomaly_detection').AnomalyPattern | undefined,
+            status: req.query.status as import('./anomaly_detection').AnomalyStatus | undefined,
+            severity: req.query.severity as import('./anomaly_detection').AnomalySeverity | undefined,
+            source_id: req.query.source_id as string | undefined,
+            customer_id: req.query.customer_id as string | undefined,
+          },
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'list_anomalies_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/anomalies/patterns/config',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getPatternConfig } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+      return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, patterns: getPatternConfig(req.tenant!.tenant_id) }, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/anomalies/patterns/config',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { setPatternConfig } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const updates = (inner as { updates?: unknown })?.updates as { pattern: import('./anomaly_detection').AnomalyPattern; enabled?: boolean; threshold?: number }[];
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        if (!Array.isArray(updates)) {
+          return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: 'updates[] required', severity: 'MEDIUM' }, ctx));
+        }
+        const patterns = setPatternConfig(req.tenant!.tenant_id, updates, actor);
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, patterns }, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews = code === 'unknown_pattern' ? 'EWS_400_unknown_pattern' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'config_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/anomalies/rerun',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { triggerAnomalyRerun } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        return res.status(201).json(wrapResponse(triggerAnomalyRerun(req.tenant!.tenant_id, actor, now()), ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'rerun_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/anomalies/:anomaly_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getAnomaly } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+      const found = getAnomaly(req.tenant!.tenant_id, req.params.anomaly_id);
+      if (!found) {
+        return res
+          .status(404)
+          .json(
+            wrapError(
+              { code: 'EWS_404_unknown_anomaly', message: `unknown anomaly ${req.params.anomaly_id}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+      }
+      return res.json(wrapResponse(found, ctx));
+    },
+  );
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 
