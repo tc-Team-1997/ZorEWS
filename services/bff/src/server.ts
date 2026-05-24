@@ -408,6 +408,7 @@ import {
   type CmsListFilter,
 } from './cms_store';
 import { seedDefaultEwsRules } from './ews_rules_seed';
+import { seedDemoAuditEvents } from './demo_audit_seed';
 import {
   autoCreateCaseFromAlert,
   defaultAssigneePoolStore,
@@ -34464,6 +34465,14 @@ if (require.main === module) {
       typeof import('./analytics/stage_migration');
     const { source: stageMigrationSource } = await makeStageMigrationSource();
     seedDemoCmsCases(); // populate the default in-memory CMS store on cold start
+    try {
+      const r = seedDemoAuditEvents(defaultAuditTrailStore, new Date());
+      // eslint-disable-next-line no-console
+      console.log(`[bff] seeded ${r.seeded} demo audit events (skipped tenants: ${r.skipped_tenants.join(', ') || 'none'})`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[bff] demo audit seed failed (non-fatal):', e);
+    }
     // T6 M14.25b — escalation worker cron. Off by default; opt-in via
     // ESCALATION_WORKER_INTERVAL_SEC. Tenants come from
     // ESCALATION_WORKER_TENANTS (CSV), default BANK_DEMO,BIL.
