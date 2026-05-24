@@ -33,6 +33,7 @@ import {
   BrainCircuit,
   TrendingUp,
   Activity,
+  Sigma,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -58,6 +59,7 @@ const NAV: readonly NavItem[] = [
   { to: '/customers', i18nKey: 'customers', icon: Users },
   { to: '/borrower-watch', i18nKey: 'borrower_watch', icon: TrendingUp },
   { to: '/account-behaviour', i18nKey: 'account_behaviour', icon: Activity },
+  { to: '/financial-ratios', i18nKey: 'financial_ratios', icon: Sigma },
   { to: '/rules', i18nKey: 'rules', icon: SlidersHorizontal },
   { to: '/rules/ews', i18nKey: 'ews_rules', icon: SlidersHorizontal },
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },

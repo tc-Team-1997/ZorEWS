@@ -33383,6 +33383,126 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // M2.3 — single-ratio history slice with sector benchmark overlay.
+  // Mounted BEFORE /v1/banking/ratios/customer/:customer_id so the literal
+  // /history segment is captured first.
+  app.get(
+    '/v1/banking/ratios/customer/:customer_id/history',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildRatioHistorySlice } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const cid = req.params.customer_id ?? '';
+        const ratio_code = (req.query.ratio_code as string | undefined) ?? '';
+        if (!cid) {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_missing_customer_id', message: 'customer_id required', severity: 'MEDIUM' }, ctx));
+        }
+        if (!ratio_code) {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_missing_ratio_code', message: 'ratio_code query param required', severity: 'MEDIUM' }, ctx));
+        }
+        const overrides = defaultRatioThresholdStore.resolve(req.tenant!.tenant_id);
+        const out = buildRatioHistorySlice(req.tenant!.tenant_id, cid, ratio_code, overrides, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const isRatiosErr = (e as { name?: string }).name === 'RatiosError';
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const msg = e instanceof Error ? e.message : 'history_slice_failed';
+        if (isRatiosErr && code === 'invalid_ratio_code') {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_invalid_ratio_code', message: msg, severity: 'MEDIUM' }, ctx));
+        }
+        return res
+          .status(isRatiosErr ? 400 : 500)
+          .json(wrapError({ code: isRatiosErr ? `EWS_400_${code}` : 'EWS_500', message: msg, severity: isRatiosErr ? 'MEDIUM' : 'HIGH' }, ctx));
+      }
+    },
+  );
+
+  // M2.3 — ratio notes: GET list (filterable) + POST add.
+  app.get(
+    '/v1/banking/ratios/notes',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultRatioNoteStore, isRatioCode } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const customer_id = (req.query.customer_id as string | undefined)?.trim() || undefined;
+        const ratio_code_raw = (req.query.ratio_code as string | undefined)?.trim() || undefined;
+        if (ratio_code_raw && !isRatioCode(ratio_code_raw.toUpperCase())) {
+          return res
+            .status(400)
+            .json(wrapError({ code: 'EWS_400_invalid_ratio_code', message: `unknown ratio: ${ratio_code_raw}`, severity: 'MEDIUM' }, ctx));
+        }
+        const notes = defaultRatioNoteStore.list(req.tenant!.tenant_id, { customer_id, ratio_code: ratio_code_raw });
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, total: notes.length, notes }, ctx));
+      } catch (e) {
+        return res
+          .status(500)
+          .json(wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'notes_list_failed', severity: 'HIGH' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/banking/ratios/notes',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultRatioNoteStore } = require('./banking_ratios') as typeof import('./banking_ratios');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const b = (inner ?? {}) as { customer_id?: string; ratio_code?: string; body?: string };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const note = defaultRatioNoteStore.add(
+          req.tenant!.tenant_id,
+          b.customer_id ?? '',
+          b.ratio_code ?? '',
+          b.body ?? '',
+          actor,
+          now(),
+        );
+        // Audit fan-out (cross-cutting #6)
+        const role = ((req.headers['x-apex-role'] as string | undefined) ?? '').trim() || 'unknown';
+        const channel = (req as Request & { channel?: string }).channel ?? null;
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: role,
+            action: 'ratio_note.add',
+            resource_type: 'config',
+            resource_id: `${note.customer_id}|${note.ratio_code}`,
+            outcome: 'success',
+            severity: 'info',
+            metadata: { note_id: note.note_id, channel, body_length: note.body.length },
+          },
+          now(),
+        );
+        return res.status(201).json(wrapResponse(note, ctx));
+      } catch (e) {
+        const isRatiosErr = (e as { name?: string }).name === 'RatiosError';
+        const code = (e as { code?: string }).code ?? 'invalid_input';
+        const msg = e instanceof Error ? e.message : 'note_add_failed';
+        return res
+          .status(isRatiosErr ? 400 : 500)
+          .json(wrapError({ code: isRatiosErr ? `EWS_400_${code}` : 'EWS_500', message: msg, severity: isRatiosErr ? 'MEDIUM' : 'HIGH' }, ctx));
+      }
+    },
+  );
+
   app.get(
     '/v1/banking/ratios/sector-benchmark',
     requireTenantMw,

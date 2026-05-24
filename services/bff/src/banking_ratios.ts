@@ -661,3 +661,161 @@ ${customerSections.join('\n')}
     size_bytes: Buffer.byteLength(html, 'utf8'),
   };
 }
+
+// ─── M2.3 Additive surface — history slice + notes ─────────────────────
+//
+// Per cross-cutting #1 (no duplication), `buildRatioHistorySlice` re-uses
+// `buildCustomerRatios` + `buildSectorBenchmark` to compose a single-ratio
+// 12-month view with sector benchmark overlay — exactly what the SPA's
+// Ratio detail modal renders.
+
+export interface RatioHistorySliceResult {
+  tenant_id: string;
+  generated_at: string;
+  customer_id: string;
+  customer_name: string;
+  sector: string;
+  ratio_code: RatioCode;
+  ratio_def: RatioDef;
+  current: RatioValue;
+  history: RatioHistoryPoint[];
+  sector_benchmark: { p25: number; median: number; p75: number; internal_median: number };
+  trend_vs_sector: 'better' | 'worse' | 'on_par';
+  threshold: { warning: number; critical: number; source: 'tenant_override' | 'platform_default' };
+}
+
+export function buildRatioHistorySlice(
+  tenant_id: string,
+  customer_id: string,
+  ratio_code: string,
+  thresholdOverrides: Partial<Record<RatioCode, { warning: number; critical: number }>>,
+  now: Date,
+  historyMonths = 12,
+): RatioHistorySliceResult {
+  if (!tenant_id) throw new RatiosError('invalid_input', 'tenant_id is required');
+  if (!customer_id) throw new RatiosError('invalid_input', 'customer_id is required');
+  const codeUpper = (ratio_code ?? '').toUpperCase();
+  if (!isRatioCode(codeUpper))
+    throw new RatiosError('invalid_ratio_code', `unknown ratio: ${ratio_code}`);
+
+  const bundle = buildCustomerRatios(
+    tenant_id,
+    customer_id,
+    thresholdOverrides,
+    now,
+    historyMonths,
+  );
+  const code = codeUpper as RatioCode;
+  const benchmark = buildSectorBenchmark(tenant_id, bundle.sector, now);
+  const benchRow = benchmark.ratios.find((r) => r.code === code);
+  if (!benchRow) {
+    // Defensive — sector benchmark must include every catalog ratio. If it
+    // doesn't (future drift), fall back to placeholder values so the route
+    // doesn't 500.
+    throw new RatiosError('sector_benchmark_missing', `sector ${bundle.sector} has no benchmark for ${code}`);
+  }
+  const def = RATIO_BY_CODE[code];
+
+  // Trend vs sector — polarity-aware "better/worse" verdict.
+  const value = bundle.current[code].value;
+  const median = benchRow.rbi_median;
+  let trend: 'better' | 'worse' | 'on_par' = 'on_par';
+  const drift = Math.abs(value - median) / Math.max(1e-9, Math.abs(median));
+  if (drift < 0.05) {
+    trend = 'on_par';
+  } else if (def.polarity === 'higher_is_better') {
+    trend = value > median ? 'better' : 'worse';
+  } else {
+    trend = value < median ? 'better' : 'worse';
+  }
+
+  const override = thresholdOverrides[code];
+  const threshold = override
+    ? { warning: override.warning, critical: override.critical, source: 'tenant_override' as const }
+    : { warning: def.default_warning, critical: def.default_critical, source: 'platform_default' as const };
+
+  return {
+    tenant_id,
+    generated_at: now.toISOString(),
+    customer_id,
+    customer_name: bundle.customer_name,
+    sector: bundle.sector,
+    ratio_code: code,
+    ratio_def: def,
+    current: bundle.current[code],
+    history: bundle.history[code],
+    sector_benchmark: {
+      p25: benchRow.rbi_quartile_25,
+      median: benchRow.rbi_median,
+      p75: benchRow.rbi_quartile_75,
+      internal_median: benchRow.internal_median,
+    },
+    trend_vs_sector: trend,
+    threshold,
+  };
+}
+
+// ─── Ratio Notes ────────────────────────────────────────────────────────
+//
+// User-supplied free-text annotations per (customer, ratio). Tooltip-sized
+// (≤ 1000 chars). Tenant-scoped. Append-only.
+
+export interface RatioNote {
+  note_id: string;
+  tenant_id: string;
+  customer_id: string;
+  ratio_code: RatioCode;
+  body: string;
+  author: string;
+  created_at: string;
+}
+
+export interface IRatioNoteStore {
+  add(tenant_id: string, customer_id: string, ratio_code: string, body: string, author: string, now: Date): RatioNote;
+  list(tenant_id: string, filter?: { customer_id?: string; ratio_code?: string }): RatioNote[];
+  _reset(): void;
+}
+
+export class InMemoryRatioNoteStore implements IRatioNoteStore {
+  private notes: RatioNote[] = [];
+  private seq = 0;
+
+  add(tenant_id: string, customer_id: string, ratio_code: string, body: string, author: string, now: Date): RatioNote {
+    if (!tenant_id) throw new RatiosError('invalid_input', 'tenant_id required');
+    if (!customer_id) throw new RatiosError('invalid_input', 'customer_id required');
+    const codeUpper = (ratio_code ?? '').toUpperCase();
+    if (!isRatioCode(codeUpper)) throw new RatiosError('invalid_ratio_code', `unknown ratio: ${ratio_code}`);
+    if (!body || typeof body !== 'string' || body.trim().length === 0)
+      throw new RatiosError('invalid_input', 'body is required');
+    if (body.length > 1000) throw new RatiosError('invalid_input', 'body must be ≤ 1000 chars');
+    if (!author) throw new RatiosError('invalid_input', 'author required');
+    this.seq++;
+    const note: RatioNote = {
+      note_id: `rnote-${tenant_id}-${now.toISOString().slice(0, 10).replace(/-/g, '')}-${String(this.seq).padStart(4, '0')}`,
+      tenant_id,
+      customer_id,
+      ratio_code: codeUpper as RatioCode,
+      body: body.trim(),
+      author,
+      created_at: now.toISOString(),
+    };
+    this.notes.push(note);
+    return note;
+  }
+
+  list(tenant_id: string, filter: { customer_id?: string; ratio_code?: string } = {}): RatioNote[] {
+    const codeUpper = filter.ratio_code ? filter.ratio_code.toUpperCase() : undefined;
+    return this.notes
+      .filter((n) => n.tenant_id === tenant_id)
+      .filter((n) => !filter.customer_id || n.customer_id === filter.customer_id)
+      .filter((n) => !codeUpper || n.ratio_code === codeUpper)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  _reset() {
+    this.notes = [];
+    this.seq = 0;
+  }
+}
+
+export const defaultRatioNoteStore: IRatioNoteStore = new InMemoryRatioNoteStore();

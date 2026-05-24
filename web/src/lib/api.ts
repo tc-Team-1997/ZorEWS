@@ -1933,7 +1933,183 @@ export const api = {
         { request_id, decision },
       )
       .then((r) => r.data),
+
+  // ── M2.3 — Financial Ratios ─────────────────────────────────────────
+  ratiosMaster: () =>
+    http
+      .get<EnvelopeBody<RatioMasterShape>>('/v1/banking/ratios/master')
+      .then((r) => r.data),
+  ratiosThresholds: () =>
+    http
+      .get<EnvelopeBody<RatioThresholdsListShape>>('/v1/banking/ratios/thresholds')
+      .then((r) => r.data),
+  ratiosSetThreshold: (code: string, warning: number, critical: number) =>
+    http
+      .put<EnvelopeBody<RatioThresholdEntryShape>>(
+        `/v1/banking/ratios/thresholds/${encodeURIComponent(code)}`,
+        { warning, critical },
+      )
+      .then((r) => r.data),
+  ratiosClearThreshold: (code: string) =>
+    http
+      .delete<EnvelopeBody<RatioThresholdEntryShape>>(
+        `/v1/banking/ratios/thresholds/${encodeURIComponent(code)}`,
+      )
+      .then((r) => r.data),
+  ratiosByCustomer: (customer_id: string) =>
+    http
+      .get<EnvelopeBody<CustomerRatioBundleShape>>(
+        `/v1/banking/ratios/customer/${encodeURIComponent(customer_id)}`,
+      )
+      .then((r) => r.data),
+  ratiosHistory: (customer_id: string, ratio_code: string) =>
+    http
+      .get<EnvelopeBody<RatioHistorySliceShape>>(
+        `/v1/banking/ratios/customer/${encodeURIComponent(customer_id)}/history?ratio_code=${encodeURIComponent(ratio_code)}`,
+      )
+      .then((r) => r.data),
+  ratiosSectorBenchmark: (sector: string) =>
+    http
+      .get<EnvelopeBody<SectorBenchmarkShape>>(
+        `/v1/banking/ratios/sector-benchmark?sector=${encodeURIComponent(sector)}`,
+      )
+      .then((r) => r.data),
+  ratiosNotesList: (q: { customer_id?: string; ratio_code?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.customer_id) p.set('customer_id', q.customer_id);
+    if (q.ratio_code) p.set('ratio_code', q.ratio_code);
+    const qs = p.toString();
+    return http
+      .get<EnvelopeBody<RatioNotesListShape>>(`/v1/banking/ratios/notes${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+  ratiosNotesAdd: (customer_id: string, ratio_code: string, body: string) =>
+    http
+      .post<EnvelopeBody<RatioNoteShape>>('/v1/banking/ratios/notes', {
+        customer_id,
+        ratio_code,
+        body,
+      })
+      .then((r) => r.data),
+  buildCmaPack: (cohort: string[], forms: ('II' | 'III' | 'IV' | 'V')[]) =>
+    http
+      .post<EnvelopeBody<CmaPackResultShape>>('/v1/banking/cma/pack', { cohort, forms })
+      .then((r) => r.data),
 };
+
+// ── M2.3 — Financial Ratios shapes ─────────────────────────────────────
+export type RatioCode = 'DSCR' | 'ICR' | 'CR' | 'QR' | 'DER' | 'TOL_TNW' | 'STK_TO' | 'DBT_TO';
+export type RatioBand = 'green' | 'amber' | 'red';
+export type RatioPolarity = 'higher_is_better' | 'lower_is_better';
+
+export interface RatioDefShape {
+  code: RatioCode;
+  name: string;
+  formula: string;
+  unit: '×' | 'ratio' | 'days';
+  polarity: RatioPolarity;
+  default_warning: number;
+  default_critical: number;
+  description: string;
+}
+export interface RatioValueShape {
+  code: RatioCode;
+  value: number;
+  band: RatioBand;
+  warning_threshold: number;
+  critical_threshold: number;
+  polarity: RatioPolarity;
+  observed_at: string;
+}
+export interface RatioHistoryPointShape {
+  date: string;
+  value: number;
+  band: RatioBand;
+}
+export interface CustomerRatioBundleShape {
+  tenant_id: string;
+  generated_at: string;
+  customer_id: string;
+  customer_name: string;
+  sector: string;
+  current: Record<RatioCode, RatioValueShape>;
+  history: Record<RatioCode, RatioHistoryPointShape[]>;
+  worst_band: RatioBand;
+  worst_ratios: RatioCode[];
+}
+export interface RatioMasterShape {
+  total: number;
+  ratios: RatioDefShape[];
+}
+export interface RatioThresholdEntryShape {
+  tenant_id: string;
+  code: RatioCode;
+  warning: number;
+  critical: number;
+  source: 'tenant_override' | 'platform_default';
+  updated_by: string | null;
+  updated_at: string | null;
+}
+export interface RatioThresholdsListShape {
+  tenant_id: string;
+  total: number;
+  entries: RatioThresholdEntryShape[];
+}
+export interface RatioHistorySliceShape {
+  tenant_id: string;
+  generated_at: string;
+  customer_id: string;
+  customer_name: string;
+  sector: string;
+  ratio_code: RatioCode;
+  ratio_def: RatioDefShape;
+  current: RatioValueShape;
+  history: RatioHistoryPointShape[];
+  sector_benchmark: { p25: number; median: number; p75: number; internal_median: number };
+  trend_vs_sector: 'better' | 'worse' | 'on_par';
+  threshold: { warning: number; critical: number; source: 'tenant_override' | 'platform_default' };
+}
+export interface SectorBenchmarkRowShape {
+  code: RatioCode;
+  name: string;
+  rbi_quartile_25: number;
+  rbi_median: number;
+  rbi_quartile_75: number;
+  internal_median: number;
+  sample_size: number;
+}
+export interface SectorBenchmarkShape {
+  tenant_id: string;
+  generated_at: string;
+  sector: string;
+  as_of_quarter: string;
+  ratios: SectorBenchmarkRowShape[];
+}
+export interface RatioNoteShape {
+  note_id: string;
+  tenant_id: string;
+  customer_id: string;
+  ratio_code: RatioCode;
+  body: string;
+  author: string;
+  created_at: string;
+}
+export interface RatioNotesListShape {
+  tenant_id: string;
+  total: number;
+  notes: RatioNoteShape[];
+}
+export interface CmaPackResultShape {
+  pack_id: string;
+  tenant_id: string;
+  generated_at: string;
+  generated_by: string;
+  cohort_size: number;
+  cohort: string[];
+  forms: ('II' | 'III' | 'IV' | 'V')[];
+  html: string;
+  size_bytes: number;
+}
 
 // ── M2.2 — Account Behaviour shapes ───────────────────────────────────
 export type AccountSignalSeverity = 'low' | 'medium' | 'high' | 'critical';

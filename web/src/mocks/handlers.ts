@@ -9358,3 +9358,208 @@ const __mswAbHandlers = [
 ];
 
 handlers.push(...__mswAbHandlers);
+
+// ── M2.3 — Financial Ratios ─────────────────────────────────────────
+//
+// Dev-mode fixtures mirror the BFF semantics at a small scale. The real
+// BFF (re-uses M14.7 + RBI sectoral lending deterministic synth) is wired
+// via vite proxy in dev.
+
+const __mswFrRatios = [
+  { code: 'DSCR', name: 'Debt Service Coverage Ratio', formula: 'EBITDA / (Interest + Principal)', unit: '×', polarity: 'higher_is_better', default_warning: 1.5, default_critical: 1.2, description: '' },
+  { code: 'ICR', name: 'Interest Coverage Ratio', formula: 'EBIT / Interest Expense', unit: '×', polarity: 'higher_is_better', default_warning: 2.0, default_critical: 1.5, description: '' },
+  { code: 'CR', name: 'Current Ratio', formula: 'Current Assets / Current Liabilities', unit: '×', polarity: 'higher_is_better', default_warning: 1.5, default_critical: 1.2, description: '' },
+  { code: 'QR', name: 'Quick Ratio', formula: '(CA – Inventory) / CL', unit: '×', polarity: 'higher_is_better', default_warning: 1.0, default_critical: 0.8, description: '' },
+  { code: 'DER', name: 'Debt-to-Equity', formula: 'Total Debt / Net Worth', unit: '×', polarity: 'lower_is_better', default_warning: 2.0, default_critical: 3.0, description: '' },
+  { code: 'TOL_TNW', name: 'TOL / TNW', formula: 'Total Outside Liab / Tangible Net Worth', unit: '×', polarity: 'lower_is_better', default_warning: 2.5, default_critical: 4.0, description: '' },
+  { code: 'STK_TO', name: 'Stock Turnover', formula: 'COGS / Avg Inventory', unit: 'days', polarity: 'lower_is_better', default_warning: 90, default_critical: 120, description: '' },
+  { code: 'DBT_TO', name: 'Debtor Turnover', formula: 'Sales / Avg Receivables', unit: 'days', polarity: 'lower_is_better', default_warning: 75, default_critical: 105, description: '' },
+] as const;
+
+const __mswFrThresholds: Record<string, { warning: number; critical: number; updated_by: string; updated_at: string }> = {};
+const __mswFrNotes: Array<{ note_id: string; tenant_id: string; customer_id: string; ratio_code: string; body: string; author: string; created_at: string }> = [];
+let __mswFrNoteSeq = 0;
+
+function __mswFrWrap(b: unknown, status = 200) {
+  return HttpResponse.json({ header: { status: 'success', code: status === 201 ? 'EWS_201' : 'EWS_200', message: 'ok', requestId: `req-msw-${Date.now()}`, timestamp: new Date().toISOString() }, body: b }, { status });
+}
+
+function __mswFrSeed(cid: string, code: string) {
+  // Tiny deterministic per (cid, code) value within the ratio's range.
+  let h = 0x811c9dc5;
+  for (const c of `${cid}|${code}`) {
+    h ^= c.charCodeAt(0);
+    h = (h * 0x01000193) >>> 0;
+  }
+  const r = (h % 10000) / 10000;
+  switch (code) {
+    case 'DSCR': return Math.round((1 + r * 1.5) * 100) / 100;
+    case 'ICR': return Math.round((1 + r * 4) * 100) / 100;
+    case 'CR': return Math.round((0.8 + r * 1.8) * 100) / 100;
+    case 'QR': return Math.round((0.5 + r * 1.4) * 100) / 100;
+    case 'DER': return Math.round((0.5 + r * 3.5) * 100) / 100;
+    case 'TOL_TNW': return Math.round((1 + r * 4.5) * 100) / 100;
+    case 'STK_TO': return Math.round(30 + r * 150);
+    case 'DBT_TO': return Math.round(30 + r * 120);
+  }
+  return 1;
+}
+
+function __mswFrBand(code: string, v: number): 'green' | 'amber' | 'red' {
+  const r = __mswFrRatios.find((x) => x.code === code)!;
+  const ovr = __mswFrThresholds[code];
+  const warning = ovr?.warning ?? r.default_warning;
+  const critical = ovr?.critical ?? r.default_critical;
+  if (r.polarity === 'higher_is_better') {
+    if (v < critical) return 'red';
+    if (v < warning) return 'amber';
+    return 'green';
+  }
+  if (v > critical) return 'red';
+  if (v > warning) return 'amber';
+  return 'green';
+}
+
+const __mswFrHandlers = [
+  http.get('/v1/banking/ratios/master', () => __mswFrWrap({ total: __mswFrRatios.length, ratios: __mswFrRatios })),
+
+  http.get('/v1/banking/ratios/thresholds', () => {
+    const entries = Object.entries(__mswFrThresholds).map(([code, v]) => ({
+      tenant_id: 'BANK_DEMO', code, warning: v.warning, critical: v.critical, source: 'tenant_override', updated_by: v.updated_by, updated_at: v.updated_at,
+    }));
+    return __mswFrWrap({ tenant_id: 'BANK_DEMO', total: entries.length, entries });
+  }),
+
+  http.put('/v1/banking/ratios/thresholds/:code', async ({ params, request }) => {
+    const code = String(params.code).toUpperCase();
+    const body = (await request.json()) as { warning?: number; critical?: number };
+    __mswFrThresholds[code] = {
+      warning: Number(body.warning),
+      critical: Number(body.critical),
+      updated_by: 'admin',
+      updated_at: new Date().toISOString(),
+    };
+    return __mswFrWrap({ tenant_id: 'BANK_DEMO', code, ...__mswFrThresholds[code], source: 'tenant_override' });
+  }),
+
+  http.delete('/v1/banking/ratios/thresholds/:code', ({ params }) => {
+    const code = String(params.code).toUpperCase();
+    delete __mswFrThresholds[code];
+    const def = __mswFrRatios.find((r) => r.code === code)!;
+    return __mswFrWrap({ tenant_id: 'BANK_DEMO', code, warning: def.default_warning, critical: def.default_critical, source: 'platform_default', updated_by: null, updated_at: null });
+  }),
+
+  http.get('/v1/banking/ratios/customer/:customer_id/history', ({ params, request }) => {
+    const cid = String(params.customer_id);
+    const u = new URL(request.url);
+    const code = (u.searchParams.get('ratio_code') ?? '').toUpperCase();
+    const def = __mswFrRatios.find((r) => r.code === code);
+    if (!def) return __mswFrWrap({ error: 'invalid_ratio_code' }, 400);
+    const value = __mswFrSeed(cid, code);
+    const band = __mswFrBand(code, value);
+    const median = __mswFrSeed(`sector|${cid}`, code);
+    const history = Array.from({ length: 12 }, (_, i) => {
+      const days = (11 - i) * 30;
+      const v = Math.round((value * (0.9 + (i / 11) * 0.2)) * 100) / 100;
+      return { date: new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10), value: v, band: __mswFrBand(code, v) };
+    });
+    const trend = Math.abs(value - median) / Math.max(1e-9, Math.abs(median)) < 0.05
+      ? 'on_par'
+      : def.polarity === 'higher_is_better'
+        ? value > median ? 'better' : 'worse'
+        : value < median ? 'better' : 'worse';
+    return __mswFrWrap({
+      tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), customer_id: cid, customer_name: `Borrower ${cid}`, sector: 'Manufacturing',
+      ratio_code: code, ratio_def: def,
+      current: { code, value, band, warning_threshold: def.default_warning, critical_threshold: def.default_critical, threshold_source: 'platform_default' },
+      history,
+      sector_benchmark: { p25: Math.round(median * 0.8 * 100) / 100, median, p75: Math.round(median * 1.2 * 100) / 100, internal_median: median },
+      trend_vs_sector: trend,
+      threshold: { warning: def.default_warning, critical: def.default_critical, source: 'platform_default' },
+    });
+  }),
+
+  http.get('/v1/banking/ratios/customer/:customer_id', ({ params }) => {
+    const cid = String(params.customer_id);
+    const current: Record<string, unknown> = {};
+    const history: Record<string, unknown> = {};
+    let worst: 'green' | 'amber' | 'red' = 'green';
+    const worstRatios: string[] = [];
+    for (const r of __mswFrRatios) {
+      const v = __mswFrSeed(cid, r.code);
+      const band = __mswFrBand(r.code, v);
+      current[r.code] = { code: r.code, value: v, band, warning_threshold: r.default_warning, critical_threshold: r.default_critical, threshold_source: 'platform_default' };
+      history[r.code] = Array.from({ length: 12 }, (_, i) => ({
+        date: new Date(Date.now() - (11 - i) * 30 * 86_400_000).toISOString().slice(0, 10),
+        value: Math.round(v * (0.9 + (i / 11) * 0.2) * 100) / 100,
+        band: __mswFrBand(r.code, Math.round(v * (0.9 + (i / 11) * 0.2) * 100) / 100),
+      }));
+      if (band === 'red') { worst = 'red'; worstRatios.push(r.code); }
+      else if (band === 'amber' && worst === 'green') { worst = 'amber'; worstRatios.push(r.code); }
+    }
+    return __mswFrWrap({
+      tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), customer_id: cid,
+      customer_name: `Borrower ${cid}`, sector: 'Manufacturing',
+      current, history, worst_band: worst, worst_ratios: worstRatios,
+    });
+  }),
+
+  http.get('/v1/banking/ratios/sector-benchmark', ({ request }) => {
+    const u = new URL(request.url);
+    const sector = u.searchParams.get('sector') ?? 'Manufacturing';
+    return __mswFrWrap({
+      tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), sector, as_of_quarter: '2026-Q1',
+      ratios: __mswFrRatios.map((r) => {
+        const m = __mswFrSeed(`bench|${sector}`, r.code);
+        return { code: r.code, name: r.name, rbi_quartile_25: Math.round(m * 0.8 * 100) / 100, rbi_median: m, rbi_quartile_75: Math.round(m * 1.2 * 100) / 100, internal_median: m, sample_size: 250 };
+      }),
+    });
+  }),
+
+  http.get('/v1/banking/ratios/notes', ({ request }) => {
+    const u = new URL(request.url);
+    const cid = u.searchParams.get('customer_id') ?? undefined;
+    const code = u.searchParams.get('ratio_code')?.toUpperCase() ?? undefined;
+    const out = __mswFrNotes
+      .filter((n) => !cid || n.customer_id === cid)
+      .filter((n) => !code || n.ratio_code === code)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return __mswFrWrap({ tenant_id: 'BANK_DEMO', total: out.length, notes: out });
+  }),
+
+  http.post('/v1/banking/ratios/notes', async ({ request }) => {
+    const b = (await request.json()) as { customer_id?: string; ratio_code?: string; body?: string };
+    __mswFrNoteSeq++;
+    const note = {
+      note_id: `rnote-BANK_DEMO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(__mswFrNoteSeq).padStart(4, '0')}`,
+      tenant_id: 'BANK_DEMO',
+      customer_id: b.customer_id ?? 'unknown',
+      ratio_code: (b.ratio_code ?? '').toUpperCase(),
+      body: (b.body ?? '').trim(),
+      author: 'admin',
+      created_at: new Date().toISOString(),
+    };
+    __mswFrNotes.push(note);
+    return __mswFrWrap(note, 201);
+  }),
+
+  http.post('/v1/banking/cma/pack', async ({ request }) => {
+    const b = (await request.json()) as { cohort?: string[]; forms?: string[] };
+    const cohort = b.cohort ?? [];
+    const forms = (b.forms ?? ['II', 'III', 'IV', 'V']) as ('II' | 'III' | 'IV' | 'V')[];
+    const html = `<!doctype html><html><body><h1>CMA Pack — ${cohort.length} borrower(s)</h1>${cohort.map((c) => `<article><h2>${c}</h2>${forms.map((f) => `<section><h3>Form ${f}</h3></section>`).join('')}</article>`).join('')}</body></html>`;
+    return __mswFrWrap({
+      pack_id: `cma-BANK_DEMO-${Date.now()}`,
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      generated_by: 'admin',
+      cohort_size: cohort.length,
+      cohort,
+      forms,
+      html,
+      size_bytes: html.length,
+    }, 201);
+  }),
+];
+
+handlers.push(...__mswFrHandlers);
