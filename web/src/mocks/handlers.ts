@@ -6873,7 +6873,146 @@ export const handlers = [
       return HttpResponse.json(envelope(snap), { status: 201 });
     },
   ),
+
+  // G2 — M15.1 audit trail MSW handlers (Monday Playbook H9)
+  http.get('/v1/audit/events', ({ request }) => {
+    const url = new URL(request.url);
+    const filters = {
+      actor_username: url.searchParams.get('actor_username') || undefined,
+      action: url.searchParams.get('action') || undefined,
+      resource_type: url.searchParams.get('resource_type') || undefined,
+      resource_id: url.searchParams.get('resource_id') || undefined,
+      correlation_id: url.searchParams.get('correlation_id') || undefined,
+      outcome: url.searchParams.get('outcome') || undefined,
+      severity: url.searchParams.get('severity') || undefined,
+    };
+    const page = Number(url.searchParams.get('page') ?? '1');
+    const page_size = Number(url.searchParams.get('page_size') ?? '25');
+    const all = __mswAuditEvents();
+    const filtered = all.filter((e) => {
+      if (filters.actor_username && !e.actor_username.toLowerCase().includes(filters.actor_username.toLowerCase())) return false;
+      if (filters.action && !e.action.toLowerCase().includes(filters.action.toLowerCase())) return false;
+      if (filters.resource_type && e.resource_type !== filters.resource_type) return false;
+      if (filters.resource_id && e.resource_id !== filters.resource_id) return false;
+      if (filters.correlation_id && e.correlation_id !== filters.correlation_id) return false;
+      if (filters.outcome && e.outcome !== filters.outcome) return false;
+      if (filters.severity && e.severity !== filters.severity) return false;
+      return true;
+    });
+    const start = (page - 1) * page_size;
+    const items = filtered.slice(start, start + page_size);
+    return HttpResponse.json(envelope({ items, page, page_size, total: filtered.length }));
+  }),
+
+  http.get('/v1/audit/events/:event_id', ({ params }) => {
+    const all = __mswAuditEvents();
+    const ev = all.find((e) => e.event_id === params.event_id);
+    if (!ev) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_404', message: 'unknown_event', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_event', message: 'event not found', severity: 'LOW' } },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(ev));
+  }),
+
+  http.get('/v1/audit/summary', () => {
+    const all = __mswAuditEvents();
+    const by_outcome = { success: 0, failure: 0, denied: 0 } as Record<string, number>;
+    const by_severity = { info: 0, warning: 0, critical: 0 } as Record<string, number>;
+    const actionCount = new Map<string, number>();
+    const rtCount = new Map<string, number>();
+    for (const e of all) {
+      by_outcome[e.outcome] = (by_outcome[e.outcome] ?? 0) + 1;
+      by_severity[e.severity] = (by_severity[e.severity] ?? 0) + 1;
+      actionCount.set(e.action, (actionCount.get(e.action) ?? 0) + 1);
+      rtCount.set(e.resource_type, (rtCount.get(e.resource_type) ?? 0) + 1);
+    }
+    return HttpResponse.json(
+      envelope({
+        since: new Date(Date.now() - 30 * 86400000).toISOString(),
+        until: new Date().toISOString(),
+        total: all.length,
+        by_outcome,
+        by_severity,
+        by_action: [...actionCount.entries()].map(([action, count]) => ({ action, count })).sort((a, b) => b.count - a.count),
+        by_resource_type: [...rtCount.entries()].map(([resource_type, count]) => ({ resource_type, count })).sort((a, b) => b.count - a.count),
+      }),
+    );
+  }),
+
+  // G3 — Dashboard widgets MSW handlers (Playbook H2)
+  http.get('/v1/banking/sectors/heatmap', () =>
+    HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_sectors: 5,
+        by_heat_level: { critical: 2, high: 1, medium: 1, low: 1 },
+        cells: [
+          { sector: 'Power', npa_ratio_pct: 10.49, total_customers: 59, total_outstanding_kes: 3_727_254_105, delta_30d_pct: -1.4, heat_level: 'critical', is_watchlisted: false },
+          { sector: 'Real_Estate', npa_ratio_pct: 8.21, total_customers: 84, total_outstanding_kes: 5_113_220_000, delta_30d_pct: 1.8, heat_level: 'critical', is_watchlisted: true },
+          { sector: 'Manufacturing', npa_ratio_pct: 5.6, total_customers: 142, total_outstanding_kes: 8_900_000_000, delta_30d_pct: 0.3, heat_level: 'high', is_watchlisted: false },
+          { sector: 'Retail_Trade', npa_ratio_pct: 3.8, total_customers: 220, total_outstanding_kes: 1_450_000_000, delta_30d_pct: -0.4, heat_level: 'medium', is_watchlisted: false },
+          { sector: 'IT_Services', npa_ratio_pct: 1.2, total_customers: 91, total_outstanding_kes: 2_300_000_000, delta_30d_pct: -0.6, heat_level: 'low', is_watchlisted: false },
+        ],
+      }),
+    ),
+  ),
+
+  http.get('/v1/ingestion/health', () =>
+    HttpResponse.json(
+      envelope({
+        total_connectors: 10,
+        by_status: { healthy: 9, degraded: 1, failing: 0, paused: 0 },
+        attention_required: [
+          { id: 'agent_productivity', name: 'Agent Productivity', source_system: 'AGENT', type: 'batch_csv', schedule: 'daily 03:00', status: 'degraded', last_run_at: null, last_run_status: null, last_run_records: 5880, average_lag_seconds: 32, paused_at: null },
+        ],
+        fleet_records_last_run: 248_910,
+      }),
+    ),
+  ),
+
+  http.get('/v1/ai/models', ({ request }) => {
+    const url = new URL(request.url);
+    const type = url.searchParams.get('type');
+    const all = [
+      { model_id: 'pd_xgb_v3', name: 'PD XGBoost', version: '3.2.1', type: 'pd', framework: 'xgboost', status: 'production', metrics: { auc: 0.847, ks: 0.61 }, trained_at: '2026-04-15T00:00:00Z', deployed_at: '2026-04-20T00:00:00Z' },
+      { model_id: 'pd_xgb_v2', name: 'PD XGBoost', version: '2.4.0', type: 'pd', framework: 'xgboost', status: 'retired', metrics: { auc: 0.812 }, trained_at: '2026-01-10T00:00:00Z', deployed_at: null },
+    ];
+    const items = type ? all.filter((m) => m.type === type) : all;
+    return HttpResponse.json(envelope({ items, total: items.length }));
+  }),
+
+  http.get('/v1/audit/integrity', () => {
+    const all = __mswAuditEvents();
+    const last = all[0]; // newest-first; last appended = head
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_events: all.length,
+        valid: true,
+        last_hash: last?.hash ?? 'GENESIS',
+      }),
+    );
+  }),
 ];
+
+// MSW seed for /v1/audit/* — deterministic small set so test-runs are stable.
+function __mswAuditEvents() {
+  const NOW = Date.now();
+  // newest-first sorted, mirrors backend behaviour
+  return [
+    { event_id: 'aud-msw-001', ts: new Date(NOW - 30 * 60_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'system', actor_role: 'system', action: 'user.access.review', resource_type: 'user' as const, resource_id: 'ravi.risk', outcome: 'denied' as const, severity: 'critical' as const, correlation_id: null, ip_address: null, metadata: { reason: 'dormant_90d_check' }, prev_hash: '47cf9e32', hash: '2df32923' },
+    { event_id: 'aud-msw-002', ts: new Date(NOW - 60 * 60_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'fiona.field', actor_role: 'field_officer', action: 'auth.login', resource_type: 'session' as const, resource_id: 'sid-004', outcome: 'success' as const, severity: 'info' as const, correlation_id: null, ip_address: null, metadata: {}, prev_hash: '2df32923', hash: 'aa11bb22' },
+    { event_id: 'aud-msw-003', ts: new Date(NOW - 2 * 3_600_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'fiona.field', actor_role: 'field_officer', action: 'auth.login', resource_type: 'session' as const, resource_id: 'sid-003', outcome: 'failure' as const, severity: 'warning' as const, correlation_id: null, ip_address: null, metadata: { reason: 'wrong_password' }, prev_hash: 'aa11bb22', hash: 'cc33dd44' },
+    { event_id: 'aud-msw-004', ts: new Date(NOW - 4 * 3_600_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'alice.admin', actor_role: 'admin', action: 'config.update', resource_type: 'config' as const, resource_id: 'alerts.red_sla_hours', outcome: 'success' as const, severity: 'warning' as const, correlation_id: 'corr-c-115', ip_address: '127.0.0.1', metadata: { previous_value: 4, new_value: 2 }, prev_hash: 'cc33dd44', hash: 'ee55ff66' },
+    { event_id: 'aud-msw-005', ts: new Date(NOW - 6 * 3_600_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'system', actor_role: 'system', action: 'alert.created', resource_type: 'alert' as const, resource_id: 'a-1009', outcome: 'success' as const, severity: 'critical' as const, correlation_id: 'corr-c-115', ip_address: null, metadata: { customer_id: 'c-115', class: 'red' }, prev_hash: 'ee55ff66', hash: '77aabb88' },
+    { event_id: 'aud-msw-006', ts: new Date(NOW - 8 * 3_600_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'ravi.risk', actor_role: 'risk_analyst', action: 'alert.ack', resource_type: 'alert' as const, resource_id: 'a-1009', outcome: 'success' as const, severity: 'info' as const, correlation_id: 'corr-c-115', ip_address: null, metadata: {}, prev_hash: '77aabb88', hash: '99cc11dd' },
+    { event_id: 'aud-msw-007', ts: new Date(NOW - 10 * 3_600_000).toISOString(), tenant_id: 'BANK_DEMO', actor_username: 'alice.admin', actor_role: 'admin', action: 'report.run', resource_type: 'report' as const, resource_id: 'portfolio_snapshot_daily', outcome: 'success' as const, severity: 'info' as const, correlation_id: null, ip_address: null, metadata: { format: 'pdf' }, prev_hash: '99cc11dd', hash: '22ee33ff' },
+  ];
+}
 
 // ── EWS Rules versions seed (RP-1 + diff-page) ───────────────────────
 

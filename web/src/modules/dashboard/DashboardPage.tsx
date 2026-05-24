@@ -34,6 +34,7 @@ import {
 } from '@/components/dashboard/AlertDrilldown';
 import { AlertAnalyticsSection } from '@/components/dashboard/AlertAnalyticsSection';
 import { RecoveryStatsCard } from '@/components/dashboard/RecoveryStatsCard';
+import { PortfolioInsightsRow } from '@/modules/dashboard/PortfolioInsightsRow';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -351,6 +352,9 @@ export function DashboardPage() {
       <div className="mt-4">
         <RecoveryStatsCard />
       </div>
+
+      {/* G3 — Portfolio insights (sector heatmap + AI confidence + DQ-by-source) */}
+      <PortfolioInsightsRow />
     </div>
   );
 }

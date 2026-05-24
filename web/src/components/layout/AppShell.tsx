@@ -12,6 +12,7 @@ import {
   FileBarChart,
   Plug,
   ShieldCheck,
+  Shield,
   LogOut,
   Clock,
   Smartphone,
@@ -37,6 +38,7 @@ import { cn } from '@/lib/cn';
 import { ChatWidget } from '@/components/copilot/ChatWidget';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { LanguageToggle } from '@/components/layout/LanguageToggle';
+import { ModeToggle } from '@/components/layout/ModeToggle';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { Button } from '@/components/ui';
 
@@ -70,6 +72,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/users', i18nKey: 'users', icon: UsersRound, requireRole: ['admin'] },
   { to: '/admin/integrations', i18nKey: 'integrations', icon: Plug, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/audit-log', i18nKey: 'audit_log', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/audit-trail', i18nKey: 'audit_trail', icon: Shield, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/activity', i18nKey: 'admin_activity', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/webhooks', i18nKey: 'webhooks', icon: Webhook, requireRole: ['admin'] },
   { to: '/admin/tenants', i18nKey: 'tenants', icon: Building2, requireRole: ['admin'] },
@@ -201,6 +204,7 @@ export function AppShell() {
             <span className="module-label">{t('nav.risk_operations')}</span>
           </div>
           <div className="flex items-center gap-3">
+            <ModeToggle />
             <LanguageToggle />
             <NotificationBell />
             <span className="text-xs text-muted">

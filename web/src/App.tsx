@@ -37,6 +37,7 @@ import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
+import { AuditTrailPage } from '@/modules/admin/AuditTrailPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -115,6 +116,7 @@ export function App() {
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
+            <Route path="admin/audit-trail" element={<AuditTrailPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

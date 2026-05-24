@@ -1548,6 +1548,31 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // G2 — M15.1 audit trail surface (Monday Playbook H9)
+  auditEvents: (params: AuditEventQuery = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+    }
+    const q = qs.toString();
+    return http
+      .get<EnvelopeBody<AuditEventsPage>>(`/v1/audit/events${q ? `?${q}` : ''}`)
+      .then((r) => r.data);
+  },
+
+  auditEvent: (event_id: string) =>
+    http
+      .get<EnvelopeBody<AuditEventFull>>(`/v1/audit/events/${encodeURIComponent(event_id)}`)
+      .then((r) => r.data),
+
+  auditSummary: (days: number = 30) =>
+    http
+      .get<EnvelopeBody<AuditSummary>>(`/v1/audit/summary?days=${days}`)
+      .then((r) => r.data),
+
+  auditIntegrity: () =>
+    http.get<EnvelopeBody<AuditIntegrity>>('/v1/audit/integrity').then((r) => r.data),
+
   aiExplanation: (prediction_id: string) =>
     http
       .get<EnvelopeBody<PredictionExplanation>>(
@@ -1569,6 +1594,15 @@ export const api = {
 
   sectorHeatmap: () =>
     http.get<EnvelopeBody<SectorHeatmapReport>>('/v1/banking/sectors/heatmap').then((r) => r.data),
+
+  // G3 — Dashboard portfolio-insights widgets (Monday Playbook H2)
+  ingestionHealth: () =>
+    http.get<EnvelopeBody<IngestionHealthReport>>('/v1/ingestion/health').then((r) => r.data),
+
+  aiModels: (type?: string) =>
+    http
+      .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${type ? `?type=${encodeURIComponent(type)}` : ''}`)
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -1648,6 +1682,125 @@ export interface PortfolioDriverReport {
   total_drivers: number;
   drivers: PortfolioDriverRow[];
   most_universal_driver: { feature_name: string; affected_predictions: number } | null;
+}
+
+// G2 — M15.1 audit trail types
+export type AuditOutcome = 'success' | 'failure' | 'denied';
+export type AuditSeverity = 'info' | 'warning' | 'critical';
+export type AuditResourceType =
+  | 'user'
+  | 'session'
+  | 'config'
+  | 'case'
+  | 'alert'
+  | 'report'
+  | 'scenario'
+  | 'rule'
+  | 'integration'
+  | 'system';
+
+export interface AuditEventQuery {
+  actor_username?: string;
+  action?: string;
+  resource_type?: AuditResourceType;
+  resource_id?: string;
+  correlation_id?: string;
+  outcome?: AuditOutcome;
+  severity?: AuditSeverity;
+  since?: string;
+  until?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface AuditEventRow {
+  event_id: string;
+  ts: string;
+  tenant_id: string;
+  actor_username: string;
+  actor_role: string;
+  action: string;
+  resource_type: AuditResourceType;
+  resource_id: string;
+  outcome: AuditOutcome;
+  severity: AuditSeverity;
+  correlation_id: string | null;
+  ip_address?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface AuditEventFull extends AuditEventRow {
+  prev_hash: string;
+  hash: string;
+}
+
+export interface AuditEventsPage {
+  items: AuditEventRow[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface AuditSummary {
+  since: string;
+  until: string;
+  total: number;
+  by_outcome: Record<AuditOutcome, number>;
+  by_severity: Record<AuditSeverity, number>;
+  by_action: { action: string; count: number }[];
+  by_resource_type: { resource_type: AuditResourceType; count: number }[];
+}
+
+export interface AuditIntegrity {
+  tenant_id: string;
+  generated_at: string;
+  total_events: number;
+  valid: boolean;
+  last_hash: string;
+  broken_at?: { index: number; event_id: string; reason: string };
+}
+
+// G3 — Portfolio Insights row (Monday Playbook H2)
+export type IngestionStatus = 'healthy' | 'degraded' | 'failing' | 'paused';
+
+export interface IngestionAttentionConnector {
+  id: string;
+  name: string;
+  source_system: string;
+  type: string;
+  schedule: string;
+  status: IngestionStatus;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  last_run_records: number;
+  average_lag_seconds: number;
+  paused_at: string | null;
+  default_status?: string;
+  description?: string;
+}
+
+export interface IngestionHealthReport {
+  total_connectors: number;
+  by_status: Record<IngestionStatus, number>;
+  attention_required: IngestionAttentionConnector[];
+  fleet_records_last_run: number;
+}
+
+export interface AiModelRow {
+  model_id: string;
+  name?: string;
+  version: string;
+  type: string;
+  framework?: string;
+  status: 'experimental' | 'staging' | 'shadow' | 'production' | 'retired';
+  metrics?: { auc?: number; ks?: number; brier?: number } | null;
+  trained_at?: string;
+  deployed_at?: string | null;
+}
+
+export interface AiModelListPage {
+  items: AiModelRow[];
+  total: number;
 }
 
 export interface PredictionExplanation {
