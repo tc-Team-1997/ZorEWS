@@ -39,17 +39,16 @@
 
 ### What to click
 
-1. Enter username: `tanya.credit` (or whatever your seed user is)
-2. Password: `••••••••`
+1. Enter username: `ravi.risk`
+2. Password: `Risk!Pass1`
 3. Click **Sign in**
-4. **[If tenant picker appears]** Select tenant: **BANK_DEMO**
-5. Confirm header shows **BANK** chip on top right
+4. Confirm header shows **BANK_DEMO** chip on top right
 
 ### What to say
 
-> *"ZorEWS multi-tenant hai — ek instance me multiple banks aur insurance companies host ho sakti hain. Main `BANK_DEMO` tenant me sign in kar rahi hu — Bank mode pe."*
+> *"ZorEWS multi-tenant hai — ek instance me multiple banks aur insurance companies host ho sakti hain. Main `BANK_DEMO` tenant me sign in kar rahi hu — Bank mode pe, as a **risk analyst** persona."*
 >
-> *"Notice karein top-right pe — yeh **BANK / INSURANCE** toggle hai. Aaj hum Bank vertical dikha rahe hain. Insurance vertical bhi same architecture pe banti hai — aaj scope me nahi."*
+> *"Architecture multi-tenant + multi-vertical hai — same instance Bank aur Insurance dono verticals support karta hai. Aaj BANK_DEMO dikha rahi hu."*
 >
 > *"JWT-based auth, RBAC built-in, MFA support — bank-grade security baseline."*
 
@@ -61,7 +60,8 @@
 ### Watch out for
 
 - ⚠ If login fails → use backup pre-logged-in browser tab
-- ⚠ If mode toggle doesn't show → say "header element under final styling polish"
+- ⚠ If `ravi.risk` is locked out from prior demos → switch to `alice.admin` / `Admin!Pass1` (admin sees every screen)
+- ⚠ Tenant picker doesn't appear (BANK_DEMO is implicit) — don't promise it
 
 ---
 
@@ -87,16 +87,16 @@
 > *"Top pe 6 KPIs hain — **Open Alerts**, **S1 Critical Count**, **Borrowers on Watchlist**, **Today's NPA Predictions**, **DQ Composite Score**, **SLA Breach Count**. Sab tiles clickable hain, aur direct drill kar deti hain source module me."*
 
 **[Point at Top Stressed Borrowers]**
-> *"Yeh hai aaj ke top stressed borrowers — AI ne score kiye hain 0 se 100. S1 highest severity. ACME Industries top pe hai with score 87 — abhi click karenge."*
+> *"Yeh hai aaj ke top stressed borrowers — AI ne score kiye hain 0 se 100. **Olivia Cherop** top pe hai with PD 0.83 — High band. Power sector me **Arjun Reddy** bhi watchlist pe hai — abhi NPA Prediction me deep-dive karenge."*
 
 **[Point at Alert Trend chart]**
 > *"Alert trend last 30 days — clearly notice hota hai stress alerts ki spike last week me. Range configurable hai — 7 days, 30, 60, 90."*
 
 **[Point at Risk Heatmap]**
-> *"Risk Heatmap — sector × severity grid. Real Estate aur Power sectors clearly red zone me hain — concentration aur stress dono high."*
+> *"Risk Heatmap — sector × severity grid. **Power, Agro-Processing, IT Services** sectors clearly red zone me hain — concentration aur stress dono high."*
 
 **[Point at AI Confidence]**
-> *"AI Confidence card — abhi 0.89 dikha raha hai, kal 0.87 tha. Models healthy hain, predictions trust-worthy."*
+> *"AI Confidence card — abhi 0.88 dikha raha hai. Models healthy hain, predictions trust-worthy. Latest NPA backtest AUC 0.875 hai."*
 
 ### Talking points
 
@@ -109,100 +109,98 @@
 - ⚠ If KPI numbers look 0 or weird → "seed data is loading, latest numbers in production view"
 - ⚠ If heatmap empty → just point at the structure: "this is where sector × severity matrix would render"
 
-**[Transition]** Click ACME Industries row in Top Stressed Borrowers.
+**[Transition]** Click any High-band borrower row → opens Customer Risk Profile. (Or skip directly to sidebar → **NPA Prediction** for Act 4 — recommended path since it's the demo's strongest moment.)
 
 ---
 
 ## ACT 3 — DISCOVER STRESS (3 minutes)
 
-**Screen:** Borrower 360° modal (opened from Act 2)
+**Screen:** Customer Risk Profile page (opened from Act 2)
 
-If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch** → click ACME row.
+Navigate via sidebar → **Customers** → click any High-band borrower (or directly to `/customers/c-100014` for the Act-4 anchor Arjun Reddy).
 
 ### What to click
 
-1. **Borrower 360° modal opens** — show Overview tab
-2. Switch to **Ratios** tab → point at DSCR / ICR with red/amber bands
-3. Switch to **Account Signals** tab → point at "Cash flow drop 32% MoM" signal
-4. Switch to **SMA Status** tab → show "SMA-1 since 12 days"
-5. Switch to **Alerts History** tab → 3-4 historical alerts
-6. **Close modal**
-7. Show **Borrower Watch list** behind it — apply filter: **Sector = Real Estate**
-8. Show filtered list (3-5 borrowers)
+1. **Customer Risk Profile page** opens — point at the header KPIs (PD, exposure, risk level)
+2. Scroll to **Linked Alerts** panel → 3-4 historical alerts visible
+3. Scroll to **Linked Cases** panel → cases tied to this borrower
+4. Point at the **SHAP top-5 reasons** panel (existing on this page) — that's the AI explainability preview
+5. (Optional) Click sector heatmap link if filter sidebar exists, else move on
 
 ### What to say
 
-**[Modal opens, Overview tab]**
-> *"ACME Industries — manufacturing sector, total exposure 45 crore, EWS score 87. Yeh hai 360-degree view — har angle se borrower ko dekho."*
+**[Page opens]**
+> *"Arjun Reddy — Power sector, exposure ~32 million KES, risk level High. Yeh hai 360-degree view — har angle se borrower ko dekho — alerts, cases, SHAP reasons, PD timeline."*
 
-**[Click Ratios tab]**
-> *"Financial ratios — DSCR 0.9, jo 1.0 ke threshold se neeche hai. ICR bhi weak. Yeh red bands automatic threshold-based hain, aur sector benchmark se compare ho rahe hain."*
+**[Point at SHAP reasons]**
+> *"AI ke top-5 reasons highlighted hain — DPD pattern, utilization, EMI bounce rate — yeh red bands automatic threshold-based hain. Full SHAP attribution NPA Prediction page pe deep-dive karenge."*
 
-**[Click Account Signals tab]**
-> *"Account behaviour signals — AI ne detect kiya hai cash flow 32% drop month-over-month, salary credits 3 employees ke ruke hain. Yeh signals manual rules nahi catch karte — yahan ML model lagta hai."*
+**[Point at Linked Alerts]**
+> *"Past 90 days me alerts raise hue hain is borrower pe — pattern clearly deteriorating. Linked cases bhi visible — ek already open hai."*
 
-**[Click SMA Status tab]**
-> *"SMA classification — abhi SMA-1 me hai, 12 days se. RBI framework ke according 30 din me SMA-2 me chala jayega agar nothing changes. Yeh trajectory critical hai."*
-
-**[Click Alerts History]**
-> *"Past 90 days me 4 alerts raise hue hain is borrower pe — pattern clearly deteriorating."*
-
-**[Close modal, apply Real Estate filter]**
-> *"Yeh sirf ek borrower ka view tha. Ab dekhte hain — Real Estate sector me kitne borrowers similar stress me hain..."*
-
-**[Filtered list shows]**
-> *"5 borrowers Real Estate me — sab on watchlist, sab S2 ya S3. Yahan se main cohort action le sakti hu — bulk notice issue karo, ya credit committee me list submit karo."*
+**[Point at Linked Cases panel]**
+> *"Cohort actions bhi yahan se le sakti hu — bulk notice issue karo, ya credit committee me list submit karo. Time ke liye abhi NPA Prediction screen pe chalti hu — wahan AI ka real power dikhega."*
 
 ### Talking points
 
 - *"Watchlist tagging — user-driven aur AI-suggested dono."*
-- *"360° endpoint single call me 8 different data points aggregate karta hai — limits, exposure, ratios, signals, alerts, SMA, cases, notes."*
-- *"Cohort actions — multi-select karke CMA pack bana sakte hain, ya notice bhej sakte hain. Aaj time ke liye skip kar rahi hu."*
+- *"`/v1/customers/:id/360` endpoint single call me 8 different data points aggregate karta hai — exposure, ratios, signals, alerts, SMA, cases, AML matches, notes."*
+- *"Cohort actions — multi-select karke CMA pack (Forms II/III/IV/V) bana sakte hain, ya notice bhej sakte hain (`POST /v1/notices/issue`). Aaj time ke liye skip kar rahi hu."*
 
 ### Watch out for
 
-- ⚠ If 360° modal doesn't open → use Borrower Watch list, walk through ACME row data verbally
-- ⚠ If tabs don't switch → "tab navigation under final integration, data shown is from same endpoint"
-- ⚠ If filter doesn't work → skip filter demo, transition directly to Act 4
+- ⚠ If borrower profile slow to load → just point at the header KPIs + linked alerts/cases visible
+- ⚠ Separate Ratios / Account Signals / SMA tabs aren't wired yet — data is in panels on the same page. If asked, say *"tab navigation under final integration, data shown is from the same /360 endpoint"*
+- ⚠ Sector filter on Customers list may not be wired — skip filter demo, transition to NPA Prediction
 
-**[Transition]** Click **NPA Prediction** in sidebar.
+**[Transition]** Click **NPA Prediction** in sidebar — this is the Act-4 centrepiece.
 
 ---
 
 ## ACT 4 — AI IN ACTION (3 minutes)
 
-**Screen:** NPA Prediction list
+**Screen:** NPA Prediction list at `/banking/npa-prediction`
 
 ### What to click
 
-1. **NPA Prediction list page** loads — show top 10 high-risk accounts
-2. Point at columns: 30d / 60d / 90d NPA probability
-3. Show sort by 90d horizon (descending)
-4. Click the **top account** row → **NPA Why modal** opens
-5. In Why modal, point at top 5 features with importance bars
-6. Point at the natural-language explanation
-7. Click **Backtest report** button → quick glimpse of AUC 0.89
-8. Close modals
+1. **NPA Prediction page** loads — KPI strip shows totals (high-risk count, critical count, exposure at risk)
+2. Point at the **Horizon switcher** (30 / 60 / 90 / 180 days) — keep on 90-day
+3. Top row should be **Arjun Reddy / Power / PD 0.986** — click the row
+4. **NPA Why modal** opens — point at top-5 feature importance bars
+5. Point at recommended actions list
+6. Point at comparable customers list (historical outcomes — npa/cured/pending)
+7. Close modal → click **Backtest report** button → AUC 0.875 + confusion matrix + by-segment chart
+8. Close modal
 
 ### What to say
 
-**[List loads]**
-> *"NPA Prediction — yahan AI ka real power dikhta hai. Model NPA-v3.2 har account ke liye predict karta hai — agle 30, 60, aur 90 din me NPA banne ki probability."*
+**[Page loads]**
+> *"NPA Prediction — yahan AI ka real power dikhta hai. Model `pd-xgb-prod v3.2.0` har account ke liye predict karta hai — agle 30, 60, 90, ya 180 din me NPA banne ki probability."*
 
-**[Point at columns]**
-> *"3 horizons — short-term, medium, aur quarterly view. 90-day horizon credit committee planning ke liye most useful hai."*
+**[Point at horizon switcher]**
+> *"4 horizons — short-term, medium, aur quarterly view. 90-day horizon credit committee planning ke liye most useful hai. Currently 63 high-risk accounts, 28 critical, total exposure 32 crore+."*
 
-**[Click top row]**
-> *"ACME Industries (yes, wahi borrower jisko abhi dekha) — 90-day NPA probability 0.84. Bahut high. Lekin aaj banking AI ke saath sirf score dena enough nahi hai — humein dikhana padta hai **WHY**."*
+**[Click top row — Arjun Reddy]**
+> *"**Arjun Reddy**, Power sector — 90-day NPA probability **0.986**. Almost certain NPA. Exposure 32 million KES. Lekin aaj banking AI ke saath sirf score dena enough nahi hai — humein dikhana padta hai **WHY**."*
 
 **[Why modal opens — point at feature importance]**
-> *"Top 5 contributing factors — DSCR drop is #1 contributor at 0.31 importance, cash flow trend #2, sector beta #3, default cluster proximity #4, payment delays #5. Yeh SHAP-style feature attribution hai."*
+> *"Top 5 contributing factors:*
+> *— **DPD pattern (max DPD 90d)** — biggest factor, +0.32 weight, 45 days DPD*
+> *— **EMI bounce rate** — +0.21, 3 of 12 bounced*
+> *— **Utilization** — +0.18, 92% drawn*
+> *— **Bureau score** — −0.15, 612 sub-prime*
+> *— **Cash withdrawal velocity** — +0.12, +2.4σ above baseline*
+>
+> *Yeh SHAP-style feature attribution hai — har feature ka signed contribution dikhta hai."*
 
-**[Point at natural-language explanation]**
-> *"AI ne natural language me bhi explain kiya hai — 'This account shows characteristics similar to 78% of accounts that turned NPA in the past 12 months, primarily driven by deteriorating debt service capacity.' Yeh credit officer ko decision context deta hai, regulator ko audit trail deta hai."*
+**[Point at recommended actions panel]**
+> *"AI ne actions bhi recommend kar diye hain — head_of_risk ko escalate karo, covenant breach review initiate karo, fresh stock statement maango, 5 days me RM ke saath review karo. Yeh credit officer ko decision context deta hai, regulator ko audit trail deta hai."*
+
+**[Point at comparable customers]**
+> *"Comparable historical customers bhi dikha rahi hu — similar PD wale accounts ka kya hua: kuch NPA hue, kuch cured. Pattern visible hai."*
 
 **[Click Backtest button]**
-> *"Model itself — AUC 0.89 latest backtest pe. Production-grade."*
+> *"Model itself — AUC **0.875** latest backtest pe, KS 0.575, precision @top-10% = 73%. Cohort size 4,958 accounts. Production-grade."*
 
 ### Talking points
 
@@ -212,8 +210,9 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 
 ### Watch out for
 
-- ⚠ If Why modal doesn't open → talk through feature importance verbally pointing at backup screenshot
-- ⚠ If explanation text empty → "natural language generation in final QA, feature importance chart is core artifact"
+- ⚠ If Why modal doesn't open on click → use the "Why?" button on the row (also opens modal)
+- ⚠ If backtest modal slow to load → skip, just say "AUC 0.875, production-grade — full backtest panel is in the modal"
+- ⚠ If top row isn't Arjun Reddy on demo day (deterministic per day — should be) → just say "top of the list, Power sector" and proceed
 
 **[Transition]** Click **Alerts & Cases** in sidebar.
 
@@ -225,27 +224,27 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 
 ### What to click
 
-1. **Alerts inbox** loads — show 28 open cases (badge in sidebar should match)
-2. Filter by severity: **S1 + S2**
-3. Click a case (preferably one linked to ACME)
-4. **Case detail modal** opens — show Timeline, Notes, Attachments tabs
-5. Click **Triage Now** or **Assign** button → quick modal
+1. **Alerts inbox** loads — show open cases (current count ~38 in CMS, 11 high+critical alerts)
+2. Filter by severity: **critical + high**
+3. Click any high-severity case row
+4. **Case detail page** opens — Timeline, Notes, Attachments sections
+5. Click **Assign** button → quick modal
 6. Assign to: **Self** (or another user)
 7. Add note: "Reviewed — escalating to credit committee"
-8. Click **Escalate to CRO** button → escalation modal
-9. Show approval chain
-10. Close → back to inbox, show case status updated to "In Review"
+8. Click **Escalate** button → escalation modal
+9. Show approval chain (maker-checker)
+10. Close → back to inbox, status updated
 
 ### What to say
 
 **[Inbox loads]**
-> *"Alerts & Cases — yeh hai mera daily inbox. 28 open cases — sab severity tagged. Yahan se actual work hota hai."*
+> *"Alerts & Cases — yeh hai mera daily inbox. **38 open cases**, **11 critical + high severity alerts**. Yahan se actual work hota hai."*
 
-**[Apply S1+S2 filter]**
-> *"Filter S1 aur S2 pe — sirf critical aur high-priority dikha do. 12 cases."*
+**[Apply critical+high filter]**
+> *"Filter critical aur high pe — sirf priority cases. 11 alerts visible."*
 
-**[Click ACME-related case]**
-> *"Ek case kholte hain — ACME Industries pe NPA-risk alert. Yeh case automatically generate hua jab AI ne 80+ score raise kiya."*
+**[Click a case]**
+> *"Ek case kholte hain — Power sector borrower pe NPA-risk alert. Yeh case automatically generate hua jab AI ne high PD raise kiya."*
 
 **[Case detail modal opens]**
 > *"Case detail — Timeline tab me poori event history dikhti hai, kab alert raise hua, kab assign hua, kab koi action liya. Notes tab me analyst remarks. Attachments tab me supporting documents."*
@@ -260,7 +259,7 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 > *"Escalation — direct CRO ko bhej rahi hu. Yeh **maker-checker** workflow follow karta hai — main maker hu, CRO checker. Same user dono nahi ho sakte. Yeh banking compliance ke liye mandatory hai."*
 
 **[Show case status updated]**
-> *"Case ab 'In Review' state me hai, CRO ki approval pending hai. SLA countdown bhi visible hai — 48 hours."*
+> *"Case ab 'In Review' state me hai, supervisor ki approval pending hai. SLA countdown bhi visible hai. RBI segregation-of-duties — maker aur checker different user hone chahiye."*
 
 ### Talking points
 
@@ -287,36 +286,36 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 
 1. **Audit Trail** page loads — show event table
 2. Filter by **Resource type = case** (or just show recent events)
-3. Show ACME-related events from Act 5 (should be visible at top)
+3. Show recent case events from Act 5 (the one you escalated should be visible at top)
 4. Click one event → detail modal
 5. Point at hash chain / correlation ID
 
 #### Part B — Reports & BI (1 min)
 
-1. Click **Reports & BI** in sidebar
-2. Show **Report Library** — list of templates
-3. Pick **Stressed Borrowers Report** (or similar) → Run
+1. Click **Reports** in sidebar
+2. Show **Report Library** — 9 BIL templates (operational/regulatory/audit/business)
+3. Pick **`portfolio_snapshot_daily`** or **`rbi_quarterly_summary`** → Run
 4. Show preview/PDF generated
-5. Mention scheduling
+5. Mention scheduling (`/v1/reports/schedules` — daily/weekly/monthly/quarterly cadences)
 
 ### What to say
 
 **[Audit Trail loads]**
 > *"Compliance angle — yeh Audit Trail har action ka immutable log rakhta hai. Login, case assignment, escalation, model promotion, threshold change — sab event yahan hai."*
 
-**[Show ACME events]**
-> *"Notice — abhi-abhi jo case main escalate ki, woh top pe dikh rahi hai. Actor — me. Action — case.escalate. Outcome — success. Timestamp millisecond precision."*
+**[Show recent events]**
+> *"Notice — abhi-abhi jo case main escalate ki, woh top pe dikh rahi hai. Actor — ravi.risk. Action — `case.escalate`. Outcome — success. Timestamp millisecond precision."*
 
 **[Click event → detail]**
 > *"Event detail — full payload, correlation ID jo upstream aur downstream events ko link karta hai, hash chain jo tampering detect karta hai."*
 
 > *"Audit Trail tamper-evident hai — koi past event modify nahi kar sakta. Regulator audit ke liye crucial."*
 
-**[Navigate to Reports & BI]**
-> *"Last piece — regulatory reporting. Report Library me pre-built templates hain — Stressed Borrowers Report, NPA Trend Report, Sector Concentration Report, AML STR Report, etc."*
+**[Navigate to Reports]**
+> *"Last piece — regulatory reporting. Report Library me 9 BIL templates hain — Portfolio Snapshot Daily, RBI Quarterly Summary, IRDAI Claims Quarterly, Audit Compliance Dump, Agent Productivity, etc. 3 regulators (RBI / IRDAI / Internal) covered."*
 
-**[Run Stressed Borrowers Report]**
-> *"Run karte hain — Stressed Borrowers Report. PDF generate hota hai, formatted, regulator-submittable. Schedule bhi kar sakte hain — har Monday morning auto-run, board ko email."*
+**[Run a report]**
+> *"Run karte hain — Portfolio Snapshot Daily ya RBI Quarterly Summary. JSON / CSV / PDF / Excel — sab formats supported. Schedule bhi kar sakte hain — recurring schedules with daily/weekly/monthly/quarterly cadences."*
 
 ### Talking points
 
@@ -342,25 +341,26 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 
 #### Part A — SMA Classification (1 min)
 
-1. Click **SMA Classification** in sidebar
-2. Show today's SMA movements: SMA-0 → SMA-1 transitions, count
-3. Click a movement → drill modal showing accounts
+1. Click **SMA Classification** in sidebar (new — at `/banking/sma`)
+2. KPI strip shows total movements / deteriorations / improvements / exposure at risk
+3. Category mix chart shows SMA-0 / SMA-1 / SMA-2 / NPA bars
+4. Movement detail table shows from→to badges
 
 #### Part B — Sector Watch (1 min)
 
-1. Click **Sector Watch** in sidebar
-2. Show **Sector Heatmap** — Real Estate, Power highlighted
-3. Click Real Estate → sector deep-dive
+1. Click **Sector Watch** in sidebar (new — at `/banking/sectors`)
+2. Show **Sector Heatmap** — 12 sectors, Power/Agro-Processing/IT Services in critical
+3. Click any critical sector tile for sector deep-dive
 
 ### What to say
 
 **[SMA Classification]**
-> *"Banking domain depth — SMA Classification. RBI's Special Mention Account framework — SMA-0 / 1 / 2 buckets. Aaj 12 accounts SMA-0 se SMA-1 me transition kar gaye. Drill karke main exact accounts dekh sakti hu, aur kal-parso unka outreach plan bana sakti hu."*
+> *"Banking domain depth — SMA Classification. RBI's Special Mention Account framework — SMA-0 / 1 / 2 / NPA buckets. **Aaj 59 movements** — SMA-0 me 17, SMA-1 me 15, SMA-2 me 17, NPA 10. **329.8 million KES exposure at risk**. Drill table me exact accounts dikh rahe hain, kal-parso unka outreach plan bana sakti hu."*
 
 **[Sector Watch]**
-> *"Sector Watch — portfolio concentration aur sector stress ek saath. Real Estate aur Power — dono hot zone me hain, jaise dashboard pe bhi dikha tha. Click karke deep-dive."*
+> *"Sector Watch — portfolio concentration aur sector stress ek saath. **12 sectors total — 5 critical heat me**: Power 10.49% NPA, Agro-Processing 10.44%, IT Services 8.85%, Retail Trade 8.6%, Hospitality 8.42%. Power tile click karke deep-dive."*
 
-> *"India-specific frameworks built-in hain — RBI default. RMA Bhutan, CBK Kenya, MAS Singapore — sab configurable masters me se."*
+> *"Multi-country frameworks built-in hain — RBI default, RMA Bhutan, CBK Kenya, MAS Singapore — sab configurable masters me se."*
 
 ---
 
@@ -445,32 +445,56 @@ If 360° modal doesn't open directly, navigate via sidebar → **Borrower Watch*
 ZorEWS Demo — Tuesday — 15 min
 
 🎬 OPEN: "Credit risk officer's Monday morning"
-📍 LOGIN → BANK_DEMO → Bank mode
-📍 DASHBOARD → KPIs / Trend / Heatmap / AI Conf → click ACME
-📍 ACME 360° → Ratios / Signals / SMA / Alerts → filter Real Estate
-📍 NPA PREDICTION → 90d sort → ACME Why → top-5 features → AUC 0.89
-📍 ALERTS → S1+S2 filter → ACME case → triage → assign me → escalate CRO
-📍 AUDIT → ACME events on top → click event → hash chain
-📍 REPORTS → Stressed Borrowers Report → run → PDF
-🎬 (bonus) SMA today / Sector heatmap
-🎬 CLOSE: "End-to-end journey, 775 APIs, multi-tenant ready"
+📍 LOGIN → ravi.risk / Risk!Pass1 → BANK_DEMO header chip
+📍 DASHBOARD → KPIs / Trend / Heatmap / AI Conf 0.88 → click High borrower
+📍 CUSTOMER PROFILE → Arjun Reddy (c-100014) → SHAP top-5 / Linked Alerts / Linked Cases
+📍 NPA PREDICTION (/banking/npa-prediction) → 90d → click Arjun Reddy → Why modal
+   → top 5 features (DPD 0.32 / EMI bounce 0.21 / Util 0.18 / Bureau -0.15 / Cash 0.12)
+   → Backtest button → AUC 0.875
+📍 ALERTS → critical+high filter (11) → click case → assign → escalate → maker-checker
+📍 AUDIT → recent events → click event → hash chain
+📍 REPORTS → portfolio_snapshot_daily OR rbi_quarterly_summary → run → PDF
+🎬 (bonus) SMA (/banking/sma) — 59 movements / 329M exposure
+🎬 (bonus) SECTORS (/banking/sectors) — 5 critical, Power 10.49% NPA
+🎬 CLOSE: "End-to-end journey, 775+ APIs, multi-tenant + multi-vertical ready"
 🎤 Q&A
 ```
 
 ---
 
-## RIGHT NOW — next 15 minutes
+## RIGHT NOW — final prep steps
 
-1. **Read this script top-to-bottom** — 5 min. Make sure narrative flows.
-2. **Edit any names/numbers** to match your seed data:
-   - Replace `ACME Industries` with actual top borrower name
-   - Replace `0.84 NPA prob` with actual number from your `/v1/banking/npa/high-risk` response
-   - Replace `28 open cases` with actual count from `/v1/cms/cases`
-3. **Print or open on phone/tablet** — for quick glance during demo
-4. **Move to next prep step** — Newman smoke run
+✅ **DONE 2026-05-24:**
+- ✅ Script names/numbers swapped to real seed data (this v2)
+- ✅ User persona swapped: `tanya.credit` → **`ravi.risk` / `Risk!Pass1`**
+- ✅ Anchor borrower swapped: `ACME Industries` → **Arjun Reddy / Power / c-100014 / PD 0.986**
+- ✅ Real numbers across all Acts (cases 28→38, AUC 0.89→0.875, etc.)
+- ✅ NPA Prediction page built + wired at `/banking/npa-prediction`
+- ✅ SMA Classification page built + wired at `/banking/sma`
+- ✅ Sector Watch page built + wired at `/banking/sectors`
+- ✅ Newman smoke green (24 requests / 32/32 assertions)
+- ✅ Full SPA vitest: 510/510 pass
+
+⏳ **TO DO BEFORE TUESDAY:**
+
+1. **Read this v2 script top-to-bottom** — verify narrative flows with new numbers
+2. **Take backup screenshots** — login first via `ravi.risk`, then capture:
+   - Dashboard with KPI strip + Top Stressed Borrowers
+   - `/customers/c-100014` profile page
+   - `/banking/npa-prediction` list view
+   - NPA Why modal (click Arjun Reddy row)
+   - Backtest modal
+   - Alerts inbox + a case detail
+   - Audit Trail
+   - Reports library
+   - `/banking/sma` page
+   - `/banking/sectors` heatmap
+3. **Full dry-run** — set 15-min timer, screen-share to a teammate or record yourself
+4. **Newman full run**: `npm run newman:full`
+5. **Print or open `DEMO_PREP.md` on phone/tablet** — companion reference during demo
 
 ---
 
-*Tu yeh kar legi. Script ready hai, ab build aur practice.*
+*Tu yeh kar legi. Script v2 ready, ab practice.*
 
-*— Demo script v1, 2026-05-24*
+*— Demo script v2, 2026-05-24 (real-data substitution pass)*
