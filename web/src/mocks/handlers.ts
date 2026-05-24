@@ -6960,6 +6960,60 @@ export const handlers = [
     ),
   ),
 
+  // Module 1.2 — Data Profiling MSW handlers
+  http.get('/v1/dq/profile/:source_id/columns', ({ params }) => {
+    const sid = String(params.source_id);
+    return HttpResponse.json(envelope(__mswDqProfile(sid)));
+  }),
+
+  http.get('/v1/dq/profile/:source_id/column/:col', ({ params }) => {
+    const sid = String(params.source_id);
+    const col = String(params.col);
+    const profile = __mswDqProfile(sid);
+    const found = profile.columns.find((c: { column: string }) => c.column === col);
+    if (!found) {
+      return HttpResponse.json(
+        {
+          header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() },
+          error: { code: 'EWS_404_unknown_column', message: `unknown column ${col}`, severity: 'LOW' },
+        },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(
+      envelope({ tenant_id: 'BANK_DEMO', source_id: sid, generated_at: new Date().toISOString(), column: found }),
+    );
+  }),
+
+  http.get('/v1/dq/profile/:source_id/columns/:column/distribution', ({ params }) => {
+    const sid = String(params.source_id);
+    const col = String(params.column);
+    const buckets = Array.from({ length: 10 }, (_, i) => ({
+      bucket: `${i * 10}-${(i + 1) * 10}`,
+      count: 1200 - i * 80 + Math.floor(Math.random() * 50),
+      pct: Math.round(((10 - i) / 55) * 1000) / 1000,
+    }));
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', source_id: sid, column: col, generated_at: new Date().toISOString(), total_rows: 12_000, buckets, has_drift: false }));
+  }),
+
+  http.post('/v1/dq/profile/:source_id/suggest-rules', ({ params }) => {
+    const sid = String(params.source_id);
+    const rules = [
+      { rule_id: `dq-msw-${sid}-loan_id-nn`, source_id: sid, column: 'loan_id', rule_type: 'not_null', rule_def: { allow_null: false }, rationale: 'Observed null rate <0.1%; enforce NOT NULL.', confidence: 0.92, status: 'suggested' },
+      { rule_id: `dq-msw-${sid}-customer_id-regex`, source_id: sid, column: 'customer_id', rule_type: 'regex', rule_def: { pattern: '^c-\\d{6}$', format: 'numeric_id', sample: 'c-100012' }, rationale: '≥80% of values match c-NNNNNN pattern; enforce regex.', confidence: 0.9, status: 'suggested' },
+      { rule_id: `dq-msw-${sid}-worst_dpd-range`, source_id: sid, column: 'worst_dpd', rule_type: 'range', rule_def: { min: 0, max: 720 }, rationale: 'Observed min=0, max=540; suggest bound [0, 720].', confidence: 0.78, status: 'suggested' },
+    ];
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', source_id: sid, count: rules.length, rules }));
+  }),
+
+  http.post('/v1/dq/profile/promote-rule', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { rule_id?: string } | null;
+    if (!body?.rule_id) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'rule_id required in body', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    return HttpResponse.json(envelope({ rule_id: body.rule_id, source_id: 'cbs_loans', column: 'loan_id', rule_type: 'not_null', rule_def: { allow_null: false }, rationale: 'promoted', confidence: 0.92, status: 'promoted' }));
+  }),
+
   // Module 1.1 — Data Ingestion MSW handlers
   http.get('/v1/ingestion/connectors', () => HttpResponse.json(envelope({ items: __mswConnectors(), total: __mswConnectors().length }))),
 
@@ -7128,6 +7182,18 @@ export const handlers = [
 ];
 
 // MSW seed for /v1/audit/* — deterministic small set so test-runs are stable.
+// Module 1.2 — Data Profiling MSW seed
+function __mswDqProfile(source_id: string) {
+  const columns = [
+    { column: 'loan_id', type: 'string', null_count: 12, null_pct: 0.001, distinct_count: 9_120, min: null, max: null, mean: null, p50: null, p95: null, std_dev: null, anomaly_score: 0.1, has_drift: false, top_values: [{ value: 'LN-100012', count: 18, pct: 0.0015 }, { value: 'LN-100013', count: 14, pct: 0.0012 }], format_detected: null },
+    { column: 'customer_id', type: 'string', null_count: 0, null_pct: 0, distinct_count: 7_840, min: null, max: null, mean: null, p50: null, p95: null, std_dev: null, anomaly_score: 0.08, has_drift: false, top_values: [{ value: 'c-100012', count: 4500, pct: 0.18 }, { value: 'c-100020', count: 2800, pct: 0.15 }, { value: 'c-100015', count: 2400, pct: 0.13 }], format_detected: 'numeric_id' },
+    { column: 'pan', type: 'string', null_count: 240, null_pct: 0.02, distinct_count: 9_120, min: null, max: null, mean: null, p50: null, p95: null, std_dev: null, anomaly_score: 0.05, has_drift: false, top_values: [{ value: 'AAAPL1234C', count: 12, pct: 0.001 }], format_detected: 'pan' },
+    { column: 'sanctioned_amount', type: 'number', null_count: 0, null_pct: 0, distinct_count: 7_120, min: 50_000, max: 25_000_000, mean: 850_000, p50: 750_000, p95: 4_500_000, std_dev: 1_200_000, anomaly_score: 0.12, has_drift: false, top_values: [{ value: '500000', count: 320, pct: 0.027 }], format_detected: null },
+    { column: 'worst_dpd', type: 'integer', null_count: 0, null_pct: 0, distinct_count: 540, min: 0, max: 540, mean: 32, p50: 12, p95: 180, std_dev: 64, anomaly_score: 0.45, has_drift: true, top_values: [{ value: '0', count: 8400, pct: 0.7 }, { value: '30', count: 1100, pct: 0.092 }], format_detected: null },
+  ];
+  return { tenant_id: 'BANK_DEMO', source_id, generated_at: new Date().toISOString(), total_rows: 12_000, columns };
+}
+
 // Module 1.1 — Data Ingestion MSW seed
 const __mswCustomConnectors: Array<Record<string, unknown>> = [];
 function __mswConnectors() {

@@ -91,6 +91,23 @@ export function isDataSourceId(x: unknown): x is DataSourceId {
   return typeof x === 'string' && KNOWN_SOURCES.includes(x as DataSourceId);
 }
 
+export type DetectedFormat =
+  | 'pan'
+  | 'gstin'
+  | 'email'
+  | 'phone_in'
+  | 'iso_date'
+  | 'iso_datetime'
+  | 'uuid'
+  | 'numeric_id'
+  | null;
+
+export interface TopValue {
+  value: string;
+  count: number;
+  pct: number;
+}
+
 export interface ColumnProfile {
   column: string;
   type: 'string' | 'integer' | 'number' | 'boolean' | 'date' | 'enum';
@@ -100,9 +117,18 @@ export interface ColumnProfile {
   min: number | string | null;
   max: number | string | null;
   mean: number | null;
+  /** 50th percentile (median). Null for non-numeric columns. */
+  p50: number | null;
+  /** 95th percentile. Null for non-numeric columns. */
+  p95: number | null;
   std_dev: number | null;
   anomaly_score: number;
   has_drift: boolean;
+  /** Top 5 most-common values (string-rendered). */
+  top_values: TopValue[];
+  /** Heuristic format detection (PAN / GST / email / etc). null when string
+   *  doesn't match any known pattern OR column isn't a string. */
+  format_detected: DetectedFormat;
 }
 
 export interface SourceProfile {
@@ -115,6 +141,104 @@ export interface SourceProfile {
 
 function tenantScale(t: string): number {
   return t === 'BIL' ? 0.6 : 1.0;
+}
+
+/** Pattern → DetectedFormat mapping. Heuristic: rows that match a known
+ *  regex push the detector toward that format. Returns null when nothing
+ *  matches (or column type doesn't lend itself — booleans, numbers etc). */
+const FORMAT_PATTERNS: ReadonlyArray<{ format: Exclude<DetectedFormat, null>; regex: RegExp; sample: string }> = [
+  { format: 'pan',          regex: /^[A-Z]{5}[0-9]{4}[A-Z]$/,                            sample: 'AAAPL1234C' },
+  { format: 'gstin',        regex: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9][Z][0-9A-Z]$/,    sample: '27AAAPL1234C1Z5' },
+  { format: 'email',        regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,                         sample: 'jane.doe@bank.com' },
+  { format: 'phone_in',     regex: /^(\+91|0)?[6-9]\d{9}$/,                              sample: '+919811234567' },
+  { format: 'iso_datetime', regex: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/,  sample: '2026-05-24T11:30:00Z' },
+  { format: 'iso_date',     regex: /^\d{4}-\d{2}-\d{2}$/,                                sample: '2026-05-24' },
+  { format: 'uuid',         regex: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, sample: 'a3b8c2d1-...' },
+  { format: 'numeric_id',   regex: /^[0-9]{4,18}$/,                                      sample: '100245789' },
+];
+
+/** Detect a column's most-likely format from a sample of values. */
+export function detectFormat(sampleValues: ReadonlyArray<string>): DetectedFormat {
+  if (sampleValues.length === 0) return null;
+  for (const pat of FORMAT_PATTERNS) {
+    const matches = sampleValues.filter((v) => pat.regex.test(v)).length;
+    if (matches >= Math.ceil(sampleValues.length * 0.8)) return pat.format;
+  }
+  return null;
+}
+
+/** Generate a deterministic sample of values for a column. */
+function sampleValuesFor(
+  source_id: string,
+  column: string,
+  type: ColumnProfile['type'],
+  rng: () => number,
+): string[] {
+  if (type === 'boolean') return ['true', 'false'];
+  if (type === 'date') return [
+    '2026-05-22', '2026-05-23', '2026-05-24', '2026-05-21', '2026-05-20',
+  ];
+  if (type === 'enum') {
+    if (column.includes('product')) return ['PL_RET', 'AUTO_RET', 'CORP_TL', 'INV_SME', 'WC_SME'];
+    if (column.includes('risk')) return ['low', 'medium', 'high'];
+    if (column.includes('kyc')) return ['verified', 'pending', 'expired'];
+    if (column.includes('channel')) return ['atm', 'branch', 'online', 'mobile'];
+    return ['A', 'B', 'C'];
+  }
+  if (type === 'integer') {
+    const lo = Math.floor(rng() * 100);
+    const hi = lo + Math.floor(rng() * 500);
+    return [String(lo), String(lo + 5), String((lo + hi) >> 1), String(hi - 3), String(hi)];
+  }
+  if (type === 'number') {
+    const base = 50000 + Math.floor(rng() * 200000);
+    return [String(base), String(base + 12500), String(base * 2), String(base / 2), String(base * 1.5)];
+  }
+  // String columns: heuristic — emit pattern-matching sample based on column name
+  if (column === 'customer_id' || column === 'loan_id' || column === 'repayment_id' || column === 'txn_id' || column === 'account_id') {
+    return ['c-100012', 'c-100015', 'c-100020', 'c-100023', 'c-100028'];
+  }
+  if (column.includes('pan')) {
+    return ['AAAPL1234C', 'BBBPM2345D', 'CCCPN3456E', 'DDDPO4567F', 'EEEPQ5678G'];
+  }
+  if (column.includes('email')) {
+    return ['jane.doe@bank.com', 'ravi.kumar@apex.in', 'priya.s@zorews.example', 'amit.gupta@bank.com', 'sue.l@apex.in'];
+  }
+  if (column.includes('phone') || column.includes('mobile')) {
+    return ['+919811234567', '+919823456789', '+919876543210', '+919812345678', '+919898765432'];
+  }
+  if (column.includes('gst')) {
+    return ['27AAAPL1234C1Z5', '07BBBPM2345D1Z6', '19CCCPN3456E1Z7', '29DDDPO4567F1Z8', '36EEEPQ5678G1Z9'];
+  }
+  if (column.includes('uuid') || column.endsWith('_uuid')) {
+    return ['a3b8c2d1-f441-4d92-9c0b-1a2b3c4d5e6f', 'b4c9d3e2-...', 'c5d0e4f3-...', 'd6e1f5a4-...', 'e7f2a6b5-...'];
+  }
+  // Generic fallback
+  return ['val_A', 'val_B', 'val_C', 'val_D', 'val_E'];
+}
+
+/** Pure helper: compute top-5 from a sample value list (deterministic). */
+function topFiveFrom(rng: () => number, values: ReadonlyArray<string>, totalRows: number): TopValue[] {
+  if (values.length === 0 || totalRows === 0) return [];
+  // Distribute total_rows non-uniformly across sample values (concentrated)
+  const weights = values.map(() => 0.1 + rng() * 0.9);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return values
+    .map((v, i) => {
+      const c = Math.floor((weights[i] / sum) * totalRows * 0.6); // 60% of rows in top-5
+      return {
+        value: v,
+        count: c,
+        pct: Math.round((c / totalRows) * 10000) / 10000,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Quantile from a min/max range — deterministic synthesis, not a real
+ *  ranking. Production swaps to T-Digest / HLL once a real warehouse is wired. */
+function quantileFrom(min: number, max: number, q: number): number {
+  return Math.round((min + (max - min) * q) * 100) / 100;
 }
 
 export function profileSource(tenant_id: string, source_id: string, now: Date): SourceProfile {
@@ -153,6 +277,16 @@ export function profileSource(tenant_id: string, source_id: string, now: Date): 
     }
     const anomaly = Math.round(cRng() * 0.7 * 100) / 100;
     const has_drift = anomaly >= 0.4;
+    const samples = sampleValuesFor(source_id, col.name, col.type, cRng);
+    const top_values = topFiveFrom(cRng, samples, totalRows);
+    const format_detected: DetectedFormat =
+      col.type === 'string' || col.type === 'date' ? detectFormat(samples) : null;
+    let p50: number | null = null;
+    let p95: number | null = null;
+    if (col.type === 'integer' || col.type === 'number') {
+      p50 = quantileFrom(min as number, max as number, 0.5);
+      p95 = quantileFrom(min as number, max as number, 0.95);
+    }
     return {
       column: col.name,
       type: col.type,
@@ -162,9 +296,13 @@ export function profileSource(tenant_id: string, source_id: string, now: Date): 
       min,
       max,
       mean,
+      p50,
+      p95,
       std_dev: std,
       anomaly_score: anomaly,
       has_drift,
+      top_values,
+      format_detected,
     };
   });
 
@@ -191,6 +329,28 @@ export interface ColumnDistribution {
   total_rows: number;
   buckets: DistributionBucket[];
   has_drift: boolean;
+}
+
+/** Single-column detail accessor — for the "Column profile" panel on the
+ *  SPA when one cell is clicked. Composes `profileSource` then filters
+ *  to the requested column. Throws unknown_column when the column isn't
+ *  in the catalog. */
+export function profileColumn(
+  tenant_id: string,
+  source_id: string,
+  column: string,
+  now: Date,
+): ColumnProfile {
+  if (!column) throw new DataProfilingError('invalid_input', 'column required');
+  const src = profileSource(tenant_id, source_id, now);
+  const col = src.columns.find((c) => c.column === column);
+  if (!col) {
+    throw new DataProfilingError(
+      'unknown_column',
+      `unknown column ${column} in ${source_id}`,
+    );
+  }
+  return col;
 }
 
 export function buildColumnDistribution(tenant_id: string, source_id: string, column: string, now: Date): ColumnDistribution {
@@ -252,8 +412,36 @@ export function suggestDqRules(tenant_id: string, source_id: string, now: Date):
   if (!tenant_id) throw new DataProfilingError('invalid_input', 'tenant_id required');
   if (!isDataSourceId(source_id)) throw new DataProfilingError('unknown_source', `unknown source ${source_id}`);
 
+  // Re-use the live profile so format detection + p95 statistics align
+  // with whatever the SPA renders in the column-profile table.
+  const profile = profileSource(tenant_id, source_id, now);
+  const profileByName = new Map(profile.columns.map((c) => [c.column, c]));
+
   const rules: SuggestedDqRule[] = [];
   for (const col of COLUMNS_BY_SOURCE[source_id]) {
+    const live = profileByName.get(col.name);
+
+    // Format-driven regex suggestion (PAN / GSTIN / email / phone / UUID / iso_date)
+    if (live?.format_detected) {
+      const pat = FORMAT_PATTERNS.find((p) => p.format === live.format_detected);
+      if (pat) {
+        _ruleSeq++;
+        const id = `dq-${tenant_id}-${source_id}-${col.name}-regex-${_ruleSeq}`;
+        const rule: SuggestedDqRule = {
+          rule_id: id,
+          source_id: source_id as DataSourceId,
+          column: col.name,
+          rule_type: 'regex',
+          rule_def: { pattern: pat.regex.source, format: pat.format, sample: pat.sample },
+          rationale: `≥80% of sampled values match the canonical ${pat.format.toUpperCase()} pattern (e.g. "${pat.sample}"); suggest enforcing the regex.`,
+          confidence: Math.round((0.9) * 100) / 100,
+          status: 'suggested',
+        };
+        suggestionStore.set(id, rule);
+        rules.push(rule);
+      }
+    }
+
     const cRng = mulberry32(fnv1a(`${tenant_id}|${source_id}|${col.name}|suggest`));
     // Not-null suggestion always for required-looking cols
     if (col.name.endsWith('_id') || col.name === 'amount' || col.name === 'paid_at' || col.name === 'worst_dpd') {
@@ -283,6 +471,30 @@ export function suggestDqRules(tenant_id: string, source_id: string, now: Date):
         rule_def: { min: 0, max: 720 },
         rationale: `Observed min=0, max=540; suggest bound [0, 720] (2-year max DPD).`,
         confidence: Math.round((0.7 + cRng() * 0.2) * 100) / 100,
+        status: 'suggested',
+      };
+      suggestionStore.set(id, rule);
+      rules.push(rule);
+    }
+
+    // Generic numeric-range suggestion using p95 — drives "tighten to 95th
+    // percentile" for any numeric column that isn't a DPD-style measure.
+    if ((col.type === 'integer' || col.type === 'number')
+        && !col.name.includes('dpd')
+        && live?.p95 !== null
+        && live?.p95 !== undefined) {
+      const min = (live.min as number) ?? 0;
+      const upper = Math.ceil((live.p95 as number) * 1.05);
+      _ruleSeq++;
+      const id = `dq-${tenant_id}-${source_id}-${col.name}-p95range-${_ruleSeq}`;
+      const rule: SuggestedDqRule = {
+        rule_id: id,
+        source_id: source_id as DataSourceId,
+        column: col.name,
+        rule_type: 'range',
+        rule_def: { min, max: upper, basis: 'p95 + 5% headroom' },
+        rationale: `Observed p50=${live.p50}, p95=${live.p95}; suggest bound [${min}, ${upper}] (p95 + 5% headroom).`,
+        confidence: Math.round((0.6 + cRng() * 0.25) * 100) / 100,
         status: 'suggested',
       };
       suggestionStore.set(id, rule);

@@ -33023,6 +33023,45 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** Module 1.2 — GET /v1/dq/profile/:source_id/column/:col
+   *  Single-column detail accessor per Module 1.2 spec. Distinct path
+   *  from `/columns/:column/distribution` (which returns the histogram).
+   *  Returns the same ColumnProfile shape as one row of `/columns`. */
+  app.get(
+    '/v1/dq/profile/:source_id/column/:col',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { profileColumn } = require('./data_profiling') as typeof import('./data_profiling');
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              source_id: req.params.source_id,
+              generated_at: now().toISOString(),
+              column: profileColumn(req.tenant!.tenant_id, req.params.source_id, req.params.col, now()),
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus =
+          code === 'unknown_source' || code === 'unknown_column' ? 404 : 400;
+        const ews =
+          code === 'unknown_source' ? 'EWS_404_unknown_source'
+            : code === 'unknown_column' ? 'EWS_404_unknown_column'
+              : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'column_profile_failed';
+        return res
+          .status(httpStatus)
+          .json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   app.get(
     '/v1/dq/profile/:source_id/columns/:column/distribution',
     requireTenantMw,
@@ -33069,28 +33108,72 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // Module 1.2 — promote handler (used by both the per-source and the
+  // tenant-level routes). Writes an audit-log entry on success.
+  const promoteDqRuleHandler = (req: Request, res: Response, rule_id: string) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { promoteDqRule } = require('./data_profiling') as typeof import('./data_profiling');
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const promoted = promoteDqRule(req.tenant!.tenant_id, rule_id, actor, now());
+      // Audit-log write (cross-cutting #6)
+      try {
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: 'admin',
+            action: 'dq.suggestion.promote',
+            resource_type: 'rule',
+            resource_id: rule_id,
+            outcome: 'success',
+            severity: 'info',
+            metadata: { source_id: promoted.source_id, column: promoted.column, rule_type: promoted.rule_type, confidence: promoted.confidence },
+          },
+          now(),
+        );
+      } catch { /* best-effort */ }
+      return res.json(wrapResponse(promoted, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      const httpStatus = code === 'unknown_rule' ? 404
+        : code === 'already_promoted' ? 409
+        : 400;
+      const ews = code === 'unknown_rule' ? 'EWS_404_unknown_rule'
+        : code === 'already_promoted' ? 'EWS_409_already_promoted'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'promote_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  };
+
   app.post(
     '/v1/dq/profile/:source_id/rules/:rule_id/promote',
     requireTenantMw,
     requireRole('audit:read'),
+    (req: Request, res: Response) => promoteDqRuleHandler(req, res, req.params.rule_id),
+  );
+
+  /** Module 1.2 — POST /v1/dq/profile/promote-rule body {rule_id}
+   *  Tenant-level alias per the Module 1.2 spec. Same handler as the
+   *  per-source variant; rule_id is supplied in the body. */
+  app.post(
+    '/v1/dq/profile/promote-rule',
+    requireTenantMw,
+    requireRole('audit:read'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      try {
-        const { promoteDqRule } = require('./data_profiling') as typeof import('./data_profiling');
-        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        const promoted = promoteDqRule(req.tenant!.tenant_id, req.params.rule_id, actor, now());
-        return res.json(wrapResponse(promoted, ctx));
-      } catch (e) {
-        const code = (e as { code?: string }).code;
-        const httpStatus = code === 'unknown_rule' ? 404
-          : code === 'already_promoted' ? 409
-          : 400;
-        const ews = code === 'unknown_rule' ? 'EWS_404_unknown_rule'
-          : code === 'already_promoted' ? 'EWS_409_already_promoted'
-          : 'EWS_400_invalid_input';
-        const msg = e instanceof Error ? e.message : 'promote_failed';
-        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      const body = (req.body?.body ?? req.body) as { rule_id?: string };
+      const rule_id = body?.rule_id;
+      if (typeof rule_id !== 'string' || rule_id.length === 0) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: 'rule_id required in body', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
       }
+      return promoteDqRuleHandler(req, res, rule_id);
     },
   );
 

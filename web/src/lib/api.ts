@@ -1634,6 +1634,38 @@ export const api = {
     http
       .get<EnvelopeBody<IngestionSchemaDriftReport>>('/v1/ingestion/connectors/schema-drift')
       .then((r) => r.data),
+
+  // Module 1.2 — Data Profiling (AI)
+  dqProfileColumns: (source_id: string) =>
+    http
+      .get<EnvelopeBody<DqSourceProfile>>(`/v1/dq/profile/${encodeURIComponent(source_id)}/columns`)
+      .then((r) => r.data),
+
+  dqProfileColumn: (source_id: string, column: string) =>
+    http
+      .get<EnvelopeBody<DqColumnDetail>>(
+        `/v1/dq/profile/${encodeURIComponent(source_id)}/column/${encodeURIComponent(column)}`,
+      )
+      .then((r) => r.data),
+
+  dqColumnDistribution: (source_id: string, column: string, buckets?: number) => {
+    const q = buckets ? `?buckets=${buckets}` : '';
+    return http
+      .get<EnvelopeBody<DqColumnDistribution>>(
+        `/v1/dq/profile/${encodeURIComponent(source_id)}/columns/${encodeURIComponent(column)}/distribution${q}`,
+      )
+      .then((r) => r.data);
+  },
+
+  dqSuggestRules: (source_id: string) =>
+    http
+      .post<EnvelopeBody<DqSuggestionsEnvelope>>(`/v1/dq/profile/${encodeURIComponent(source_id)}/suggest-rules`)
+      .then((r) => r.data),
+
+  dqPromoteRule: (rule_id: string) =>
+    http
+      .post<EnvelopeBody<DqSuggestedRule>>('/v1/dq/profile/promote-rule', { rule_id })
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -1916,6 +1948,86 @@ export interface IngestionSchemaDriftReport {
   clean_count: number;
   rows: IngestionSchemaDriftRow[];
   drifted_rows: IngestionSchemaDriftRow[];
+}
+
+// Module 1.2 — Data Profiling types
+export type DqColumnType = 'string' | 'integer' | 'number' | 'boolean' | 'date' | 'enum';
+export type DqDetectedFormat =
+  | 'pan' | 'gstin' | 'email' | 'phone_in' | 'iso_date' | 'iso_datetime' | 'uuid' | 'numeric_id' | null;
+export type DqRuleType =
+  | 'not_null' | 'range' | 'enum_membership' | 'regex' | 'unique' | 'freshness';
+
+export interface DqTopValue {
+  value: string;
+  count: number;
+  pct: number;
+}
+
+export interface DqColumnProfile {
+  column: string;
+  type: DqColumnType;
+  null_count: number;
+  null_pct: number;
+  distinct_count: number;
+  min: number | string | null;
+  max: number | string | null;
+  mean: number | null;
+  p50: number | null;
+  p95: number | null;
+  std_dev: number | null;
+  anomaly_score: number;
+  has_drift: boolean;
+  top_values: DqTopValue[];
+  format_detected: DqDetectedFormat;
+}
+
+export interface DqSourceProfile {
+  tenant_id: string;
+  source_id: string;
+  generated_at: string;
+  total_rows: number;
+  columns: DqColumnProfile[];
+}
+
+export interface DqColumnDetail {
+  tenant_id: string;
+  source_id: string;
+  generated_at: string;
+  column: DqColumnProfile;
+}
+
+export interface DqDistributionBucket {
+  bucket: string;
+  count: number;
+  pct: number;
+}
+
+export interface DqColumnDistribution {
+  tenant_id: string;
+  source_id: string;
+  column: string;
+  generated_at: string;
+  total_rows: number;
+  buckets: DqDistributionBucket[];
+  has_drift: boolean;
+}
+
+export interface DqSuggestedRule {
+  rule_id: string;
+  source_id: string;
+  column: string;
+  rule_type: DqRuleType;
+  rule_def: Record<string, unknown>;
+  rationale: string;
+  confidence: number;
+  status: 'suggested' | 'promoted';
+}
+
+export interface DqSuggestionsEnvelope {
+  tenant_id: string;
+  source_id: string;
+  count: number;
+  rules: DqSuggestedRule[];
 }
 
 export interface PredictionExplanation {
