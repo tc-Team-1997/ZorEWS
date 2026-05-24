@@ -33355,6 +33355,37 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       try {
         const { listAnomalies } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        // Module 1.5: window=24h / 1h / 7d / Nh / Nd → compute `since`.
+        const windowParam = req.query.window as string | undefined;
+        let sinceFromWindow: string | undefined;
+        if (windowParam) {
+          const m = /^(\d+)([hd])$/.exec(windowParam);
+          if (!m) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: `invalid window: ${windowParam}`, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          const n = Number(m[1]);
+          const ms = (m[2] === 'h' ? n * 3_600_000 : n * 86_400_000);
+          sinceFromWindow = new Date(now().getTime() - ms).toISOString();
+        }
+        // ?min_score accepts either 0..1 (decimal) or 0..100 (integer) for ergonomics.
+        let minScore: number | undefined;
+        if (req.query.min_score !== undefined) {
+          const raw = Number(req.query.min_score);
+          if (!Number.isFinite(raw) || raw < 0) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: 'min_score must be ≥ 0', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          minScore = raw > 1 ? raw / 100 : raw;
+        }
         const out = listAnomalies(
           req.tenant!.tenant_id,
           {
@@ -33363,6 +33394,8 @@ export function makeApp(deps: AppDeps = {}) {
             severity: req.query.severity as import('./anomaly_detection').AnomalySeverity | undefined,
             source_id: req.query.source_id as string | undefined,
             customer_id: req.query.customer_id as string | undefined,
+            min_score: minScore,
+            since: (req.query.since as string | undefined) ?? sinceFromWindow,
           },
           now(),
         );
@@ -33431,13 +33464,209 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // Module 1.5 — inject a 10× spike for demo / acceptance.
+  // Literal path → must be mounted BEFORE `:anomaly_id` catch-all.
+  app.post(
+    '/v1/anomalies/inject-spike',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { injectSpike } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const w = (inner ?? {}) as {
+          source_id?: unknown;
+          multiplier?: unknown;
+          pattern?: unknown;
+        };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const a = injectSpike(
+          req.tenant!.tenant_id,
+          {
+            source_id: typeof w.source_id === 'string' ? w.source_id : undefined,
+            multiplier: typeof w.multiplier === 'number' ? w.multiplier : undefined,
+            pattern: typeof w.pattern === 'string'
+              ? (w.pattern as import('./anomaly_detection').AnomalyPattern)
+              : undefined,
+            actor_username: actor,
+          },
+          now(),
+        );
+        // Audit fan-out (cross-cutting #6).
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'anomaly.inject_spike',
+              resource_type: 'system',
+              resource_id: a.anomaly_id,
+              outcome: 'success',
+              severity: 'warning',
+              metadata: {
+                source_id: a.source_id,
+                pattern: a.pattern,
+                anomaly_score: a.anomaly_score,
+                affected_records: a.affected_records,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow audit failures — best-effort
+        }
+        return res.status(201).json(wrapResponse(a, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews = code === 'unknown_pattern' ? 'EWS_400_unknown_pattern' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'inject_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // Module 1.5 — Investigate: transitions an anomaly to `investigating`
+  // and cross-links a case_id. Caller may pass an existing case_id or
+  // omit it (the route mints `case-anom-<anomaly_id>` deterministically
+  // so an audit trail exists even when the cases-svc isn't reachable).
+  app.post(
+    '/v1/anomalies/:anomaly_id/investigate',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const anomaly_id = req.params.anomaly_id ?? '';
+      try {
+        const { investigateAnomaly } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const w = (inner ?? {}) as { case_id?: unknown; notes?: unknown };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const case_id = typeof w.case_id === 'string' && w.case_id.trim() !== ''
+          ? w.case_id
+          : `case-anom-${anomaly_id}`;
+        const notes = typeof w.notes === 'string' ? w.notes : null;
+        const a = investigateAnomaly(
+          tenant_id,
+          anomaly_id,
+          { case_id, actor_username: actor, notes },
+          now(),
+        );
+        // Audit fan-out (cross-cutting #6).
+        try {
+          auditTrailStore.record(
+            tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'anomaly.investigate',
+              resource_type: 'system',
+              resource_id: anomaly_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { case_id, notes },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(a, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === 'unknown_anomaly') {
+          return res.status(404).json(
+            wrapError({ code: 'EWS_404_unknown_anomaly', message: `unknown anomaly ${anomaly_id}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (code === 'already_investigating' || code === 'already_dismissed' || code === 'already_resolved') {
+          return res.status(409).json(
+            wrapError(
+              { code: `EWS_409_${code}`, message: e instanceof Error ? e.message : code, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        const msg = e instanceof Error ? e.message : 'investigate_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // Module 1.5 — Dismiss anomaly as false positive. Reason required.
+  app.post(
+    '/v1/anomalies/:anomaly_id/dismiss',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const anomaly_id = req.params.anomaly_id ?? '';
+      try {
+        const { dismissAnomaly } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const w = (inner ?? {}) as { reason?: unknown };
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const reason = typeof w.reason === 'string' ? w.reason : '';
+        const a = dismissAnomaly(tenant_id, anomaly_id, { reason, actor_username: actor }, now());
+        try {
+          auditTrailStore.record(
+            tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'anomaly.dismiss',
+              resource_type: 'system',
+              resource_id: anomaly_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { reason },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(a, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === 'unknown_anomaly') {
+          return res.status(404).json(
+            wrapError({ code: 'EWS_404_unknown_anomaly', message: `unknown anomaly ${anomaly_id}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (code === 'already_dismissed') {
+          return res.status(409).json(
+            wrapError({ code: 'EWS_409_already_dismissed', message: e instanceof Error ? e.message : code, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        const msg = e instanceof Error ? e.message : 'dismiss_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   app.get(
     '/v1/anomalies/:anomaly_id',
     requireTenantMw,
     requireRole('audit:read'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const { getAnomaly } = require('./anomaly_detection') as typeof import('./anomaly_detection');
+      const { getAnomaly, timeSeriesFor, scoreAs100 } = require('./anomaly_detection') as typeof import('./anomaly_detection');
       const found = getAnomaly(req.tenant!.tenant_id, req.params.anomaly_id);
       if (!found) {
         return res
@@ -33449,7 +33678,14 @@ export function makeApp(deps: AppDeps = {}) {
             ),
           );
       }
-      return res.json(wrapResponse(found, ctx));
+      // Module 1.5: decorate the single-anomaly response with the
+      // time-series + score-as-100 for the SPA Case Modal.
+      return res.json(
+        wrapResponse(
+          { ...found, time_series: timeSeriesFor(found), score_100: scoreAs100(found) },
+          ctx,
+        ),
+      );
     },
   );
 

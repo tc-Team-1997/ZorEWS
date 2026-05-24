@@ -32,6 +32,7 @@ import {
   Gauge,
   BrainCircuit,
   TrendingUp,
+  Activity,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -75,6 +76,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/audit-trail', i18nKey: 'audit_trail', icon: Shield, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/ingestion', i18nKey: 'data_ingestion', icon: Database, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/data-profiling', i18nKey: 'data_profiling', icon: BrainCircuit, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/anomalies', i18nKey: 'anomaly_detection', icon: Activity, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/activity', i18nKey: 'admin_activity', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/webhooks', i18nKey: 'webhooks', icon: Webhook, requireRole: ['admin'] },
   { to: '/admin/tenants', i18nKey: 'tenants', icon: Building2, requireRole: ['admin'] },

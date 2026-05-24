@@ -7179,7 +7179,11 @@ export const handlers = [
       }),
     );
   }),
+
 ];
+// Module 1.5 — Anomaly Detection handlers are appended after declaration
+// further down the file. The append happens at module-eval time, so
+// MSW's handler array contains them by the time the worker reads it.
 
 // MSW seed for /v1/audit/* — deterministic small set so test-runs are stable.
 // Module 1.2 — Data Profiling MSW seed
@@ -8132,3 +8136,300 @@ function rulesV2Backtest(ruleId: string) {
     monthly_volume: monthly,
   };
 }
+
+// ── Module 1.5 — Anomaly Detection (AI) — MSW handlers ────────────────
+// Mirrors services/bff/src/anomaly_detection.ts. Per-tenant in-memory
+// store keyed off `X-Tenant-ID` request header (defaults to BANK_DEMO).
+// 12-item baseline per tenant + injected spikes survive across calls.
+
+type _MswAnomaly = {
+  anomaly_id: string;
+  tenant_id: string;
+  pattern: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'acknowledged' | 'investigating' | 'resolved' | 'false_positive';
+  source_id: string;
+  detected_at: string;
+  anomaly_score: number;
+  affected_records: number;
+  description: string;
+  customer_id: string | null;
+  metadata: Record<string, unknown>;
+  case_id?: string | null;
+  status_updates?: Array<{ status: string; actor_username: string; notes: string | null; changed_at: string }>;
+  injected?: boolean;
+};
+
+const __mswAnomalyStore = new Map<string, Map<string, _MswAnomaly>>();
+const __mswAnomalyPatternCfg = new Map<string, Array<{ pattern: string; enabled: boolean; threshold: number }>>();
+const __mswAnomalyPatterns = [
+  'txn_volume_spike',
+  'geo_velocity',
+  'channel_shift',
+  'amount_outlier',
+  'frequency_outlier',
+  'schema_drift',
+  'pipeline_lag',
+  'duplicate_burst',
+];
+const __mswAnomalySources = ['cbs_loans', 'cbs_repayments', 'cbs_txns', 'mart_customer_360', 'mart_loan_360', 'bureau_score'];
+
+function __mswAnomalySev(score: number): _MswAnomaly['severity'] {
+  if (score >= 0.9) return 'critical';
+  if (score >= 0.75) return 'high';
+  if (score >= 0.55) return 'medium';
+  return 'low';
+}
+
+function __mswAnomalyBaseline(tenant_id: string): Map<string, _MswAnomaly> {
+  if (__mswAnomalyStore.has(tenant_id)) return __mswAnomalyStore.get(tenant_id)!;
+  const m = new Map<string, _MswAnomaly>();
+  const now = Date.now();
+  for (let i = 0; i < 12; i++) {
+    const id = `anm-${tenant_id}-${String(i).padStart(5, '0')}`;
+    const score = Math.round((0.45 + (i % 10) * 0.05) * 100) / 100;
+    const sev = __mswAnomalySev(score);
+    const pattern = __mswAnomalyPatterns[i % __mswAnomalyPatterns.length];
+    const source = __mswAnomalySources[i % __mswAnomalySources.length];
+    m.set(id, {
+      anomaly_id: id,
+      tenant_id,
+      pattern,
+      severity: sev,
+      status: 'open',
+      source_id: source,
+      detected_at: new Date(now - i * 3_600_000).toISOString(),
+      anomaly_score: score,
+      affected_records: 500 + i * 250,
+      description: `Pattern ${pattern} on ${source} (score ${Math.round(score * 100)})`,
+      customer_id: i % 3 === 0 ? `c-1000${String(i).padStart(2, '0')}` : null,
+      metadata: { seeded: true },
+      case_id: null,
+      status_updates: [],
+      injected: false,
+    });
+  }
+  __mswAnomalyStore.set(tenant_id, m);
+  return m;
+}
+
+function __mswAnomalyPatternConfig(tenant_id: string): Array<{ pattern: string; enabled: boolean; threshold: number }> {
+  if (__mswAnomalyPatternCfg.has(tenant_id)) return __mswAnomalyPatternCfg.get(tenant_id)!;
+  const cfg = __mswAnomalyPatterns.map((p) => ({ pattern: p, enabled: true, threshold: 0.7 }));
+  __mswAnomalyPatternCfg.set(tenant_id, cfg);
+  return cfg;
+}
+
+const __mswAnomalyHandlers = [
+  http.get('/v1/anomalies', ({ request }) => {
+    const url = new URL(request.url);
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const store = __mswAnomalyBaseline(tenant_id);
+    const windowParam = url.searchParams.get('window');
+    let since: string | undefined;
+    if (windowParam) {
+      const m = /^(\d+)([hd])$/.exec(windowParam);
+      if (m) {
+        const ms = m[2] === 'h' ? Number(m[1]) * 3_600_000 : Number(m[1]) * 86_400_000;
+        since = new Date(Date.now() - ms).toISOString();
+      }
+    }
+    const pattern = url.searchParams.get('pattern');
+    const sev = url.searchParams.get('severity');
+    const status = url.searchParams.get('status');
+    const source = url.searchParams.get('source_id');
+    const minScoreRaw = url.searchParams.get('min_score');
+    let minScore: number | undefined;
+    if (minScoreRaw) {
+      const v = Number(minScoreRaw);
+      if (Number.isFinite(v)) minScore = v > 1 ? v / 100 : v;
+    }
+    const all = Array.from(store.values()).filter((a) => {
+      if (pattern && a.pattern !== pattern) return false;
+      if (sev && a.severity !== sev) return false;
+      if (status && a.status !== status) return false;
+      if (source && a.source_id !== source) return false;
+      if (minScore !== undefined && a.anomaly_score < minScore) return false;
+      if (since && a.detected_at < since) return false;
+      return true;
+    });
+    const sevRank: Record<_MswAnomaly['severity'], number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    all.sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.anomaly_score - a.anomaly_score);
+    const by_severity = { low: 0, medium: 0, high: 0, critical: 0 } as Record<string, number>;
+    const by_status: Record<string, number> = { open: 0, acknowledged: 0, investigating: 0, resolved: 0, false_positive: 0 };
+    const by_pattern: Record<string, number> = {};
+    for (const a of all) {
+      by_severity[a.severity] = (by_severity[a.severity] ?? 0) + 1;
+      by_status[a.status] = (by_status[a.status] ?? 0) + 1;
+      by_pattern[a.pattern] = (by_pattern[a.pattern] ?? 0) + 1;
+    }
+    return HttpResponse.json(
+      envelope({
+        tenant_id,
+        generated_at: new Date().toISOString(),
+        total: all.length,
+        by_severity,
+        by_pattern,
+        by_status,
+        anomalies: all,
+      }),
+    );
+  }),
+
+  http.get('/v1/anomalies/patterns/config', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    return HttpResponse.json(envelope({ tenant_id, patterns: __mswAnomalyPatternConfig(tenant_id) }));
+  }),
+
+  http.post('/v1/anomalies/patterns/config', async ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const body = (await request.json()) as { updates?: Array<{ pattern: string; enabled?: boolean; threshold?: number }> };
+    if (!body.updates || !Array.isArray(body.updates)) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_400', message: 'updates[] required', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'updates[] required', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    const cfg = __mswAnomalyPatternConfig(tenant_id);
+    for (const u of body.updates) {
+      const r = cfg.find((c) => c.pattern === u.pattern);
+      if (!r) continue;
+      if (u.enabled !== undefined) r.enabled = u.enabled;
+      if (u.threshold !== undefined) r.threshold = u.threshold;
+    }
+    return HttpResponse.json(envelope({ tenant_id, patterns: cfg }));
+  }),
+
+  http.post('/v1/anomalies/rerun', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    return HttpResponse.json(
+      envelope({
+        tenant_id,
+        run_id: `run-${tenant_id}-${Date.now()}`,
+        triggered_by: actor,
+        triggered_at: new Date().toISOString(),
+        scanned_records: 142_500,
+        patterns_evaluated: __mswAnomalyPatterns.length,
+        new_anomalies: 3,
+        duration_ms: 2400,
+      }),
+      { status: 201 },
+    );
+  }),
+
+  http.post('/v1/anomalies/inject-spike', async ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const body = (await request.json().catch(() => ({}))) as { source_id?: string; multiplier?: number; pattern?: string };
+    const store = __mswAnomalyBaseline(tenant_id);
+    const multiplier = Math.max(2, Math.min(100, body.multiplier ?? 10));
+    const score = Math.round(Math.max(0.80, Math.min(0.99, 0.50 + multiplier * 0.035)) * 100) / 100;
+    const id = `anm-${tenant_id}-${Date.now()}-spike`;
+    const source_id = body.source_id ?? 'cbs_txns';
+    const pattern = (body.pattern as string | undefined) ?? 'txn_volume_spike';
+    const a: _MswAnomaly = {
+      anomaly_id: id,
+      tenant_id,
+      pattern,
+      severity: __mswAnomalySev(score),
+      status: 'open',
+      source_id,
+      detected_at: new Date().toISOString(),
+      anomaly_score: score,
+      affected_records: 1000 * multiplier,
+      description: `Injected ${multiplier}× spike on ${source_id} (score ${Math.round(score * 100)})`,
+      customer_id: null,
+      metadata: { injected: true, multiplier, injected_by: actor },
+      case_id: null,
+      status_updates: [{ status: 'open', actor_username: actor, notes: `Injected ${multiplier}× spike`, changed_at: new Date().toISOString() }],
+      injected: true,
+    };
+    store.set(id, a);
+    return HttpResponse.json(envelope(a), { status: 201 });
+  }),
+
+  http.post('/v1/anomalies/:anomaly_id/investigate', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const store = __mswAnomalyBaseline(tenant_id);
+    const id = String(params.anomaly_id ?? '');
+    const a = store.get(id);
+    if (!a) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_404', message: 'not found', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_anomaly', message: `unknown ${id}`, severity: 'MEDIUM' } },
+        { status: 404 },
+      );
+    }
+    if (a.status === 'investigating') {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_409', message: 'already investigating', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_409_already_investigating', message: 'already investigating', severity: 'MEDIUM' } },
+        { status: 409 },
+      );
+    }
+    const body = (await request.json().catch(() => ({}))) as { case_id?: string; notes?: string };
+    const case_id = body.case_id && body.case_id.trim() !== '' ? body.case_id : `case-anom-${id}`;
+    a.status = 'investigating';
+    a.case_id = case_id;
+    a.status_updates = [...(a.status_updates ?? []), { status: 'investigating', actor_username: actor, notes: body.notes ?? null, changed_at: new Date().toISOString() }];
+    return HttpResponse.json(envelope(a));
+  }),
+
+  http.post('/v1/anomalies/:anomaly_id/dismiss', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const store = __mswAnomalyBaseline(tenant_id);
+    const id = String(params.anomaly_id ?? '');
+    const a = store.get(id);
+    if (!a) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_404', message: 'not found', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_anomaly', message: `unknown ${id}`, severity: 'MEDIUM' } },
+        { status: 404 },
+      );
+    }
+    const body = (await request.json().catch(() => ({}))) as { reason?: string };
+    if (!body.reason || !body.reason.trim()) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_400', message: 'reason required', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'reason required', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    a.status = 'false_positive';
+    a.status_updates = [...(a.status_updates ?? []), { status: 'false_positive', actor_username: actor, notes: body.reason, changed_at: new Date().toISOString() }];
+    return HttpResponse.json(envelope(a));
+  }),
+
+  http.get('/v1/anomalies/:anomaly_id', ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const store = __mswAnomalyBaseline(tenant_id);
+    const id = String(params.anomaly_id ?? '');
+    const a = store.get(id);
+    if (!a) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_404', message: 'not found', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_anomaly', message: `unknown ${id}`, severity: 'MEDIUM' } },
+        { status: 404 },
+      );
+    }
+    // Synthesise a 24-hour time series ending at detected_at.
+    const detected = new Date(a.detected_at).getTime();
+    const baseline = Math.max(1, Math.round(a.affected_records / (1 + a.anomaly_score * 9)));
+    const time_series = Array.from({ length: 24 }, (_, idx) => {
+      const h = 23 - idx;
+      const ts = new Date(detected - h * 3_600_000).toISOString();
+      const isOut = h === 0;
+      return { ts, value: isOut ? a.affected_records : Math.round(baseline * (0.9 + (idx % 5) * 0.04)), is_outlier: isOut };
+    });
+    return HttpResponse.json(envelope({ ...a, time_series, score_100: Math.round(a.anomaly_score * 100) }));
+  }),
+];
+
+export function __resetMswAnomalyStore() {
+  __mswAnomalyStore.clear();
+  __mswAnomalyPatternCfg.clear();
+}
+
+// Module 1.5 — register the anomaly handlers with the exported `handlers`
+// array. Done as a side-effect to avoid the TDZ that would result from
+// spreading them inline before their `const __mswAnomalyHandlers = [...]`
+// declaration further up the file.
+handlers.push(...__mswAnomalyHandlers);

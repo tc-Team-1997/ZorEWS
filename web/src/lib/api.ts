@@ -1666,6 +1666,56 @@ export const api = {
     http
       .post<EnvelopeBody<DqSuggestedRule>>('/v1/dq/profile/promote-rule', { rule_id })
       .then((r) => r.data),
+
+  // ── Module 1.5 — Anomaly Detection (AI) ────────────────────────────
+  anomaliesList: (q: { window?: string; source_id?: string; severity?: string; min_score?: number; pattern?: string; status?: string } = {}) => {
+    const sp = new URLSearchParams();
+    if (q.window) sp.set('window', q.window);
+    if (q.source_id) sp.set('source_id', q.source_id);
+    if (q.severity) sp.set('severity', q.severity);
+    if (q.pattern) sp.set('pattern', q.pattern);
+    if (q.status) sp.set('status', q.status);
+    if (q.min_score !== undefined) sp.set('min_score', String(q.min_score));
+    const qs = sp.toString();
+    return http
+      .get<EnvelopeBody<AnomalyListReport>>(`/v1/anomalies${qs ? `?${qs}` : ''}`)
+      .then((r) => r.data);
+  },
+
+  anomalyGet: (id: string) =>
+    http
+      .get<EnvelopeBody<AnomalyDetail>>(`/v1/anomalies/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  anomalyPatternsConfigGet: () =>
+    http
+      .get<EnvelopeBody<AnomalyPatternsConfigEnvelope>>('/v1/anomalies/patterns/config')
+      .then((r) => r.data),
+
+  anomalyPatternsConfigSet: (updates: AnomalyPatternConfigUpdate[]) =>
+    http
+      .post<EnvelopeBody<AnomalyPatternsConfigEnvelope>>('/v1/anomalies/patterns/config', { updates })
+      .then((r) => r.data),
+
+  anomalyRerun: () =>
+    http
+      .post<EnvelopeBody<AnomalyRerunSummary>>('/v1/anomalies/rerun', {})
+      .then((r) => r.data),
+
+  anomalyInjectSpike: (body: { source_id?: string; multiplier?: number; pattern?: string } = {}) =>
+    http
+      .post<EnvelopeBody<AnomalySummary>>('/v1/anomalies/inject-spike', body)
+      .then((r) => r.data),
+
+  anomalyInvestigate: (id: string, body: { case_id?: string; notes?: string } = {}) =>
+    http
+      .post<EnvelopeBody<AnomalySummary>>(`/v1/anomalies/${encodeURIComponent(id)}/investigate`, body)
+      .then((r) => r.data),
+
+  anomalyDismiss: (id: string, reason: string) =>
+    http
+      .post<EnvelopeBody<AnomalySummary>>(`/v1/anomalies/${encodeURIComponent(id)}/dismiss`, { reason })
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -2912,4 +2962,92 @@ export interface RecoveryAnalytics {
   mean_time_to_restore_hours: number | null;
   p50_time_to_restore_hours: number | null;
   p95_time_to_restore_hours: number | null;
+}
+
+// ── Module 1.5 — Anomaly Detection response shapes ────────────────────
+export type AnomalyPattern =
+  | 'txn_volume_spike'
+  | 'geo_velocity'
+  | 'channel_shift'
+  | 'amount_outlier'
+  | 'frequency_outlier'
+  | 'schema_drift'
+  | 'pipeline_lag'
+  | 'duplicate_burst';
+
+export type AnomalySeverity = 'low' | 'medium' | 'high' | 'critical';
+export type AnomalyStatus = 'open' | 'acknowledged' | 'investigating' | 'resolved' | 'false_positive';
+
+export interface AnomalyStatusUpdate {
+  status: AnomalyStatus;
+  actor_username: string;
+  notes: string | null;
+  changed_at: string;
+}
+
+export interface AnomalySummary {
+  anomaly_id: string;
+  tenant_id: string;
+  pattern: AnomalyPattern;
+  severity: AnomalySeverity;
+  status: AnomalyStatus;
+  source_id: string;
+  detected_at: string;
+  anomaly_score: number;
+  affected_records: number;
+  description: string;
+  customer_id: string | null;
+  metadata: Record<string, unknown>;
+  case_id?: string | null;
+  status_updates?: AnomalyStatusUpdate[];
+  injected?: boolean;
+}
+
+export interface AnomalyListReport {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  by_severity: Record<AnomalySeverity, number>;
+  by_pattern: Partial<Record<AnomalyPattern, number>>;
+  by_status: Record<AnomalyStatus, number>;
+  anomalies: AnomalySummary[];
+}
+
+export interface AnomalyTimeSeriesPoint {
+  ts: string;
+  value: number;
+  is_outlier: boolean;
+}
+
+export interface AnomalyDetail extends AnomalySummary {
+  time_series: AnomalyTimeSeriesPoint[];
+  score_100: number;
+}
+
+export interface AnomalyPatternConfigRow {
+  pattern: AnomalyPattern;
+  enabled: boolean;
+  threshold: number;
+}
+
+export interface AnomalyPatternsConfigEnvelope {
+  tenant_id: string;
+  patterns: AnomalyPatternConfigRow[];
+}
+
+export interface AnomalyPatternConfigUpdate {
+  pattern: AnomalyPattern;
+  enabled?: boolean;
+  threshold?: number;
+}
+
+export interface AnomalyRerunSummary {
+  tenant_id: string;
+  run_id: string;
+  triggered_by: string;
+  triggered_at: string;
+  scanned_records: number;
+  patterns_evaluated: number;
+  new_anomalies: number;
+  duration_ms: number;
 }
