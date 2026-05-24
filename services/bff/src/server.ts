@@ -26725,6 +26725,130 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** Module 1.1 — GET /v1/ingestion/connectors/schema-drift
+   *  Cross-source schema-drift dashboard view. Distinct from M3.9 (which
+   *  compares two specific schemas); this endpoint lists every connector
+   *  + how many tenant overrides it carries (= drift signal). Drives the
+   *  SPA "Schema Drift" card on /admin/ingestion. **Declared BEFORE
+   *  catch-all `/v1/ingestion/connectors/:id` so the literal segment wins.** */
+  app.get(
+    '/v1/ingestion/connectors/schema-drift',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant_id = req.tenant!.tenant_id;
+      const connectors = ingestionRegistry.list(tenant_id);
+      const rows = connectors.flatMap((c) => {
+        let schema = null as null | { version: string; fields_count: number };
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const mod = require('./connector_schema') as typeof import('./connector_schema');
+          const s = mod.getConnectorSchema(c.id);
+          if (s) schema = { version: s.version, fields_count: s.fields.length };
+        } catch { /* schema lookup best-effort */ }
+        let overrides_count = 0;
+        let tenant_added_fields: string[] = [];
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const mod = require('./connector_schema_overrides') as typeof import('./connector_schema_overrides');
+          const list = mod.defaultSchemaOverrideStore.list(tenant_id, c.id);
+          overrides_count = list.length;
+          tenant_added_fields = list.map((f) => f.name);
+        } catch { /* override-store optional */ }
+        return [{
+          connector_id: c.id,
+          name: c.name,
+          source_system: c.source_system,
+          type: c.type,
+          status: c.status,
+          schema_version: schema?.version ?? null,
+          platform_fields_count: schema?.fields_count ?? 0,
+          tenant_added_fields,
+          overrides_count,
+          has_drift: overrides_count > 0,
+        }];
+      });
+      const drifted = rows.filter((r) => r.has_drift);
+      return res.json(wrapResponse({
+        tenant_id,
+        generated_at: new Date().toISOString(),
+        total_connectors: rows.length,
+        drifted_count: drifted.length,
+        clean_count: rows.length - drifted.length,
+        rows,
+        drifted_rows: drifted,
+      }, ctx));
+    },
+  );
+
+  /** Module 1.1 — POST /v1/ingestion/connectors body ConnectorCreateInput.
+   *  Adds a new per-tenant custom source (Source Editor "Add new source").
+   *  Writes an audit event on success. 201 happy / 400 invalid_input or
+   *  invalid_id / 409 id_in_use / 501 when the configured registry doesn't
+   *  implement create. */
+  app.post(
+    '/v1/ingestion/connectors',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!ingestionRegistry.create) {
+        return res.status(501).json(
+          wrapError(
+            { code: 'EWS_501_not_implemented', message: 'connector creation not available in this configuration', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const input = (req.body?.body ?? req.body) as Record<string, unknown>;
+      try {
+        const created = ingestionRegistry.create(req.tenant!.tenant_id, {
+          id: String((input?.id ?? '') as string),
+          name: String((input?.name ?? '') as string),
+          source_system: String((input?.source_system ?? '') as string),
+          type: input?.type as never,
+          schedule: String((input?.schedule ?? '') as string),
+          description: input?.description as string | undefined,
+          default_status: input?.default_status as never,
+          owner_user_id: (input?.owner_user_id ?? null) as string | null,
+        }, new Date());
+        // Audit-log write (cross-cutting #6)
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+              actor_role: 'admin',
+              action: 'ingestion.connector.create',
+              resource_type: 'integration',
+              resource_id: created.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { type: created.type, schedule: created.schedule, source_system: created.source_system },
+            },
+            new Date(),
+          );
+        } catch { /* best-effort */ }
+        return res.status(201).json(wrapResponse(created, ctx));
+      } catch (e) {
+        if (e instanceof IngestionError) {
+          if (e.code === 'id_in_use') {
+            return res.status(409).json(
+              wrapError({ code: 'EWS_409_id_in_use', message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'create failed', severity: 'HIGH' }, ctx),
+        );
+      }
+    },
+  );
+
   /** GET /v1/ingestion/connectors/:id — single connector. 404 on miss. */
   app.get(
     '/v1/ingestion/connectors/:id',
@@ -26743,6 +26867,72 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(c, ctx));
+    },
+  );
+
+  /** Module 1.1 — PATCH /v1/ingestion/connectors/:id body ConnectorUpdateInput.
+   *  Edits a connector's editable metadata (name / source_system / type /
+   *  schedule / description / default_status / owner_user_id). Seed
+   *  connectors are edited via a per-tenant overlay; custom connectors
+   *  are edited in-place. Writes an audit event on success. */
+  app.patch(
+    '/v1/ingestion/connectors/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.id ?? '';
+      if (!ingestionRegistry.update) {
+        return res.status(501).json(
+          wrapError(
+            { code: 'EWS_501_not_implemented', message: 'connector update not available in this configuration', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const patch = (req.body?.body ?? req.body) as Record<string, unknown>;
+      try {
+        const updated = ingestionRegistry.update(req.tenant!.tenant_id, id, {
+          name: patch?.name as string | undefined,
+          source_system: patch?.source_system as string | undefined,
+          type: patch?.type as never,
+          schedule: patch?.schedule as string | undefined,
+          description: patch?.description as string | undefined,
+          default_status: patch?.default_status as never,
+          owner_user_id: patch?.owner_user_id as string | null | undefined,
+        }, new Date());
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+              actor_role: 'admin',
+              action: 'ingestion.connector.update',
+              resource_type: 'integration',
+              resource_id: updated.id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { patched_fields: Object.keys(patch ?? {}) },
+            },
+            new Date(),
+          );
+        } catch { /* best-effort */ }
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof IngestionError) {
+          if (e.code === 'unknown_connector') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_connector', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'update failed', severity: 'HIGH' }, ctx),
+        );
+      }
     },
   );
 

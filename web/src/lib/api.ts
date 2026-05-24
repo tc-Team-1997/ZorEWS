@@ -1603,6 +1603,37 @@ export const api = {
     http
       .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${type ? `?type=${encodeURIComponent(type)}` : ''}`)
       .then((r) => r.data),
+
+  // Module 1.1 — Data Ingestion (Source Feeds management)
+  ingestionConnectors: () =>
+    http.get<EnvelopeBody<{ items: IngestionConnector[]; total: number }>>('/v1/ingestion/connectors').then((r) => r.data),
+
+  ingestionCreateConnector: (input: IngestionConnectorCreateInput) =>
+    http.post<EnvelopeBody<IngestionConnector>>('/v1/ingestion/connectors', input).then((r) => r.data),
+
+  ingestionUpdateConnector: (id: string, patch: IngestionConnectorUpdateInput) =>
+    http.patch<EnvelopeBody<IngestionConnector>>(`/v1/ingestion/connectors/${encodeURIComponent(id)}`, patch).then((r) => r.data),
+
+  ingestionConnectorRuns: (id: string, limit = 50) =>
+    http
+      .get<EnvelopeBody<{ items: IngestionConnectorRun[]; total: number; connector_id: string; limit: number }>>(
+        `/v1/ingestion/connectors/${encodeURIComponent(id)}/runs?limit=${limit}`,
+      )
+      .then((r) => r.data),
+
+  ingestionRunNow: (id: string) =>
+    http.post<EnvelopeBody<IngestionConnectorRun>>(`/v1/ingestion/connectors/${encodeURIComponent(id)}/run`).then((r) => r.data),
+
+  ingestionPause: (id: string) =>
+    http.post<EnvelopeBody<IngestionConnector>>(`/v1/ingestion/connectors/${encodeURIComponent(id)}/pause`).then((r) => r.data),
+
+  ingestionResume: (id: string) =>
+    http.post<EnvelopeBody<IngestionConnector>>(`/v1/ingestion/connectors/${encodeURIComponent(id)}/resume`).then((r) => r.data),
+
+  ingestionSchemaDrift: () =>
+    http
+      .get<EnvelopeBody<IngestionSchemaDriftReport>>('/v1/ingestion/connectors/schema-drift')
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -1801,6 +1832,90 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// Module 1.1 — Data Ingestion types
+export type IngestionConnectorType =
+  | 'kafka_stream'
+  | 'batch_csv'
+  | 'rest_api'
+  | 'soap_api'
+  | 'sftp_drop';
+
+export type IngestionRunStatus = 'success' | 'failure' | 'partial' | 'running';
+
+export interface IngestionConnector {
+  id: string;
+  name: string;
+  source_system: string;
+  type: IngestionConnectorType;
+  schedule: string;
+  description: string;
+  default_status: IngestionStatus;
+  status: IngestionStatus;
+  last_run_at: string | null;
+  last_run_status: IngestionRunStatus | null;
+  last_run_records: number;
+  average_lag_seconds: number;
+  paused_at: string | null;
+  owner_user_id?: string | null;
+  is_custom?: boolean;
+}
+
+export interface IngestionConnectorRun {
+  run_id: string;
+  connector_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: IngestionRunStatus;
+  records_processed: number;
+  records_failed: number;
+  error_message: string | null;
+  triggered_manually: boolean;
+}
+
+export interface IngestionConnectorCreateInput {
+  id: string;
+  name: string;
+  source_system: string;
+  type: IngestionConnectorType;
+  schedule: string;
+  description?: string;
+  default_status?: IngestionStatus;
+  owner_user_id?: string | null;
+}
+
+export interface IngestionConnectorUpdateInput {
+  name?: string;
+  source_system?: string;
+  type?: IngestionConnectorType;
+  schedule?: string;
+  description?: string;
+  default_status?: IngestionStatus;
+  owner_user_id?: string | null;
+}
+
+export interface IngestionSchemaDriftRow {
+  connector_id: string;
+  name: string;
+  source_system: string;
+  type: IngestionConnectorType;
+  status: IngestionStatus;
+  schema_version: string | null;
+  platform_fields_count: number;
+  tenant_added_fields: string[];
+  overrides_count: number;
+  has_drift: boolean;
+}
+
+export interface IngestionSchemaDriftReport {
+  tenant_id: string;
+  generated_at: string;
+  total_connectors: number;
+  drifted_count: number;
+  clean_count: number;
+  rows: IngestionSchemaDriftRow[];
+  drifted_rows: IngestionSchemaDriftRow[];
 }
 
 export interface PredictionExplanation {

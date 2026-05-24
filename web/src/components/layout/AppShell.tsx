@@ -73,6 +73,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/integrations', i18nKey: 'integrations', icon: Plug, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/audit-log', i18nKey: 'audit_log', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/audit-trail', i18nKey: 'audit_trail', icon: Shield, requireRole: ['admin', 'supervisor'] },
+  { to: '/admin/ingestion', i18nKey: 'data_ingestion', icon: Database, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/activity', i18nKey: 'admin_activity', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/webhooks', i18nKey: 'webhooks', icon: Webhook, requireRole: ['admin'] },
   { to: '/admin/tenants', i18nKey: 'tenants', icon: Building2, requireRole: ['admin'] },

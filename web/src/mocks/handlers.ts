@@ -6960,6 +6960,134 @@ export const handlers = [
     ),
   ),
 
+  // Module 1.1 — Data Ingestion MSW handlers
+  http.get('/v1/ingestion/connectors', () => HttpResponse.json(envelope({ items: __mswConnectors(), total: __mswConnectors().length }))),
+
+  http.post('/v1/ingestion/connectors', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== 'object') {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'body required', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const ID_RE = /^[a-z][a-z0-9_]{2,63}$/;
+    if (typeof body.id !== 'string' || !ID_RE.test(body.id)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_id', message: 'id must match ^[a-z][a-z0-9_]{2,63}$', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const list = __mswConnectors();
+    if (list.find((c) => c.id === body.id)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_409_id_in_use', message: `connector id already in use: ${body.id}`, severity: 'MEDIUM' } }, { status: 409 });
+    }
+    const created = {
+      id: String(body.id),
+      name: String(body.name ?? ''),
+      source_system: String(body.source_system ?? ''),
+      type: (body.type as string) || 'rest_api',
+      schedule: String(body.schedule ?? ''),
+      description: String(body.description ?? ''),
+      default_status: 'healthy',
+      status: 'healthy',
+      last_run_at: null,
+      last_run_status: null,
+      last_run_records: 1100,
+      average_lag_seconds: 12,
+      paused_at: null,
+      owner_user_id: (body.owner_user_id as string | null) ?? null,
+      is_custom: true,
+    };
+    __mswCustomConnectors.push(created as never);
+    return HttpResponse.json(envelope(created), { status: 201 });
+  }),
+
+  http.patch('/v1/ingestion/connectors/:id', async ({ params, request }) => {
+    const all = __mswConnectors();
+    const target = all.find((c) => c.id === params.id);
+    if (!target) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_connector', message: `unknown connector: ${params.id}`, severity: 'LOW' } }, { status: 404 });
+    }
+    const patch = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (patch) {
+      Object.assign(target as Record<string, unknown>, patch);
+    }
+    return HttpResponse.json(envelope(target));
+  }),
+
+  http.get('/v1/ingestion/connectors/schema-drift', () => {
+    const rows = __mswConnectors().map((c) => ({
+      connector_id: c.id,
+      name: c.name,
+      source_system: c.source_system,
+      type: c.type,
+      status: c.status,
+      schema_version: '1.0.0',
+      platform_fields_count: 10,
+      tenant_added_fields: c.id === 'cbs_loan_book' ? ['custom_field_a', 'custom_field_b'] : [],
+      overrides_count: c.id === 'cbs_loan_book' ? 2 : 0,
+      has_drift: c.id === 'cbs_loan_book',
+    }));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_connectors: rows.length,
+        drifted_count: rows.filter((r) => r.has_drift).length,
+        clean_count: rows.filter((r) => !r.has_drift).length,
+        rows,
+        drifted_rows: rows.filter((r) => r.has_drift),
+      }),
+    );
+  }),
+
+  http.get('/v1/ingestion/connectors/:id/runs', ({ params, request }) => {
+    const url = new URL(request.url);
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? '50')));
+    const cid = String(params.id);
+    const runs = Array.from({ length: 5 }, (_, i) => ({
+      run_id: `run-${cid}-${i}`,
+      connector_id: cid,
+      started_at: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
+      finished_at: new Date(Date.now() - (i + 1) * 3_600_000 + 60_000).toISOString(),
+      status: (i === 1 ? 'failure' : i === 3 ? 'partial' : 'success') as 'success' | 'failure' | 'partial' | 'running',
+      records_processed: 12_000 - i * 100,
+      records_failed: i === 1 ? 12_000 : i === 3 ? 230 : 0,
+      error_message: i === 1 ? 'connection timeout after 30s' : i === 3 ? 'schema mismatch on column "amount"' : null,
+      triggered_manually: i === 0,
+    })).slice(0, limit);
+    return HttpResponse.json(envelope({ items: runs, total: runs.length, connector_id: cid, limit }));
+  }),
+
+  http.post('/v1/ingestion/connectors/:id/run', ({ params }) => {
+    const cid = String(params.id);
+    const run = {
+      run_id: `run-${cid}-now`,
+      connector_id: cid,
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      status: 'success' as const,
+      records_processed: 12_500,
+      records_failed: 0,
+      error_message: null,
+      triggered_manually: true,
+    };
+    return HttpResponse.json(envelope(run), { status: 201 });
+  }),
+
+  http.post('/v1/ingestion/connectors/:id/pause', ({ params }) => {
+    const all = __mswConnectors();
+    const target = all.find((c) => c.id === params.id);
+    if (!target) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_connector', message: 'unknown', severity: 'LOW' } }, { status: 404 });
+    (target as Record<string, unknown>).status = 'paused';
+    (target as Record<string, unknown>).paused_at = new Date().toISOString();
+    return HttpResponse.json(envelope(target));
+  }),
+
+  http.post('/v1/ingestion/connectors/:id/resume', ({ params }) => {
+    const all = __mswConnectors();
+    const target = all.find((c) => c.id === params.id);
+    if (!target) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_connector', message: 'unknown', severity: 'LOW' } }, { status: 404 });
+    (target as Record<string, unknown>).status = 'healthy';
+    (target as Record<string, unknown>).paused_at = null;
+    return HttpResponse.json(envelope(target));
+  }),
+
   http.get('/v1/ingestion/health', () =>
     HttpResponse.json(
       envelope({
@@ -7000,6 +7128,17 @@ export const handlers = [
 ];
 
 // MSW seed for /v1/audit/* — deterministic small set so test-runs are stable.
+// Module 1.1 — Data Ingestion MSW seed
+const __mswCustomConnectors: Array<Record<string, unknown>> = [];
+function __mswConnectors() {
+  const seed = [
+    { id: 'cbs_loan_book', name: 'Core Banking Loan Book', source_system: 'CBS', type: 'kafka_stream', schedule: 'continuous', description: 'Streams loan + repayment events', default_status: 'healthy', status: 'healthy', last_run_at: new Date(Date.now() - 5 * 60_000).toISOString(), last_run_status: 'success', last_run_records: 52_400, average_lag_seconds: 8, paused_at: null, owner_user_id: 'ravi.risk', is_custom: false },
+    { id: 'agent_productivity', name: 'Agent Productivity', source_system: 'AGENT', type: 'batch_csv', schedule: 'daily 03:00', description: 'Daily agent KPI rollup', default_status: 'degraded', status: 'degraded', last_run_at: new Date(Date.now() - 90 * 60_000).toISOString(), last_run_status: 'partial', last_run_records: 5_880, average_lag_seconds: 32, paused_at: null, owner_user_id: 'sue.super', is_custom: false },
+    { id: 'aml_watchlist', name: 'AML Watchlist Sync', source_system: 'AML', type: 'rest_api', schedule: 'hourly', description: 'Pulls sanctions + PEP updates', default_status: 'healthy', status: 'healthy', last_run_at: new Date(Date.now() - 30 * 60_000).toISOString(), last_run_status: 'success', last_run_records: 412, average_lag_seconds: 4, paused_at: null, owner_user_id: null, is_custom: false },
+  ];
+  return [...__mswCustomConnectors, ...seed] as Array<Record<string, unknown>> as never[];
+}
+
 function __mswAuditEvents() {
   const NOW = Date.now();
   // newest-first sorted, mirrors backend behaviour

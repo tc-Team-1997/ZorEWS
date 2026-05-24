@@ -54,6 +54,12 @@ export interface Connector extends ConnectorDef {
   average_lag_seconds: number;
   /** ISO timestamp when the connector was last paused — null if active. */
   paused_at: string | null;
+  /** Module 1.1 — username of the connector owner; null when unassigned.
+   *  Optional in the type for backward compat with existing test fixtures
+   *  that build Connector literals; composeConnector always populates it. */
+  owner_user_id?: string | null;
+  /** True when this connector was created via POST /connectors (vs seed). */
+  is_custom?: boolean;
 }
 
 export interface ConnectorRun {
@@ -79,6 +85,30 @@ export interface IngestionHealth {
   fleet_records_last_run: number;
 }
 
+export interface ConnectorCreateInput {
+  /** Required client-supplied id (`^[a-z][a-z0-9_]{2,63}$`). */
+  id: string;
+  name: string;
+  source_system: string;
+  type: ConnectorType;
+  schedule: string;
+  description?: string;
+  /** Initial status. Defaults to 'healthy'. */
+  default_status?: ConnectorStatus;
+  /** Optional owner username (Module 1.1 spec). */
+  owner_user_id?: string | null;
+}
+
+export interface ConnectorUpdateInput {
+  name?: string;
+  source_system?: string;
+  type?: ConnectorType;
+  schedule?: string;
+  description?: string;
+  default_status?: ConnectorStatus;
+  owner_user_id?: string | null;
+}
+
 export interface IngestionRegistry {
   list(tenant_id: string): Connector[];
   get(tenant_id: string, connector_id: string): Connector | null;
@@ -91,6 +121,13 @@ export interface IngestionRegistry {
   health(tenant_id: string): IngestionHealth;
   /** Pause / resume a connector. Throws unknown_connector. */
   setPaused(tenant_id: string, connector_id: string, paused: boolean, now: Date): Connector;
+  /** Module 1.1 — Add a new per-tenant custom connector (admin Source Editor).
+   *  Throws IngestionError(invalid_id | id_in_use | invalid_input). */
+  create?(tenant_id: string, input: ConnectorCreateInput, now: Date): Connector;
+  /** Edit a connector's mutable metadata. Platform seed connectors are
+   *  editable via overlay (effective view merges); custom connectors
+   *  are edited in place. Throws unknown_connector | invalid_input. */
+  update?(tenant_id: string, connector_id: string, patch: ConnectorUpdateInput, now: Date): Connector;
 }
 
 export class IngestionError extends Error {
@@ -258,6 +295,10 @@ interface TenantState {
     last_run_status?: RunStatus;
     paused_at?: string | null;
   }>;
+  /** Module 1.1 — per-tenant custom connectors (Source Editor "Add new source"). */
+  customs: Map<string, ConnectorDef & { owner_user_id: string | null }>;
+  /** Module 1.1 — per-connector metadata overlay (Source Editor "Edit"). Applies to seed + custom. */
+  meta_overrides: Map<string, Partial<ConnectorDef> & { owner_user_id?: string | null }>;
   /** Per-connector run history, newest-last. */
   runs: Map<string, ConnectorRun[]>;
 }
@@ -271,11 +312,18 @@ export class InMemoryIngestionRegistry implements IngestionRegistry {
   }
 
   list(tenant_id: string): Connector[] {
-    return SEED_CONNECTORS.map((def) => this.composeConnector(tenant_id, def, new Date()));
+    const now = new Date();
+    const ts = this.state.get(tenant_id);
+    const seedRows = SEED_CONNECTORS.map((def) => this.composeConnector(tenant_id, def, now));
+    const customRows = ts
+      ? [...ts.customs.values()].map((def) => this.composeConnector(tenant_id, def, now))
+      : [];
+    // Custom first so newly-added sources surface at the top.
+    return [...customRows, ...seedRows];
   }
 
   get(tenant_id: string, connector_id: string): Connector | null {
-    const def = SEED_BY_ID.get(connector_id);
+    const def = this.resolveDef(tenant_id, connector_id);
     if (!def) return null;
     return this.composeConnector(tenant_id, def, new Date());
   }
@@ -286,7 +334,7 @@ export class InMemoryIngestionRegistry implements IngestionRegistry {
     triggered_by: string,
     now: Date,
   ): ConnectorRun {
-    const def = SEED_BY_ID.get(connector_id);
+    const def = this.resolveDef(tenant_id, connector_id);
     if (!def) {
       throw new IngestionError('unknown_connector', `unknown connector: ${connector_id}`);
     }
@@ -353,7 +401,7 @@ export class InMemoryIngestionRegistry implements IngestionRegistry {
   }
 
   listRuns(tenant_id: string, connector_id: string, limit = 50): ConnectorRun[] {
-    if (!SEED_BY_ID.has(connector_id)) {
+    if (!this.resolveDef(tenant_id, connector_id)) {
       throw new IngestionError('unknown_connector', `unknown connector: ${connector_id}`);
     }
     const lim = Math.max(1, Math.min(200, limit));
@@ -386,7 +434,7 @@ export class InMemoryIngestionRegistry implements IngestionRegistry {
   }
 
   setPaused(tenant_id: string, connector_id: string, paused: boolean, now: Date): Connector {
-    const def = SEED_BY_ID.get(connector_id);
+    const def = this.resolveDef(tenant_id, connector_id);
     if (!def) {
       throw new IngestionError('unknown_connector', `unknown connector: ${connector_id}`);
     }
@@ -408,27 +456,173 @@ export class InMemoryIngestionRegistry implements IngestionRegistry {
   private tState(tenant_id: string): TenantState {
     let ts = this.state.get(tenant_id);
     if (!ts) {
-      ts = { overrides: new Map(), runs: new Map() };
+      ts = {
+        overrides: new Map(),
+        customs: new Map(),
+        meta_overrides: new Map(),
+        runs: new Map(),
+      };
       this.state.set(tenant_id, ts);
     }
     return ts;
   }
 
+  /** Locate the connector def for an id — seed catalog OR per-tenant custom. */
+  private resolveDef(tenant_id: string, connector_id: string):
+    | (ConnectorDef & { is_custom: boolean; owner_user_id: string | null })
+    | null {
+    const ts = this.state.get(tenant_id);
+    const custom = ts?.customs.get(connector_id);
+    if (custom) {
+      return { ...custom, is_custom: true, owner_user_id: custom.owner_user_id ?? null };
+    }
+    const seed = SEED_BY_ID.get(connector_id);
+    if (seed) {
+      return { ...seed, is_custom: false, owner_user_id: null };
+    }
+    return null;
+  }
+
   private composeConnector(tenant_id: string, def: ConnectorDef, now: Date): Connector {
-    const ov = this.state.get(tenant_id)?.overrides.get(def.id);
+    const ts = this.state.get(tenant_id);
+    const ov = ts?.overrides.get(def.id);
+    const meta = ts?.meta_overrides.get(def.id);
+    const custom = ts?.customs.get(def.id);
     const stats = dailyStats(tenant_id, def.id, now);
     const status: ConnectorStatus = ov?.paused_at
       ? 'paused'
       : ov?.status ?? def.default_status;
-    return {
+    const merged: ConnectorDef = {
       ...def,
+      ...(meta ?? {}),
+    } as ConnectorDef;
+    const owner_user_id =
+      meta?.owner_user_id ?? custom?.owner_user_id ?? null;
+    return {
+      ...merged,
       status,
       last_run_at: ov?.last_run_at ?? null,
       last_run_status: ov?.last_run_status ?? null,
       last_run_records: stats.last_run_records,
       average_lag_seconds: stats.average_lag_seconds,
       paused_at: ov?.paused_at ?? null,
+      owner_user_id,
+      is_custom: !!custom,
     };
+  }
+
+  // ── Module 1.1 — create + update ────────────────────────────────────
+  create(tenant_id: string, input: ConnectorCreateInput, now: Date): Connector {
+    const ID_RE = /^[a-z][a-z0-9_]{2,63}$/;
+    if (!input || typeof input !== 'object') {
+      throw new IngestionError('invalid_input', 'input required');
+    }
+    if (!ID_RE.test(input.id)) {
+      throw new IngestionError(
+        'invalid_id',
+        'id must match ^[a-z][a-z0-9_]{2,63}$',
+      );
+    }
+    if (!input.name || input.name.trim().length === 0) {
+      throw new IngestionError('invalid_input', 'name required');
+    }
+    if (!input.source_system || input.source_system.trim().length === 0) {
+      throw new IngestionError('invalid_input', 'source_system required');
+    }
+    if (!input.schedule || input.schedule.trim().length === 0) {
+      throw new IngestionError('invalid_input', 'schedule required');
+    }
+    const VALID_TYPES: ConnectorType[] = [
+      'kafka_stream',
+      'batch_csv',
+      'rest_api',
+      'soap_api',
+      'sftp_drop',
+    ];
+    if (!VALID_TYPES.includes(input.type)) {
+      throw new IngestionError(
+        'invalid_input',
+        `type must be one of: ${VALID_TYPES.join(', ')}`,
+      );
+    }
+    // id collision: against seed AND existing customs for the tenant
+    const ts = this.tState(tenant_id);
+    if (SEED_BY_ID.has(input.id) || ts.customs.has(input.id)) {
+      throw new IngestionError('id_in_use', `connector id already in use: ${input.id}`);
+    }
+    const def: ConnectorDef & { owner_user_id: string | null } = {
+      id: input.id,
+      name: input.name.trim(),
+      source_system: input.source_system.trim(),
+      type: input.type,
+      schedule: input.schedule.trim(),
+      default_status: input.default_status ?? 'healthy',
+      description: input.description?.trim() ?? '',
+      owner_user_id: input.owner_user_id ?? null,
+    };
+    ts.customs.set(input.id, def);
+    return this.composeConnector(tenant_id, def, now);
+  }
+
+  update(
+    tenant_id: string,
+    connector_id: string,
+    patch: ConnectorUpdateInput,
+    now: Date,
+  ): Connector {
+    if (!patch || typeof patch !== 'object') {
+      throw new IngestionError('invalid_input', 'patch required');
+    }
+    const def = this.resolveDef(tenant_id, connector_id);
+    if (!def) {
+      throw new IngestionError('unknown_connector', `unknown connector: ${connector_id}`);
+    }
+    const ts = this.tState(tenant_id);
+    const VALID_TYPES: ConnectorType[] = [
+      'kafka_stream',
+      'batch_csv',
+      'rest_api',
+      'soap_api',
+      'sftp_drop',
+    ];
+    if (patch.type !== undefined && !VALID_TYPES.includes(patch.type)) {
+      throw new IngestionError(
+        'invalid_input',
+        `type must be one of: ${VALID_TYPES.join(', ')}`,
+      );
+    }
+    // For seed connectors, patch goes into meta_overrides (overlay).
+    // For custom connectors, patch updates the custom def in place.
+    if (def.is_custom) {
+      const cur = ts.customs.get(connector_id)!;
+      const next = {
+        ...cur,
+        ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+        ...(patch.source_system !== undefined ? { source_system: patch.source_system.trim() } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.schedule !== undefined ? { schedule: patch.schedule.trim() } : {}),
+        ...(patch.description !== undefined ? { description: patch.description?.trim() ?? '' } : {}),
+        ...(patch.default_status !== undefined ? { default_status: patch.default_status } : {}),
+        ...(patch.owner_user_id !== undefined ? { owner_user_id: patch.owner_user_id } : {}),
+      };
+      ts.customs.set(connector_id, next);
+    } else {
+      const prev = ts.meta_overrides.get(connector_id) ?? {};
+      const next = {
+        ...prev,
+        ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+        ...(patch.source_system !== undefined ? { source_system: patch.source_system.trim() } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.schedule !== undefined ? { schedule: patch.schedule.trim() } : {}),
+        ...(patch.description !== undefined ? { description: patch.description?.trim() ?? '' } : {}),
+        ...(patch.default_status !== undefined ? { default_status: patch.default_status } : {}),
+        ...(patch.owner_user_id !== undefined ? { owner_user_id: patch.owner_user_id } : {}),
+      };
+      ts.meta_overrides.set(connector_id, next);
+    }
+    // Reload + compose
+    const reloadedDef = this.resolveDef(tenant_id, connector_id)!;
+    return this.composeConnector(tenant_id, reloadedDef, now);
   }
 }
 
