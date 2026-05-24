@@ -157,6 +157,35 @@ export const DEFAULTS: readonly ConfigDef[] = [
     default_value: 365,
   },
 
+  // M3.3 — scheduler tick worker tuning (POST /v1/reports/schedules/tick).
+  {
+    key: 'reporting.scheduler_tolerance_minutes',
+    category: 'reporting',
+    type: 'number',
+    description:
+      'How close to next_run_at a schedule must be to be considered "due" at tick time. ' +
+      'M3.3 acceptance — daily schedule fires within ±5 min of configured time.',
+    default_value: 5,
+  },
+  {
+    key: 'reporting.scheduler_max_retries',
+    category: 'reporting',
+    type: 'number',
+    description:
+      'Maximum retry attempts on a transient scheduler-side failure (submit job + mark-run). ' +
+      'After max_retries the schedule is parked and surfaces in the ops dashboard.',
+    default_value: 3,
+  },
+  {
+    key: 'reporting.scheduler_retry_backoff_minutes',
+    category: 'reporting',
+    type: 'number',
+    description:
+      'Base retry backoff in minutes (exponential: base × 2^(attempt − 1)). ' +
+      'Backoff window is honoured per-schedule via the retry_state.next_retry_at field.',
+    default_value: 5,
+  },
+
   // scoring — BIL Σ(W×V) thresholds (mirrors bil_scoring.ts).
   {
     key: 'scoring.default_thresholds.low_max',

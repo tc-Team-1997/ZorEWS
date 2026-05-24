@@ -97,6 +97,22 @@ export interface ReportScheduleInput {
   tz?: ScheduleTz;
 }
 
+/** M3.3 — retry tracking attached to a schedule entry when the
+ *  scheduler tick fails to submit the job. Cleared on the next
+ *  successful run. */
+export interface ScheduleRetryState {
+  /** 1 = first retry pending; increments on each failure. */
+  attempt: number;
+  last_failure_at: string;
+  last_failure_message: string;
+  /** ISO when the next retry is eligible (now + backoff). The tick
+   *  worker skips entries whose next_retry_at > as_of. */
+  next_retry_at: string;
+  /** Set by the tick worker when attempt ≥ max_retries — the schedule
+   *  is parked and surfaces in the ops dashboard for manual review. */
+  parked: boolean;
+}
+
 export interface ReportScheduleEntry {
   schedule_id: string;
   tenant_id: string;
@@ -117,6 +133,9 @@ export interface ReportScheduleEntry {
   last_run_at: string | null;
   /** T6 M12.4 — always set; legacy schedules default to 'UTC'. */
   tz: ScheduleTz;
+  /** M3.3 — set by the scheduler tick worker on submit failure.
+   *  Cleared by markRun on the next successful run. */
+  retry_state?: ScheduleRetryState | null;
 }
 
 export type ReportSchedulePatch = Partial<Pick<
@@ -471,6 +490,17 @@ export interface ReportScheduleStore {
   delete(tenant_id: string, schedule_id: string): boolean;
   listDue(tenant_id: string, as_of: Date): ReportScheduleEntry[];
   markRun(tenant_id: string, schedule_id: string, now: Date): ReportScheduleEntry;
+  /** M3.3 — record a tick-time failure. Increments attempt + writes
+   *  next_retry_at + parks when attempt ≥ max_retries. Cleared by the
+   *  next successful markRun. */
+  recordFailure(
+    tenant_id: string,
+    schedule_id: string,
+    opts: { error_message: string; max_retries: number; backoff_minutes: number; now: Date },
+  ): ReportScheduleEntry;
+  /** M3.3 — explicitly clear retry_state (used by SPA "retry now"
+   *  affordance + by markRun on the next successful run). */
+  clearRetryState(tenant_id: string, schedule_id: string, now: Date): ReportScheduleEntry;
 }
 
 export class InMemoryReportScheduleStore implements ReportScheduleStore {
@@ -656,10 +686,121 @@ export class InMemoryReportScheduleStore implements ReportScheduleStore {
       last_run_at: now.toISOString(),
       next_run_at: next.toISOString(),
       updated_at: now.toISOString(),
+      // M3.3 — successful run clears any pending retry state.
+      retry_state: null,
     };
     bucket.set(schedule_id, updated);
     return { ...updated, recipients: [...updated.recipients], parameters: { ...updated.parameters } };
   }
+
+  recordFailure(
+    tenant_id: string,
+    schedule_id: string,
+    opts: { error_message: string; max_retries: number; backoff_minutes: number; now: Date },
+  ): ReportScheduleEntry {
+    const bucket = this.bucket(tenant_id);
+    const cur = bucket.get(schedule_id);
+    if (!cur) {
+      throw new ScheduleError('unknown_schedule', `schedule ${schedule_id} not found`);
+    }
+    const prev_attempt = cur.retry_state?.attempt ?? 0;
+    const attempt = prev_attempt + 1;
+    const backoff_ms = computeBackoffMinutes(attempt, opts.backoff_minutes) * 60_000;
+    const retry_state: ScheduleRetryState = {
+      attempt,
+      last_failure_at: opts.now.toISOString(),
+      last_failure_message: String(opts.error_message).slice(0, 1000),
+      next_retry_at: new Date(opts.now.getTime() + backoff_ms).toISOString(),
+      parked: attempt >= opts.max_retries,
+    };
+    const updated: ReportScheduleEntry = {
+      ...cur,
+      retry_state,
+      updated_at: opts.now.toISOString(),
+    };
+    bucket.set(schedule_id, updated);
+    return { ...updated, recipients: [...updated.recipients], parameters: { ...updated.parameters } };
+  }
+
+  clearRetryState(tenant_id: string, schedule_id: string, now: Date): ReportScheduleEntry {
+    const bucket = this.bucket(tenant_id);
+    const cur = bucket.get(schedule_id);
+    if (!cur) {
+      throw new ScheduleError('unknown_schedule', `schedule ${schedule_id} not found`);
+    }
+    const updated: ReportScheduleEntry = {
+      ...cur,
+      retry_state: null,
+      updated_at: now.toISOString(),
+    };
+    bucket.set(schedule_id, updated);
+    return { ...updated, recipients: [...updated.recipients], parameters: { ...updated.parameters } };
+  }
+}
+
+// ─── M3.3 — pure helpers for the scheduler tick worker ──────────────
+
+/** Exponential backoff in minutes. base × 2^(attempt − 1) — so a
+ *  base of 5 yields 5 / 10 / 20 / 40 / ... clamped to a sensible max
+ *  (24h) to avoid runaway delays on a schedule that's been broken
+ *  forever. */
+export function computeBackoffMinutes(attempt: number, base_minutes: number): number {
+  if (!Number.isFinite(attempt) || attempt < 1) return base_minutes;
+  if (!Number.isFinite(base_minutes) || base_minutes < 1) return 1;
+  const mult = Math.pow(2, attempt - 1);
+  const minutes = Math.round(base_minutes * mult);
+  return Math.min(minutes, 24 * 60); // 24h cap
+}
+
+/** Pure. Returns schedules eligible to fire at `as_of` honouring the
+ *  ±tolerance_minutes window AND any active retry_state backoff.
+ *
+ *  A schedule is eligible iff:
+ *   - enabled
+ *   - next_run_at is within [as_of - tolerance, as_of + tolerance]  OR
+ *     it's overdue (next_run_at < as_of - tolerance) — overdue still fires
+ *   - no retry_state, OR retry_state.parked === false AND
+ *     next_retry_at ≤ as_of
+ *
+ *  M3.3 acceptance — "daily schedule fires within ±5 min of configured
+ *  time": tolerance default 5 min. Production cron ticks at ~1 Hz so
+ *  the window is generous enough to absorb cron jitter + clock skew. */
+export function findDueSchedulesWithTolerance(
+  schedules: readonly ReportScheduleEntry[],
+  as_of: Date,
+  tolerance_minutes: number,
+): ReportScheduleEntry[] {
+  const t = as_of.getTime();
+  const window_ms = Math.max(0, tolerance_minutes) * 60_000;
+  const due: ReportScheduleEntry[] = [];
+  for (const e of schedules) {
+    if (!e.enabled) continue;
+    if (e.retry_state) {
+      if (e.retry_state.parked) continue;
+      const nextRetry = new Date(e.retry_state.next_retry_at).getTime();
+      if (nextRetry > t) continue;
+    }
+    const next = new Date(e.next_run_at).getTime();
+    // Fire if next_run_at is in the past OR within the future tolerance.
+    if (next <= t + window_ms) {
+      due.push(e);
+    }
+  }
+  // Oldest-due first so retries surface ahead of green-path firings.
+  due.sort((a, b) =>
+    a.next_run_at < b.next_run_at ? -1 : a.next_run_at > b.next_run_at ? 1 : 0,
+  );
+  return due;
+}
+
+/** Heuristic: should a schedule retry be allowed to fire? Used by the
+ *  tick worker to decide between "fire now" and "skip / waiting on
+ *  backoff". Pure — passed `as_of` so behaviour is deterministic in
+ *  tests. */
+export function canRetryNow(entry: ReportScheduleEntry, as_of: Date): boolean {
+  if (!entry.retry_state) return true;
+  if (entry.retry_state.parked) return false;
+  return new Date(entry.retry_state.next_retry_at).getTime() <= as_of.getTime();
 }
 
 export const defaultReportScheduleStore: ReportScheduleStore = new InMemoryReportScheduleStore();

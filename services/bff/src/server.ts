@@ -30442,6 +30442,305 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   /**
+   * POST /v1/reports/schedules/tick — M3.3 scheduler worker tick.
+   *
+   * Fires due schedules per the M3.3 acceptance: "scheduled daily
+   * report fires within ±5 min of configured time; failure triggers
+   * retry per policy." External cron (or the SPA admin button) calls
+   * this on a regular cadence; the worker:
+   *   1. resolves tolerance/max_retries/backoff from M13.1 config
+   *   2. finds due+enabled schedules within ±tolerance (or overdue),
+   *      skipping any in backoff window
+   *   3. for each, submits a job via reportJobStore + markRun on
+   *      success / recordFailure with exponential backoff on submit
+   *      throw. After max_retries the schedule is parked.
+   *   4. writes one M15.1 audit event per fired schedule
+   *      (action=report.scheduler.fire, severity=info on success /
+   *      warning on failure / critical on park) so forensics has the
+   *      full chain.
+   *
+   * Body: { as_of?: ISO, tolerance_minutes?: number,
+   *         max_retries?: number, backoff_minutes?: number,
+   *         dry_run?: boolean, simulate_failures?: string[] }
+   *   - simulate_failures is a test hook: report_ids in this list
+   *     are recorded as failures without actually calling submit.
+   *     Useful for E2E retry/park tests without breaking the real
+   *     job path. Empty in production callers.
+   *
+   * Returns: { tenant_id, generated_at, as_of, tolerance_minutes,
+   *            max_retries, backoff_minutes, dry_run, total_considered,
+   *            fired[], retried_later[], skipped[], errors[], parked[] }
+   *
+   * RBAC: audit:read (admin) — scheduler tick is an ops-tier surface.
+   */
+  app.post(
+    '/v1/reports/schedules/tick',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as {
+        as_of?: unknown;
+        tolerance_minutes?: unknown;
+        max_retries?: unknown;
+        backoff_minutes?: unknown;
+        dry_run?: unknown;
+        simulate_failures?: unknown;
+      };
+
+      // Resolve as_of (default = now).
+      let as_of: Date;
+      if (w.as_of !== undefined && w.as_of !== null) {
+        if (typeof w.as_of !== 'string' || Number.isNaN(new Date(w.as_of).getTime())) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'as_of must be a valid ISO timestamp', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        as_of = new Date(w.as_of);
+      } else {
+        as_of = now();
+      }
+
+      // Resolve tolerance + retry policy: body override > M13.1 config > defaults.
+      const cfgTol = configStore.get(req.tenant!.tenant_id, 'reporting.scheduler_tolerance_minutes');
+      const cfgMax = configStore.get(req.tenant!.tenant_id, 'reporting.scheduler_max_retries');
+      const cfgBackoff = configStore.get(req.tenant!.tenant_id, 'reporting.scheduler_retry_backoff_minutes');
+      const numOpt = (v: unknown, fallback: number, lo: number, hi: number): number | { error: string } => {
+        if (v === undefined || v === null) return fallback;
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) {
+          return { error: `must be a finite number in [${lo}, ${hi}]` };
+        }
+        return v;
+      };
+      // Tolerance bound 0..1440 (24h). Default 5min serves the spec
+      // acceptance "fires within ±5 min". The wider ceiling supports
+      // one-off recovery runs ("tick everything overdue in the last day").
+      const tolR = numOpt(
+        w.tolerance_minutes,
+        typeof cfgTol?.value === 'number' ? cfgTol.value : 5,
+        0,
+        1440,
+      );
+      if (typeof tolR === 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `tolerance_minutes ${tolR.error}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const maxR = numOpt(
+        w.max_retries,
+        typeof cfgMax?.value === 'number' ? cfgMax.value : 3,
+        0,
+        20,
+      );
+      if (typeof maxR === 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `max_retries ${maxR.error}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const backoffR = numOpt(
+        w.backoff_minutes,
+        typeof cfgBackoff?.value === 'number' ? cfgBackoff.value : 5,
+        1,
+        1440,
+      );
+      if (typeof backoffR === 'object') {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `backoff_minutes ${backoffR.error}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const tolerance_minutes = tolR;
+      const max_retries = maxR;
+      const backoff_minutes = backoffR;
+      const dry_run = w.dry_run === true;
+      const simulate_failures = Array.isArray(w.simulate_failures)
+        ? (w.simulate_failures as unknown[]).filter((s): s is string => typeof s === 'string')
+        : [];
+
+      // Drain schedules + find due.
+      const { findDueSchedulesWithTolerance } =
+        require('./report_schedules') as typeof import('./report_schedules');
+      // List uses pagination — drain enough for the per-tenant cap (50).
+      const page = reportScheduleStore.list(req.tenant!.tenant_id, 1, 200);
+      const due = findDueSchedulesWithTolerance(page.items, as_of, tolerance_minutes);
+
+      const fired: Array<{ schedule_id: string; name: string; report_id: string; job_id: string; next_run_at: string }> = [];
+      const retried_later: Array<{ schedule_id: string; name: string; report_id: string; attempt: number; next_retry_at: string; error: string }> = [];
+      const parked: Array<{ schedule_id: string; name: string; report_id: string; attempt: number; error: string }> = [];
+      const errors: Array<{ schedule_id: string; code: string; message: string }> = [];
+
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'scheduler';
+
+      if (dry_run) {
+        return res.json(
+          wrapResponse(
+            {
+              tenant_id: req.tenant!.tenant_id,
+              generated_at: now().toISOString(),
+              as_of: as_of.toISOString(),
+              tolerance_minutes,
+              max_retries,
+              backoff_minutes,
+              dry_run: true,
+              total_considered: page.items.length,
+              would_fire: due.length,
+              candidates: due,
+              fired: [],
+              retried_later: [],
+              parked: [],
+              errors: [],
+            },
+            ctx,
+          ),
+        );
+      }
+
+      for (const sch of due) {
+        const shouldFail = simulate_failures.includes(sch.report_id);
+        try {
+          if (shouldFail) {
+            throw new Error(`simulated_failure for report_id=${sch.report_id}`);
+          }
+          // Submit a job via the existing M12.1 store.
+          const job = reportJobStore.submit(
+            req.tenant!.tenant_id,
+            {
+              report_id: sch.report_id,
+              format: sch.format,
+              parameters: sch.parameters ?? {},
+            },
+            actor,
+            now(),
+          );
+          // Advance the schedule's next_run_at + clear any retry state.
+          const after = reportScheduleStore.markRun(req.tenant!.tenant_id, sch.schedule_id, now());
+          fired.push({
+            schedule_id: sch.schedule_id,
+            name: sch.name,
+            report_id: sch.report_id,
+            job_id: job.job_id,
+            next_run_at: after.next_run_at,
+          });
+          // M15.1 audit fan-out — success.
+          try {
+            auditTrailStore.record(
+              req.tenant!.tenant_id,
+              {
+                actor_username: actor,
+                actor_role: 'admin',
+                action: 'report.scheduler.fire',
+                resource_type: 'report',
+                resource_id: sch.schedule_id,
+                outcome: 'success',
+                severity: 'info',
+                metadata: { report_id: sch.report_id, job_id: job.job_id, name: sch.name, attempt: (sch.retry_state?.attempt ?? 0) + 1 },
+              },
+              now(),
+            );
+          } catch {
+            /* swallow */
+          }
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          try {
+            const after = reportScheduleStore.recordFailure(
+              req.tenant!.tenant_id,
+              sch.schedule_id,
+              { error_message: message, max_retries, backoff_minutes, now: now() },
+            );
+            if (after.retry_state?.parked) {
+              parked.push({
+                schedule_id: sch.schedule_id,
+                name: sch.name,
+                report_id: sch.report_id,
+                attempt: after.retry_state.attempt,
+                error: message,
+              });
+            } else if (after.retry_state) {
+              retried_later.push({
+                schedule_id: sch.schedule_id,
+                name: sch.name,
+                report_id: sch.report_id,
+                attempt: after.retry_state.attempt,
+                next_retry_at: after.retry_state.next_retry_at,
+                error: message,
+              });
+            }
+            // M15.1 audit fan-out — failure / park.
+            try {
+              auditTrailStore.record(
+                req.tenant!.tenant_id,
+                {
+                  actor_username: actor,
+                  actor_role: 'admin',
+                  action: 'report.scheduler.fire',
+                  resource_type: 'report',
+                  resource_id: sch.schedule_id,
+                  outcome: 'failure',
+                  severity: after.retry_state?.parked ? 'critical' : 'warning',
+                  metadata: {
+                    report_id: sch.report_id,
+                    name: sch.name,
+                    attempt: after.retry_state?.attempt,
+                    parked: after.retry_state?.parked ?? false,
+                    error: message,
+                  },
+                },
+                now(),
+              );
+            } catch {
+              /* swallow */
+            }
+          } catch (re) {
+            errors.push({
+              schedule_id: sch.schedule_id,
+              code: re instanceof ScheduleError ? re.code : 'internal_error',
+              message: re instanceof Error ? re.message : String(re),
+            });
+          }
+        }
+      }
+
+      return res.json(
+        wrapResponse(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            generated_at: now().toISOString(),
+            as_of: as_of.toISOString(),
+            tolerance_minutes,
+            max_retries,
+            backoff_minutes,
+            dry_run: false,
+            total_considered: page.items.length,
+            would_fire: due.length,
+            fired,
+            retried_later,
+            parked,
+            errors,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /**
    * GET /v1/reports/:type?period={week|month|quarter}&format={json|csv}
    * type ∈ {snapshot, alerts, cases, rbi}
    *

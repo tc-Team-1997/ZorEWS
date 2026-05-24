@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Download, FileSpreadsheet, FileText, FileType, RefreshCw, Wrench } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  AlertTriangle,
+  Calendar,
+  ChevronDown,
+  Clock,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  RefreshCw,
+  Wrench,
+  Zap,
+} from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import {
   Bar,
@@ -12,7 +24,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { reportsSchedulerApi, type SchedulerTickResult } from './schedulerApi';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
 import {
@@ -152,6 +165,12 @@ export function ReportsPage() {
           ) : null
         }
       />
+
+      {/* M3.3 — scheduler tick + retry-state panel. Admin/supervisor
+          only; matches the audit:read RBAC on POST /schedules/tick. */}
+      {user?.roles.some((r) => ['admin', 'supervisor'].includes(r)) && (
+        <SchedulerPanel />
+      )}
 
       <Panel title="Report selector" className="mb-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -550,5 +569,171 @@ function RbiSummaryView({ r }: { r: RbiSummaryReport }) {
         </table>
       </Panel>
     </>
+  );
+}
+
+// ─── M3.3 SchedulerPanel ─────────────────────────────────────────────
+//
+// Admin/supervisor-only panel that surfaces upcoming schedules with
+// retry-state badges + an admin "Run scheduler tick" button. Spec
+// acceptance: ±5 min tolerance + retry per policy. Defaults read from
+// M13.1 config; admin can override via the form.
+
+function SchedulerPanel() {
+  const qc = useQueryClient();
+  const [showPreview, setShowPreview] = useState(false);
+  const [lastTick, setLastTick] = useState<SchedulerTickResult | null>(null);
+
+  const schedulesQ = useQuery({
+    queryKey: ['schedules-list'],
+    queryFn: () => reportsSchedulerApi.listSchedules(),
+  });
+  const upcomingQ = useQuery({
+    queryKey: ['schedules-upcoming'],
+    queryFn: () => reportsSchedulerApi.upcoming(5),
+  });
+
+  const tickMut = useMutation({
+    mutationFn: (opts: { dry_run: boolean }) => reportsSchedulerApi.tick(opts),
+    onSuccess: (data) => {
+      setLastTick(data);
+      if (!data.dry_run) {
+        void qc.invalidateQueries({ queryKey: ['schedules-list'] });
+        void qc.invalidateQueries({ queryKey: ['schedules-upcoming'] });
+        setShowPreview(false);
+      } else {
+        setShowPreview(true);
+      }
+    },
+  });
+
+  const schedules = schedulesQ.data?.items ?? [];
+  const pendingRetry = schedules.filter((s) => s.retry_state && !s.retry_state.parked);
+  const parked = schedules.filter((s) => s.retry_state?.parked);
+
+  return (
+    <Panel
+      title="Schedule worker"
+      className="mb-4"
+      action={
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => tickMut.mutate({ dry_run: true })}
+            disabled={tickMut.isPending}
+            data-testid="scheduler-preview-btn"
+          >
+            <Calendar size={14} /> Preview tick
+          </Button>
+          <Button
+            onClick={() => tickMut.mutate({ dry_run: false })}
+            disabled={tickMut.isPending}
+            data-testid="scheduler-tick-btn"
+          >
+            <Zap size={14} /> {tickMut.isPending ? 'Running…' : 'Run scheduler tick'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <MetricCard
+          label="Active schedules"
+          value={schedules.filter((s) => s.enabled).length.toString()}
+        />
+        <MetricCard
+          label="Pending retry"
+          value={pendingRetry.length.toString()}
+          tone={pendingRetry.length > 0 ? 'warning' : undefined}
+        />
+        <MetricCard
+          label="Parked"
+          value={parked.length.toString()}
+          tone={parked.length > 0 ? 'danger' : undefined}
+        />
+        <MetricCard
+          label="Upcoming (next 5)"
+          value={(upcomingQ.data?.items.length ?? 0).toString()}
+        />
+      </div>
+
+      {lastTick && showPreview && (
+        <div
+          className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm"
+          data-testid="scheduler-preview-result"
+        >
+          <strong>Dry-run preview</strong> · tolerance {lastTick.tolerance_minutes}min ·
+          max_retries {lastTick.max_retries} · backoff {lastTick.backoff_minutes}min ·
+          considered {lastTick.total_considered} · <strong>would fire {lastTick.would_fire}</strong>
+        </div>
+      )}
+      {lastTick && !lastTick.dry_run && (
+        <div
+          className="mb-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm"
+          data-testid="scheduler-tick-result"
+        >
+          <strong>Tick complete</strong> · fired {lastTick.fired.length} ·
+          retried {lastTick.retried_later.length} · parked {lastTick.parked.length} ·
+          errors {lastTick.errors.length}
+        </div>
+      )}
+
+      {schedules.length === 0 ? (
+        <p className="text-sm text-muted">No schedules configured.</p>
+      ) : (
+        <table className="w-full text-sm" data-testid="scheduler-schedule-table">
+          <thead className="text-left text-xs uppercase text-muted">
+            <tr className="border-b border-divider/40">
+              <th className="py-2">Schedule</th>
+              <th>Cadence</th>
+              <th>Next run</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {schedules.slice(0, 10).map((s) => {
+              const rs = s.retry_state;
+              return (
+                <tr key={s.schedule_id} className="border-b border-divider/40">
+                  <td className="py-2">
+                    <div className="font-medium">{s.name}</div>
+                    <div className="text-xs text-muted">
+                      {s.report_id} · {s.format} · {s.recipients.length} recipient(s)
+                    </div>
+                  </td>
+                  <td className="text-xs">
+                    {s.cadence} @ {String(s.hour_utc).padStart(2, '0')}:00 {s.tz}
+                  </td>
+                  <td className="text-xs">{new Date(s.next_run_at).toLocaleString()}</td>
+                  <td>
+                    {!s.enabled && <Badge tone="blue">Disabled</Badge>}
+                    {s.enabled && !rs && <Badge tone="success">On track</Badge>}
+                    {rs?.parked && (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        data-testid={`scheduler-parked-${s.schedule_id}`}
+                      >
+                        <Badge tone="danger">
+                          <AlertTriangle size={10} /> Parked (attempt {rs.attempt})
+                        </Badge>
+                      </span>
+                    )}
+                    {rs && !rs.parked && (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        data-testid={`scheduler-retry-${s.schedule_id}`}
+                      >
+                        <Badge tone="warning">
+                          <Clock size={10} /> Retry {rs.attempt} → {new Date(rs.next_retry_at).toLocaleTimeString()}
+                        </Badge>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </Panel>
   );
 }
