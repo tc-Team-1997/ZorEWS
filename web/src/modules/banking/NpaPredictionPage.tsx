@@ -16,6 +16,7 @@ import {
   type NpaHighRiskRow,
   type NpaPredictionExplanation,
   type NpaBacktestSummary,
+  type PortfolioDriverReport,
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -39,6 +40,11 @@ export function NpaPredictionPage() {
   const { data: list, isLoading } = useQuery({
     queryKey: ['npa.highRisk', horizon],
     queryFn: () => api.npaHighRisk(horizon),
+  });
+
+  const { data: drivers } = useQuery({
+    queryKey: ['npa.portfolioDrivers', horizon],
+    queryFn: () => api.npaPortfolioDrivers(horizon),
   });
 
   return (
@@ -75,6 +81,9 @@ export function NpaPredictionPage() {
           testId="kpi-npa-exposure"
         />
       </div>
+
+      {/* Portfolio drivers (M7.19) */}
+      {drivers && <PortfolioDriversPanel report={drivers} />}
 
       {/* Horizon selector */}
       <Panel title="Horizon">
@@ -161,6 +170,106 @@ export function NpaPredictionPage() {
       {/* Backtest modal */}
       {backtestOpen && <BacktestModal onClose={() => setBacktestOpen(false)} />}
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// M7.19 — Portfolio Drivers panel
+
+function humaniseFeature(name: string): string {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function driverTone(row: { direction_split: { up: number; down: number } }): 'danger' | 'success' | 'warning' {
+  if (row.direction_split.up > row.direction_split.down) return 'danger';
+  if (row.direction_split.down > row.direction_split.up) return 'success';
+  return 'warning';
+}
+
+function PortfolioDriversPanel({ report }: { report: PortfolioDriverReport }) {
+  const top = report.drivers.slice(0, 5);
+  const total = report.total_predictions_analyzed;
+
+  if (total === 0 || top.length === 0) {
+    return (
+      <Panel title="Portfolio drivers — what's pushing risk across the portfolio?">
+        <p className="py-4 text-sm text-ink-subtle">No high-risk predictions to aggregate at this horizon.</p>
+      </Panel>
+    );
+  }
+
+  const maxContribution = Math.max(...top.map((d) => d.total_contribution)) || 1;
+
+  return (
+    <Panel
+      title={`Portfolio drivers — across ${total} high-risk accounts (${report.horizon_days}d horizon)`}
+      data-testid="portfolio-drivers-panel"
+    >
+      <div className="space-y-3">
+        {report.most_universal_driver && (
+          <div className="flex items-center gap-2 rounded-md border border-action/30 bg-action/5 px-3 py-2 text-sm">
+            <Sparkles className="size-4 text-action" aria-hidden />
+            <span className="text-ink">
+              <span className="font-medium">Most universal:</span>{' '}
+              <span className="font-semibold text-action">
+                {humaniseFeature(report.most_universal_driver.feature_name)}
+              </span>{' '}
+              <span className="text-ink-subtle">
+                — affects {report.most_universal_driver.affected_predictions}/{total} predictions
+              </span>
+            </span>
+          </div>
+        )}
+
+        <div className="space-y-2" data-testid="portfolio-drivers-list">
+          {top.map((d) => {
+            const widthPct = Math.round((d.total_contribution / maxContribution) * 100);
+            const tone = driverTone(d);
+            const barClass =
+              tone === 'danger' ? 'bg-danger' : tone === 'success' ? 'bg-success' : 'bg-warning';
+            const directionLabel =
+              d.direction_split.up > d.direction_split.down
+                ? `${d.direction_split.up} raising`
+                : d.direction_split.down > d.direction_split.up
+                  ? `${d.direction_split.down} protective`
+                  : `${d.direction_split.up} raising / ${d.direction_split.down} protective`;
+            return (
+              <div
+                key={d.feature_name}
+                className="rounded-md border border-divider bg-surface p-3"
+                data-testid={`portfolio-driver-${d.feature_name}`}
+              >
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-ink">{humaniseFeature(d.feature_name)}</span>
+                    <Badge tone={tone}>{directionLabel}</Badge>
+                  </div>
+                  <div className="tabular-nums text-ink-subtle">
+                    <span className="font-semibold text-ink">{(d.pct_of_total * 100).toFixed(1)}%</span>{' '}
+                    <span className="text-xs">of portfolio weight</span>
+                  </div>
+                </div>
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-divider/30">
+                  <div className={`h-full ${barClass}`} style={{ width: `${widthPct}%` }} />
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-xs text-ink-subtle">
+                  <span>
+                    Appears in {d.affected_predictions}/{total} predictions
+                  </span>
+                  <span className="tabular-nums">avg weight {d.avg_weight >= 0 ? '+' : ''}{d.avg_weight.toFixed(2)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {report.total_drivers > top.length && (
+          <p className="pt-1 text-xs text-ink-subtle">
+            Showing top {top.length} of {report.total_drivers} drivers. SHAP-style attribution aggregated across the cohort.
+          </p>
+        )}
+      </div>
+    </Panel>
   );
 }
 

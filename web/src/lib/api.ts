@@ -1541,6 +1541,13 @@ export const api = {
   npaBacktest: () =>
     http.get<EnvelopeBody<NpaBacktestSummary>>('/v1/banking/npa/backtest/latest').then((r) => r.data),
 
+  npaPortfolioDrivers: (horizon: 30 | 60 | 90 | 180 = 90) =>
+    http
+      .get<EnvelopeBody<PortfolioDriverReport>>(
+        `/v1/banking/npa/portfolio-drivers?horizon=${horizon}`,
+      )
+      .then((r) => r.data),
+
   aiExplanation: (prediction_id: string) =>
     http
       .get<EnvelopeBody<PredictionExplanation>>(
@@ -1620,6 +1627,27 @@ export interface NpaBacktestSummary {
   recall_at_top_decile: number;
   confusion: { tp: number; fp: number; tn: number; fn: number };
   by_segment: { segment: string; auc: number; cohort_size: number }[];
+}
+
+// M7.19 — Portfolio-level NPA driver aggregation
+export interface PortfolioDriverRow {
+  feature_name: string;
+  total_contribution: number;
+  affected_predictions: number;
+  avg_weight: number;
+  direction_split: { up: number; down: number };
+  by_sector: Record<string, number>;
+  pct_of_total: number;
+}
+
+export interface PortfolioDriverReport {
+  tenant_id: string;
+  generated_at: string;
+  horizon_days: number;
+  total_predictions_analyzed: number;
+  total_drivers: number;
+  drivers: PortfolioDriverRow[];
+  most_universal_driver: { feature_name: string; affected_predictions: number } | null;
 }
 
 export interface PredictionExplanation {
