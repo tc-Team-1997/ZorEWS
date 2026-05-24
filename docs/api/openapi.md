@@ -1,6 +1,6 @@
 # BFF OpenAPI 3.1 — API Reference
 
-> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T02:20:54.636Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
+> Auto-generated from `services/bff/src/server.ts` + `services/auth-svc/src/**` on **2026-05-24T02:35:01.329Z**. Hand-edits are overwritten on next `scripts/gen-openapi.js` run.
 
 ## Specification artefacts
 
@@ -12,7 +12,7 @@
 
 ## Coverage
 
-- **846** route declarations auto-discovered: 805 from BFF + 41 from auth-svc
+- **867** route declarations auto-discovered: 826 from BFF + 41 from auth-svc
 - Grouped into **10** tag buckets (Auth · Users · Dashboard · Borrower · EWS · Alerts · Workflow · AI · Reports · Config)
 - **Bearer auth** required on all routes except: `/healthz`, `/oauth/token`, `/.well-known/jwks.json`, `/auth/login`, `/auth/refresh`, `/auth/captcha`
 - **`X-Tenant-ID` + `X-Channel`** headers required on every `/v1/*` route (BFF tenant middleware)
@@ -461,7 +461,7 @@ _Cases, investigations, maker-checker approvals, action log, tenant onboarding_
 
 _AI/ML model registry, scoring, promotions, retraining, copilot, predictions_
 
-**73 routes.** Routes sorted by path.
+**78 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -501,6 +501,11 @@ _AI/ML model registry, scoring, promotions, retraining, copilot, predictions_
 | `GET` | `/v1/ai/promotions/daily-volume` | day: {date, total, by_status (every PromotionRequestStatus at 0: |
 | `GET` | `/v1/ai/promotions/latency-histogram` | approval-latency distribution over decided requests + still-pending |
 | `GET` | `/v1/ai/promotions/reviewer-rollup` | pivot over M7.2 promotion requests. Counts only decided requests |
+| `POST` | `/v1/ai/prompts` |  |
+| `DELETE` | `/v1/ai/prompts/:prompt_id` |  |
+| `GET` | `/v1/ai/prompts/:prompt_id` |  |
+| `PATCH` | `/v1/ai/prompts/:prompt_id` |  |
+| `GET` | `/v1/ai/prompts/library` | Module #23 — AI Workbench prompt library (§2.4) |
 | `GET` | `/v1/ai/retraining/outcomes` |  |
 | `POST` | `/v1/ai/retraining/outcomes` | completed retrain (success/failure/rolled_back/in_progress). On |
 | `GET` | `/v1/ai/retraining/schedules` |  |
@@ -623,7 +628,7 @@ _Report catalog, scheduled jobs, builder, scenario library, exports_
 
 _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 
-**378 routes.** Routes sorted by path.
+**394 routes.** Routes sorted by path.
 
 | Method | Path | Summary |
 |---|---|---|
@@ -759,6 +764,8 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/dr/game-days/:record_id` |  |
 | `PATCH` | `/v1/dr/game-days/:record_id` |  |
 | `GET` | `/v1/dr/runbook` |  |
+| `POST` | `/v1/export/pdf` |  |
+| `POST` | `/v1/export/xlsx` | Module #24 — Generic Excel + PDF export (§2.4) |
 | `GET` | `/v1/finops/dashboard` | + cost-per-alert + cost-per-customer efficiency metrics per |
 | `GET` | `/v1/fraud/cases` | Module #18 — Banking Fraud full surface (§2.3) |
 | `POST` | `/v1/fraud/cases` |  |
@@ -771,6 +778,9 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `POST` | `/v1/fraud/rules` |  |
 | `DELETE` | `/v1/fraud/rules/:rule_id` |  |
 | `PATCH` | `/v1/fraud/rules/:rule_id` |  |
+| `GET` | `/v1/glossary/categories` |  |
+| `GET` | `/v1/glossary/terms` | Module #22 — Glossary (§2.4) |
+| `GET` | `/v1/glossary/terms/:term_id` |  |
 | `GET` | `/v1/ifrs9/ecl-overrides` |  |
 | `POST` | `/v1/ifrs9/ecl-overrides` |  |
 | `DELETE` | `/v1/ifrs9/ecl-overrides/:override_id` |  |
@@ -994,6 +1004,17 @@ _Admin configuration, webhooks, integrations, audit trail, recovery, FinOps_
 | `GET` | `/v1/tenants/bulk-import/previews` |  |
 | `GET` | `/v1/tenants/me` |  |
 | `GET` | `/v1/tenants/me/readiness` |  |
+| `GET` | `/v1/testing/runs` |  |
+| `GET` | `/v1/testing/runs/:run_id` |  |
+| `GET` | `/v1/testing/schedule` |  |
+| `POST` | `/v1/testing/schedule` |  |
+| `GET` | `/v1/testing/tests` | Module #21 — Testing Hub (§2.4) |
+| `POST` | `/v1/testing/tests` |  |
+| `DELETE` | `/v1/testing/tests/:test_id` |  |
+| `GET` | `/v1/testing/tests/:test_id` |  |
+| `PATCH` | `/v1/testing/tests/:test_id` |  |
+| `POST` | `/v1/testing/tests/:test_id/run` |  |
+| `POST` | `/v1/testing/tests/bulk-upload` |  |
 | `GET` | `/v1/webhooks` |  |
 | `POST` | `/v1/webhooks` |  |
 | `DELETE` | `/v1/webhooks/:id` |  |

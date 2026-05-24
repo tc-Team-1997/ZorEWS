@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "968da455-1e2e-4898-83d3-64d7d59e4fdc",
     "name": "ZorEWS — Config APIs",
-    "description": "Config routes from the ZorEWS BFF + auth-svc surface. 377 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Config routes from the ZorEWS BFF + auth-svc surface. 393 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -12055,6 +12055,210 @@
       ]
     },
     {
+      "name": "/v1/export/pdf",
+      "description": "1 route(s) under /v1/export/pdf",
+      "item": [
+        {
+          "name": "POST /v1/export/pdf",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/export/pdf",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "pdf"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/export/pdf",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/export/pdf — auto-discovered (server.ts:34256)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/export/xlsx",
+      "description": "1 route(s) under /v1/export/xlsx",
+      "item": [
+        {
+          "name": "POST /v1/export/xlsx",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/export/xlsx",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "xlsx"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/export/xlsx",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Module #24 — Generic Excel + PDF export (§2.4)"
+        }
+      ]
+    },
+    {
       "name": "/v1/finops/dashboard",
       "description": "1 route(s) under /v1/finops/dashboard",
       "item": [
@@ -13193,6 +13397,272 @@
           ],
           "response": [],
           "_summary": "PATCH /v1/fraud/rules/:rule_id — auto-discovered (server.ts:33506)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/glossary/categories",
+      "description": "1 route(s) under /v1/glossary/categories",
+      "item": [
+        {
+          "name": "GET /v1/glossary/categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/glossary/categories",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "glossary",
+                "categories"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/glossary/categories",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/glossary/categories — auto-discovered (server.ts:34124)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/glossary/terms",
+      "description": "2 route(s) under /v1/glossary/terms",
+      "item": [
+        {
+          "name": "GET /v1/glossary/terms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/glossary/terms",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "glossary",
+                "terms"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/glossary/terms",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Module #22 — Glossary (§2.4)"
+        },
+        {
+          "name": "GET /v1/glossary/terms/{term_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/glossary/terms/:term_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "glossary",
+                "terms",
+                ":term_id"
+              ],
+              "variable": [
+                {
+                  "key": "term_id",
+                  "value": "<term_id>",
+                  "description": "Path parameter: term_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/glossary/terms/{term_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/glossary/terms/:term_id — auto-discovered (server.ts:34130)"
         }
       ]
     },
@@ -33594,6 +34064,1038 @@
           ],
           "response": [],
           "_summary": "GET /v1/tenants/me/readiness — auto-discovered (server.ts:14900)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/testing/runs",
+      "description": "2 route(s) under /v1/testing/runs",
+      "item": [
+        {
+          "name": "GET /v1/testing/runs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/runs",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "runs"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/testing/runs",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/testing/runs — auto-discovered (server.ts:34049)"
+        },
+        {
+          "name": "GET /v1/testing/runs/{run_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/runs/:run_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "runs",
+                ":run_id"
+              ],
+              "variable": [
+                {
+                  "key": "run_id",
+                  "value": "<run_id>",
+                  "description": "Path parameter: run_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/testing/runs/{run_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/testing/runs/:run_id — auto-discovered (server.ts:34063)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/testing/schedule",
+      "description": "2 route(s) under /v1/testing/schedule",
+      "item": [
+        {
+          "name": "GET /v1/testing/schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/schedule",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "schedule"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/testing/schedule",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/testing/schedule — auto-discovered (server.ts:34071)"
+        },
+        {
+          "name": "POST /v1/testing/schedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/schedule",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "schedule"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/testing/schedule",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/testing/schedule — auto-discovered (server.ts:34077)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/testing/tests",
+      "description": "7 route(s) under /v1/testing/tests",
+      "item": [
+        {
+          "name": "GET /v1/testing/tests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/testing/tests",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Module #21 — Testing Hub (§2.4)"
+        },
+        {
+          "name": "POST /v1/testing/tests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/testing/tests",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/testing/tests — auto-discovered (server.ts:33953)"
+        },
+        {
+          "name": "DELETE /v1/testing/tests/{test_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests/:test_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests",
+                ":test_id"
+              ],
+              "variable": [
+                {
+                  "key": "test_id",
+                  "value": "<test_id>",
+                  "description": "Path parameter: test_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for DELETE /v1/testing/tests/{test_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([204, 200, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "DELETE /v1/testing/tests/:test_id — auto-discovered (server.ts:34006)"
+        },
+        {
+          "name": "GET /v1/testing/tests/{test_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests/:test_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests",
+                ":test_id"
+              ],
+              "variable": [
+                {
+                  "key": "test_id",
+                  "value": "<test_id>",
+                  "description": "Path parameter: test_id"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/testing/tests/{test_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/testing/tests/:test_id — auto-discovered (server.ts:33977)"
+        },
+        {
+          "name": "PATCH /v1/testing/tests/{test_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests/:test_id",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests",
+                ":test_id"
+              ],
+              "variable": [
+                {
+                  "key": "test_id",
+                  "value": "<test_id>",
+                  "description": "Path parameter: test_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for PATCH /v1/testing/tests/{test_id}",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "PATCH /v1/testing/tests/:test_id — auto-discovered (server.ts:33985)"
+        },
+        {
+          "name": "POST /v1/testing/tests/{test_id}/run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests/:test_id/run",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests",
+                ":test_id",
+                "run"
+              ],
+              "variable": [
+                {
+                  "key": "test_id",
+                  "value": "<test_id>",
+                  "description": "Path parameter: test_id"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/testing/tests/{test_id}/run",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/testing/tests/:test_id/run — auto-discovered (server.ts:34032)"
+        },
+        {
+          "name": "POST /v1/testing/tests/bulk-upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/testing/tests/bulk-upload",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "testing",
+                "tests",
+                "bulk-upload"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/testing/tests/bulk-upload",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /v1/testing/tests/bulk-upload — auto-discovered (server.ts:34014)"
         }
       ]
     },

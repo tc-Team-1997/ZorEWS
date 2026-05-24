@@ -33925,6 +33925,353 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Module #21 — Testing Hub (§2.4)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get('/v1/testing/tests', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { listTestCases } = require('./testing_hub') as typeof import('./testing_hub');
+      return res.json(
+        wrapResponse(
+          {
+            tests: listTestCases(req.tenant!.tenant_id, {
+              target_type: req.query.target_type as import('./testing_hub').TestTarget | undefined,
+              enabled_only: String(req.query.enabled_only ?? '').toLowerCase() === 'true',
+            }),
+          },
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'list_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.post('/v1/testing/tests', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { createTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.status(201).json(
+        wrapResponse(
+          createTestCase(req.tenant!.tenant_id, inner as Parameters<typeof import('./testing_hub').createTestCase>[1], actor, now()),
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const ews = code === 'invalid_target' ? 'EWS_400_invalid_target' : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'create_failed';
+      return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.get('/v1/testing/tests/:test_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+    const found = getTestCase(req.tenant!.tenant_id, req.params.test_id);
+    if (!found) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_test', message: `unknown ${req.params.test_id}`, severity: 'MEDIUM' }, ctx));
+    return res.json(wrapResponse(found, ctx));
+  });
+
+  app.patch('/v1/testing/tests/:test_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updateTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      return res.json(
+        wrapResponse(updateTestCase(req.tenant!.tenant_id, req.params.test_id, inner as Record<string, unknown>, now()), ctx),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_test' ? 404 : 400;
+      const ews = code === 'unknown_test' ? 'EWS_404_unknown_test' : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'update_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.delete('/v1/testing/tests/:test_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { deleteTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+    const ok = deleteTestCase(req.tenant!.tenant_id, req.params.test_id);
+    if (!ok) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_test', message: `unknown ${req.params.test_id}`, severity: 'MEDIUM' }, ctx));
+    return res.status(204).end();
+  });
+
+  app.post('/v1/testing/tests/bulk-upload', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { bulkUploadTests } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const csv = (inner as { csv?: string })?.csv ?? '';
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.status(201).json(wrapResponse(bulkUploadTests(req.tenant!.tenant_id, csv, actor, now()), ctx));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'bulk_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.post('/v1/testing/tests/:test_id/run', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { runTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.status(201).json(wrapResponse(runTestCase(req.tenant!.tenant_id, req.params.test_id, actor, now()), ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_test' ? 404 : code === 'test_disabled' ? 409 : 400;
+      const ews = code === 'unknown_test' ? 'EWS_404_unknown_test'
+        : code === 'test_disabled' ? 'EWS_409_test_disabled'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'run_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.get('/v1/testing/runs', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { listTestRuns } = require('./testing_hub') as typeof import('./testing_hub');
+    return res.json(
+      wrapResponse(
+        { runs: listTestRuns(req.tenant!.tenant_id, {
+          test_id: req.query.test_id as string | undefined,
+          status: req.query.status as import('./testing_hub').TestStatus | undefined,
+        }) },
+        ctx,
+      ),
+    );
+  });
+
+  app.get('/v1/testing/runs/:run_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getTestRun } = require('./testing_hub') as typeof import('./testing_hub');
+    const r = getTestRun(req.tenant!.tenant_id, req.params.run_id);
+    if (!r) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_run', message: `unknown ${req.params.run_id}`, severity: 'MEDIUM' }, ctx));
+    return res.json(wrapResponse(r, ctx));
+  });
+
+  app.get('/v1/testing/schedule', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getTestSchedule } = require('./testing_hub') as typeof import('./testing_hub');
+    return res.json(wrapResponse(getTestSchedule(req.tenant!.tenant_id), ctx));
+  });
+
+  app.post('/v1/testing/schedule', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { setTestSchedule } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.json(
+        wrapResponse(
+          setTestSchedule(req.tenant!.tenant_id, inner as { enabled: boolean; cron_expression: string }, actor, now()),
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'schedule_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #22 — Glossary (§2.4)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get('/v1/glossary/terms', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { listGlossaryTerms } = require('./glossary') as typeof import('./glossary');
+      return res.json(
+        wrapResponse(
+          { terms: listGlossaryTerms({
+            category: req.query.category as import('./glossary').GlossaryCategory | undefined,
+            q: req.query.q as string | undefined,
+          }) },
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const ews = code === 'invalid_category' ? 'EWS_400_invalid_category' : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'glossary_failed';
+      return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.get('/v1/glossary/categories', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { listGlossaryCategories } = require('./glossary') as typeof import('./glossary');
+    return res.json(wrapResponse({ categories: listGlossaryCategories() }, ctx));
+  });
+
+  app.get('/v1/glossary/terms/:term_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getGlossaryTerm } = require('./glossary') as typeof import('./glossary');
+    const t = getGlossaryTerm(req.params.term_id);
+    if (!t) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_term', message: `unknown ${req.params.term_id}`, severity: 'LOW' }, ctx));
+    return res.json(wrapResponse(t, ctx));
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #23 — AI Workbench prompt library (§2.4)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get('/v1/ai/prompts/library', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { listPrompts } = require('./ai_prompts') as typeof import('./ai_prompts');
+      return res.json(
+        wrapResponse(
+          { prompts: listPrompts(req.tenant!.tenant_id, {
+            category: req.query.category as import('./ai_prompts').PromptCategory | undefined,
+            include_platform: String(req.query.include_platform ?? '').toLowerCase() !== 'false',
+            q: req.query.q as string | undefined,
+          }) },
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const ews = code === 'invalid_category' ? 'EWS_400_invalid_category' : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'list_failed';
+      return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.get('/v1/ai/prompts/:prompt_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getPrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+    const p = getPrompt(req.tenant!.tenant_id, req.params.prompt_id);
+    if (!p) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_prompt', message: `unknown ${req.params.prompt_id}`, severity: 'MEDIUM' }, ctx));
+    return res.json(wrapResponse(p, ctx));
+  });
+
+  app.post('/v1/ai/prompts', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { createPrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      return res.status(201).json(
+        wrapResponse(
+          createPrompt(req.tenant!.tenant_id, inner as Parameters<typeof import('./ai_prompts').createPrompt>[1], actor, now()),
+          ctx,
+        ),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const ews = code === 'invalid_category' ? 'EWS_400_invalid_category'
+        : code === 'invalid_name' ? 'EWS_400_invalid_name'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'prompt_create_failed';
+      return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.patch('/v1/ai/prompts/:prompt_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updatePrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      return res.json(
+        wrapResponse(updatePrompt(req.tenant!.tenant_id, req.params.prompt_id, inner as Record<string, unknown>, now()), ctx),
+      );
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_prompt' ? 404
+        : code === 'platform_immutable' ? 409
+        : 400;
+      const ews = code === 'unknown_prompt' ? 'EWS_404_unknown_prompt'
+        : code === 'platform_immutable' ? 'EWS_409_platform_immutable'
+        : code === 'invalid_name' ? 'EWS_400_invalid_name'
+        : code === 'invalid_category' ? 'EWS_400_invalid_category'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'prompt_update_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.delete('/v1/ai/prompts/:prompt_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { deletePrompt } = require('./ai_prompts') as typeof import('./ai_prompts');
+    const ok = deletePrompt(req.tenant!.tenant_id, req.params.prompt_id);
+    if (!ok) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_prompt', message: `unknown ${req.params.prompt_id}`, severity: 'MEDIUM' }, ctx));
+    return res.status(204).end();
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Module #24 — Generic Excel + PDF export (§2.4)
+  // ──────────────────────────────────────────────────────────────────
+
+  app.post('/v1/export/xlsx', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { buildXlsx } = require('./generic_export') as typeof import('./generic_export');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const out = buildXlsx(inner as import('./generic_export').XlsxExportInput);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+      return res.send(out.buffer);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'xlsx_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.post('/v1/export/pdf', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { buildPdf } = require('./generic_export') as typeof import('./generic_export');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const out = buildPdf(inner as import('./generic_export').PdfExportInput);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+      return res.send(out.buffer);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'pdf_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
 
