@@ -14572,6 +14572,285 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── Module 2.1 — Borrower Watch ─────────────────────────────────────
+  //
+  // The single most important credit-officer screen. Server-side EWS
+  // sort + multi-axis filters (sector / segment / region / severity /
+  // watchlist_only / min_ews / max_ews / search). Plus the cohort CMA
+  // pack composer. The /360 and /risk-profile single-borrower routes
+  // already exist (M11.6, T3.7) — borrower-watch is the LIST surface.
+
+  /** GET /v1/customers?mode=&sector=&segment=&region=&severity=&watchlist_only=&min_ews=&max_ews=&search=&sort=
+   *
+   *  Server-side sort by EWS score (spec acceptance). Default mode is
+   *  `stressed` (S1+S2 only); pass `?mode=all` to widen to S3. */
+  app.get(
+    '/v1/customers',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const {
+          buildBorrowerList,
+          isBorrowerSector,
+          isBorrowerSegment,
+          isBorrowerRegion,
+          isBorrowerSeverity,
+        } = require('./borrower_watch') as typeof import('./borrower_watch');
+
+        // Filter parsing with code-routed 400s.
+        const mode = (req.query.mode as string | undefined) === 'all' ? 'all' : 'stressed';
+        const sector = req.query.sector as string | undefined;
+        const segment = req.query.segment as string | undefined;
+        const region = req.query.region as string | undefined;
+        const severity = req.query.severity as string | undefined;
+        const watchlistOnlyRaw = req.query.watchlist_only as string | undefined;
+        const watchlist_only = watchlistOnlyRaw === 'true';
+        const minEwsRaw = req.query.min_ews as string | undefined;
+        const maxEwsRaw = req.query.max_ews as string | undefined;
+        const search = (req.query.search as string | undefined)?.trim() || undefined;
+        const sortKeyRaw = (req.query.sort as string | undefined) ?? 'ews_score';
+        const sortOrderRaw = (req.query.order as string | undefined) ?? 'desc';
+
+        if (sector && !isBorrowerSector(sector)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_sector', message: `unknown sector: ${sector}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (segment && !isBorrowerSegment(segment)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_segment', message: `unknown segment: ${segment}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (region && !isBorrowerRegion(region)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_region', message: `unknown region: ${region}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (severity && !isBorrowerSeverity(severity)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_severity', message: `unknown severity: ${severity}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        const validSortKeys = ['ews_score', 'exposure_inr', 'dpd', 'last_alert_at', 'name'];
+        if (!validSortKeys.includes(sortKeyRaw)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_sort', message: `unknown sort key: ${sortKeyRaw}`, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (sortOrderRaw !== 'asc' && sortOrderRaw !== 'desc') {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_order', message: 'order must be asc|desc', severity: 'MEDIUM' }, ctx),
+          );
+        }
+
+        const min_ews = minEwsRaw !== undefined ? Number(minEwsRaw) : undefined;
+        const max_ews = maxEwsRaw !== undefined ? Number(maxEwsRaw) : undefined;
+        if (min_ews !== undefined && (!Number.isFinite(min_ews) || min_ews < 0 || min_ews > 100)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_input', message: 'min_ews must be in [0, 100]', severity: 'MEDIUM' }, ctx),
+          );
+        }
+        if (max_ews !== undefined && (!Number.isFinite(max_ews) || max_ews < 0 || max_ews > 100)) {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_input', message: 'max_ews must be in [0, 100]', severity: 'MEDIUM' }, ctx),
+          );
+        }
+
+        // Compose the input customer list. Prefer pg-backed overlay
+        // reader when wired; fall back to in-memory lookups for tests.
+        const tenant_id = req.tenant!.tenant_id;
+        let customerInputs: Array<import('./borrower_watch').BorrowerInput> = [];
+        if (customerOverlayReader) {
+          const items = await customerOverlayReader.fetchList({ tenant_id });
+          customerInputs = items.map((i) => ({
+            id: i.id,
+            name: i.name,
+            pd: i.pd,
+            exposure: i.exposure,
+            dpd: i.dpd,
+          }));
+        } else {
+          // Fallback: iterate the in-memory customer dictionary.
+          for (const id of Object.keys(lookups.customers)) {
+            const profile = await riskProfile.get(id);
+            if (!profile) continue;
+            customerInputs.push({
+              id: profile.id,
+              name: profile.name,
+              pd: profile.pd,
+              exposure: profile.exposure,
+              dpd: profile.dpd,
+            });
+          }
+        }
+
+        const watchlist = watchlistStore.list(tenant_id).map((w) => ({
+          customer_id: w.customer_id,
+          tag: w.reason || null, // map reason → tag for spec terminology
+          added_at: w.added_at,
+        }));
+
+        const report = buildBorrowerList(
+          tenant_id,
+          customerInputs,
+          watchlist,
+          {
+            mode,
+            sector: sector as import('./borrower_watch').BorrowerSector | undefined,
+            segment: segment as import('./borrower_watch').BorrowerSegment | undefined,
+            region: region as import('./borrower_watch').BorrowerRegion | undefined,
+            severity: severity as import('./borrower_watch').BorrowerSeverity | undefined,
+            watchlist_only,
+            min_ews,
+            max_ews,
+            search,
+          },
+          {
+            key: sortKeyRaw as import('./borrower_watch').BorrowerSortKey,
+            order: sortOrderRaw as 'asc' | 'desc',
+          },
+          now(),
+        );
+
+        return res.json(wrapResponse(report, ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'list_failed';
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: msg, severity: 'HIGH' }, ctx),
+        );
+      }
+    },
+  );
+
+  /** Module 2.1 — POST /v1/banking/cohort/cma-pack
+   *  body { cohort_ids: string[] }. Builds a Credit Monitoring
+   *  Arrangement pack metadata blob from a cohort. Caller (SPA) uses
+   *  the returned pack_id + download_filename to build the actual
+   *  XLSX/PDF client-side.
+   *
+   *  Reads the SAME borrower list as `/v1/customers` (mode='all' so
+   *  any borrower can be in the cohort, even S3) so the cohort can
+   *  include all borrowers visible to the operator. */
+  app.post(
+    '/v1/banking/cohort/cma-pack',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildBorrowerList, buildCohortCmaPack, CohortError } =
+          require('./borrower_watch') as typeof import('./borrower_watch');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const w = (inner ?? {}) as { cohort_ids?: unknown };
+        const cohort_ids = Array.isArray(w.cohort_ids) ? w.cohort_ids.filter((x) => typeof x === 'string') as string[] : [];
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        const tenant_id = req.tenant!.tenant_id;
+
+        // Build the full borrower list (mode='all') as our source-of-truth row pool.
+        let customerInputs: Array<import('./borrower_watch').BorrowerInput> = [];
+        if (customerOverlayReader) {
+          const items = await customerOverlayReader.fetchList({ tenant_id });
+          customerInputs = items.map((i) => ({
+            id: i.id,
+            name: i.name,
+            pd: i.pd,
+            exposure: i.exposure,
+            dpd: i.dpd,
+          }));
+        } else {
+          for (const id of Object.keys(lookups.customers)) {
+            const profile = await riskProfile.get(id);
+            if (!profile) continue;
+            customerInputs.push({
+              id: profile.id,
+              name: profile.name,
+              pd: profile.pd,
+              exposure: profile.exposure,
+              dpd: profile.dpd,
+            });
+          }
+        }
+        const watchlist = watchlistStore.list(tenant_id).map((wl) => ({
+          customer_id: wl.customer_id,
+          tag: wl.reason || null,
+          added_at: wl.added_at,
+        }));
+        const report = buildBorrowerList(
+          tenant_id,
+          customerInputs,
+          watchlist,
+          { mode: 'all' },
+          { key: 'ews_score', order: 'desc' },
+          now(),
+        );
+        try {
+          const pack = buildCohortCmaPack(
+            tenant_id,
+            report.items,
+            cohort_ids,
+            actor,
+            now(),
+          );
+          // Audit fan-out (cross-cutting #6).
+          try {
+            auditTrailStore.record(
+              tenant_id,
+              {
+                actor_username: actor,
+                actor_role: 'admin',
+                action: 'cma.pack.build',
+                resource_type: 'report',
+                resource_id: pack.pack_id,
+                outcome: 'success',
+                severity: 'info',
+                metadata: {
+                  cohort_size: pack.cohort_size,
+                  total_exposure_inr: pack.totals.exposure_inr,
+                  mean_ews_score: pack.totals.mean_ews_score,
+                },
+              },
+              now(),
+            );
+          } catch {
+            // swallow audit failures
+          }
+          return res.status(201).json(wrapResponse(pack, ctx));
+        } catch (e) {
+          if (e instanceof CohortError) {
+            const status = e.code === 'unknown_borrower'
+              ? 404
+              : e.code === 'too_many_borrowers'
+                ? 409
+                : 400;
+            const codePrefix = e.code === 'unknown_borrower'
+              ? 'EWS_404'
+              : e.code === 'too_many_borrowers'
+                ? 'EWS_409'
+                : 'EWS_400';
+            return res.status(status).json(
+              wrapError(
+                { code: `${codePrefix}_${e.code}`, message: e.message, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          throw e;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'cma_pack_failed';
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: msg, severity: 'HIGH' }, ctx),
+        );
+      }
+    },
+  );
+
   // ── Field-officer mobile (T6 M14.10) ────────────────────────────────
   //
   // Append-only visit ledger surfaced to the field-officer mobile

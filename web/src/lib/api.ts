@@ -1816,6 +1816,64 @@ export const api = {
     http
       .get<EnvelopeBody<DqExecutionShape>>(`/v1/dq/executions/${encodeURIComponent(id)}`)
       .then((r) => r.data),
+
+  // ── Module 2.1 — Borrower Watch ─────────────────────────────────────
+  borrowerWatchList: (q: {
+    mode?: 'stressed' | 'all';
+    sector?: string;
+    segment?: string;
+    region?: string;
+    severity?: string;
+    watchlist_only?: boolean;
+    min_ews?: number;
+    max_ews?: number;
+    search?: string;
+    sort?: string;
+    order?: 'asc' | 'desc';
+  } = {}) => {
+    const sp = new URLSearchParams();
+    if (q.mode) sp.set('mode', q.mode);
+    if (q.sector) sp.set('sector', q.sector);
+    if (q.segment) sp.set('segment', q.segment);
+    if (q.region) sp.set('region', q.region);
+    if (q.severity) sp.set('severity', q.severity);
+    if (q.watchlist_only) sp.set('watchlist_only', 'true');
+    if (q.min_ews !== undefined) sp.set('min_ews', String(q.min_ews));
+    if (q.max_ews !== undefined) sp.set('max_ews', String(q.max_ews));
+    if (q.search) sp.set('search', q.search);
+    if (q.sort) sp.set('sort', q.sort);
+    if (q.order) sp.set('order', q.order);
+    const qs = sp.toString();
+    return http
+      .get<EnvelopeBody<BorrowerListReportShape>>(`/v1/customers${qs ? `?${qs}` : ''}`)
+      .then((r) => r.data);
+  },
+
+  cohortCmaPack: (cohort_ids: string[]) =>
+    http
+      .post<EnvelopeBody<CohortCmaPackShape>>('/v1/banking/cohort/cma-pack', { cohort_ids })
+      .then((r) => r.data),
+
+  // ── Module 2.1 helpers — wrapping pre-existing /v1 routes ───────────
+  riskProfile: (customer_id: string) =>
+    http
+      .get<EnvelopeBody<RiskProfileShape>>(`/v1/risk-profile/${encodeURIComponent(customer_id)}`)
+      .then((r) => r.data),
+
+  watchlistList: () =>
+    http
+      .get<EnvelopeBody<{ items: WatchlistEntryShape[]; total: number }>>('/v1/watchlist')
+      .then((r) => r.data),
+
+  watchlistAdd: (body: { customer_id: string; reason: string; vertical?: 'banking' | 'insurance' }) =>
+    http
+      .post<EnvelopeBody<WatchlistEntryShape>>('/v1/watchlist', body)
+      .then((r) => r.data),
+
+  watchlistRemove: (customer_id: string) =>
+    http
+      .delete<EnvelopeBody<void>>(`/v1/watchlist/${encodeURIComponent(customer_id)}`)
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -3350,4 +3408,86 @@ export interface DqExecutionShape {
   sample_failures?: Array<Record<string, unknown>>;
   error_message?: string | null;
   triggered_by: string;
+}
+
+// ── Module 2.1 — Borrower Watch response shapes ───────────────────────
+export type BorrowerSeverity = 'S1' | 'S2' | 'S3';
+export type BorrowerSector =
+  | 'manufacturing' | 'services' | 'retail' | 'agriculture'
+  | 'real_estate' | 'msme' | 'corporate' | 'consumer';
+export type BorrowerSegment = 'retail' | 'sme' | 'corporate' | 'priority_sector';
+export type BorrowerRegion = 'north' | 'south' | 'east' | 'west' | 'central' | 'northeast';
+export type BorrowerSortKey = 'ews_score' | 'exposure_inr' | 'dpd' | 'last_alert_at' | 'name';
+
+export interface BorrowerWatchRowShape {
+  borrower_id: string;
+  name: string;
+  sector: BorrowerSector;
+  segment: BorrowerSegment;
+  region: BorrowerRegion;
+  exposure_inr: number;
+  pd: number;
+  ews_score: number;
+  severity: BorrowerSeverity;
+  top_signal: string;
+  last_alert_at: string | null;
+  watchlist_tag: string | null;
+  dpd: number;
+}
+
+export interface BorrowerListReportShape {
+  tenant_id: string;
+  generated_at: string;
+  mode: 'stressed' | 'all';
+  total: number;
+  total_unfiltered: number;
+  sort: { key: BorrowerSortKey; order: 'desc' | 'asc' };
+  by_severity: Record<BorrowerSeverity, number>;
+  by_sector: Partial<Record<BorrowerSector, number>>;
+  items: BorrowerWatchRowShape[];
+}
+
+export interface CohortCmaPackShape {
+  pack_id: string;
+  tenant_id: string;
+  generated_at: string;
+  generated_by: string;
+  cohort_size: number;
+  borrowers: Array<{
+    borrower_id: string;
+    name: string;
+    sector: BorrowerSector;
+    exposure_inr: number;
+    ews_score: number;
+    severity: BorrowerSeverity;
+  }>;
+  totals: {
+    exposure_inr: number;
+    mean_ews_score: number;
+    by_severity: Record<BorrowerSeverity, number>;
+    by_sector: Partial<Record<BorrowerSector, number>>;
+  };
+  download_filename: string;
+}
+
+// ── Module 2.1 helpers — response shapes ───────────────────────────────
+export interface RiskProfileShape {
+  id: string;
+  name?: string;
+  pd: number;
+  level: 'Low' | 'Medium' | 'High';
+  exposure: number;
+  dpd: number;
+  top_reasons?: Array<{ feature: string; value: unknown; shap_value: number; direction: 'positive' | 'negative' }>;
+  model_name?: string;
+  model_version?: string;
+}
+
+export interface WatchlistEntryShape {
+  customer_id: string;
+  tenant_id: string;
+  reason: string;
+  vertical: 'banking' | 'insurance' | null;
+  added_by: string;
+  added_at: string;
 }

@@ -56,6 +56,7 @@ const NAV: readonly NavItem[] = [
   { to: '/', i18nKey: 'dashboard', icon: LayoutDashboard },
   { to: '/alerts', i18nKey: 'alerts', icon: Bell },
   { to: '/customers', i18nKey: 'customers', icon: Users },
+  { to: '/borrower-watch', i18nKey: 'borrower_watch', icon: TrendingUp },
   { to: '/rules', i18nKey: 'rules', icon: SlidersHorizontal },
   { to: '/rules/ews', i18nKey: 'ews_rules', icon: SlidersHorizontal },
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },

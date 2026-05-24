@@ -8980,3 +8980,200 @@ handlers.push(...__mswDqHandlers);
 export function __resetMswDqWeights() {
   __mswDqWeights.clear();
 }
+
+// ── Module 2.1 — Borrower Watch MSW handlers ──────────────────────────
+type _MswBorrower = {
+  borrower_id: string;
+  name: string;
+  sector: string;
+  segment: string;
+  region: string;
+  exposure_inr: number;
+  pd: number;
+  ews_score: number;
+  severity: 'S1' | 'S2' | 'S3';
+  top_signal: string;
+  last_alert_at: string | null;
+  watchlist_tag: string | null;
+  dpd: number;
+};
+
+const __mswBwSectors = ['manufacturing', 'services', 'retail', 'agriculture', 'real_estate', 'msme', 'corporate', 'consumer'];
+const __mswBwSegments = ['retail', 'sme', 'corporate', 'priority_sector'];
+const __mswBwRegions = ['north', 'south', 'east', 'west', 'central', 'northeast'];
+const __mswBwSignals = [
+  'DPD 30+ in last 60 days', 'EMI bounce streak (3 of last 5)', 'Account dormancy detected',
+  'Bureau score dropped 50+ pts', 'Utilisation crossed 95%', 'Geographic risk flag',
+  'High-velocity withdrawals', 'Sector exposure concentration', 'Repeat overdraft requests',
+  'Salary credit ceased',
+];
+const __mswBwFirstNames = ['Aarav', 'Ananya', 'Vikram', 'Priya', 'Rohan', 'Meera', 'Karan', 'Neha'];
+const __mswBwLastNames = ['Sharma', 'Patel', 'Reddy', 'Kumar', 'Iyer', 'Banerjee', 'Singh', 'Mehta'];
+
+function __mswBwHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h >>> 0;
+}
+function __mswBwRng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+  };
+}
+
+function __mswBwSeverity(score: number): 'S1' | 'S2' | 'S3' {
+  if (score >= 75) return 'S1';
+  if (score >= 50) return 'S2';
+  return 'S3';
+}
+
+const __mswBwBaseline: _MswBorrower[] = (() => {
+  // 30 deterministic borrowers — same seed each render so SPA tests are stable.
+  const out: _MswBorrower[] = [];
+  for (let i = 0; i < 30; i++) {
+    const id = `c-${String(100 + i)}`;
+    const rng = __mswBwRng(__mswBwHash(`BANK_DEMO|${id}|borrower_watch`));
+    const pd = Math.round(rng() * 100) / 100;
+    const dpd = Math.floor(rng() * 180);
+    const ews = Math.round((Math.max(0, Math.min(1, pd)) * 70 + Math.min(180, dpd) / 180 * 30) * 10) / 10;
+    out.push({
+      borrower_id: id,
+      name: `${__mswBwFirstNames[Math.floor(rng() * __mswBwFirstNames.length)]} ${__mswBwLastNames[Math.floor(rng() * __mswBwLastNames.length)]}`,
+      sector: __mswBwSectors[Math.floor(rng() * __mswBwSectors.length)],
+      segment: __mswBwSegments[Math.floor(rng() * __mswBwSegments.length)],
+      region: __mswBwRegions[Math.floor(rng() * __mswBwRegions.length)],
+      exposure_inr: Math.round((500_000 + rng() * 4_500_000) / 1000) * 1000,
+      pd,
+      ews_score: ews,
+      severity: __mswBwSeverity(ews),
+      top_signal: __mswBwSignals[Math.floor(rng() * __mswBwSignals.length)],
+      last_alert_at: rng() < 0.3 ? null : new Date(Date.now() - Math.floor(rng() * 60 * 86_400_000)).toISOString(),
+      watchlist_tag: null,
+      dpd,
+    });
+  }
+  return out;
+})();
+
+const __mswBwHandlers = [
+  http.get('/v1/customers', ({ request }) => {
+    const url = new URL(request.url);
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const mode = (url.searchParams.get('mode') === 'all' ? 'all' : 'stressed') as 'all' | 'stressed';
+    let items = [...__mswBwBaseline];
+
+    // Defensive validation — mirror BFF 400 envelopes.
+    const sector = url.searchParams.get('sector');
+    const segment = url.searchParams.get('segment');
+    const region = url.searchParams.get('region');
+    const severity = url.searchParams.get('severity');
+    const search = url.searchParams.get('search');
+    const watchlist_only = url.searchParams.get('watchlist_only') === 'true';
+    const minEws = url.searchParams.get('min_ews');
+    const maxEws = url.searchParams.get('max_ews');
+    const sortKey = url.searchParams.get('sort') ?? 'ews_score';
+    const order = url.searchParams.get('order') ?? 'desc';
+
+    if (sector && !__mswBwSectors.includes(sector)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_sector', message: `unknown ${sector}`, severity: 'MEDIUM' } }, { status: 400 });
+    }
+    if (severity && !['S1', 'S2', 'S3'].includes(severity)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_severity', message: `unknown ${severity}`, severity: 'MEDIUM' } }, { status: 400 });
+    }
+
+    const total_unfiltered = items.length;
+    if (mode === 'stressed') items = items.filter((r) => r.severity === 'S1' || r.severity === 'S2');
+    if (sector) items = items.filter((r) => r.sector === sector);
+    if (segment) items = items.filter((r) => r.segment === segment);
+    if (region) items = items.filter((r) => r.region === region);
+    if (severity) items = items.filter((r) => r.severity === severity);
+    if (watchlist_only) items = items.filter((r) => r.watchlist_tag !== null);
+    if (minEws) {
+      const lo = Number(minEws);
+      if (Number.isFinite(lo)) items = items.filter((r) => r.ews_score >= lo);
+    }
+    if (maxEws) {
+      const hi = Number(maxEws);
+      if (Number.isFinite(hi)) items = items.filter((r) => r.ews_score <= hi);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      items = items.filter((r) => r.borrower_id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
+    }
+    // Server-side sort.
+    const mul = order === 'asc' ? 1 : -1;
+    items.sort((a, b) => {
+      const ak = (a as Record<string, unknown>)[sortKey];
+      const bk = (b as Record<string, unknown>)[sortKey];
+      if (typeof ak === 'number' && typeof bk === 'number') return (ak - bk) * mul;
+      if (typeof ak === 'string' && typeof bk === 'string') return ak.localeCompare(bk) * mul;
+      return 0;
+    });
+    const by_severity: Record<string, number> = { S1: 0, S2: 0, S3: 0 };
+    const by_sector: Record<string, number> = {};
+    for (const r of items) {
+      by_severity[r.severity]++;
+      by_sector[r.sector] = (by_sector[r.sector] ?? 0) + 1;
+    }
+    return HttpResponse.json(envelope({
+      tenant_id,
+      generated_at: new Date().toISOString(),
+      mode,
+      total: items.length,
+      total_unfiltered,
+      sort: { key: sortKey, order },
+      by_severity,
+      by_sector,
+      items,
+    }));
+  }),
+
+  http.post('/v1/banking/cohort/cma-pack', async ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const body = (await request.json()) as { cohort_ids?: string[] };
+    const cohortIds = (body.cohort_ids ?? []).filter((x) => typeof x === 'string');
+    if (cohortIds.length === 0) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'cohort_ids required', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const unique = Array.from(new Set(cohortIds));
+    const rowsById = new Map(__mswBwBaseline.map((r) => [r.borrower_id, r]));
+    const missing = unique.filter((id) => !rowsById.has(id));
+    if (missing.length > 0) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_borrower', message: `unknown: ${missing.slice(0, 3).join(', ')}`, severity: 'MEDIUM' } }, { status: 404 });
+    }
+    const found = unique.map((id) => rowsById.get(id)!);
+    let exposureSum = 0, ewsSum = 0;
+    const by_severity: Record<string, number> = { S1: 0, S2: 0, S3: 0 };
+    const by_sector: Record<string, number> = {};
+    for (const r of found) {
+      exposureSum += r.exposure_inr;
+      ewsSum += r.ews_score;
+      by_severity[r.severity]++;
+      by_sector[r.sector] = (by_sector[r.sector] ?? 0) + 1;
+    }
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    return HttpResponse.json(envelope({
+      pack_id: `cma-${tenant_id}-${day}-msw`,
+      tenant_id,
+      generated_at: new Date().toISOString(),
+      generated_by: actor,
+      cohort_size: found.length,
+      borrowers: found.map((r) => ({ borrower_id: r.borrower_id, name: r.name, sector: r.sector, exposure_inr: r.exposure_inr, ews_score: r.ews_score, severity: r.severity })),
+      totals: {
+        exposure_inr: exposureSum,
+        mean_ews_score: Math.round((ewsSum / found.length) * 10) / 10,
+        by_severity,
+        by_sector,
+      },
+      download_filename: `cma-pack-${tenant_id}-${day}.xlsx`,
+    }), { status: 201 });
+  }),
+];
+
+handlers.push(...__mswBwHandlers);
