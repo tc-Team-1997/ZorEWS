@@ -39,14 +39,16 @@
 
 ### What to click
 
-1. Enter username: `ravi.risk`
-2. Password: `Risk!Pass1`
+1. Enter username: **`alice.admin`** (admin role — needed for Audit + Backtest in later Acts)
+2. Password: **`Admin!Pass1`**
 3. Click **Sign in**
 4. Confirm header shows **BANK_DEMO** chip on top right
 
+**Persona caveat:** You're narrating as "Credit Risk Officer" but logging in as the admin user. The role is just there so all 6 Acts work end-to-end (audit:read needed in Act 6, Act 4 Backtest). Alternative: log in as `ravi.risk` / `RiskAnalyst!1` and skip the Backtest modal click + Audit Trail step.
+
 ### What to say
 
-> *"ZorEWS multi-tenant hai — ek instance me multiple banks aur insurance companies host ho sakti hain. Main `BANK_DEMO` tenant me sign in kar rahi hu — Bank mode pe, as a **risk analyst** persona."*
+> *"ZorEWS multi-tenant hai — ek instance me multiple banks aur insurance companies host ho sakti hain. Main `BANK_DEMO` tenant me sign in kar rahi hu — Bank mode pe, as a **Credit Risk Officer** persona."*
 >
 > *"Architecture multi-tenant + multi-vertical hai — same instance Bank aur Insurance dono verticals support karta hai. Aaj BANK_DEMO dikha rahi hu."*
 >
@@ -60,7 +62,7 @@
 ### Watch out for
 
 - ⚠ If login fails → use backup pre-logged-in browser tab
-- ⚠ If `ravi.risk` is locked out from prior demos → switch to `alice.admin` / `Admin!Pass1` (admin sees every screen)
+- ⚠ If `alice.admin` is locked out from prior demos → restart auth-svc: `lsof -ti tcp:8080 \| xargs kill -9 && cd services/auth-svc && npm run dev`
 - ⚠ Tenant picker doesn't appear (BANK_DEMO is implicit) — don't promise it
 
 ---
@@ -117,7 +119,7 @@
 
 **Screen:** Customer Risk Profile page (opened from Act 2)
 
-Navigate via sidebar → **Customers** → click any High-band borrower (or directly to `/customers/c-100014` for the Act-4 anchor Arjun Reddy).
+Navigate via sidebar → **Customers** → click **Olivia Cherop (c-115)** at top of list (or directly to `/customers/c-115`).
 
 ### What to click
 
@@ -130,7 +132,7 @@ Navigate via sidebar → **Customers** → click any High-band borrower (or dire
 ### What to say
 
 **[Page opens]**
-> *"Arjun Reddy — Power sector, exposure ~32 million KES, risk level High. Yeh hai 360-degree view — har angle se borrower ko dekho — alerts, cases, SHAP reasons, PD timeline."*
+> *"Olivia Cherop — top of stressed list, PD 0.83, risk level High. Yeh hai 360-degree view — har angle se borrower ko dekho — alerts, cases, SHAP reasons, PD timeline."*
 
 **[Point at SHAP reasons]**
 > *"AI ke top-5 reasons highlighted hain — DPD pattern, utilization, EMI bounce rate — yeh red bands automatic threshold-based hain. Full SHAP attribution NPA Prediction page pe deep-dive karenge."*
@@ -139,7 +141,7 @@ Navigate via sidebar → **Customers** → click any High-band borrower (or dire
 > *"Past 90 days me alerts raise hue hain is borrower pe — pattern clearly deteriorating. Linked cases bhi visible — ek already open hai."*
 
 **[Point at Linked Cases panel]**
-> *"Cohort actions bhi yahan se le sakti hu — bulk notice issue karo, ya credit committee me list submit karo. Time ke liye abhi NPA Prediction screen pe chalti hu — wahan AI ka real power dikhega."*
+> *"Cohort actions bhi yahan se le sakti hu — bulk notice issue karo, ya credit committee me list submit karo. Ab Power sector ki taraf chalti hu — wahan ek borrower hai jo AI ne NPA-imminent flag kiya hai. **NPA Prediction screen pe chalti hu — wahan AI ka real power dikhega**."*
 
 ### Talking points
 
@@ -445,10 +447,10 @@ Navigate via sidebar → **Customers** → click any High-band borrower (or dire
 ZorEWS Demo — Tuesday — 15 min
 
 🎬 OPEN: "Credit risk officer's Monday morning"
-📍 LOGIN → ravi.risk / Risk!Pass1 → BANK_DEMO header chip
+📍 LOGIN → alice.admin / Admin!Pass1 → BANK_DEMO header chip
 📍 DASHBOARD → KPIs / Trend / Heatmap / AI Conf 0.88 → click High borrower
-📍 CUSTOMER PROFILE → Arjun Reddy (c-100014) → SHAP top-5 / Linked Alerts / Linked Cases
-📍 NPA PREDICTION (/banking/npa-prediction) → 90d → click Arjun Reddy → Why modal
+📍 CUSTOMER PROFILE → Olivia Cherop (c-115) → SHAP top-5 / Linked Alerts / Linked Cases
+📍 NPA PREDICTION (/banking/npa-prediction) → 90d → click TOP row (Arjun Reddy / Power) → Why modal
    → top 5 features (DPD 0.32 / EMI bounce 0.21 / Util 0.18 / Bureau -0.15 / Cash 0.12)
    → Backtest button → AUC 0.875
 📍 ALERTS → critical+high filter (11) → click case → assign → escalate → maker-checker

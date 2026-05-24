@@ -10,9 +10,15 @@ The script says login as `tanya.credit`. That user **does not exist**. Use one o
 
 | Username | Role | Password | Why |
 |---|---|---|---|
-| `ravi.risk` | risk_analyst | `Risk!Pass1` | **Recommended** — matches Credit Risk Officer persona |
-| `alice.admin` | admin | `Admin!Pass1` | Fallback — sees every screen incl. admin tabs |
-| `sue.super` | supervisor | `Sup!Pass1` | Use for the "checker" half of Act 5's maker-checker if you want to demo both sides |
+| `ravi.risk` | risk_analyst | `RiskAnalyst!1` | **Recommended** — matches Credit Risk Officer persona |
+| `alice.admin` | admin | `Admin!Pass1` | **Use for Act 6** — audit + reports need admin role; reverify each role-gated step |
+| `sue.super` | supervisor | `Super!Pass1` | Use for the "checker" half of Act 5's maker-checker if you want to demo both sides |
+
+**Important:** the `ravi.risk` (risk_analyst) role does **NOT** have `audit:read` scope. For Act 6 (Audit Trail + NPA Backtest modal), you need to either:
+- (a) Log in as `alice.admin` upfront — simplest, admin sees everything
+- (b) Keep ravi.risk and just skip the Backtest modal click in Act 4, plus skip the Audit Trail portion of Act 6 (talk through verbally)
+
+**Recommended:** log in as **`alice.admin / Admin!Pass1`** for the demo. Persona narration ("I'm a Credit Risk Officer") works fine — you're just logged in as the admin user playing that role.
 
 **Tenant:** Sign in directly — `BANK_DEMO` is the default. No tenant picker appears; the header chip just says `BANK_DEMO`.
 
@@ -37,8 +43,23 @@ Pull KPI numbers from `/api/dashboard/summary`. Heatmap data comes from `/v1/ban
 
 ### Act 3 — Borrower 360°
 
+**Important:** `c-100014` (Arjun Reddy) is **NOT** in the `/api/customers` registry — that ID exists only in the NPA prediction synthesis pool. Trying to open `/customers/c-100014` will show a 404 / loading-forever state.
+
+**Real customer IDs you can navigate to** (top of Borrower Watch list):
+
+| Customer ID | Name | PD | Level |
+|---|---|---:|---|
+| **c-115** | **Olivia Cherop** | 0.83 | High |
+| c-101 | Achieng Otieno | 0.78 | High |
+| c-106 | Faisal Hussein | 0.74 | High |
+| c-118 | Ruth Akinyi | 0.69 | High |
+
+**Recommendation:** Open `/customers/c-115` (**Olivia Cherop** — top of stress list). Talk through the panels verbally. Then transition to **NPA Prediction** sidebar entry where Arjun Reddy lives.
+
+The narrative bridge in Act 3 closing:
+> *"Olivia Cherop ka context dekh liya. Ab let's see — Power sector me ek aur borrower hai jisko AI ne NPA-imminent flag kiya hai. NPA Prediction screen pe chalti hu."*
+
 - ⚠ Existing `/customers/:id` page exists but **tabs (Ratios / Account Signals / SMA Status / Alerts History) are NOT separate UI tabs**. Data is shown on the page in panels.
-- **Recommendation:** Open `/customers/c-100014` (Arjun Reddy, the Act-4 anchor) — talk through the panels verbally. If asked about tabs, say *"tab navigation under final integration; data shown is from the same /customers/:id/360 endpoint"*.
 - Real Estate filter: Borrower Watch list filters by `?level=High` etc. — sector filter UI may not be wired. Use Power sector as the "filter on" example since Power IS clearly critical in the heatmap.
 
 ### Act 4 — NPA Prediction ⭐ NEW PAGE WIRED ⭐
