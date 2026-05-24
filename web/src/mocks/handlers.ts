@@ -8433,3 +8433,330 @@ export function __resetMswAnomalyStore() {
 // spreading them inline before their `const __mswAnomalyHandlers = [...]`
 // declaration further up the file.
 handlers.push(...__mswAnomalyHandlers);
+
+// ── Module 1.6 — Reconciliation MSW handlers ──────────────────────────
+type _MswReconDef = {
+  recon_id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  source_label: string;
+  target_label: string;
+  kind: string;
+  key_field: string;
+  amount_field: string | null;
+  amount_tolerance: number;
+  severity: string;
+  active: boolean;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+};
+type _MswReconRun = {
+  run_id: string;
+  tenant_id: string;
+  recon_id: string;
+  recon_kind: string;
+  recon_severity: string;
+  source_label: string;
+  target_label: string;
+  started_at: string;
+  finished_at: string;
+  status: string;
+  source_count: number;
+  target_count: number;
+  matched_count: number;
+  source_only_count: number;
+  target_only_count: number;
+  amount_mismatch_count: number;
+  source_total: number | null;
+  target_total: number | null;
+  difference: number | null;
+  sample_breaks: Array<{ key: string; kind: string; source_amount: number | null; target_amount: number | null; delta: number | null }>;
+  error_message: string | null;
+  triggered_by: string;
+  accepted_at?: string | null;
+  accepted_by?: string | null;
+  accepted_reason?: string | null;
+};
+
+const __mswReconDefs = new Map<string, Map<string, _MswReconDef>>();
+const __mswReconRuns = new Map<string, _MswReconRun[]>();
+const __mswReconDrops = new Map<string, Map<string, string[]>>(); // tenant → recon_id → keys
+
+function __mswReconSeed(tenant_id: string): Map<string, _MswReconDef> {
+  if (__mswReconDefs.has(tenant_id)) return __mswReconDefs.get(tenant_id)!;
+  const m = new Map<string, _MswReconDef>();
+  const now = new Date().toISOString();
+  const seeds: Array<Partial<_MswReconDef>> = [
+    { recon_id: 'rcn_loans_to_staging', name: 'CBS Loans → Staging', source_label: 'cbs.loan_book', target_label: 'staging.loans', kind: 'count_only', key_field: 'loan_id', severity: 'high' },
+    { recon_id: 'rcn_staging_to_mart', name: 'Staging Loans → Warehouse', source_label: 'staging.loans', target_label: 'mart.loan_360', kind: 'count_only', key_field: 'loan_id', severity: 'high' },
+    { recon_id: 'rcn_txns_amounts', name: 'CBS Txns Amount Match', source_label: 'cbs.txns', target_label: 'mart.txn_features', kind: 'amount_match', key_field: 'txn_id', amount_field: 'amount', severity: 'medium' },
+  ];
+  for (const s of seeds) {
+    const d: _MswReconDef = {
+      recon_id: s.recon_id!,
+      tenant_id,
+      name: s.name!,
+      description: null,
+      source_label: s.source_label!,
+      target_label: s.target_label!,
+      kind: s.kind!,
+      key_field: s.key_field!,
+      amount_field: s.amount_field ?? null,
+      amount_tolerance: 0,
+      severity: s.severity ?? 'medium',
+      active: true,
+      created_at: now,
+      created_by: 'system',
+      updated_at: now,
+      updated_by: 'system',
+      deleted_at: null,
+      deleted_by: null,
+    };
+    m.set(d.recon_id, d);
+  }
+  __mswReconDefs.set(tenant_id, m);
+  return m;
+}
+
+function __mswReconRunsBucket(tenant_id: string): _MswReconRun[] {
+  if (!__mswReconRuns.has(tenant_id)) __mswReconRuns.set(tenant_id, []);
+  return __mswReconRuns.get(tenant_id)!;
+}
+
+function __mswReconDropBucket(tenant_id: string): Map<string, string[]> {
+  if (!__mswReconDropsHas(tenant_id)) __mswReconDrops.set(tenant_id, new Map());
+  return __mswReconDrops.get(tenant_id)!;
+}
+function __mswReconDropsHas(tenant_id: string): boolean {
+  return __mswReconDrops.has(tenant_id);
+}
+
+const __mswReconHandlers = [
+  http.get('/v1/recon/definitions', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const defs = Array.from(__mswReconSeed(tenant_id).values()).filter((d) => !d.deleted_at);
+    return HttpResponse.json(envelope({ items: defs, total: defs.length }));
+  }),
+
+  http.post('/v1/recon/definitions', async ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const body = (await request.json()) as Partial<_MswReconDef>;
+    if (!body.recon_id || !body.name || !body.source_label || !body.target_label || !body.kind || !body.key_field) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_400', message: 'missing fields', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'required field missing', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    const store = __mswReconSeed(tenant_id);
+    if (store.has(body.recon_id)) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_409', message: 'duplicate', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_409_duplicate_recon_id', message: `duplicate recon_id: ${body.recon_id}`, severity: 'MEDIUM' } },
+        { status: 409 },
+      );
+    }
+    const now = new Date().toISOString();
+    const d: _MswReconDef = {
+      recon_id: body.recon_id,
+      tenant_id,
+      name: body.name,
+      description: body.description ?? null,
+      source_label: body.source_label,
+      target_label: body.target_label,
+      kind: body.kind,
+      key_field: body.key_field,
+      amount_field: body.amount_field ?? null,
+      amount_tolerance: body.amount_tolerance ?? 0,
+      severity: body.severity ?? 'medium',
+      active: body.active ?? true,
+      created_at: now,
+      created_by: actor,
+      updated_at: now,
+      updated_by: actor,
+      deleted_at: null,
+      deleted_by: null,
+    };
+    store.set(d.recon_id, d);
+    return HttpResponse.json(envelope(d), { status: 201 });
+  }),
+
+  http.get('/v1/recon/definitions/:recon_id', ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const id = String(params.recon_id ?? '');
+    const d = __mswReconSeed(tenant_id).get(id);
+    if (!d || d.deleted_at) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', code: 'EWS_404', message: 'not found', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_recon', message: `unknown ${id}`, severity: 'LOW' } },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(d));
+  }),
+
+  http.patch('/v1/recon/definitions/:recon_id', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const id = String(params.recon_id ?? '');
+    const d = __mswReconSeed(tenant_id).get(id);
+    if (!d) return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_recon', message: 'not found', severity: 'LOW' } }, { status: 404 });
+    const patch = (await request.json()) as Partial<_MswReconDef>;
+    const next: _MswReconDef = { ...d, ...patch, recon_id: d.recon_id, tenant_id: d.tenant_id, updated_at: new Date().toISOString(), updated_by: actor };
+    __mswReconSeed(tenant_id).set(id, next);
+    return HttpResponse.json(envelope(next));
+  }),
+
+  http.delete('/v1/recon/definitions/:recon_id', ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const id = String(params.recon_id ?? '');
+    const d = __mswReconSeed(tenant_id).get(id);
+    if (!d) return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_recon', message: 'not found', severity: 'LOW' } }, { status: 404 });
+    const now = new Date().toISOString();
+    d.deleted_at = now;
+    d.deleted_by = actor;
+    return HttpResponse.json(envelope(d));
+  }),
+
+  http.post('/v1/recon/definitions/:recon_id/run', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const id = String(params.recon_id ?? '');
+    const d = __mswReconSeed(tenant_id).get(id);
+    if (!d || d.deleted_at) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_recon', message: 'not found', severity: 'LOW' } }, { status: 404 });
+    }
+    const dropped = __mswReconDropBucket(tenant_id).get(id) ?? [];
+    const sourceCount = 1000;
+    const targetCount = sourceCount - dropped.length;
+    const status = dropped.length === 0 ? 'balanced' : 'breaks_found';
+    const now = new Date();
+    const run: _MswReconRun = {
+      run_id: `rcn-msw-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenant_id,
+      recon_id: id,
+      recon_kind: d.kind,
+      recon_severity: d.severity,
+      source_label: d.source_label,
+      target_label: d.target_label,
+      started_at: now.toISOString(),
+      finished_at: new Date(now.getTime() + 100).toISOString(),
+      status,
+      source_count: sourceCount,
+      target_count: targetCount,
+      matched_count: targetCount,
+      source_only_count: dropped.length,
+      target_only_count: 0,
+      amount_mismatch_count: 0,
+      source_total: null,
+      target_total: null,
+      difference: null,
+      sample_breaks: dropped.map((k) => ({ key: k, kind: 'source_only', source_amount: null, target_amount: null, delta: null })),
+      error_message: null,
+      triggered_by: actor,
+      accepted_at: null,
+      accepted_by: null,
+      accepted_reason: null,
+    };
+    __mswReconRunsBucket(tenant_id).unshift(run);
+    return HttpResponse.json(envelope(run));
+  }),
+
+  http.get('/v1/recon/runs', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const url = new URL(request.url);
+    const recon_id = url.searchParams.get('recon_id');
+    const status = url.searchParams.get('status');
+    let runs = __mswReconRunsBucket(tenant_id);
+    if (recon_id) runs = runs.filter((r) => r.recon_id === recon_id);
+    if (status) runs = runs.filter((r) => r.status === status);
+    return HttpResponse.json(envelope({ tenant_id, generated_at: new Date().toISOString(), total: runs.length, items: runs }));
+  }),
+
+  http.get('/v1/recon/runs/:run_id', ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const id = String(params.run_id ?? '');
+    const r = __mswReconRunsBucket(tenant_id).find((x) => x.run_id === id);
+    if (!r) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_run', message: `unknown ${id}`, severity: 'LOW' } }, { status: 404 });
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/recon/runs/:run_id/accept', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const id = String(params.run_id ?? '');
+    const r = __mswReconRunsBucket(tenant_id).find((x) => x.run_id === id);
+    if (!r) return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_run', message: 'not found', severity: 'LOW' } }, { status: 404 });
+    const body = (await request.json()) as { reason?: string };
+    if (!body.reason || !body.reason.trim()) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_reason', message: 'reason required', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    if (r.accepted_at) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_409', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_409_already_accepted', message: 'already accepted', severity: 'MEDIUM' } }, { status: 409 });
+    }
+    r.accepted_at = new Date().toISOString();
+    r.accepted_by = actor;
+    r.accepted_reason = body.reason;
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/recon/definitions/:recon_id/inject-drop', async ({ request, params }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const actor = request.headers.get('x-apex-user') ?? 'admin';
+    const id = String(params.recon_id ?? '');
+    const d = __mswReconSeed(tenant_id).get(id);
+    if (!d) return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_404', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_recon', message: 'not found', severity: 'LOW' } }, { status: 404 });
+    const body = (await request.json()) as { row_key?: string; leg?: string };
+    if (!body.row_key || !body.row_key.trim()) {
+      return HttpResponse.json({ header: { status: 'FAILURE', code: 'EWS_400', message: '', requestId: 'msw', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'row_key required', severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const drops = __mswReconDropBucket(tenant_id);
+    const list = drops.get(id) ?? [];
+    if (!list.includes(body.row_key)) list.push(body.row_key);
+    drops.set(id, list);
+    return HttpResponse.json(envelope({ recon_id: id, tenant_id, row_key: body.row_key, leg: body.leg ?? 'staging', staging_dropped: list, warehouse_dropped: [], registered_at: new Date().toISOString(), registered_by: actor }), { status: 201 });
+  }),
+
+  http.get('/v1/recon/dashboard', ({ request }) => {
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const defs = Array.from(__mswReconSeed(tenant_id).values()).filter((d) => !d.deleted_at);
+    const runs = __mswReconRunsBucket(tenant_id);
+    const total_breaks_24h = runs.filter((r) => r.status === 'breaks_found').length;
+    return HttpResponse.json(envelope({
+      tenant_id,
+      generated_at: new Date().toISOString(),
+      total_definitions: defs.length,
+      active_definitions: defs.filter((d) => d.active).length,
+      total_runs: runs.length,
+      total_balanced: runs.filter((r) => r.status === 'balanced').length,
+      total_breaks_found: runs.filter((r) => r.status === 'breaks_found').length,
+      total_error: runs.filter((r) => r.status === 'error').length,
+      total_breaks_24h,
+      by_severity: { high: { definitions: 0, runs: 0, breaks_24h: 0 }, medium: { definitions: 0, runs: 0, breaks_24h: 0 }, low: { definitions: 0, runs: 0, breaks_24h: 0 } },
+      by_kind: { count_only: { definitions: 0, runs: 0 }, amount_match: { definitions: 0, runs: 0 }, set_diff: { definitions: 0, runs: 0 } },
+      definitions_status: defs.map((d) => ({
+        recon_id: d.recon_id, name: d.name, kind: d.kind, severity: d.severity,
+        latest_status: runs.find((r) => r.recon_id === d.recon_id)?.status ?? null,
+        latest_breaks: runs.find((r) => r.recon_id === d.recon_id)?.source_only_count ?? null,
+        latest_difference: null,
+        latest_at: runs.find((r) => r.recon_id === d.recon_id)?.finished_at ?? null,
+        runs_total: runs.filter((r) => r.recon_id === d.recon_id).length,
+        breaks_24h: runs.filter((r) => r.recon_id === d.recon_id && r.status === 'breaks_found').length,
+      })),
+    }));
+  }),
+];
+
+handlers.push(...__mswReconHandlers);
+
+export function __resetMswReconStore() {
+  __mswReconDefs.clear();
+  __mswReconRuns.clear();
+  __mswReconDrops.clear();
+}

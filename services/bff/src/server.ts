@@ -276,6 +276,9 @@ import {
   runReconcile,
   isReconKind,
   isReconSeverity,
+  acceptReconRun,
+  registerDrop,
+  buildSyntheticRecords,
   type ReconStore,
   type ReconRunStatus,
 } from './recon/recon_engine';
@@ -24172,21 +24175,63 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const body = (inner ?? {}) as { source_records?: unknown; target_records?: unknown };
       try {
+        // Module 1.6: when the caller omits records (SPA "Run" button on
+        // the recon page or a smoke-test call without payload), synthesise
+        // a deterministic record set that honours any registered drops via
+        // /inject-drop. This is what gives us the acceptance path —
+        // "row-drop in staging → non-zero gap with missing key visible".
+        let source_records = Array.isArray(body.source_records)
+          ? (body.source_records as Array<Record<string, unknown>>)
+          : [];
+        let target_records = Array.isArray(body.target_records)
+          ? (body.target_records as Array<Record<string, unknown>>)
+          : [];
+        if (source_records.length === 0 && target_records.length === 0) {
+          const recon_id = req.params.recon_id ?? '';
+          const def = reconStore.getDefinition(req.tenant!.tenant_id, recon_id);
+          if (def) {
+            const synth = buildSyntheticRecords(req.tenant!.tenant_id, recon_id, def);
+            source_records = synth.source_records;
+            target_records = synth.target_records;
+          }
+        }
         const run = runReconcile(
           reconStore,
           req.tenant!.tenant_id,
           {
             recon_id: req.params.recon_id ?? '',
-            source_records: Array.isArray(body.source_records)
-              ? (body.source_records as Array<Record<string, unknown>>)
-              : [],
-            target_records: Array.isArray(body.target_records)
-              ? (body.target_records as Array<Record<string, unknown>>)
-              : [],
+            source_records,
+            target_records,
             triggered_by: actor,
           },
           now(),
         );
+        // Audit fan-out — cross-cutting #6.
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'recon.run',
+              resource_type: 'integration',
+              resource_id: req.params.recon_id ?? '',
+              outcome: run.status === 'error' ? 'failure' : 'success',
+              severity: run.status === 'breaks_found' ? 'warning' : 'info',
+              metadata: {
+                run_id: run.run_id,
+                source_count: run.source_count,
+                target_count: run.target_count,
+                source_only_count: run.source_only_count,
+                target_only_count: run.target_only_count,
+                amount_mismatch_count: run.amount_mismatch_count,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow audit failures — best-effort
+        }
         return res.json(wrapResponse(run, ctx));
       } catch (e) {
         if (e instanceof ReconError) {
@@ -24289,6 +24334,165 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const dashboard = buildReconDashboard(reconStore, req.tenant!.tenant_id, now());
       return res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  /** Module 1.6 — POST /v1/recon/runs/:run_id/accept body { reason }.
+   *  Marks a recon run as accepted (e.g. "known gap, signed off by ops").
+   *  Reason required (≤2000 chars). 404 unknown_run, 409 already_accepted. */
+  app.post(
+    '/v1/recon/runs/:run_id/accept',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { reason?: unknown };
+      const reason = typeof w.reason === 'string' ? w.reason : '';
+      try {
+        const run = acceptReconRun(
+          reconStore,
+          {
+            tenant_id: req.tenant!.tenant_id,
+            run_id: req.params.run_id ?? '',
+            reason,
+            actor_username: actor,
+          },
+          now(),
+        );
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'recon.accept',
+              resource_type: 'integration',
+              resource_id: run.run_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: { recon_id: run.recon_id, reason },
+            },
+            now(),
+          );
+        } catch {
+          // swallow audit failures
+        }
+        return res.json(wrapResponse(run, ctx));
+      } catch (e) {
+        if (e instanceof ReconError) {
+          if (e.code === 'unknown_run') {
+            return res.status(404).json(
+              wrapError({ code: 'EWS_404_unknown_run', message: e.message, severity: 'LOW' }, ctx),
+            );
+          }
+          if (e.code === 'already_accepted') {
+            return res.status(409).json(
+              wrapError({ code: 'EWS_409_already_accepted', message: e.message, severity: 'MEDIUM' }, ctx),
+            );
+          }
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'accept_failed', severity: 'HIGH' }, ctx),
+        );
+      }
+    },
+  );
+
+  /** Module 1.6 — POST /v1/recon/definitions/:recon_id/inject-drop
+   *  body { row_key, leg? }. Registers a deliberate row-drop for the demo:
+   *  the next /run call (with no records[] payload) synthesises records
+   *  that omit this key in the staging leg, producing a non-zero gap.
+   *  Required for the spec acceptance test. */
+  app.post(
+    '/v1/recon/definitions/:recon_id/inject-drop',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const w = (inner ?? {}) as { row_key?: unknown; leg?: unknown };
+      const row_key = typeof w.row_key === 'string' ? w.row_key : '';
+      const legRaw = typeof w.leg === 'string' ? w.leg : 'staging';
+      if (legRaw !== 'staging' && legRaw !== 'warehouse') {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400_invalid_leg', message: `leg must be staging|warehouse`, severity: 'MEDIUM' }, ctx),
+        );
+      }
+      const recon_id = req.params.recon_id ?? '';
+      const def = reconStore.getDefinition(req.tenant!.tenant_id, recon_id);
+      if (!def) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_recon', message: `unknown recon_id: ${recon_id}`, severity: 'LOW' }, ctx),
+        );
+      }
+      try {
+        const entry = registerDrop(
+          {
+            tenant_id: req.tenant!.tenant_id,
+            recon_id,
+            row_key,
+            leg: legRaw as 'staging' | 'warehouse',
+            actor_username: actor,
+          },
+          now(),
+        );
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'recon.inject_drop',
+              resource_type: 'integration',
+              resource_id: recon_id,
+              outcome: 'success',
+              severity: 'warning',
+              metadata: { row_key, leg: legRaw },
+            },
+            now(),
+          );
+        } catch {
+          // swallow audit failures
+        }
+        return res.status(201).json(
+          wrapResponse(
+            {
+              recon_id,
+              tenant_id: req.tenant!.tenant_id,
+              row_key,
+              leg: legRaw,
+              staging_dropped: entry.staging_dropped,
+              warehouse_dropped: entry.warehouse_dropped,
+              registered_at: entry.registered_at,
+              registered_by: entry.registered_by,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        if (e instanceof ReconError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        return res.status(500).json(
+          wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'inject_drop_failed', severity: 'HIGH' }, ctx),
+        );
+      }
     },
   );
 

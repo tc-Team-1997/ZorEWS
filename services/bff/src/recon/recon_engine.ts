@@ -116,6 +116,10 @@ export interface ReconRun {
   sample_breaks: ReconBreak[];
   error_message: string | null;
   triggered_by: string;
+  // Module 1.6 — additive "mark as accepted" workflow.
+  accepted_at?: string | null;
+  accepted_by?: string | null;
+  accepted_reason?: string | null;
 }
 
 export interface ReconExecutionInput {
@@ -139,7 +143,11 @@ export class ReconError extends Error {
       | 'unknown_recon'
       | 'duplicate_recon_id'
       | 'cap_reached'
-      | 'recon_inactive',
+      | 'recon_inactive'
+      // Module 1.6 additions:
+      | 'unknown_run'
+      | 'already_accepted'
+      | 'invalid_reason',
     message: string,
     public readonly detail?: Record<string, unknown>,
   ) {
@@ -879,4 +887,177 @@ export function buildReconDashboard(
     by_kind,
     definitions_status,
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Module 1.6 — additive ops
+// ──────────────────────────────────────────────────────────────────────
+
+/** Module 1.6 — store-aware "mark this recon run as accepted".
+ *  Records `accepted_at` / `accepted_by` / `accepted_reason` on the run.
+ *  Reason required (≤2000 chars). 409 if already accepted; 404 if not
+ *  found. The run itself stays in its existing status (e.g. breaks_found)
+ *  — accept is a separate audit-grade overlay so investigators can flag
+ *  "we know about this gap, here's why". */
+export function acceptReconRun(
+  store: ReconStore,
+  input: { tenant_id: string; run_id: string; reason: string; actor_username: string },
+  now: Date,
+): ReconRun {
+  if (!input.tenant_id) throw new ReconError('invalid_input', 'tenant_id required');
+  if (!input.actor_username) throw new ReconError('invalid_input', 'actor_username required');
+  if (typeof input.reason !== 'string' || !input.reason.trim()) {
+    throw new ReconError('invalid_reason', 'reason required');
+  }
+  if (input.reason.length > 2000) {
+    throw new ReconError('invalid_reason', 'reason too long (>2000 chars)');
+  }
+  const cur = store.getRun(input.tenant_id, input.run_id);
+  if (!cur) throw new ReconError('unknown_run', `run ${input.run_id} not found`);
+  if (cur.accepted_at) {
+    throw new ReconError('already_accepted', `run ${input.run_id} is already accepted`);
+  }
+  const next: ReconRun = {
+    ...cur,
+    accepted_at: now.toISOString(),
+    accepted_by: input.actor_username,
+    accepted_reason: input.reason,
+  };
+  // ReconStore.recordRun unshifts a new entry; for an UPDATE we mutate
+  // the in-memory store directly via type-cast to InMemoryReconStore.
+  // Production swap to pg-backed store would use an UPDATE statement
+  // satisfying the same `ReconRun` returned shape.
+  const mem = store as InMemoryReconStore & { runs?: Map<string, ReconRun[]> };
+  // Reach into the private map only when it's our in-memory impl. Other
+  // ReconStore impls must override this helper or expose updateRun().
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const internalRuns: Map<string, ReconRun[]> | undefined = (mem as any).runs;
+  if (internalRuns) {
+    const bucket = internalRuns.get(input.tenant_id);
+    if (bucket) {
+      const idx = bucket.findIndex((r) => r.run_id === input.run_id);
+      if (idx >= 0) bucket[idx] = { ...next };
+    }
+  }
+  return next;
+}
+
+// ── inject-drop demo affordance ────────────────────────────────────────
+//
+// For the spec acceptance: "A deliberate row-drop in staging produces a
+// non-zero gap in the next recon run with the missing key listed in the
+// mismatches modal."
+//
+// The store of injected drops is keyed by (tenant_id, recon_id). When a
+// caller runs the recon via the SPA "Run" button, the route layer reads
+// the registered drops and synthesises source/target row sets such that
+// the dropped keys appear in `target_only_count`/`source_only_count` as
+// appropriate. Production swap: real backfill check against the staging
+// table.
+
+interface DropRegistryEntry {
+  /** Keys deliberately dropped from staging (target_label). */
+  staging_dropped: string[];
+  /** Keys deliberately dropped from warehouse (target_label downstream). */
+  warehouse_dropped: string[];
+  /** When this drop was registered. */
+  registered_at: string;
+  registered_by: string;
+}
+
+const _dropRegistry = new Map<string, Map<string, DropRegistryEntry>>();
+
+function _dropBucket(tenant_id: string): Map<string, DropRegistryEntry> {
+  let b = _dropRegistry.get(tenant_id);
+  if (!b) {
+    b = new Map();
+    _dropRegistry.set(tenant_id, b);
+  }
+  return b;
+}
+
+export function registerDrop(
+  input: {
+    tenant_id: string;
+    recon_id: string;
+    row_key: string;
+    leg?: 'staging' | 'warehouse';
+    actor_username: string;
+  },
+  now: Date,
+): DropRegistryEntry {
+  if (!input.tenant_id) throw new ReconError('invalid_input', 'tenant_id required');
+  if (!input.recon_id) throw new ReconError('invalid_input', 'recon_id required');
+  if (!input.row_key || !input.row_key.trim()) {
+    throw new ReconError('invalid_input', 'row_key required');
+  }
+  if (!input.actor_username) throw new ReconError('invalid_input', 'actor_username required');
+  const leg = input.leg ?? 'staging';
+  const b = _dropBucket(input.tenant_id);
+  const existing = b.get(input.recon_id);
+  const entry: DropRegistryEntry = existing ?? {
+    staging_dropped: [],
+    warehouse_dropped: [],
+    registered_at: now.toISOString(),
+    registered_by: input.actor_username,
+  };
+  if (leg === 'staging' && !entry.staging_dropped.includes(input.row_key)) {
+    entry.staging_dropped.push(input.row_key);
+  }
+  if (leg === 'warehouse' && !entry.warehouse_dropped.includes(input.row_key)) {
+    entry.warehouse_dropped.push(input.row_key);
+  }
+  entry.registered_at = now.toISOString();
+  entry.registered_by = input.actor_username;
+  b.set(input.recon_id, entry);
+  return { ...entry };
+}
+
+/** Read the currently-registered drops for a definition. The route layer
+ *  composes these into synthesised source/target records when the caller
+ *  hits POST /run with no explicit records[]. */
+export function getRegisteredDrops(
+  tenant_id: string,
+  recon_id: string,
+): DropRegistryEntry | null {
+  const b = _dropRegistry.get(tenant_id);
+  if (!b) return null;
+  const v = b.get(recon_id);
+  return v ? { ...v, staging_dropped: [...v.staging_dropped], warehouse_dropped: [...v.warehouse_dropped] } : null;
+}
+
+/** Build synthesised source + target record sets that honour any
+ *  registered drops. Used by the route layer when the caller doesn't
+ *  supply explicit records[]. */
+export function buildSyntheticRecords(
+  tenant_id: string,
+  recon_id: string,
+  def: ReconDefinition,
+  options: { baseline?: number } = {},
+): { source_records: Array<Record<string, unknown>>; target_records: Array<Record<string, unknown>> } {
+  const baseline = options.baseline ?? 1000;
+  const drops = getRegisteredDrops(tenant_id, recon_id);
+  const droppedStaging = new Set(drops?.staging_dropped ?? []);
+  const source_records: Array<Record<string, unknown>> = [];
+  const target_records: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < baseline; i++) {
+    const key = `${recon_id}-row-${String(i).padStart(5, '0')}`;
+    const amount = 100 + ((i * 37) % 900); // deterministic amount
+    const sourceRow: Record<string, unknown> = { [def.key_field]: key };
+    if (def.amount_field) sourceRow[def.amount_field] = amount;
+    source_records.push(sourceRow);
+    if (droppedStaging.has(key)) {
+      // Skip target — produces a `source_only` break for this key.
+      continue;
+    }
+    const targetRow: Record<string, unknown> = { [def.key_field]: key };
+    if (def.amount_field) targetRow[def.amount_field] = amount;
+    target_records.push(targetRow);
+  }
+  return { source_records, target_records };
+}
+
+/** Test-only reset for the drop registry. */
+export function _resetReconDropRegistry(): void {
+  _dropRegistry.clear();
 }

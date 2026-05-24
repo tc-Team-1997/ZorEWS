@@ -1716,6 +1716,71 @@ export const api = {
     http
       .post<EnvelopeBody<AnomalySummary>>(`/v1/anomalies/${encodeURIComponent(id)}/dismiss`, { reason })
       .then((r) => r.data),
+
+  // ── Module 1.6 — Reconciliation ─────────────────────────────────────
+  reconDefList: () =>
+    http
+      .get<EnvelopeBody<{ items: ReconDefinitionShape[]; total: number }>>('/v1/recon/definitions')
+      .then((r) => r.data),
+
+  reconDefGet: (id: string) =>
+    http
+      .get<EnvelopeBody<ReconDefinitionShape>>(`/v1/recon/definitions/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  reconDefCreate: (body: Partial<ReconDefinitionShape>) =>
+    http
+      .post<EnvelopeBody<ReconDefinitionShape>>('/v1/recon/definitions', body)
+      .then((r) => r.data),
+
+  reconDefUpdate: (id: string, patch: Partial<ReconDefinitionShape>) =>
+    http
+      .patch<EnvelopeBody<ReconDefinitionShape>>(`/v1/recon/definitions/${encodeURIComponent(id)}`, patch)
+      .then((r) => r.data),
+
+  reconDefDelete: (id: string) =>
+    http
+      .delete<EnvelopeBody<ReconDefinitionShape>>(`/v1/recon/definitions/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  reconDefRun: (id: string, body: { source_records?: Array<Record<string, unknown>>; target_records?: Array<Record<string, unknown>> } = {}) =>
+    http
+      .post<EnvelopeBody<ReconRunShape>>(`/v1/recon/definitions/${encodeURIComponent(id)}/run`, body)
+      .then((r) => r.data),
+
+  reconRunsList: (q: { recon_id?: string; status?: ReconRunStatus; limit?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (q.recon_id) sp.set('recon_id', q.recon_id);
+    if (q.status) sp.set('status', q.status);
+    if (q.limit !== undefined) sp.set('limit', String(q.limit));
+    const qs = sp.toString();
+    return http
+      .get<EnvelopeBody<{ items: ReconRunShape[]; total: number; tenant_id: string; generated_at: string }>>(`/v1/recon/runs${qs ? `?${qs}` : ''}`)
+      .then((r) => r.data);
+  },
+
+  reconRunGet: (id: string) =>
+    http
+      .get<EnvelopeBody<ReconRunShape>>(`/v1/recon/runs/${encodeURIComponent(id)}`)
+      .then((r) => r.data),
+
+  reconRunAccept: (id: string, reason: string) =>
+    http
+      .post<EnvelopeBody<ReconRunShape>>(`/v1/recon/runs/${encodeURIComponent(id)}/accept`, { reason })
+      .then((r) => r.data),
+
+  reconInjectDrop: (recon_id: string, row_key: string, leg: 'staging' | 'warehouse' = 'staging') =>
+    http
+      .post<EnvelopeBody<{ recon_id: string; row_key: string; leg: string; staging_dropped: string[]; warehouse_dropped: string[] }>>(
+        `/v1/recon/definitions/${encodeURIComponent(recon_id)}/inject-drop`,
+        { row_key, leg },
+      )
+      .then((r) => r.data),
+
+  reconDashboard: () =>
+    http
+      .get<EnvelopeBody<ReconDashboardRollupShape>>('/v1/recon/dashboard')
+      .then((r) => r.data),
 };
 
 // ── Demo §2.1 response shapes ──
@@ -3050,4 +3115,92 @@ export interface AnomalyRerunSummary {
   patterns_evaluated: number;
   new_anomalies: number;
   duration_ms: number;
+}
+
+// ── Module 1.6 — Reconciliation response shapes ───────────────────────
+export type ReconKind = 'count_only' | 'amount_match' | 'set_diff';
+export type ReconSeverity = 'high' | 'medium' | 'low';
+export type ReconRunStatus = 'running' | 'balanced' | 'breaks_found' | 'error';
+
+export interface ReconDefinitionShape {
+  recon_id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  source_label: string;
+  target_label: string;
+  kind: ReconKind;
+  key_field: string;
+  amount_field: string | null;
+  amount_tolerance: number;
+  severity: ReconSeverity;
+  active: boolean;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+}
+
+export interface ReconBreakShape {
+  key: string;
+  kind: 'source_only' | 'target_only' | 'amount_mismatch';
+  source_amount: number | null;
+  target_amount: number | null;
+  delta: number | null;
+}
+
+export interface ReconRunShape {
+  run_id: string;
+  tenant_id: string;
+  recon_id: string;
+  recon_kind: ReconKind;
+  recon_severity: ReconSeverity;
+  source_label: string;
+  target_label: string;
+  started_at: string;
+  finished_at: string;
+  status: ReconRunStatus;
+  source_count: number;
+  target_count: number;
+  matched_count: number;
+  source_only_count: number;
+  target_only_count: number;
+  amount_mismatch_count: number;
+  source_total: number | null;
+  target_total: number | null;
+  difference: number | null;
+  sample_breaks: ReconBreakShape[];
+  error_message: string | null;
+  triggered_by: string;
+  accepted_at?: string | null;
+  accepted_by?: string | null;
+  accepted_reason?: string | null;
+}
+
+export interface ReconDashboardRollupShape {
+  tenant_id: string;
+  generated_at: string;
+  total_definitions: number;
+  active_definitions: number;
+  total_runs: number;
+  total_balanced: number;
+  total_breaks_found: number;
+  total_error: number;
+  total_breaks_24h: number;
+  by_severity: Record<ReconSeverity, { definitions: number; runs: number; breaks_24h: number }>;
+  by_kind: Record<ReconKind, { definitions: number; runs: number }>;
+  definitions_status: Array<{
+    recon_id: string;
+    name: string;
+    kind: ReconKind;
+    severity: ReconSeverity;
+    latest_status: ReconRunStatus | null;
+    latest_breaks: number | null;
+    latest_difference: number | null;
+    latest_at: string | null;
+    runs_total: number;
+    breaks_24h: number;
+  }>;
 }
