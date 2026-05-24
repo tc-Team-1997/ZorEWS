@@ -63,6 +63,12 @@ interface EwsRule {
   /** Latest recorded SemVer from app.ews_rule_versions, or null if no
    *  snapshots exist (legacy rules pre-dating the version log). */
   latest_semver?: string | null;
+  /** Module 1.3 VR-1: where the rule came from. e.g. "ai_suggestion:dq-cbs_loans-loan_id-nn" */
+  source?: string | null;
+  /** Module 1.3 VR-1: defines what happens when a record fails the rule */
+  action_on_fail?: 'reject' | 'quarantine' | 'log';
+  /** Module 1.3 VR-1: convenience boolean — set when the rule originated from M1.2 DQ AI */
+  ai_suggested?: boolean;
 }
 
 interface EwsIndicator {
@@ -117,6 +123,10 @@ interface EwsListFilters {
   category?: EwsRuleCategory;
   state?: EwsRuleState;
   is_active?: boolean;
+  /** Module 1.3 VR-3: filter to AI-suggested rules only. Backend ignores
+   *  unknown query params — this is a client-side filter applied AFTER
+   *  the list fetch (small N — every tenant has < 200 rules). */
+  ai_suggested?: boolean;
 }
 
 const ewsApi = {
@@ -175,9 +185,17 @@ export function EwsRuleBuilderPage() {
   const activeParam = searchParams.get('is_active');
   const activeFilter: boolean | null =
     activeParam === 'true' ? true : activeParam === 'false' ? false : null;
+  // Module 1.3 VR-3: AI-suggested filter (client-side).
+  const aiParam = searchParams.get('ai_suggested');
+  const aiFilter: boolean | null = aiParam === 'true' ? true : null;
 
   const setFilter = (
-    next: { state?: EwsRuleState | null; category?: EwsRuleCategory | null; is_active?: boolean | null },
+    next: {
+      state?: EwsRuleState | null;
+      category?: EwsRuleCategory | null;
+      is_active?: boolean | null;
+      ai_suggested?: boolean | null;
+    },
   ) => {
     const sp = new URLSearchParams(searchParams);
     if ('state' in next) {
@@ -191,6 +209,10 @@ export function EwsRuleBuilderPage() {
     if ('is_active' in next) {
       if (next.is_active === null) sp.delete('is_active');
       else if (next.is_active !== undefined) sp.set('is_active', String(next.is_active));
+    }
+    if ('ai_suggested' in next) {
+      if (next.ai_suggested === null) sp.delete('ai_suggested');
+      else if (next.ai_suggested !== undefined) sp.set('ai_suggested', String(next.ai_suggested));
     }
     setSearchParams(sp, { replace: true });
   };
@@ -262,7 +284,10 @@ export function EwsRuleBuilderPage() {
     return m;
   }, [indicatorsQ.data]);
 
-  const rules = rulesQ.data ?? [];
+  // VR-3: AI-suggested is a client-side filter (backend ignores unknown
+  // query params). Apply AFTER the server-side state/category/active filters.
+  const allRules = rulesQ.data ?? [];
+  const rules = aiFilter === true ? allRules.filter((r) => r.ai_suggested) : allRules;
 
   return (
     <div className="space-y-6 p-6">
@@ -349,11 +374,21 @@ export function EwsRuleBuilderPage() {
             Active only
           </label>
 
-          {(stateFilter || categoryFilter || activeFilter !== null) && (
+          <label className="flex items-center gap-1 text-slate-600" title="Show only rules suggested by the M1.2 DQ AI">
+            <input
+              type="checkbox"
+              data-testid="rule-filter-ai-suggested"
+              checked={aiFilter === true}
+              onChange={(e) => setFilter({ ai_suggested: e.target.checked ? true : null })}
+            />
+            AI-suggested only
+          </label>
+
+          {(stateFilter || categoryFilter || activeFilter !== null || aiFilter !== null) && (
             <button
               type="button"
               data-testid="rule-filter-clear"
-              onClick={() => setFilter({ state: null, category: null, is_active: null })}
+              onClick={() => setFilter({ state: null, category: null, is_active: null, ai_suggested: null })}
               className="ml-auto text-slate-500 underline hover:text-slate-700"
             >
               Clear filters
@@ -396,9 +431,38 @@ export function EwsRuleBuilderPage() {
                   </div>
                   <div className="mt-1 text-sm font-medium">{r.name}</div>
                   <div className="text-xs text-slate-500">{r.description}</div>
-                  <div className="mt-1 text-xs text-slate-400">
-                    {r.conditions.length} condition{r.conditions.length === 1 ? '' : 's'} ·{' '}
-                    {r.logic} · {r.category}
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                    <span>
+                      {r.conditions.length} condition{r.conditions.length === 1 ? '' : 's'} ·{' '}
+                      {r.logic} · {r.category}
+                    </span>
+                    {r.ai_suggested && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+                        data-testid={`rule-ai-badge-${r.rule_id}`}
+                        title="Originated from M1.2 DQ AI suggestion"
+                      >
+                        <Sparkles size={10} /> AI-suggested
+                      </span>
+                    )}
+                    {r.source && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-600"
+                        data-testid={`rule-source-${r.rule_id}`}
+                        title={`Source: ${r.source}`}
+                      >
+                        {r.source.length > 32 ? `${r.source.slice(0, 32)}…` : r.source}
+                      </span>
+                    )}
+                    {r.action_on_fail && r.action_on_fail !== 'quarantine' && (
+                      <span
+                        className="inline-flex items-center rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600"
+                        data-testid={`rule-action-on-fail-${r.rule_id}`}
+                        title={`On fail: ${r.action_on_fail}`}
+                      >
+                        fail→{r.action_on_fail}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

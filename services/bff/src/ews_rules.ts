@@ -110,6 +110,11 @@ export interface EwsRuleAction {
 
 // ─── Rule envelope ────────────────────────────────────────────────────
 
+/** Module 1.3 — what happens to a record that violates the rule. */
+export type EwsActionOnFail = 'quarantine' | 'log' | 'block';
+
+export const EWS_ACTIONS_ON_FAIL: readonly EwsActionOnFail[] = ['quarantine', 'log', 'block'];
+
 export interface EwsRuleInput {
   rule_id: string;
   name: string;
@@ -121,6 +126,14 @@ export interface EwsRuleInput {
   is_active?: boolean;
   /** Free-form tags. */
   tags?: string[];
+  /** Module 1.3 — data source (connector_id) this rule runs against. */
+  source?: string;
+  /** Module 1.3 — quarantine | log | block. Defaults to 'quarantine'. */
+  action_on_fail?: EwsActionOnFail;
+  /** Module 1.3 — true when this rule was originated by an AI suggestion
+   *  (e.g. promoted via M1.2 /v1/dq/profile/promote-rule). When omitted
+   *  the value is inferred from the presence of an `ai_suggested` tag. */
+  ai_suggested?: boolean;
 }
 
 export interface EwsRule {
@@ -140,6 +153,11 @@ export interface EwsRule {
   created_at: string;
   updated_at: string;
   deprecated_at: string | null;
+  /** Module 1.3 — additive fields. Optional for backward compat with
+   *  pre-1.3 rules; new rules always carry them. */
+  source?: string | null;
+  action_on_fail?: EwsActionOnFail;
+  ai_suggested?: boolean;
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────
@@ -404,6 +422,34 @@ export function validateEwsRule(input: unknown): EwsRuleInput {
     tags = i.tags.map((t) => (t as string).trim());
   }
 
+  // Module 1.3 — additive optional fields
+  let source: string | undefined;
+  if (i.source !== undefined) {
+    if (typeof i.source !== 'string' || !i.source.trim()) {
+      throw new EwsRuleError('invalid_input', 'source must be a non-empty string when supplied');
+    }
+    source = i.source.trim();
+  }
+
+  let action_on_fail: EwsActionOnFail | undefined;
+  if (i.action_on_fail !== undefined) {
+    if (typeof i.action_on_fail !== 'string' || !EWS_ACTIONS_ON_FAIL.includes(i.action_on_fail as EwsActionOnFail)) {
+      throw new EwsRuleError(
+        'invalid_input',
+        `action_on_fail must be one of: ${EWS_ACTIONS_ON_FAIL.join(', ')}`,
+      );
+    }
+    action_on_fail = i.action_on_fail as EwsActionOnFail;
+  }
+
+  let ai_suggested: boolean | undefined;
+  if (i.ai_suggested !== undefined) {
+    if (typeof i.ai_suggested !== 'boolean') {
+      throw new EwsRuleError('invalid_input', 'ai_suggested must be a boolean when supplied');
+    }
+    ai_suggested = i.ai_suggested;
+  }
+
   return {
     rule_id: i.rule_id.trim(),
     name: i.name.trim(),
@@ -414,6 +460,9 @@ export function validateEwsRule(input: unknown): EwsRuleInput {
     action,
     is_active: i.is_active,
     tags,
+    source,
+    action_on_fail,
+    ai_suggested,
   };
 }
 
@@ -581,6 +630,11 @@ export class InMemoryEwsRuleStore implements EwsRuleStore {
         `tenant ${tenant_id} already has ${RULES_CAP_PER_TENANT} rules`,
       );
     }
+    const tags = valid.tags ?? [];
+    // Module 1.3 — ai_suggested resolves from explicit input first,
+    // then falls back to a tag-presence check so caller code (and the
+    // M1.2 dq.suggestion.promote path) can mark provenance either way.
+    const ai_suggested = valid.ai_suggested ?? tags.includes('ai_suggested');
     const rule: EwsRule = {
       rule_id: valid.rule_id,
       tenant_id,
@@ -593,11 +647,14 @@ export class InMemoryEwsRuleStore implements EwsRuleStore {
       is_active: false, // newly-created rules are NOT active until activated
       state: 'draft',
       version: 1,
-      tags: valid.tags ?? [],
+      tags,
       created_by: created_by.trim(),
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
       deprecated_at: null,
+      source: valid.source ?? null,
+      action_on_fail: valid.action_on_fail ?? 'quarantine',
+      ai_suggested,
     };
     bucket.set(rule.rule_id, rule);
     return cloneRule(rule);
@@ -626,6 +683,9 @@ export class InMemoryEwsRuleStore implements EwsRuleStore {
     }
     const inputObj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
     const valid = validateEwsRule({ ...inputObj, rule_id: cur.rule_id });
+    const nextTags = valid.tags ?? cur.tags;
+    // Module 1.3 — preserve prior value when patch omits the field, but
+    // honour an explicit override + tag-derived ai_suggested.
     const next: EwsRule = {
       ...cur,
       name: valid.name,
@@ -634,9 +694,15 @@ export class InMemoryEwsRuleStore implements EwsRuleStore {
       conditions: valid.conditions,
       logic: valid.logic,
       action: valid.action,
-      tags: valid.tags ?? cur.tags,
+      tags: nextTags,
       version: cur.version + 1,
       updated_at: now.toISOString(),
+      source: valid.source ?? cur.source ?? null,
+      action_on_fail: valid.action_on_fail ?? cur.action_on_fail ?? 'quarantine',
+      ai_suggested:
+        valid.ai_suggested !== undefined
+          ? valid.ai_suggested
+          : cur.ai_suggested ?? nextTags.includes('ai_suggested'),
     };
     bucket.set(rule_id, next);
     return cloneRule(next);
