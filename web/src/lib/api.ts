@@ -1781,6 +1781,45 @@ export const api = {
       .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${type ? `?type=${encodeURIComponent(type)}` : ''}`)
       .then((r) => r.data),
 
+  // M4.2 — Model Registry CRUD. Status changes go through the gate +
+  // maker-checker flow (aiPromotionRequest...), not these endpoints.
+  aiModelCreate: (body: {
+    model_id: string;
+    name: string;
+    type: string;
+    version: string;
+    framework: string;
+    description?: string;
+    status?: 'experimental' | 'staging' | 'shadow';
+    training_data_window_days?: number;
+    key_features?: string[];
+    metrics?: { auc?: number; precision?: number; recall?: number; f1?: number; mae?: number; training_rows?: number };
+  }) =>
+    http
+      .post<EnvelopeBody<AiModelRow>>('/v1/ai/models', body)
+      .then((r) => r.data),
+
+  aiModelUpdate: (
+    model_id: string,
+    patch: Partial<{
+      name: string;
+      description: string;
+      training_data_window_days: number;
+      key_features: string[];
+      metrics: Partial<{ auc: number; precision: number; recall: number; f1: number; mae: number; training_rows: number }>;
+    }>,
+  ) =>
+    http
+      .put<EnvelopeBody<AiModelRow>>(`/v1/ai/models/${encodeURIComponent(model_id)}`, patch)
+      .then((r) => r.data),
+
+  aiModelDelete: (model_id: string, force = false) =>
+    http
+      .delete<EnvelopeBody<AiModelRow>>(
+        `/v1/ai/models/${encodeURIComponent(model_id)}${force ? '?force=true' : ''}`,
+      )
+      .then((r) => r.data),
+
   // Module 1.1 — Data Ingestion (Source Feeds management)
   ingestionConnectors: () =>
     http.get<EnvelopeBody<{ items: IngestionConnector[]; total: number }>>('/v1/ingestion/connectors').then((r) => r.data),

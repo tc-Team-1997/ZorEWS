@@ -34,6 +34,16 @@ class FakeRegistry implements AiModelRegistry {
   score(): never {
     throw new Error('not implemented in FakeRegistry');
   }
+  // M4.2 — CRUD stubs (not exercised by these deployment-age tests)
+  create(): never {
+    throw new Error('not implemented in FakeRegistry');
+  }
+  update(): never {
+    throw new Error('not implemented in FakeRegistry');
+  }
+  retire(): never {
+    throw new Error('not implemented in FakeRegistry');
+  }
 }
 
 function model(overrides: Partial<ModelVersion>): ModelVersion {

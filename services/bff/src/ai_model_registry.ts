@@ -95,12 +95,48 @@ export interface InferenceResult {
   top_features: { feature: string; value: number; attribution: number }[];
 }
 
+/** M4.2 — payload for creating a new model version. status defaults
+ *  to 'experimental' and cannot be 'production' (production status
+ *  changes go through the promotion-gate + maker-checker flow per
+ *  spec acceptance). retired_at is null on create. */
+export interface ModelCreateInput {
+  model_id: string;
+  name: string;
+  type: ModelType;
+  version: string;
+  framework: ModelFramework;
+  description?: string;
+  status?: Exclude<ModelStatus, 'production'>;
+  training_data_window_days?: number;
+  key_features?: string[];
+  metrics?: Partial<ModelMetrics>;
+  trained_at?: string;
+}
+
+/** M4.2 — partial update. status is INTENTIONALLY excluded; status
+ *  changes go through the promotion-gate / promotion-request flow
+ *  per spec acceptance "Promotion from Staging → Prod requires both
+ *  metric gate pass AND human approval." */
+export interface ModelUpdateInput {
+  name?: string;
+  description?: string;
+  training_data_window_days?: number;
+  key_features?: string[];
+  metrics?: Partial<ModelMetrics>;
+}
+
 export interface AiModelRegistry {
   list(filter?: { type?: ModelType; status?: ModelStatus }): ModelVersion[];
   get(model_id: string): ModelVersion | null;
   /** Returns the *production* model for a type (or null if none). */
   getProductionByType(type: ModelType): ModelVersion | null;
   score(model_id: string, input: InferenceInput, tenant_id: string, asOf: Date): InferenceResult;
+  // M4.2 — Model Registry CRUD
+  create(input: ModelCreateInput, now: Date): ModelVersion;
+  update(model_id: string, patch: ModelUpdateInput, now: Date): ModelVersion;
+  /** Soft delete — transitions status → 'retired' + sets retired_at.
+   *  Refused on currently-production models unless force=true. */
+  retire(model_id: string, opts: { force?: boolean }, now: Date): ModelVersion;
 }
 
 export class ModelRegistryError extends Error {
@@ -404,9 +440,15 @@ function synthesiseInference(
 
 // ─── In-memory registry ────────────────────────────────────────────────
 
+// M4.2 — model_id format: snake-case alphanumeric + hyphens, 3..64 chars.
+const MODEL_ID_RE = /^[a-z][a-z0-9_-]{2,63}$/;
+
 export class InMemoryAiModelRegistry implements AiModelRegistry {
   list(filter?: { type?: ModelType; status?: ModelStatus }): ModelVersion[] {
-    let arr = [...SEED_MODELS];
+    // M4.2 — read from MODELS_BY_ID (mutable) so create/update/retire
+    // surface in subsequent list() calls. SEED_MODELS stays the
+    // bootstrap source-of-truth at module load.
+    let arr = [...MODELS_BY_ID.values()];
     if (filter?.type) arr = arr.filter((m) => m.type === filter.type);
     if (filter?.status) arr = arr.filter((m) => m.status === filter.status);
     // Sort: production first, then status order, then newest trained_at
@@ -429,7 +471,9 @@ export class InMemoryAiModelRegistry implements AiModelRegistry {
   }
 
   getProductionByType(type: ModelType): ModelVersion | null {
-    for (const m of SEED_MODELS) {
+    // M4.2 — also read from MODELS_BY_ID so a retired-then-re-promoted
+    // model surfaces correctly.
+    for (const m of MODELS_BY_ID.values()) {
       if (m.type === type && m.status === 'production') return m;
     }
     return null;
@@ -454,6 +498,203 @@ export class InMemoryAiModelRegistry implements AiModelRegistry {
     }
     return synthesiseInference(model, input, tenant_id, asOf);
   }
+
+  // ─── M4.2 — Model Registry CRUD ───────────────────────────────────
+
+  create(input: ModelCreateInput, now: Date): ModelVersion {
+    if (!input || typeof input !== 'object') {
+      throw new ModelRegistryError('invalid_input', 'request body required');
+    }
+    if (typeof input.model_id !== 'string' || !MODEL_ID_RE.test(input.model_id)) {
+      throw new ModelRegistryError(
+        'invalid_input',
+        'model_id must match ^[a-z][a-z0-9_-]{2,63}$',
+      );
+    }
+    if (MODELS_BY_ID.has(input.model_id)) {
+      throw new ModelRegistryError(
+        'duplicate_model_id',
+        `model_id ${input.model_id} already exists`,
+      );
+    }
+    if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120) {
+      throw new ModelRegistryError('invalid_input', 'name required (≤ 120 chars)');
+    }
+    if (!isModelType(input.type)) {
+      throw new ModelRegistryError('invalid_input', `invalid type: ${input.type}`);
+    }
+    if (typeof input.version !== 'string' || !input.version.trim() || input.version.length > 32) {
+      throw new ModelRegistryError('invalid_input', 'version required (≤ 32 chars)');
+    }
+    if (!VALID_FRAMEWORKS.includes(input.framework)) {
+      throw new ModelRegistryError('invalid_input', `invalid framework: ${input.framework}`);
+    }
+    // status defaults to 'experimental'. Creating directly at
+    // 'production' is forbidden — production promotions go through
+    // the gate + maker-checker flow per spec acceptance.
+    const status: ModelStatus = input.status ?? 'experimental';
+    // Defense-in-depth: route layer narrows away 'production', but if a
+    // caller ever drives create() directly with a wider type we still
+    // refuse production on the create path. Status promotion happens
+    // through evaluatePromotionGate + maker-checker.
+    if ((status as string) === 'production') {
+      throw new ModelRegistryError(
+        'protected_status_change',
+        'cannot create a model with status=production; promote via the gate + maker-checker flow',
+      );
+    }
+    if (!VALID_STATUSES.includes(status) || status === 'retired') {
+      throw new ModelRegistryError(
+        'invalid_input',
+        `status must be one of experimental/staging/shadow (got ${status})`,
+      );
+    }
+    const window = input.training_data_window_days ?? 90;
+    if (!Number.isFinite(window) || window < 1 || window > 3650) {
+      throw new ModelRegistryError(
+        'invalid_input',
+        'training_data_window_days must be in [1, 3650]',
+      );
+    }
+    const key_features = (input.key_features ?? []).filter(
+      (f) => typeof f === 'string' && f.trim().length > 0,
+    );
+    if (key_features.length > 64) {
+      throw new ModelRegistryError('invalid_input', 'key_features: max 64 entries');
+    }
+    const metrics: ModelMetrics = {
+      auc: input.metrics?.auc ?? null,
+      precision: input.metrics?.precision ?? 0,
+      recall: input.metrics?.recall ?? 0,
+      f1: input.metrics?.f1 ?? 0,
+      mae: input.metrics?.mae ?? null,
+      training_rows: input.metrics?.training_rows ?? 0,
+      evaluated_at: input.metrics?.evaluated_at ?? now.toISOString(),
+    };
+    const entry: ModelVersion = {
+      model_id: input.model_id,
+      name: input.name.trim(),
+      type: input.type,
+      version: input.version.trim(),
+      status,
+      framework: input.framework,
+      description: typeof input.description === 'string' ? input.description : '',
+      trained_at: input.trained_at ?? now.toISOString(),
+      deployed_at: null,
+      retired_at: null,
+      training_data_window_days: Math.round(window),
+      key_features,
+      metrics,
+    };
+    MODELS_BY_ID.set(entry.model_id, entry);
+    return { ...entry };
+  }
+
+  update(model_id: string, patch: ModelUpdateInput, now: Date): ModelVersion {
+    const cur = MODELS_BY_ID.get(model_id);
+    if (!cur) {
+      throw new ModelRegistryError('unknown_model', `unknown model_id: ${model_id}`);
+    }
+    if (!patch || typeof patch !== 'object') {
+      throw new ModelRegistryError('invalid_input', 'patch body required');
+    }
+    // Refuse status mutation via PUT.
+    if ('status' in patch) {
+      throw new ModelRegistryError(
+        'protected_status_change',
+        'status cannot be changed via PUT — use /promotion-gate/auto-promote or /v1/ai/promotions',
+      );
+    }
+    const next: ModelVersion = { ...cur };
+    if (patch.name !== undefined) {
+      if (typeof patch.name !== 'string' || !patch.name.trim() || patch.name.length > 120) {
+        throw new ModelRegistryError('invalid_input', 'name (≤ 120 chars)');
+      }
+      next.name = patch.name.trim();
+    }
+    if (patch.description !== undefined) {
+      if (typeof patch.description !== 'string' || patch.description.length > 1000) {
+        throw new ModelRegistryError('invalid_input', 'description (≤ 1000 chars)');
+      }
+      next.description = patch.description;
+    }
+    if (patch.training_data_window_days !== undefined) {
+      const w = patch.training_data_window_days;
+      if (typeof w !== 'number' || !Number.isFinite(w) || w < 1 || w > 3650) {
+        throw new ModelRegistryError(
+          'invalid_input',
+          'training_data_window_days must be in [1, 3650]',
+        );
+      }
+      next.training_data_window_days = Math.round(w);
+    }
+    if (patch.key_features !== undefined) {
+      if (!Array.isArray(patch.key_features)) {
+        throw new ModelRegistryError('invalid_input', 'key_features must be string[]');
+      }
+      const cleaned = patch.key_features.filter(
+        (f) => typeof f === 'string' && f.trim().length > 0,
+      );
+      if (cleaned.length > 64) {
+        throw new ModelRegistryError('invalid_input', 'key_features: max 64 entries');
+      }
+      next.key_features = cleaned;
+    }
+    if (patch.metrics !== undefined) {
+      if (typeof patch.metrics !== 'object' || patch.metrics === null || Array.isArray(patch.metrics)) {
+        throw new ModelRegistryError('invalid_input', 'metrics must be an object');
+      }
+      next.metrics = {
+        ...cur.metrics,
+        ...patch.metrics,
+        evaluated_at: patch.metrics.evaluated_at ?? now.toISOString(),
+      };
+    }
+    // Mark touch — the registry doesn't expose updated_at on
+    // ModelVersion (intentional — version is the canonical "changed"
+    // marker). Persistence layer will stamp updated_at separately.
+    MODELS_BY_ID.set(model_id, next);
+    return { ...next };
+  }
+
+  retire(model_id: string, opts: { force?: boolean }, now: Date): ModelVersion {
+    const cur = MODELS_BY_ID.get(model_id);
+    if (!cur) {
+      throw new ModelRegistryError('unknown_model', `unknown model_id: ${model_id}`);
+    }
+    if (cur.status === 'retired') {
+      throw new ModelRegistryError('already_retired', `${model_id} is already retired`);
+    }
+    if (cur.status === 'production' && !opts.force) {
+      throw new ModelRegistryError(
+        'protected_production_retire',
+        `cannot retire production model ${model_id} without force=true — promote a successor first`,
+      );
+    }
+    const next: ModelVersion = {
+      ...cur,
+      status: 'retired',
+      retired_at: now.toISOString(),
+    };
+    MODELS_BY_ID.set(model_id, next);
+    return { ...next };
+  }
+}
+
+const VALID_FRAMEWORKS: ModelFramework[] = [
+  'xgboost',
+  'sklearn',
+  'torch',
+  'lightgbm',
+  'isolation_forest',
+];
+
+// M4.2 — test helper: re-seed MODELS_BY_ID from the readonly SEED_MODELS
+// constant. Existing tests that don't touch CRUD can stay unchanged;
+// new CRUD smokes call this in beforeEach so each test starts clean.
+export function _resetAiModelRegistry(): void {
+  MODELS_BY_ID.clear();
+  for (const m of SEED_MODELS) MODELS_BY_ID.set(m.model_id, m);
 }
 
 /** Module-level singleton used by routes when no override is supplied. */

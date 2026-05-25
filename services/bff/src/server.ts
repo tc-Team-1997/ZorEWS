@@ -767,8 +767,10 @@ import {
   ModelRegistryError,
   type AiModelRegistry,
   type InferenceInput,
+  type ModelCreateInput,
   type ModelStatus,
   type ModelType,
+  type ModelUpdateInput,
 } from './ai_model_registry';
 import {
   defaultAiPredictionStore,
@@ -5788,6 +5790,209 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const items = aiModelRegistry.list({ type: t as ModelType | undefined, status: s as ModelStatus | undefined });
       return res.json(wrapResponse({ items, total: items.length }, ctx));
+    },
+  );
+
+  /** M4.2 — Model Registry CRUD.
+   *
+   *  POST  /v1/ai/models           — register a new model version
+   *  PUT   /v1/ai/models/:model_id — update mutable fields (NOT status)
+   *  DELETE /v1/ai/models/:model_id — soft-delete (status='retired')
+   *
+   *  Status changes are NOT mutable via PUT or DELETE — they flow through
+   *  evaluatePromotionGate + maker-checker per spec acceptance:
+   *  "Promotion from Staging → Prod requires both metric gate pass AND
+   *  human approval." DELETE refuses production retirement unless
+   *  ?force=true (operators must promote a successor first). Every mutation
+   *  fans out an audit event to the M15.1 store. */
+
+  /** POST /v1/ai/models body: ModelCreateInput
+   *  RBAC: audit:read (admin only — registry is governance-grade). */
+  app.post(
+    '/v1/ai/models',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const created = aiModelRegistry.create((inner ?? {}) as ModelCreateInput, now());
+        const actor =
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'model.register',
+              resource_type: 'system',
+              resource_id: created.model_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                name: created.name,
+                type: created.type,
+                version: created.version,
+                framework: created.framework,
+                status: created.status,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow — model created; audit chain integrity surfaces via M15.2.
+        }
+        return res.status(201).json(wrapResponse(created, ctx));
+      } catch (e) {
+        if (e instanceof ModelRegistryError) {
+          const status =
+            e.code === 'unknown_model'
+              ? 404
+              : e.code === 'protected_status_change'
+                ? 409
+                : 400;
+          return res.status(status).json(
+            wrapError(
+              {
+                code: `EWS_${status}_${e.code}`,
+                message: e.message,
+                severity: status >= 500 ? 'HIGH' : 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** PUT /v1/ai/models/:model_id body: ModelUpdateInput
+   *  Patch mutable fields. Refuses status mutation. */
+  app.put(
+    '/v1/ai/models/:model_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      try {
+        const updated = aiModelRegistry.update(id, (inner ?? {}) as ModelUpdateInput, now());
+        const actor =
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'model.update',
+              resource_type: 'system',
+              resource_id: updated.model_id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                fields_changed: Object.keys((inner ?? {}) as object),
+                version: updated.version,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(updated, ctx));
+      } catch (e) {
+        if (e instanceof ModelRegistryError) {
+          const status =
+            e.code === 'unknown_model'
+              ? 404
+              : e.code === 'protected_status_change'
+                ? 409
+                : 400;
+          return res.status(status).json(
+            wrapError(
+              {
+                code: `EWS_${status}_${e.code}`,
+                message: e.message,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/ai/models/:model_id?force=true — soft-delete (retire). */
+  app.delete(
+    '/v1/ai/models/:model_id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const id = req.params.model_id ?? '';
+      const force = String(req.query.force ?? '').toLowerCase() === 'true';
+      try {
+        const retired = aiModelRegistry.retire(id, { force }, now());
+        const actor =
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'model.retire',
+              resource_type: 'system',
+              resource_id: retired.model_id,
+              outcome: 'success',
+              severity: force ? 'warning' : 'info',
+              metadata: {
+                version: retired.version,
+                forced: force,
+                retired_at: retired.retired_at,
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow
+        }
+        return res.json(wrapResponse(retired, ctx));
+      } catch (e) {
+        if (e instanceof ModelRegistryError) {
+          const status =
+            e.code === 'unknown_model'
+              ? 404
+              : e.code === 'already_retired' || e.code === 'protected_production_retire'
+                ? 409
+                : 400;
+          return res.status(status).json(
+            wrapError(
+              {
+                code: `EWS_${status}_${e.code}`,
+                message: e.message,
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
     },
   );
 

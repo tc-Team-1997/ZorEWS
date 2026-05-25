@@ -7248,12 +7248,86 @@ export const handlers = [
   http.get('/v1/ai/models', ({ request }) => {
     const url = new URL(request.url);
     const type = url.searchParams.get('type');
-    const all = [
-      { model_id: 'pd_xgb_v3', name: 'PD XGBoost', version: '3.2.1', type: 'pd', framework: 'xgboost', status: 'production', metrics: { auc: 0.847, ks: 0.61 }, trained_at: '2026-04-15T00:00:00Z', deployed_at: '2026-04-20T00:00:00Z' },
-      { model_id: 'pd_xgb_v2', name: 'PD XGBoost', version: '2.4.0', type: 'pd', framework: 'xgboost', status: 'retired', metrics: { auc: 0.812 }, trained_at: '2026-01-10T00:00:00Z', deployed_at: null },
-    ];
-    const items = type ? all.filter((m) => m.type === type) : all;
-    return HttpResponse.json(envelope({ items, total: items.length }));
+    const status = url.searchParams.get('status');
+    let pool = __mswAiModels();
+    if (status === 'deployed') {
+      pool = pool.filter((m) => m.status === 'production' || m.status === 'shadow');
+    } else if (status) {
+      pool = pool.filter((m) => m.status === status);
+    }
+    if (type) pool = pool.filter((m) => m.type === type);
+    return HttpResponse.json(envelope({ items: pool, total: pool.length }));
+  }),
+  http.post('/v1/ai/models', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body =
+      raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+        ? (raw.body as Record<string, unknown>)
+        : raw;
+    const status = (body.status as string | undefined) ?? 'experimental';
+    if (status === 'production') {
+      return HttpResponse.json(
+        envelopeError('EWS_409_protected_status_change', 'cannot create at production', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    if (__mswAiModels().some((m) => m.model_id === body.model_id)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'duplicate', 'MEDIUM'), { status: 400 });
+    }
+    const created = {
+      model_id: String(body.model_id),
+      name: String(body.name),
+      type: String(body.type),
+      version: String(body.version),
+      framework: String(body.framework),
+      status,
+      metrics: (body.metrics as Record<string, unknown> | undefined) ?? { auc: null },
+      trained_at: new Date().toISOString(),
+      deployed_at: null,
+    };
+    __mswAiModelsCustom.push(created);
+    return HttpResponse.json(envelope(created), { status: 201 });
+  }),
+  http.put('/v1/ai/models/:model_id', async ({ request, params }) => {
+    const id = String(params.model_id);
+    const raw = (await request.json()) as Record<string, unknown>;
+    const patch =
+      raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+        ? (raw.body as Record<string, unknown>)
+        : raw;
+    if ('status' in patch) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_protected_status_change', 'status not editable here', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const idx = __mswAiModelsCustom.findIndex((m) => m.model_id === id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_model', `unknown: ${id}`, 'LOW'), { status: 404 });
+    }
+    __mswAiModelsCustom[idx] = { ...__mswAiModelsCustom[idx], ...patch };
+    return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
+  }),
+  http.delete('/v1/ai/models/:model_id', ({ request, params }) => {
+    const id = String(params.model_id);
+    const url = new URL(request.url);
+    const force = url.searchParams.get('force') === 'true';
+    const idx = __mswAiModelsCustom.findIndex((m) => m.model_id === id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_model', `unknown: ${id}`, 'LOW'), { status: 404 });
+    }
+    const cur = __mswAiModelsCustom[idx];
+    if (cur.status === 'retired') {
+      return HttpResponse.json(envelopeError('EWS_409_already_retired', 'already retired', 'LOW'), { status: 409 });
+    }
+    if (cur.status === 'production' && !force) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_protected_production_retire', 'force=true required', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    __mswAiModelsCustom[idx] = { ...cur, status: 'retired', retired_at: new Date().toISOString() };
+    return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
   }),
 
   http.get('/v1/audit/integrity', () => {
@@ -7286,6 +7360,17 @@ function __mswDqProfile(source_id: string) {
     { column: 'worst_dpd', type: 'integer', null_count: 0, null_pct: 0, distinct_count: 540, min: 0, max: 540, mean: 32, p50: 12, p95: 180, std_dev: 64, anomaly_score: 0.45, has_drift: true, top_values: [{ value: '0', count: 8400, pct: 0.7 }, { value: '30', count: 1100, pct: 0.092 }], format_detected: null },
   ];
   return { tenant_id: 'BANK_DEMO', source_id, generated_at: new Date().toISOString(), total_rows: 12_000, columns };
+}
+
+// M4.2 — AI model registry seed (4 models covering each status)
+const __mswAiModelsCustom: Array<Record<string, unknown>> = [
+  { model_id: 'pd_xgb_v3', name: 'PD XGBoost', version: '3.2.1', type: 'pd', framework: 'xgboost', status: 'production', metrics: { auc: 0.847, ks: 0.61 }, trained_at: '2026-04-15T00:00:00Z', deployed_at: '2026-04-20T00:00:00Z' },
+  { model_id: 'pd_xgb_v2', name: 'PD XGBoost', version: '2.4.0', type: 'pd', framework: 'xgboost', status: 'retired', metrics: { auc: 0.812 }, trained_at: '2026-01-10T00:00:00Z', deployed_at: null, retired_at: '2026-04-15T00:00:00Z' },
+  { model_id: 'fraud_lgbm_v1', name: 'Fraud LightGBM', version: '1.0.0', type: 'fraud', framework: 'lightgbm', status: 'shadow', metrics: { auc: 0.78 }, trained_at: '2026-05-01T00:00:00Z', deployed_at: '2026-05-05T00:00:00Z' },
+  { model_id: 'churn_sklearn_v1', name: 'Churn baseline', version: '0.4.0', type: 'churn', framework: 'sklearn', status: 'staging', metrics: { auc: 0.71 }, trained_at: '2026-05-10T00:00:00Z', deployed_at: null },
+];
+function __mswAiModels(): Array<Record<string, unknown>> {
+  return [...__mswAiModelsCustom];
 }
 
 // Module 1.1 — Data Ingestion MSW seed

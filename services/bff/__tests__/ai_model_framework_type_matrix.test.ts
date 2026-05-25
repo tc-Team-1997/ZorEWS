@@ -40,6 +40,9 @@ class FakeRegistry implements AiModelRegistry {
   score(): never {
     throw new Error('not implemented');
   }
+  create(): never { throw new Error('not implemented'); }
+  update(): never { throw new Error('not implemented'); }
+  retire(): never { throw new Error('not implemented'); }
 }
 
 function model(overrides: Partial<ModelVersion>): ModelVersion {

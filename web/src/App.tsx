@@ -33,6 +33,7 @@ import { FeatureStorePage } from '@/modules/admin/featureStore/FeatureStorePage'
 import { StreamingLatencyPage } from '@/modules/admin/streamingLatency/StreamingLatencyPage';
 import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AiWorkbenchPage } from '@/modules/ai/AiWorkbenchPage';
+import { ModelRegistryPage } from '@/modules/ai/ModelRegistryPage';
 import { NpaPredictionPage } from '@/modules/banking/NpaPredictionPage';
 import { SmaClassificationPage } from '@/modules/banking/SmaClassificationPage';
 import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
@@ -121,6 +122,7 @@ export function App() {
             <Route path="admin/streaming-latency" element={<StreamingLatencyPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="ai/workbench" element={<AiWorkbenchPage />} />
+            <Route path="ai/registry" element={<ModelRegistryPage />} />
             <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
             <Route path="banking/sma" element={<SmaClassificationPage />} />
             <Route path="banking/sectors" element={<SectorWatchPage />} />

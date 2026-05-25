@@ -38,6 +38,9 @@ class FakeRegistry implements AiModelRegistry {
     return this.items.find((m) => m.type === type && m.status === 'production') ?? null;
   }
   score(): never { throw new Error('not implemented'); }
+  create(): never { throw new Error('not implemented'); }
+  update(): never { throw new Error('not implemented'); }
+  retire(): never { throw new Error('not implemented'); }
 }
 
 function model(overrides: Partial<ModelVersion>): ModelVersion {

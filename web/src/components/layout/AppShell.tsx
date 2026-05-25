@@ -37,6 +37,7 @@ import {
   ShieldAlert,
   GitBranch,
   Bot,
+  Boxes,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -69,6 +70,7 @@ const NAV: readonly NavItem[] = [
   { to: '/cms/cases', i18nKey: 'cms_cases', icon: Briefcase },
   { to: '/cms/workflow', i18nKey: 'case_workflow', icon: GitBranch, requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'] },
   { to: '/ai/workbench', i18nKey: 'ai_workbench', icon: Bot, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+  { to: '/ai/registry', i18nKey: 'model_registry', icon: Boxes, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/npa-prediction', i18nKey: 'npa_prediction', icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sma', i18nKey: 'sma_classification', icon: TrendingUp, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sectors', i18nKey: 'sector_watch', icon: BarChart3, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
