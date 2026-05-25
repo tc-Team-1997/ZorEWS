@@ -7330,6 +7330,112 @@ export const handlers = [
     return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
   }),
 
+  // M4.3 — Explainability MSW handlers. Deterministic synth so dev mode
+  // renders without a BFF. Special prediction_ids drive the gate UI:
+  // 'expired-xx' → 410, 'missing-xx' → 404.
+  http.get('/v1/ai/predictions/:prediction_id/explanation', ({ params }) => {
+    const pid = String(params.prediction_id);
+    if (pid === 'expired-xx') {
+      return HttpResponse.json(envelopeError('EWS_410_explanation_expired', 'too old', 'MEDIUM'), { status: 410 });
+    }
+    if (pid === 'missing-xx') {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_prediction', 'not found', 'LOW'), { status: 404 });
+    }
+    const features = [
+      { feature_name: 'dpd_max_90d', display_name: 'Max DPD (90d)', weight: 0.31, base_value: 0.08, observed_value: '45 days', direction: 'up' as const, group: 'credit' as const },
+      { feature_name: 'utilization_pct', display_name: 'Utilization', weight: 0.22, base_value: 0.08, observed_value: '92%', direction: 'up' as const, group: 'credit' as const },
+      { feature_name: 'bureau_score', display_name: 'Bureau Score', weight: -0.14, base_value: 0.08, observed_value: '612', direction: 'down' as const, group: 'credit' as const },
+      { feature_name: 'cash_withdrawal_velocity', display_name: 'Cash withdrawal velocity', weight: 0.18, base_value: 0.08, observed_value: '+2.4σ', direction: 'up' as const, group: 'behavioural' as const },
+      { feature_name: 'cheque_bounce_rate', display_name: 'Cheque bounce rate (180d)', weight: 0.12, base_value: 0.08, observed_value: '3 of 12', direction: 'up' as const, group: 'behavioural' as const },
+    ];
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      prediction_id: pid,
+      generated_at: new Date().toISOString(),
+      model_id: 'pd-xgb-prod',
+      model_version: 'v3.2.0',
+      pd: 0.72,
+      band: 'high',
+      base_pd_population: 0.082,
+      top_features: features,
+      counterfactual: {
+        description: 'If Max DPD (90d) dropped from 45 days to baseline, PD would fall ~0.31',
+        change_feature: 'dpd_max_90d',
+        required_value: 'baseline (≤ population mean)',
+        resulting_pd: 0.41,
+        resulting_band: 'medium',
+      },
+      feature_group_summary: [
+        { group: 'credit', contribution: 0.39, pct_of_total: 0.41 },
+        { group: 'behavioural', contribution: 0.30, pct_of_total: 0.32 },
+      ],
+    }));
+  }),
+  http.get('/v1/ai/predictions/:prediction_id/feature-importance', ({ params }) => {
+    const pid = String(params.prediction_id);
+    if (pid === 'expired-xx') {
+      return HttpResponse.json(envelopeError('EWS_410_explanation_expired', 'too old', 'MEDIUM'), { status: 410 });
+    }
+    const pool = [
+      { name: 'dpd_max_90d', display: 'Max DPD (90d)', group: 'credit', sample: '45 days', w: 0.31 },
+      { name: 'utilization_pct', display: 'Utilization', group: 'credit', sample: '92%', w: 0.22 },
+      { name: 'cash_withdrawal_velocity', display: 'Cash withdrawal velocity', group: 'behavioural', sample: '+2.4σ', w: 0.18 },
+      { name: 'bureau_score', display: 'Bureau Score', group: 'credit', sample: '612', w: -0.14 },
+      { name: 'cheque_bounce_rate', display: 'Cheque bounce rate (180d)', group: 'behavioural', sample: '3 of 12', w: 0.12 },
+      { name: 'monthly_credit_zscore', display: 'Monthly credit z-score', group: 'transaction', sample: '-1.8σ', w: -0.09 },
+      { name: 'txn_concentration_top5', display: 'Counterparty concentration', group: 'transaction', sample: '78%', w: 0.08 },
+      { name: 'collateral_coverage_ratio', display: 'Collateral coverage', group: 'collateral', sample: '0.72', w: -0.06 },
+      { name: 'sector_npa_ratio', display: 'Sector NPA ratio', group: 'macro', sample: '6.8%', w: 0.04 },
+    ];
+    const totalAbs = pool.reduce((s, p) => s + Math.abs(p.w), 0);
+    const features = pool.map((p, i) => ({
+      rank: i + 1,
+      feature_name: p.name,
+      display_name: p.display,
+      group: p.group,
+      weight: p.w,
+      abs_weight: Math.abs(p.w),
+      direction: p.w >= 0 ? 'up' : 'down',
+      pct_of_total: Math.abs(p.w) / totalAbs,
+      observed_value: p.sample,
+    }));
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      prediction_id: pid,
+      generated_at: new Date().toISOString(),
+      model_id: 'pd-xgb-prod',
+      model_version: 'v3.2.0',
+      total_features: features.length,
+      features,
+      by_group: [
+        { group: 'credit', total_abs_weight: 0.67, share: 0.54 },
+        { group: 'behavioural', total_abs_weight: 0.30, share: 0.24 },
+        { group: 'transaction', total_abs_weight: 0.17, share: 0.14 },
+        { group: 'collateral', total_abs_weight: 0.06, share: 0.05 },
+        { group: 'macro', total_abs_weight: 0.04, share: 0.03 },
+      ],
+    }));
+  }),
+  http.get('/v1/ai/predictions/:prediction_id/trust-signals', ({ params }) => {
+    const pid = String(params.prediction_id);
+    if (pid === 'expired-xx') {
+      return HttpResponse.json(envelopeError('EWS_410_explanation_expired', 'too old', 'MEDIUM'), { status: 410 });
+    }
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      prediction_id: pid,
+      generated_at: new Date().toISOString(),
+      overall: 'amber',
+      signals: [
+        { signal: 'feature_drift_psi', status: 'amber', value: '0.18', threshold: '<0.10 green / <0.25 amber', description: 'PSI across model features' },
+        { signal: 'calibration_coverage', status: 'green', value: '0.92', threshold: '>0.90 green', description: '90% prediction interval calibration' },
+        { signal: 'training_cohort_size', status: 'green', value: '180,000', threshold: '>100k green', description: 'Training cohort size' },
+        { signal: 'feature_freshness_days', status: 'green', value: '3 days', threshold: '<7d green', description: 'Feature refresh recency' },
+        { signal: 'training_freshness_days', status: 'amber', value: '85 days', threshold: '<60d green / <120d amber', description: 'Days since last retraining' },
+      ],
+    }));
+  }),
+
   http.get('/v1/audit/integrity', () => {
     const all = __mswAuditEvents();
     const last = all[0]; // newest-first; last appended = head

@@ -1820,6 +1820,31 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // M4.3 — Explainability. The 3 explainability surfaces share the
+  // 24-month age gate; the SPA renders 410 distinct from 404.
+  aiPrediction: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<PredictionRow>>(`/v1/ai/predictions/${encodeURIComponent(prediction_id)}`)
+      .then((r) => r.data),
+  aiPredictionExplanation: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<ExplanationReport>>(
+        `/v1/ai/predictions/${encodeURIComponent(prediction_id)}/explanation`,
+      )
+      .then((r) => r.data),
+  aiPredictionFeatureImportance: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<FeatureImportanceReport>>(
+        `/v1/ai/predictions/${encodeURIComponent(prediction_id)}/feature-importance`,
+      )
+      .then((r) => r.data),
+  aiPredictionTrustSignals: (prediction_id: string) =>
+    http
+      .get<EnvelopeBody<TrustSignalReport>>(
+        `/v1/ai/predictions/${encodeURIComponent(prediction_id)}/trust-signals`,
+      )
+      .then((r) => r.data),
+
   // Module 1.1 — Data Ingestion (Source Feeds management)
   ingestionConnectors: () =>
     http.get<EnvelopeBody<{ items: IngestionConnector[]; total: number }>>('/v1/ingestion/connectors').then((r) => r.data),
@@ -2834,6 +2859,84 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// M4.3 — Explainability types (mirror services/bff/src/ai_explainability.ts).
+export interface PredictionRow {
+  prediction_id: string;
+  tenant_id: string;
+  model_id: string;
+  model_version: string;
+  prediction_type: string;
+  customer_id: string;
+  value: number;
+  band: 'low' | 'medium' | 'high' | null;
+  confidence: number | null;
+  generated_at: string;
+  created_at: string;
+}
+export interface ShapFeatureView {
+  feature_name: string;
+  display_name: string;
+  weight: number;
+  base_value: number;
+  observed_value: string;
+  direction: 'up' | 'down';
+  group: 'credit' | 'behavioural' | 'transaction' | 'collateral' | 'macro';
+}
+export interface ExplanationReport {
+  tenant_id: string;
+  prediction_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  pd: number;
+  band: 'low' | 'medium' | 'high' | 'critical';
+  base_pd_population: number;
+  top_features: ShapFeatureView[];
+  counterfactual: {
+    description: string;
+    change_feature: string;
+    required_value: string;
+    resulting_pd: number;
+    resulting_band: 'low' | 'medium' | 'high' | 'critical';
+  };
+  feature_group_summary: { group: string; contribution: number; pct_of_total: number }[];
+}
+export interface FeatureImportanceRowView {
+  rank: number;
+  feature_name: string;
+  display_name: string;
+  group: ShapFeatureView['group'];
+  weight: number;
+  abs_weight: number;
+  direction: 'up' | 'down';
+  pct_of_total: number;
+  observed_value: string;
+}
+export interface FeatureImportanceReport {
+  tenant_id: string;
+  prediction_id: string;
+  generated_at: string;
+  model_id: string;
+  model_version: string;
+  total_features: number;
+  features: FeatureImportanceRowView[];
+  by_group: { group: string; total_abs_weight: number; share: number }[];
+}
+export interface TrustSignalRowView {
+  signal: string;
+  status: 'green' | 'amber' | 'red';
+  value: string;
+  threshold: string;
+  description: string;
+}
+export interface TrustSignalReport {
+  tenant_id: string;
+  prediction_id: string;
+  generated_at: string;
+  overall: 'green' | 'amber' | 'red';
+  signals: TrustSignalRowView[];
 }
 
 // M4.1 — AI Workbench prompt library row.

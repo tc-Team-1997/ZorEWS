@@ -34912,8 +34912,61 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   // ──────────────────────────────────────────────────────────────────
-  // Module #6 — AI Explainability (§2.1.6)
+  // Module #6 — AI Explainability (§2.1.6) — extended by M4.3 with
+  // feature-importance route + 24-month age gate on every endpoint.
   // ──────────────────────────────────────────────────────────────────
+
+  /** Shared age-gate wrapper for the 3 explainability routes. Reads the
+   *  prediction from the live store + verifies it's ≤ 24 months old.
+   *  Routes the 3 ExplainabilityError codes to canonical HTTP statuses:
+   *  - unknown_prediction   → 404 EWS_404_unknown_prediction
+   *  - explanation_expired  → 410 EWS_410_explanation_expired
+   *  - invalid_input        → 400 EWS_400_invalid_input
+   *  Anything else → 500 EWS_500. */
+  function explainabilityAgeGuard(req: Request, res: Response, ctx: ReturnType<typeof extractCtx>): boolean {
+    try {
+      const { assertPredictionExplainable } =
+        require('./ai_explainability') as typeof import('./ai_explainability');
+      assertPredictionExplainable(
+        req.tenant!.tenant_id,
+        req.params.prediction_id ?? '',
+        now(),
+        (tenant, pid) => {
+          const row = aiPredictionStore.get(tenant, pid);
+          if (!row) return null;
+          return { prediction_id: row.prediction_id, tenant_id: row.tenant_id, created_at: row.created_at };
+        },
+      );
+      return true;
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === 'unknown_prediction') {
+        res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_prediction', message: e instanceof Error ? e.message : 'not found', severity: 'LOW' },
+            ctx,
+          ),
+        );
+        return false;
+      }
+      if (code === 'explanation_expired') {
+        res.status(410).json(
+          wrapError(
+            { code: 'EWS_410_explanation_expired', message: e instanceof Error ? e.message : 'expired', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+        return false;
+      }
+      res.status(400).json(
+        wrapError(
+          { code: 'EWS_400_invalid_input', message: e instanceof Error ? e.message : 'invalid', severity: 'MEDIUM' },
+          ctx,
+        ),
+      );
+      return false;
+    }
+  }
 
   app.get(
     '/v1/ai/predictions/:prediction_id/explanation',
@@ -34921,6 +34974,7 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('customers:read_risk_profile'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
+      if (!explainabilityAgeGuard(req, res, ctx)) return;
       try {
         const { explainPrediction } =
           require('./ai_explainability') as typeof import('./ai_explainability');
@@ -34940,6 +34994,7 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('customers:read_risk_profile'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
+      if (!explainabilityAgeGuard(req, res, ctx)) return;
       try {
         const { buildTrustSignals } =
           require('./ai_explainability') as typeof import('./ai_explainability');
@@ -34948,6 +35003,29 @@ export function makeApp(deps: AppDeps = {}) {
         );
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'trust_signals_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  /** M4.3 — GET /v1/ai/predictions/:id/feature-importance
+   *  Full feature ranking (every feature in the pool, by |weight| desc).
+   *  Distinct from /explanation (top-5 only). Same age + tenant gate. */
+  app.get(
+    '/v1/ai/predictions/:prediction_id/feature-importance',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      if (!explainabilityAgeGuard(req, res, ctx)) return;
+      try {
+        const { buildFeatureImportance } =
+          require('./ai_explainability') as typeof import('./ai_explainability');
+        return res.json(
+          wrapResponse(buildFeatureImportance(req.tenant!.tenant_id, req.params.prediction_id, now()), ctx),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'feature_importance_failed';
         return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
       }
     },

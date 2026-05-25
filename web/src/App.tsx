@@ -34,6 +34,7 @@ import { StreamingLatencyPage } from '@/modules/admin/streamingLatency/Streaming
 import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AiWorkbenchPage } from '@/modules/ai/AiWorkbenchPage';
 import { ModelRegistryPage } from '@/modules/ai/ModelRegistryPage';
+import { ExplainabilityPage } from '@/modules/ai/ExplainabilityPage';
 import { NpaPredictionPage } from '@/modules/banking/NpaPredictionPage';
 import { SmaClassificationPage } from '@/modules/banking/SmaClassificationPage';
 import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
@@ -123,6 +124,7 @@ export function App() {
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="ai/workbench" element={<AiWorkbenchPage />} />
             <Route path="ai/registry" element={<ModelRegistryPage />} />
+            <Route path="ai/explainability" element={<ExplainabilityPage />} />
             <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
             <Route path="banking/sma" element={<SmaClassificationPage />} />
             <Route path="banking/sectors" element={<SectorWatchPage />} />
