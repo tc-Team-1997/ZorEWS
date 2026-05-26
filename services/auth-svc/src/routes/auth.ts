@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { SignJWT, exportJWK } from "jose";
-import { RegisterFailure, type Role } from "../users.js";
+import { ALL_ROLES, RegisterFailure, type Role } from "../users.js";
 import { loadSigner, signAccessToken, signRefreshToken, verifyToken, type Signer } from "../jwt.js";
 import { getServiceClientStore, ServiceClientConflict } from "../service_clients.js";
 import {
@@ -893,6 +893,85 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   }
 
   /**
+   * POST /auth/users/:username/role
+   * Authorization: Bearer <admin>
+   * Body: { role: Role }
+   *
+   * M6.1 — Users & RBAC: change a user's role. Combined with /auth/me's
+   * live read of user.role + user.locked, the new role takes effect on
+   * the user's next request to /auth/me without forcing a logout (spec
+   * acceptance: "Role change takes effect on next request, no logout
+   * required"). Existing JWTs continue to carry the OLD role for the
+   * lifetime of the token — services that read the role from the JWT
+   * (X-APEX-ROLE) will still see the old role until the user signs in
+   * again. The SPA reads /auth/me on every page mount + before every
+   * mutation, so it picks up the new role within ~1 page transition.
+   *
+   * Refuses to change the caller's own role (you can't lock yourself
+   * out of admin by accident). 400 on bad/missing role; 404 unknown
+   * user; 403 non-admin; 409 self-change.
+   */
+  app.post<{ Params: { username: string }; Body: { role?: Role } }>(
+    "/auth/users/:username/role",
+    async (req, reply) => {
+      const { signer, users, audit } = await getState();
+      const auth = req.headers.authorization;
+      if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });
+      let callerSub: string | undefined;
+      let callerRole: unknown;
+      try {
+        const { payload } = await verifyToken(signer, auth.slice(7));
+        if (payload.typ === "refresh") return reply.code(401).send({ error: "invalid_token" });
+        callerSub = typeof payload.sub === "string" ? payload.sub : undefined;
+        callerRole = payload.role;
+      } catch {
+        return reply.code(401).send({ error: "invalid_token" });
+      }
+      if (callerRole !== "admin") {
+        return reply.code(403).send({ error: "forbidden", message: "admin role required" });
+      }
+      const target = users.findByUsername(req.params.username.toLowerCase());
+      if (!target) return reply.code(404).send({ error: "user_not_found" });
+      if (target.id === callerSub) {
+        return reply.code(409).send({
+          error: "cannot_change_own_role",
+          message: "you cannot change your own role",
+        });
+      }
+      const newRole = req.body?.role;
+      if (!newRole || !ALL_ROLES.includes(newRole)) {
+        return reply.code(400).send({
+          error: "invalid_role",
+          message: `role must be one of ${ALL_ROLES.join(", ")}`,
+        });
+      }
+      if (target.role === newRole) {
+        return reply.send({ ok: true, username: target.username, role: target.role, unchanged: true });
+      }
+      const previousRole = target.role;
+      const applied = users.setRole(target, newRole);
+      if (!applied) {
+        return reply.code(400).send({ error: "invalid_role", message: `role ${newRole} is not a valid role` });
+      }
+      const actor = callerSub ? users.findById(callerSub) : undefined;
+      audit.append({
+        type: "user_role_changed",
+        target_username: target.username,
+        actor_username: actor?.username ?? null,
+        actor_role: "admin",
+        ip: callerIp(req),
+        metadata: { previous_role: previousRole, new_role: newRole },
+      });
+      return reply.send({
+        ok: true,
+        username: target.username,
+        role: target.role,
+        previous_role: previousRole,
+      });
+    },
+  );
+
+  /**
    * GET /auth/me/activity?limit=...
    * Authorization: Bearer <access token>
    *
@@ -1117,7 +1196,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   app.get("/auth/me", async (req, reply) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });
-    const { signer, sessions } = await getState();
+    const { signer, sessions, users } = await getState();
     try {
       const { payload } = await verifyToken(signer, auth.slice(7));
       const sid = typeof payload.sid === "string" ? payload.sid : undefined;
@@ -1125,10 +1204,30 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         return reply.code(401).send({ error: "session_revoked" });
       }
       if (sid) sessions.touch(sid);
+      // M6.1 — Users & RBAC acceptance: read role + locked + display_name
+      // from the user store LIVE, NOT from the JWT payload. This lets
+      // role changes / lock changes / display-name edits take effect on
+      // the user's next request without forcing a logout. JWT remains
+      // the source-of-truth for IDENTITY (sub) — the store is the
+      // source-of-truth for authorization state.
+      const sub = typeof payload.sub === "string" ? payload.sub : undefined;
+      const live = sub ? users.findById(sub) : undefined;
+      // Locked-out users get refused even with a valid JWT — closes the
+      // window between admin lock + JWT expiry.
+      if (live?.locked) {
+        return reply.code(403).send({ error: "locked_account", message: "Account locked." });
+      }
       return reply.send({
         sub: payload.sub,
-        role: payload.role,
-        display_name: payload.display_name,
+        // Prefer live role; fall back to JWT only when the user has been
+        // deleted (then the JWT is the last record we have).
+        role: live?.role ?? payload.role,
+        display_name: live?.display_name ?? payload.display_name,
+        username: live?.username,
+        email: live?.email,
+        tenant_id: live?.tenant_id ?? (typeof payload.tenant_id === "string" ? payload.tenant_id : null),
+        must_change_password: live?.must_change_password ?? false,
+        locked: live?.locked ?? false,
         session_id: sid ?? null,
       });
     } catch {

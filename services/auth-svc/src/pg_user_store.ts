@@ -299,6 +299,14 @@ export class PgUserStore {
     this.persistLockState(user);
   }
 
+  /** M6.1 — change role in cache + persist to pg fire-and-forget. */
+  setRole(user: User, newRole: Role): boolean {
+    if (!ALL_ROLES.includes(newRole)) return false;
+    user.role = newRole;
+    this.persistRoleChange(user);
+    return true;
+  }
+
   registerFailedLogin(
     user: User,
     threshold = 5,
@@ -642,6 +650,17 @@ export class PgUserStore {
       )
       .catch((err) =>
         this.logger(`failed to persist lock state for ${user.id}`, err),
+      );
+  }
+
+  private persistRoleChange(user: User): void {
+    void this.pool
+      .query(`UPDATE app_iam.users SET role = $2 WHERE user_id = $1`, [
+        user.id,
+        user.role,
+      ])
+      .catch((err) =>
+        this.logger(`failed to persist role change for ${user.id}`, err),
       );
   }
 }

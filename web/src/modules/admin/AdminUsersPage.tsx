@@ -115,6 +115,8 @@ export function AdminUsersPage() {
   const adminCreateUser = useAuth((s) => s.adminCreateUser);
   const adminDeleteUser = useAuth((s) => s.adminDeleteUser);
   const adminSetLocked = useAuth((s) => s.adminSetLocked);
+  // M6.1 — Users & RBAC: role change endpoint
+  const adminSetRole = useAuth((s) => s.adminSetRole);
   const qc = useQueryClient();
 
   const [mode, setMode] = useState<Mode>({ kind: 'idle' });
@@ -181,6 +183,26 @@ export function AdminUsersPage() {
       qc.invalidateQueries({ queryKey: ['admin.users'] });
     },
     onError: (err) => setRowError(humanizeError(err, 'Lock toggle failed.')),
+  });
+
+  // M6.1 — Users & RBAC: change a user's role inline. The acceptance
+  // contract is that the change takes effect on the target user's
+  // next /auth/me call without forcing them to log out.
+  const roleMutation = useMutation({
+    mutationFn: ({ username, role }: { username: string; role: Role }) =>
+      adminSetRole(username, role),
+    onSuccess: (data) => {
+      setRowError(null);
+      qc.invalidateQueries({ queryKey: ['admin.users'] });
+      // If the admin just changed their OWN role (shouldn't happen — server
+      // refuses with 409 — but belt + braces), refresh the local me cache.
+      if (me?.username === data.username) {
+        // role change does not invalidate the JWT but /auth/me will return
+        // the new value; surface a refresh signal via a separate query.
+        qc.invalidateQueries({ queryKey: ['auth.me'] });
+      }
+    },
+    onError: (err) => setRowError(humanizeError(err, 'Role change failed.')),
   });
 
   // Hard role gate.
@@ -292,11 +314,43 @@ export function AdminUsersPage() {
     {
       key: 'role',
       header: 'Role',
-      width: 160,
+      width: 200,
+      // M6.1 — Users & RBAC: inline role picker. Self-change is refused
+      // server-side (409) so the admin can't accidentally demote
+      // themselves; we mirror that by disabling the select for the
+      // current user. Change is applied via PATCH /auth/users/:u/role
+      // and surfaces on the target user's next /auth/me without logout.
       render: (u) => (
-        <Badge tone={ROLE_TONE[u.role]} className="text-[11px]">
-          {ROLE_LABEL[u.role]}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge tone={ROLE_TONE[u.role]} className="text-[11px]">
+            {ROLE_LABEL[u.role]}
+          </Badge>
+          <select
+            data-testid={`admin-role-select-${u.username}`}
+            aria-label={`Change role for ${u.username}`}
+            value={u.role}
+            disabled={isSelf(u) || roleMutation.isPending}
+            onChange={(e) => {
+              const next = e.target.value as Role;
+              if (next === u.role) return;
+              if (
+                !window.confirm(
+                  `Change ${u.username}'s role from ${ROLE_LABEL[u.role]} to ${ROLE_LABEL[next]}?\n\nThe change takes effect on their next request (no logout required).`,
+                )
+              ) {
+                return;
+              }
+              roleMutation.mutate({ username: u.username, role: next });
+            }}
+            className="border border-divider rounded px-1.5 py-0.5 text-[11px] bg-surface text-ink disabled:opacity-50"
+          >
+            {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABEL[r]}
+              </option>
+            ))}
+          </select>
+        </div>
       ),
     },
     {

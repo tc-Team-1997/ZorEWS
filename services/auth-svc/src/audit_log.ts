@@ -21,6 +21,7 @@ export type AuthEventType =
   | "user_deleted"
   | "user_locked"
   | "user_unlocked"
+  | "user_role_changed"
   | "register_success";
 
 export interface AuthEvent {

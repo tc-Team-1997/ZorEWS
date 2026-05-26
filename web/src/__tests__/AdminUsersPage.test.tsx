@@ -190,6 +190,64 @@ describe('AdminUsersPage', () => {
     expect(deleteBtn).toBeDisabled();
   });
 
+  // ─── M6.1 — Users & RBAC: role-change action ─────────────────────
+  it('M6.1 role-change: select reflects the new role after PATCH /auth/users/:u/role', async () => {
+    setUser('admin');
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      const user = userEvent.setup();
+      renderAdmin();
+      // fiona.field starts as field_officer in DEMO_USERS
+      await screen.findByText('fiona.field');
+      const select = screen.getByTestId('admin-role-select-fiona.field') as HTMLSelectElement;
+      expect(select.value).toBe('field_officer');
+      // Change to supervisor — userEvent.selectOptions fires the change event
+      await user.selectOptions(select, 'supervisor');
+      // After mutation succeeds, the select reflects the new role
+      await waitFor(() => {
+        const updated = screen.getByTestId('admin-role-select-fiona.field') as HTMLSelectElement;
+        expect(updated.value).toBe('supervisor');
+      });
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
+
+  it('M6.1 role-change: select disabled for the current user (no self-change)', async () => {
+    setUser('admin');
+    renderAdmin();
+    await screen.findByText('alice.admin');
+    const selfSelect = screen.getByTestId('admin-role-select-alice.admin') as HTMLSelectElement;
+    expect(selfSelect.disabled).toBe(true);
+  });
+
+  it('M6.1 role-change: cancelling confirm dialog leaves role unchanged', async () => {
+    setUser('admin');
+    const origConfirm = window.confirm;
+    window.confirm = () => false; // user clicks Cancel
+    try {
+      const user = userEvent.setup();
+      renderAdmin();
+      await screen.findByText('fiona.field');
+      const select = screen.getByTestId('admin-role-select-fiona.field') as HTMLSelectElement;
+      // Capture the current role — DEMO_USERS may have been mutated by an
+      // earlier test in the file (in-process Map carries across); we only
+      // care that the cancel path doesn't change WHATEVER it currently is.
+      const before = select.value;
+      // Pick any DIFFERENT role to try changing to — if before is
+      // 'risk_analyst', pick 'supervisor' instead, etc.
+      const target = before === 'risk_analyst' ? 'supervisor' : 'risk_analyst';
+      await user.selectOptions(select, target);
+      // Wait briefly to ensure no mutation fires
+      await new Promise((r) => setTimeout(r, 50));
+      const stillBefore = screen.getByTestId('admin-role-select-fiona.field') as HTMLSelectElement;
+      expect(stillBefore.value).toBe(before);
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
+
   it('delete fires DELETE /auth/users/:username after confirm', async () => {
     setUser('admin');
     // window.confirm always returns true in tests

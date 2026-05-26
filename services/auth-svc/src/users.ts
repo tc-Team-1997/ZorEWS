@@ -261,6 +261,17 @@ export class UserStore {
     if (!locked) user.failed_login_count = 0;
   }
 
+  /** M6.1 — Users & RBAC: change a user's role in place. Used by the
+   *  admin role-assign route. Combined with the live-read /auth/me, the
+   *  new role takes effect on the user's next request without a logout.
+   *  Returns false when newRole is not a valid Role (defensive belt + braces
+   *  vs the route-layer guard). */
+  setRole(user: User, newRole: Role): boolean {
+    if (!ALL_ROLES.includes(newRole)) return false;
+    user.role = newRole;
+    return true;
+  }
+
   /**
    * Record a wrong-password attempt. After `threshold` consecutive failures
    * the account is auto-locked for `lockoutMs`. Returns the post-update

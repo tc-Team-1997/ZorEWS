@@ -1780,6 +1780,39 @@ function setLockedHandler(username: string, locked: boolean) {
   return HttpResponse.json({ ok: true, username: target.username, locked });
 }
 
+// M6.1 — Users & RBAC: change a user's role (admin-only). Mirrors
+// auth-svc POST /auth/users/:username/role.
+const M6_VALID_ROLES = [
+  'admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer',
+] as const;
+async function setRoleHandler(request: Request, username: string) {
+  const callerRole = readPersistedRole();
+  if (callerRole === null) return HttpResponse.json({ error: 'missing_token' }, { status: 401 });
+  if (callerRole !== 'admin') return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+  const target = DEMO_USERS.find((u) => u.username === username);
+  if (!target) return HttpResponse.json({ error: 'user_not_found' }, { status: 404 });
+  if (username === readPersistedUsername()) {
+    return HttpResponse.json({ error: 'cannot_change_own_role' }, { status: 409 });
+  }
+  const body = (await request.json()) as { role?: string };
+  const newRole = body.role;
+  if (!newRole || !M6_VALID_ROLES.includes(newRole as typeof M6_VALID_ROLES[number])) {
+    return HttpResponse.json({ error: 'invalid_role' }, { status: 400 });
+  }
+  // DEMO_USERS carries roles[] (multi-role aware); the GET /auth/users
+  // handler projects roles[0] into the SPA's expected `role` field. Mirror
+  // that here — overwrite roles[0] so the next GET returns the new role.
+  const previousRole = target.roles[0];
+  target.roles = [newRole as typeof target.roles[number]];
+  return HttpResponse.json({
+    ok: true,
+    username: target.username,
+    role: newRole,
+    previous_role: previousRole,
+    unchanged: previousRole === newRole,
+  });
+}
+
 // Shared register-user logic — used by both POST /auth/register (self)
 // and POST /auth/users (admin). Returns the same SignupResult shape.
 async function registerLikeHandler(request: Request, _by: 'self' | 'admin') {
@@ -3017,6 +3050,11 @@ export const handlers = [
   ),
   http.post('/auth/users/:username/unlock', ({ params }) =>
     setLockedHandler(String(params.username).toLowerCase(), false),
+  ),
+
+  // M6.1 — Users & RBAC: role change endpoint
+  http.post('/auth/users/:username/role', ({ params, request }) =>
+    setRoleHandler(request, String(params.username).toLowerCase()),
   ),
 
   // ── Per-role dashboard widgets (T4.23, BAC-A §3.1.9.1.4) ──────────

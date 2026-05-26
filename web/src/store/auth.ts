@@ -137,6 +137,10 @@ interface AuthState {
   adminCreateUser: (input: SignupInput) => Promise<SignupResult>;
   adminDeleteUser: (username: string) => Promise<void>;
   adminSetLocked: (username: string, locked: boolean) => Promise<void>;
+  /** M6.1 — Users & RBAC: admin changes a user's role. Returns the
+   *  updated row. Combined with /auth/me's live-read, the change
+   *  surfaces on the user's next request without forcing a logout. */
+  adminSetRole: (username: string, role: string) => Promise<{ username: string; role: string; previous_role?: string }>;
   /** Fetches active sessions for the current user. */
   listMySessions: () => Promise<{ sessions: SessionRow[]; current_session_id: string | null }>;
   /** Revokes one session (must be the caller's). */
@@ -345,6 +349,19 @@ export const useAuth = create<AuthState>((set) => ({
   adminSetLocked: async (username, locked) => {
     const action = locked ? 'lock' : 'unlock';
     await http.post(`/auth/users/${encodeURIComponent(username)}/${action}`);
+  },
+
+  adminSetRole: async (username, role) => {
+    const { data } = await http.post<{
+      ok: boolean;
+      username: string;
+      role: string;
+      previous_role?: string;
+    }>(
+      `/auth/users/${encodeURIComponent(username)}/role`,
+      { role },
+    );
+    return { username: data.username, role: data.role, previous_role: data.previous_role };
   },
 
   listMySessions: async () => {
