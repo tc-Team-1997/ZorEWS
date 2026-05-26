@@ -1639,6 +1639,51 @@ export const api = {
   auditIntegrity: () =>
     http.get<EnvelopeBody<AuditIntegrity>>('/v1/audit/integrity').then((r) => r.data),
 
+  // M6.2 — Audit Trail: evidence packages + retention policies + correlations
+  auditEvidenceList: () =>
+    http
+      .get<EnvelopeBody<{ items: AuditEvidencePackage[]; total: number }>>('/v1/audit/evidence')
+      .then((r) => r.data),
+
+  auditEvidenceBuild: (filters: AuditEvidenceBuildInput) =>
+    http
+      .post<EnvelopeBody<AuditEvidencePackage>>('/v1/audit/evidence', filters)
+      .then((r) => r.data),
+
+  auditEvidenceGet: (package_id: string) =>
+    http
+      .get<EnvelopeBody<AuditEvidencePackage>>(
+        `/v1/audit/evidence/${encodeURIComponent(package_id)}`,
+      )
+      .then((r) => r.data),
+
+  auditCorrelations: () =>
+    http
+      .get<EnvelopeBody<{ correlations: AuditCorrelationGroup[] }>>('/v1/audit/correlations')
+      .then((r) => r.data),
+
+  auditRetentionStrategies: () =>
+    http
+      .get<EnvelopeBody<{ strategies: string[]; scopes: string[] }>>(
+        '/v1/admin/audit-retention/strategies',
+      )
+      .then((r) => r.data),
+
+  auditRetentionList: () =>
+    http
+      .get<EnvelopeBody<{ items: AuditRetentionPolicy[]; total: number }>>(
+        '/v1/admin/audit-retention',
+      )
+      .then((r) => r.data),
+
+  auditRetentionCreate: (body: AuditRetentionPolicyCreateInput) =>
+    http
+      .post<EnvelopeBody<AuditRetentionPolicy>>('/v1/admin/audit-retention', body)
+      .then((r) => r.data),
+
+  auditRetentionDelete: (policy_id: string) =>
+    http.delete(`/v1/admin/audit-retention/${encodeURIComponent(policy_id)}`),
+
   aiExplanation: (prediction_id: string) =>
     http
       .get<EnvelopeBody<PredictionExplanation>>(
@@ -2994,6 +3039,74 @@ export interface AuditIntegrity {
   valid: boolean;
   last_hash: string;
   broken_at?: { index: number; event_id: string; reason: string };
+}
+
+// M6.2 — Audit Trail: evidence packages + retention policies + correlations
+export interface AuditEvidenceBuildInput {
+  actor_username?: string;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  outcome?: string;
+  severity?: string;
+  since?: string;
+  until?: string;
+}
+
+export interface AuditEvidencePackage {
+  package_id: string;
+  tenant_id: string;
+  generated_at: string;
+  generated_by: string;
+  filters: AuditEvidenceBuildInput;
+  event_count: number;
+  size_bytes: number;
+  integrity: {
+    chain_verified: boolean;
+    chain_last_hash: string;
+    first_event_hash: string | null;
+    last_event_hash: string | null;
+    broken_at?: { index: number; event_id: string; reason: string };
+  };
+  events?: AuditEventRow[];
+}
+
+export interface AuditCorrelationGroup {
+  correlation_id: string;
+  total_events: number;
+  first_ts: string;
+  last_ts: string;
+  actors: string[];
+  actions: string[];
+  resource_types: string[];
+  event_ids: string[];
+}
+
+export type AuditRetentionStrategy = 'count_cap' | 'time_window' | 'never_purge';
+export type AuditRetentionScope = 'audit_trail';
+
+export interface AuditRetentionPolicy {
+  policy_id: string;
+  tenant_id: string;
+  scope: AuditRetentionScope;
+  strategy: AuditRetentionStrategy;
+  retention_days: number | null;
+  max_events: number | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+}
+
+export interface AuditRetentionPolicyCreateInput {
+  policy_id: string;
+  scope: AuditRetentionScope;
+  strategy: AuditRetentionStrategy;
+  retention_days?: number | null;
+  max_events?: number | null;
+  notes?: string | null;
+  active?: boolean;
 }
 
 // G3 — Portfolio Insights row (Monday Playbook H2)

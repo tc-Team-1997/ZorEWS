@@ -7886,7 +7886,191 @@ export const handlers = [
     );
   }),
 
+  // ── M6.2 — Audit Trail: evidence packages + retention + correlations ──
+  http.get('/v1/audit/correlations', () => {
+    const all = __mswAuditEvents();
+    const byId = new Map<string, ReturnType<typeof __mswAuditEvents>[number][]>();
+    for (const ev of all) {
+      const cid = ev.correlation_id;
+      if (!cid) continue;
+      const arr = byId.get(cid) ?? [];
+      arr.push(ev);
+      byId.set(cid, arr);
+    }
+    const correlations = Array.from(byId.entries()).map(([cid, evs]) => ({
+      correlation_id: cid,
+      total_events: evs.length,
+      first_ts: evs[evs.length - 1]!.ts,
+      last_ts: evs[0]!.ts,
+      actors: Array.from(new Set(evs.map((e) => e.actor_username))).sort(),
+      actions: Array.from(new Set(evs.map((e) => e.action))).sort(),
+      resource_types: Array.from(new Set(evs.map((e) => e.resource_type))).sort(),
+      event_ids: evs.map((e) => e.event_id),
+    }));
+    return HttpResponse.json(envelope({ correlations }));
+  }),
+
+  http.get('/v1/audit/evidence', () => {
+    return HttpResponse.json(envelope({ items: __mswEvidencePackages, total: __mswEvidencePackages.length }));
+  }),
+
+  http.post('/v1/audit/evidence', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    const all = __mswAuditEvents();
+    const filters = inner as { actor_username?: string; action?: string; resource_type?: string; outcome?: string; severity?: string };
+    const matching = all.filter((e) => {
+      if (filters.actor_username && e.actor_username !== filters.actor_username) return false;
+      if (filters.action && e.action !== filters.action) return false;
+      if (filters.resource_type && e.resource_type !== filters.resource_type) return false;
+      if (filters.outcome && e.outcome !== filters.outcome) return false;
+      if (filters.severity && e.severity !== filters.severity) return false;
+      return true;
+    });
+    __mswEvidenceSeq++;
+    const pkg = {
+      package_id: `EVD-BANK_DEMO-${String(__mswEvidenceSeq).padStart(5, '0')}`,
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      generated_by: 'alice.admin',
+      filters: filters,
+      event_count: matching.length,
+      size_bytes: JSON.stringify(matching).length,
+      integrity: {
+        chain_verified: true,
+        chain_last_hash: matching[0]?.hash ?? 'GENESIS',
+        first_event_hash: matching.length ? matching[matching.length - 1]!.hash : null,
+        last_event_hash: matching[0]?.hash ?? null,
+      },
+      events: matching,
+    };
+    __mswEvidencePackages.unshift(pkg);
+    return HttpResponse.json(envelope(pkg), { status: 201 });
+  }),
+
+  http.get('/v1/audit/evidence/:package_id', ({ params }) => {
+    const id = String(params.package_id);
+    const found = __mswEvidencePackages.find((p) => p.package_id === id);
+    if (!found) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_package', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(found));
+  }),
+
+  http.get('/v1/admin/audit-retention/strategies', () => {
+    return HttpResponse.json(envelope({
+      strategies: ['count_cap', 'time_window', 'never_purge'],
+      scopes: ['audit_trail'],
+    }));
+  }),
+
+  http.get('/v1/admin/audit-retention', () => {
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      total: __mswRetentionPolicies.length,
+      items: __mswRetentionPolicies,
+    }));
+  }),
+
+  http.post('/v1/admin/audit-retention', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    const policy_id = String(inner.policy_id ?? '');
+    if (!policy_id) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_policy_id', 'policy_id required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    if (__mswRetentionPolicies.some((p) => p.policy_id === policy_id)) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_duplicate_policy_id', `policy_id ${policy_id} already exists`, 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const entry = {
+      policy_id,
+      tenant_id: 'BANK_DEMO',
+      scope: String(inner.scope ?? 'audit_trail'),
+      strategy: String(inner.strategy ?? 'time_window'),
+      retention_days: (inner.retention_days as number | null) ?? null,
+      max_events: (inner.max_events as number | null) ?? null,
+      notes: (inner.notes as string | null) ?? null,
+      active: inner.active !== false,
+      created_at: new Date().toISOString(),
+      created_by: 'alice.admin',
+      updated_at: new Date().toISOString(),
+    };
+    __mswRetentionPolicies.push(entry);
+    return HttpResponse.json(envelope(entry), { status: 201 });
+  }),
+
+  http.delete('/v1/admin/audit-retention/:policy_id', ({ params }) => {
+    const id = String(params.policy_id);
+    const idx = __mswRetentionPolicies.findIndex((p) => p.policy_id === id);
+    if (idx === -1) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_policy', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    __mswRetentionPolicies.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
 ];
+
+// M6.2 — Audit Trail: in-memory state for evidence packages + retention.
+// Resettable so tests can start clean.
+type MswEvidencePackage = {
+  package_id: string;
+  tenant_id: string;
+  generated_at: string;
+  generated_by: string;
+  filters: Record<string, unknown>;
+  event_count: number;
+  size_bytes: number;
+  integrity: {
+    chain_verified: boolean;
+    chain_last_hash: string;
+    first_event_hash: string | null;
+    last_event_hash: string | null;
+  };
+  events: ReturnType<typeof __mswAuditEvents>;
+};
+const __mswEvidencePackages: MswEvidencePackage[] = [];
+let __mswEvidenceSeq = 0;
+
+type MswRetentionPolicy = {
+  policy_id: string;
+  tenant_id: string;
+  scope: string;
+  strategy: string;
+  retention_days: number | null;
+  max_events: number | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+};
+const __mswRetentionPolicies: MswRetentionPolicy[] = [];
+
+export function __resetMswM62() {
+  __mswEvidencePackages.length = 0;
+  __mswEvidenceSeq = 0;
+  __mswRetentionPolicies.length = 0;
+}
 // Module 1.5 — Anomaly Detection handlers are appended after declaration
 // further down the file. The append happens at module-eval time, so
 // MSW's handler array contains them by the time the worker reads it.
