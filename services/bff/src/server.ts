@@ -36322,17 +36322,30 @@ export function makeApp(deps: AppDeps = {}) {
             ? (raw as { body: unknown }).body
             : raw;
         const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        return res.status(201).json(
-          wrapResponse(
-            createWorkflowTemplate(
-              req.tenant!.tenant_id,
-              inner as Parameters<typeof import('./workflows_templates').createWorkflowTemplate>[1],
-              actor,
-              now(),
-            ),
-            ctx,
-          ),
+        const created = createWorkflowTemplate(
+          req.tenant!.tenant_id,
+          inner as Parameters<typeof import('./workflows_templates').createWorkflowTemplate>[1],
+          actor,
+          now(),
         );
+        // M5.4 — audit fan-out (cross-cutting #6).
+        try {
+          const fourEyes = created.steps.filter((s) => !!s.requires_4_eyes).map((s) => s.step_order);
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor, actor_role: 'admin',
+              action: 'workflow.create', resource_type: 'config', resource_id: created.template_id,
+              outcome: 'success', severity: 'info',
+              metadata: {
+                name: created.name, domain: created.domain, step_count: created.steps.length,
+                four_eyes_step_orders: fourEyes,
+              },
+            },
+            now(),
+          );
+        } catch { /* swallow */ }
+        return res.status(201).json(wrapResponse(created, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code ?? 'invalid_input';
         const ews = code === 'invalid_domain' ? 'EWS_400_invalid_domain'
@@ -36365,18 +36378,37 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       try {
-        const { updateWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+        const { updateWorkflowTemplate, getWorkflowTemplate } =
+          require('./workflows_templates') as typeof import('./workflows_templates');
         const raw = req.body as { header?: unknown; body?: unknown } | unknown;
         const inner =
           raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
             ? (raw as { body: unknown }).body
             : raw;
-        return res.json(
-          wrapResponse(
-            updateWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id, inner as Record<string, unknown>, now()),
-            ctx,
-          ),
+        const before = getWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
+        const updated = updateWorkflowTemplate(
+          req.tenant!.tenant_id, req.params.template_id, inner as Record<string, unknown>, now(),
         );
+        // M5.4 — audit fan-out.
+        try {
+          const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+          const fourEyes = updated.steps.filter((s) => !!s.requires_4_eyes).map((s) => s.step_order);
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor, actor_role: 'admin',
+              action: 'workflow.update', resource_type: 'config', resource_id: updated.template_id,
+              outcome: 'success', severity: 'info',
+              metadata: {
+                previous: before ? { name: before.name, step_count: before.steps.length } : null,
+                current: { name: updated.name, step_count: updated.steps.length },
+                four_eyes_step_orders: fourEyes,
+              },
+            },
+            now(),
+          );
+        } catch { /* swallow */ }
+        return res.json(wrapResponse(updated, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code ?? 'invalid_input';
         const httpStatus = code === 'unknown_template' ? 404 : 400;
@@ -36395,10 +36427,28 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('audit:read'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const { deleteWorkflowTemplate } = require('./workflows_templates') as typeof import('./workflows_templates');
+      const { deleteWorkflowTemplate, getWorkflowTemplate } =
+        require('./workflows_templates') as typeof import('./workflows_templates');
+      const before = getWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
       const ok = deleteWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
       if (!ok)
         return res.status(404).json(wrapError({ code: 'EWS_404_unknown_template', message: `unknown ${req.params.template_id}`, severity: 'MEDIUM' }, ctx));
+      // M5.4 — audit fan-out.
+      try {
+        const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor, actor_role: 'admin',
+            action: 'workflow.delete', resource_type: 'config', resource_id: req.params.template_id,
+            outcome: 'success', severity: 'warning',
+            metadata: before
+              ? { name: before.name, domain: before.domain, step_count: before.steps.length }
+              : { name: null },
+          },
+          now(),
+        );
+      } catch { /* swallow */ }
       return res.status(204).end();
     },
   );
@@ -36418,9 +36468,26 @@ export function makeApp(deps: AppDeps = {}) {
             : raw;
         const newName = (inner as { name?: string })?.name ?? '';
         const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-        return res.status(201).json(
-          wrapResponse(cloneWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id, newName, actor, now()), ctx),
+        const cloned = cloneWorkflowTemplate(
+          req.tenant!.tenant_id, req.params.template_id, newName, actor, now(),
         );
+        // M5.4 — audit fan-out.
+        try {
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor, actor_role: 'admin',
+              action: 'workflow.clone', resource_type: 'config', resource_id: cloned.template_id,
+              outcome: 'success', severity: 'info',
+              metadata: {
+                cloned_from: req.params.template_id,
+                name: cloned.name, domain: cloned.domain, step_count: cloned.steps.length,
+              },
+            },
+            now(),
+          );
+        } catch { /* swallow */ }
+        return res.status(201).json(wrapResponse(cloned, ctx));
       } catch (e) {
         const code = (e as { code?: string }).code ?? 'invalid_input';
         const httpStatus = code === 'unknown_template' ? 404 : 400;
@@ -36428,6 +36495,34 @@ export function makeApp(deps: AppDeps = {}) {
         const msg = e instanceof Error ? e.message : 'clone_failed';
         return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
       }
+    },
+  );
+
+  // M5.4 — Workflows: stage-routing derivation view (spec acceptance
+  // surface: "a 4-eyes stage automatically routes to the configured
+  // role pool"). Pure projection — no mutation, no audit.
+  app.get(
+    '/v1/workflows/templates/:template_id/routing',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { getWorkflowTemplate, deriveWorkflowRouting } =
+        require('./workflows_templates') as typeof import('./workflows_templates');
+      const tpl = getWorkflowTemplate(req.tenant!.tenant_id, req.params.template_id);
+      if (!tpl)
+        return res.status(404).json(wrapError({
+          code: 'EWS_404_unknown_template',
+          message: `unknown ${req.params.template_id}`,
+          severity: 'MEDIUM',
+        }, ctx));
+      const stages = deriveWorkflowRouting(tpl);
+      return res.json(wrapResponse({
+        template_id: tpl.template_id,
+        name: tpl.name,
+        domain: tpl.domain,
+        stages,
+      }, ctx));
     },
   );
 

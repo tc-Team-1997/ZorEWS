@@ -10866,3 +10866,245 @@ const __mswFraudHandlers = [
 ];
 
 handlers.push(...__mswFraudHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
+// M5.4 — Workflows handlers (additive — appended AFTER pushlist
+// declarations so they are picked up at module load)
+// ──────────────────────────────────────────────────────────────────────
+
+interface MswWorkflowStep {
+  step_order: number;
+  name: string;
+  description: string;
+  required_role: string;
+  expected_duration_hours: number;
+  optional: boolean;
+  requires_4_eyes?: boolean;
+  approver_pool?: string[];
+}
+
+interface MswWorkflowTemplate {
+  template_id: string;
+  tenant_id: string;
+  name: string;
+  domain: string;
+  description: string;
+  steps: MswWorkflowStep[];
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+const __mswWorkflows = new Map<string, MswWorkflowTemplate>();
+let __mswWorkflowSeq = 0;
+
+function __mswSeedWorkflows() {
+  if (__mswWorkflows.size > 0) return;
+  __mswWorkflowSeq++;
+  const t1: MswWorkflowTemplate = {
+    template_id: `wft-BANK_DEMO-${String(__mswWorkflowSeq).padStart(5, '0')}`,
+    tenant_id: 'BANK_DEMO',
+    name: 'Stress-test approval workflow',
+    domain: 'stress_test',
+    description: 'RBI Form-K + IRDAI solvency stress approval chain',
+    steps: [
+      {
+        step_order: 1, name: 'Author drafts shock vector',
+        description: 'Risk analyst configures GDP/rate/FX shocks',
+        required_role: 'risk_analyst', expected_duration_hours: 8, optional: false,
+      },
+      {
+        step_order: 2, name: 'Maker submits + Checker approves (4-eyes)',
+        description: 'Two distinct supervisors must independently approve',
+        required_role: 'supervisor', expected_duration_hours: 4, optional: false,
+        requires_4_eyes: true,
+        approver_pool: ['supervisor', 'head_of_risk', 'compliance_officer'],
+      },
+      {
+        step_order: 3, name: 'CRO sign-off',
+        description: 'Single sign-off by Chief Risk Officer',
+        required_role: 'head_of_risk', expected_duration_hours: 2, optional: false,
+      },
+    ],
+    is_default: false,
+    created_at: '2026-05-20T10:00:00.000Z',
+    updated_at: '2026-05-20T10:00:00.000Z',
+    created_by: 'alice.admin',
+  };
+  __mswWorkflows.set(t1.template_id, t1);
+  __mswWorkflowSeq++;
+  const t2: MswWorkflowTemplate = {
+    template_id: `wft-BANK_DEMO-${String(__mswWorkflowSeq).padStart(5, '0')}`,
+    tenant_id: 'BANK_DEMO',
+    name: 'KYC onboarding review',
+    domain: 'kyc_onboarding',
+    description: 'New corporate onboarding KYC + AML checks',
+    steps: [
+      {
+        step_order: 1, name: 'KYC analyst collects documents',
+        description: '', required_role: 'kyc_analyst',
+        expected_duration_hours: 24, optional: false,
+      },
+      {
+        step_order: 2, name: 'Compliance officer reviews',
+        description: '', required_role: 'compliance_officer',
+        expected_duration_hours: 8, optional: false,
+      },
+    ],
+    is_default: true,
+    created_at: '2026-05-21T10:00:00.000Z',
+    updated_at: '2026-05-21T10:00:00.000Z',
+    created_by: 'alice.admin',
+  };
+  __mswWorkflows.set(t2.template_id, t2);
+}
+
+function __mswDeriveRouting(steps: MswWorkflowStep[]) {
+  return steps.map((s) => {
+    const req4 = !!s.requires_4_eyes;
+    const pool = (req4 ? (s.approver_pool ?? [s.required_role]) : [s.required_role]).slice();
+    pool.sort((a, b) => a.localeCompare(b));
+    return {
+      step_order: s.step_order,
+      step_name: s.name,
+      strategy: req4 ? 'four_eyes' : 'single',
+      pool,
+      requires_distinct_actors: req4,
+    };
+  });
+}
+
+export function __resetMswWorkflows() {
+  __mswWorkflows.clear();
+  __mswWorkflowSeq = 0;
+}
+
+const __mswWorkflowHandlers = [
+  http.get('/v1/workflows/templates', ({ request }) => {
+    __mswSeedWorkflows();
+    const url = new URL(request.url);
+    const domain = url.searchParams.get('domain');
+    const templates = Array.from(__mswWorkflows.values())
+      .filter((t) => !domain || t.domain === domain)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return HttpResponse.json(envelope({ templates }));
+  }),
+  http.post('/v1/workflows/templates', async ({ request }) => {
+    __mswSeedWorkflows();
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    __mswWorkflowSeq++;
+    const id = `wft-BANK_DEMO-${String(__mswWorkflowSeq).padStart(5, '0')}`;
+    const t: MswWorkflowTemplate = {
+      template_id: id,
+      tenant_id: 'BANK_DEMO',
+      name: String(inner.name ?? 'Untitled'),
+      domain: String(inner.domain ?? 'other'),
+      description: String(inner.description ?? ''),
+      steps: ((inner.steps as MswWorkflowStep[]) ?? []).map((s) => ({ ...s })),
+      is_default: !!inner.is_default,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      created_by: 'alice.admin',
+    };
+    __mswWorkflows.set(id, t);
+    return HttpResponse.json(envelope(t), { status: 201 });
+  }),
+  http.get('/v1/workflows/templates/:template_id', ({ params }) => {
+    __mswSeedWorkflows();
+    const id = String(params.template_id);
+    // Resolve /routing collision — handled below; this fires only for
+    // bare /:template_id since MSW matches static segments first.
+    if (id === 'routing') return HttpResponse.json(envelope({}));
+    const t = __mswWorkflows.get(id);
+    if (!t)
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_template', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    return HttpResponse.json(envelope(t));
+  }),
+  http.get('/v1/workflows/templates/:template_id/routing', ({ params }) => {
+    __mswSeedWorkflows();
+    const id = String(params.template_id);
+    const t = __mswWorkflows.get(id);
+    if (!t)
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_template', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    return HttpResponse.json(envelope({
+      template_id: t.template_id,
+      name: t.name,
+      domain: t.domain,
+      stages: __mswDeriveRouting(t.steps),
+    }));
+  }),
+  http.patch('/v1/workflows/templates/:template_id', async ({ params, request }) => {
+    __mswSeedWorkflows();
+    const id = String(params.template_id);
+    const t = __mswWorkflows.get(id);
+    if (!t)
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_template', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    const raw = (await request.json()) as Record<string, unknown>;
+    const patch =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    if (patch.name !== undefined) t.name = String(patch.name);
+    if (patch.description !== undefined) t.description = String(patch.description);
+    if (patch.steps !== undefined) t.steps = (patch.steps as MswWorkflowStep[]).map((s) => ({ ...s }));
+    if (patch.is_default !== undefined) t.is_default = !!patch.is_default;
+    t.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(t));
+  }),
+  http.delete('/v1/workflows/templates/:template_id', ({ params }) => {
+    __mswSeedWorkflows();
+    const id = String(params.template_id);
+    if (!__mswWorkflows.has(id))
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_template', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    __mswWorkflows.delete(id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('/v1/workflows/templates/:template_id/clone', async ({ params, request }) => {
+    __mswSeedWorkflows();
+    const id = String(params.template_id);
+    const src = __mswWorkflows.get(id);
+    if (!src)
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_template', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    __mswWorkflowSeq++;
+    const newId = `wft-BANK_DEMO-${String(__mswWorkflowSeq).padStart(5, '0')}`;
+    const clone: MswWorkflowTemplate = {
+      ...src,
+      template_id: newId,
+      name: String(inner.name ?? `${src.name} (copy)`),
+      description: `Cloned from ${src.name}: ${src.description}`,
+      is_default: false,
+      steps: src.steps.map((s) => ({ ...s })),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    __mswWorkflows.set(newId, clone);
+    return HttpResponse.json(envelope(clone), { status: 201 });
+  }),
+];
+
+handlers.push(...__mswWorkflowHandlers);

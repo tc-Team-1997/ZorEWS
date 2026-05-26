@@ -38,6 +38,7 @@ import { ExplainabilityPage } from '@/modules/ai/ExplainabilityPage';
 import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RulesEnginePage } from '@/modules/rules/RulesEnginePage';
 import { ThresholdsLimitsPage } from '@/modules/admin/ThresholdsLimitsPage';
+import { WorkflowsPage } from '@/modules/admin/WorkflowsPage';
 import { NpaPredictionPage } from '@/modules/banking/NpaPredictionPage';
 import { SmaClassificationPage } from '@/modules/banking/SmaClassificationPage';
 import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
@@ -131,6 +132,7 @@ export function App() {
             <Route path="admin/master-setup" element={<MasterSetupPage />} />
             <Route path="rules/engine" element={<RulesEnginePage />} />
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />
+            <Route path="admin/workflows" element={<WorkflowsPage />} />
             <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
             <Route path="banking/sma" element={<SmaClassificationPage />} />
             <Route path="banking/sectors" element={<SectorWatchPage />} />

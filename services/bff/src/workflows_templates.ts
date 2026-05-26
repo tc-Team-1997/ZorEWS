@@ -29,6 +29,14 @@ export interface WorkflowStep {
   required_role: string;
   expected_duration_hours: number;
   optional: boolean;
+  // M5.4 — Workflows: 4-eyes gate on this stage.
+  // When `requires_4_eyes=true`, this stage must be routed to TWO
+  // different operators (maker + checker — must not be the same person)
+  // drawn from `approver_pool`. The pool falls back to `[required_role]`
+  // when not explicitly set, so existing templates pre-M5.4 keep
+  // working without migration.
+  requires_4_eyes?: boolean;
+  approver_pool?: string[];
 }
 
 export interface WorkflowTemplate {
@@ -79,6 +87,30 @@ function validateSteps(steps: unknown): WorkflowStep[] {
       throw new WorkflowTemplateError('invalid_step', 'required_role required');
     if (typeof so.expected_duration_hours !== 'number' || !Number.isFinite(so.expected_duration_hours) || so.expected_duration_hours <= 0)
       throw new WorkflowTemplateError('invalid_step', 'expected_duration_hours must be positive finite');
+    // M5.4 — Workflows: validate 4-eyes + approver_pool when present.
+    let approver_pool: string[] | undefined;
+    if (so.approver_pool !== undefined) {
+      if (!Array.isArray(so.approver_pool))
+        throw new WorkflowTemplateError('invalid_step', 'approver_pool must be array');
+      const cleaned: string[] = [];
+      for (const r of so.approver_pool) {
+        if (typeof r !== 'string' || !r.trim())
+          throw new WorkflowTemplateError('invalid_step', 'approver_pool entries must be non-empty strings');
+        if (!cleaned.includes(r)) cleaned.push(r);
+      }
+      approver_pool = cleaned;
+    }
+    const requires_4_eyes = !!so.requires_4_eyes;
+    // A 4-eyes stage needs at least 2 distinct operators — enforce that
+    // the resolved pool (explicit or fallback to required_role) is
+    // expressive enough. Single-role pool means everyone in that role
+    // can act as either maker or checker, which is acceptable; an
+    // EMPTY pool would prevent any routing at all.
+    if (requires_4_eyes) {
+      const resolved = approver_pool ?? [so.required_role];
+      if (resolved.length === 0)
+        throw new WorkflowTemplateError('invalid_step', '4-eyes stage requires non-empty approver_pool');
+    }
     out.push({
       step_order: so.step_order,
       name: so.name,
@@ -86,6 +118,8 @@ function validateSteps(steps: unknown): WorkflowStep[] {
       required_role: so.required_role,
       expected_duration_hours: so.expected_duration_hours,
       optional: !!so.optional,
+      requires_4_eyes,
+      approver_pool,
     });
   }
   out.sort((a, b) => a.step_order - b.step_order);
@@ -196,4 +230,47 @@ export function cloneWorkflowTemplate(
 export function _resetWorkflowTemplateStore() {
   _store.clear();
   _seq = 0;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// M5.4 — Workflows: stage routing derivation.
+//
+// Spec acceptance: "A workflow with a 4-eyes stage automatically routes
+// to the configured role pool." Given a stage definition, return the
+// canonical {strategy, pool} that the case/workflow engine should use
+// when assigning the stage to operators.
+//
+//   - Non-4-eyes stage  → strategy='single', pool=[required_role]
+//   - 4-eyes stage      → strategy='four_eyes', pool=approver_pool ??
+//                         [required_role]
+//
+// The pool is sorted asc for deterministic output (test invariants).
+// ──────────────────────────────────────────────────────────────────────
+export type StageRoutingStrategy = 'single' | 'four_eyes';
+
+export interface StageRouting {
+  step_order: number;
+  step_name: string;
+  strategy: StageRoutingStrategy;
+  pool: string[];
+  requires_distinct_actors: boolean;
+}
+
+export function deriveStageRouting(step: WorkflowStep): StageRouting {
+  const requires_4_eyes = !!step.requires_4_eyes;
+  const pool = requires_4_eyes
+    ? [...(step.approver_pool ?? [step.required_role])]
+    : [step.required_role];
+  pool.sort((a, b) => a.localeCompare(b));
+  return {
+    step_order: step.step_order,
+    step_name: step.name,
+    strategy: requires_4_eyes ? 'four_eyes' : 'single',
+    pool,
+    requires_distinct_actors: requires_4_eyes,
+  };
+}
+
+export function deriveWorkflowRouting(tpl: WorkflowTemplate): StageRouting[] {
+  return tpl.steps.map(deriveStageRouting);
 }

@@ -1870,6 +1870,48 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // M5.4 — Workflows. All 5 spec routes exist (CRUD + clone + spec
+  // §3.10 cases/states/graph alias is M9.7); the page also reads the
+  // derived /routing view that surfaces the 4-eyes role pool.
+  workflowsList: (domain?: string) => {
+    const qs = domain ? `?domain=${encodeURIComponent(domain)}` : '';
+    return http
+      .get<EnvelopeBody<{ templates: WorkflowTemplate[] }>>(`/v1/workflows/templates${qs}`)
+      .then((r) => r.data);
+  },
+  workflowGet: (template_id: string) =>
+    http
+      .get<EnvelopeBody<WorkflowTemplate>>(
+        `/v1/workflows/templates/${encodeURIComponent(template_id)}`,
+      )
+      .then((r) => r.data),
+  workflowCreate: (body: WorkflowTemplateCreateInput) =>
+    http
+      .post<EnvelopeBody<WorkflowTemplate>>('/v1/workflows/templates', body)
+      .then((r) => r.data),
+  workflowUpdate: (template_id: string, patch: Partial<WorkflowTemplateCreateInput>) =>
+    http
+      .patch<EnvelopeBody<WorkflowTemplate>>(
+        `/v1/workflows/templates/${encodeURIComponent(template_id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+  workflowDelete: (template_id: string) =>
+    http.delete(`/v1/workflows/templates/${encodeURIComponent(template_id)}`),
+  workflowClone: (template_id: string, name: string) =>
+    http
+      .post<EnvelopeBody<WorkflowTemplate>>(
+        `/v1/workflows/templates/${encodeURIComponent(template_id)}/clone`,
+        { name },
+      )
+      .then((r) => r.data),
+  workflowRouting: (template_id: string) =>
+    http
+      .get<EnvelopeBody<WorkflowRoutingEnvelope>>(
+        `/v1/workflows/templates/${encodeURIComponent(template_id)}/routing`,
+      )
+      .then((r) => r.data),
+
   // M5.2 — Rules Engine. The 8 spec routes all already exist; the page
   // re-uses them via these typed wrappers.
   ruleTemplateCategories: () =>
@@ -3070,6 +3112,70 @@ export interface ThresholdAuditEvent {
     default_value?: { yellow_at: number; orange_at: number; red_at: number } | null;
     source?: string;
   };
+}
+
+// M5.4 — Workflows types (mirror services/bff/src/workflows_templates.ts).
+export type WorkflowDomain =
+  | 'borrower_escalation'
+  | 'kyc_onboarding'
+  | 'annual_review'
+  | 'stress_test'
+  | 'covenant_review'
+  | 'recovery'
+  | 'other';
+
+export const ALL_WORKFLOW_DOMAINS: readonly WorkflowDomain[] = [
+  'borrower_escalation', 'kyc_onboarding', 'annual_review',
+  'stress_test', 'covenant_review', 'recovery', 'other',
+];
+
+export interface WorkflowStep {
+  step_order: number;
+  name: string;
+  description: string;
+  required_role: string;
+  expected_duration_hours: number;
+  optional: boolean;
+  requires_4_eyes?: boolean;
+  approver_pool?: string[];
+}
+
+export interface WorkflowTemplate {
+  template_id: string;
+  tenant_id: string;
+  name: string;
+  domain: WorkflowDomain;
+  description: string;
+  steps: WorkflowStep[];
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+export interface WorkflowTemplateCreateInput {
+  name: string;
+  domain: WorkflowDomain;
+  description?: string;
+  steps: WorkflowStep[];
+  is_default?: boolean;
+}
+
+export type StageRoutingStrategy = 'single' | 'four_eyes';
+
+export interface StageRouting {
+  step_order: number;
+  step_name: string;
+  strategy: StageRoutingStrategy;
+  pool: string[];
+  requires_distinct_actors: boolean;
+}
+
+export interface WorkflowRoutingEnvelope {
+  template_id: string;
+  name: string;
+  domain: WorkflowDomain;
+  stages: StageRouting[];
 }
 
 // M5.2 — Rules Engine types (mirror services/bff/src/rule_templates.ts +
