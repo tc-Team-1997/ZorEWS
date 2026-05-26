@@ -36876,7 +36876,30 @@ export function makeApp(deps: AppDeps = {}) {
     try {
       const { runTestCase } = require('./testing_hub') as typeof import('./testing_hub');
       const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-      return res.status(201).json(wrapResponse(runTestCase(req.tenant!.tenant_id, req.params.test_id, actor, now()), ctx));
+      const result = runTestCase(req.tenant!.tenant_id, req.params.test_id, actor, now());
+      // M6.3 — Testing Hub spec acceptance: "Results captured to Audit
+      // Trail". Best-effort fan-out — a failed audit write must NOT roll
+      // back the run. Severity bumps to 'warning' on fail/error so
+      // compliance dashboards can highlight failed test runs.
+      try {
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor, actor_role: 'admin',
+            action: 'testing.case.run', resource_type: 'system',
+            resource_id: result.test_id,
+            outcome: result.status === 'pass' ? 'success' : 'failure',
+            severity: result.status === 'pass' ? 'info' : 'warning',
+            metadata: {
+              run_id: result.run_id, status: result.status,
+              duration_ms: result.duration_ms, message: result.message,
+              triggered: 'manual',
+            },
+          },
+          now(),
+        );
+      } catch { /* swallow */ }
+      return res.status(201).json(wrapResponse(result, ctx));
     } catch (e) {
       const code = (e as { code?: string }).code ?? 'invalid_input';
       const httpStatus = code === 'unknown_test' ? 404 : code === 'test_disabled' ? 409 : 400;
@@ -36926,12 +36949,294 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
-      return res.json(
-        wrapResponse(
-          setTestSchedule(req.tenant!.tenant_id, inner as { enabled: boolean; cron_expression: string }, actor, now()),
-          ctx,
-        ),
-      );
+      const updated = setTestSchedule(req.tenant!.tenant_id, inner as { enabled: boolean; cron_expression: string }, actor, now());
+      // M6.3 — audit fan-out on schedule change
+      try {
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor, actor_role: 'admin',
+            action: 'testing.schedule.update', resource_type: 'system',
+            resource_id: 'testing-schedule',
+            outcome: 'success', severity: 'info',
+            metadata: { enabled: updated.enabled, cron_expression: updated.cron_expression },
+          },
+          now(),
+        );
+      } catch { /* swallow */ }
+      return res.json(wrapResponse(updated, ctx));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'schedule_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // M6.3 — Testing Hub spec routes
+  //
+  // The spec talks in terms of "test cases" + plural "schedules" + a
+  // /run-all endpoint. The existing routes (above) use "tests" /
+  // "schedule" — we keep them for backwards-compat with the SPA's
+  // existing wiring and add SPEC-COMPLIANT aliases here. Both surfaces
+  // share the SAME store functions in testing_hub.ts — no duplication.
+  // ──────────────────────────────────────────────────────────────────
+
+  // GET /v1/testing/cases  — spec alias for /tests
+  app.get('/v1/testing/cases', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { listTestCases, isTestTarget } = require('./testing_hub') as typeof import('./testing_hub');
+    const tt = req.query.target_type as string | undefined;
+    const cases = listTestCases(req.tenant!.tenant_id, {
+      target_type: tt && isTestTarget(tt) ? tt : undefined,
+      enabled_only: req.query.enabled_only === 'true',
+    });
+    return res.json(wrapResponse({ cases }, ctx));
+  });
+
+  // POST /v1/testing/cases  — spec alias for /tests (create)
+  app.post('/v1/testing/cases', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { createTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const tc = createTestCase(req.tenant!.tenant_id, inner as Parameters<typeof import('./testing_hub').createTestCase>[1], actor, now());
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.case.create', resource_type: 'system',
+          resource_id: tc.test_id,
+          outcome: 'success', severity: 'info',
+          metadata: { name: tc.name, target_type: tc.target_type, target_id: tc.target_id },
+        }, now());
+      } catch { /* swallow */ }
+      return res.status(201).json(wrapResponse(tc, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const msg = e instanceof Error ? e.message : 'create_failed';
+      return res.status(400).json(wrapError({ code: `EWS_400_${code}`, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // GET /v1/testing/cases/:id  — spec alias
+  app.get('/v1/testing/cases/:case_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+    const tc = getTestCase(req.tenant!.tenant_id, req.params.case_id);
+    if (!tc) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_case', message: `unknown ${req.params.case_id}`, severity: 'MEDIUM' }, ctx));
+    return res.json(wrapResponse(tc, ctx));
+  });
+
+  // PUT /v1/testing/cases/:id  — spec alias (update). The existing route
+  // uses PATCH; spec asks for PUT. We accept both for the same path.
+  app.put('/v1/testing/cases/:case_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updateTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const tc = updateTestCase(req.tenant!.tenant_id, req.params.case_id, inner as Parameters<typeof import('./testing_hub').updateTestCase>[2], now());
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.case.update', resource_type: 'system',
+          resource_id: tc.test_id,
+          outcome: 'success', severity: 'info',
+          metadata: { name: tc.name, enabled: tc.enabled },
+        }, now());
+      } catch { /* swallow */ }
+      return res.json(wrapResponse(tc, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_test' ? 404 : 400;
+      const ews = code === 'unknown_test' ? 'EWS_404_unknown_case' : `EWS_400_${code}`;
+      const msg = e instanceof Error ? e.message : 'update_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // DELETE /v1/testing/cases/:id  — spec alias
+  app.delete('/v1/testing/cases/:case_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { deleteTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+    const ok = deleteTestCase(req.tenant!.tenant_id, req.params.case_id);
+    if (!ok) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_case', message: `unknown ${req.params.case_id}`, severity: 'MEDIUM' }, ctx));
+    try {
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      auditTrailStore.record(req.tenant!.tenant_id, {
+        actor_username: actor, actor_role: 'admin',
+        action: 'testing.case.delete', resource_type: 'system',
+        resource_id: req.params.case_id,
+        outcome: 'success', severity: 'warning',
+      }, now());
+    } catch { /* swallow */ }
+    return res.status(204).end();
+  });
+
+  // POST /v1/testing/cases/:id/run  — spec alias (single-case run with audit)
+  app.post('/v1/testing/cases/:case_id/run', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { runTestCase } = require('./testing_hub') as typeof import('./testing_hub');
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const result = runTestCase(req.tenant!.tenant_id, req.params.case_id, actor, now());
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.case.run', resource_type: 'system',
+          resource_id: result.test_id,
+          outcome: result.status === 'pass' ? 'success' : 'failure',
+          severity: result.status === 'pass' ? 'info' : 'warning',
+          metadata: {
+            run_id: result.run_id, status: result.status,
+            duration_ms: result.duration_ms, triggered: 'manual',
+          },
+        }, now());
+      } catch { /* swallow */ }
+      return res.status(201).json(wrapResponse(result, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_test' ? 404 : code === 'test_disabled' ? 409 : 400;
+      const ews = code === 'unknown_test' ? 'EWS_404_unknown_case'
+        : code === 'test_disabled' ? 'EWS_409_case_disabled'
+        : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'run_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // POST /v1/testing/run-all  — NEW spec route
+  //
+  // Spec acceptance: "A scheduled auto-run produces a results report
+  // and writes per-case events to Audit Trail." This endpoint fires
+  // the run-all (which the auto-scheduler will eventually call) and
+  // writes ONE audit event per case in the report. Triggered=auto for
+  // calls from the scheduler; triggered=manual otherwise.
+  app.post('/v1/testing/run-all', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { runAllTestCases } = require('./testing_hub') as typeof import('./testing_hub');
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      // SPA passes triggered='auto' when the scheduler fires; default
+      // 'manual'. Either way each individual case writes its own audit
+      // event below + a roll-up event for the full report.
+      const triggered = (inner && typeof inner === 'object' && (inner as { triggered?: string }).triggered === 'auto') ? 'auto' : 'manual';
+      const report = runAllTestCases(req.tenant!.tenant_id, actor, now());
+
+      // Spec acceptance: per-case audit events
+      for (const run of report.runs) {
+        try {
+          auditTrailStore.record(req.tenant!.tenant_id, {
+            actor_username: actor, actor_role: 'admin',
+            action: 'testing.case.run', resource_type: 'system',
+            resource_id: run.test_id,
+            outcome: run.status === 'pass' ? 'success' : 'failure',
+            severity: run.status === 'pass' ? 'info' : 'warning',
+            metadata: {
+              run_id: run.run_id, status: run.status,
+              duration_ms: run.duration_ms,
+              triggered, report_id: report.report_id,
+            },
+          }, now());
+        } catch { /* swallow per-case */ }
+      }
+      // + 1 rollup event so the audit feed shows the report itself
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.run_all', resource_type: 'system',
+          resource_id: report.report_id,
+          outcome: report.total_fail + report.total_error === 0 ? 'success' : 'failure',
+          severity: report.total_fail + report.total_error === 0 ? 'info' : 'warning',
+          metadata: {
+            triggered,
+            total_tests: report.total_tests,
+            pass: report.total_pass, fail: report.total_fail,
+            error: report.total_error, skipped: report.total_skipped,
+            duration_ms: report.duration_ms,
+          },
+        }, now());
+      } catch { /* swallow rollup */ }
+      return res.status(201).json(wrapResponse(report, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const msg = e instanceof Error ? e.message : 'run_all_failed';
+      return res.status(400).json(wrapError({ code: `EWS_400_${code}`, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // POST /v1/testing/bulk-upload  — spec alias of /tests/bulk-upload
+  app.post('/v1/testing/bulk-upload', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { bulkUploadTests } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const csv = String((inner as { csv?: string })?.csv ?? '');
+      if (!csv) {
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: 'csv body required', severity: 'MEDIUM' }, ctx));
+      }
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const result = bulkUploadTests(req.tenant!.tenant_id, csv, actor, now());
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.bulk_upload', resource_type: 'system',
+          resource_id: 'testing-cases',
+          outcome: result.created_count > 0 ? 'success' : 'failure',
+          severity: 'info',
+          metadata: {
+            created: result.created_count,
+            skipped: result.skipped_count,
+          },
+        }, now());
+      } catch { /* swallow */ }
+      return res.json(wrapResponse(result, ctx));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'bulk_upload_failed';
+      return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // GET /v1/testing/schedules  — spec plural alias
+  app.get('/v1/testing/schedules', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { getTestSchedule } = require('./testing_hub') as typeof import('./testing_hub');
+    // Return as a single-item array since the spec wires plural CRUD
+    // but the testing_hub.ts store is single-schedule-per-tenant. The
+    // schedule shape is back-compat with the singular endpoint.
+    const sched = getTestSchedule(req.tenant!.tenant_id);
+    return res.json(wrapResponse({ schedules: [sched] }, ctx));
+  });
+
+  // POST /v1/testing/schedules  — spec plural alias for set
+  app.post('/v1/testing/schedules', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { setTestSchedule } = require('./testing_hub') as typeof import('./testing_hub');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const updated = setTestSchedule(req.tenant!.tenant_id, inner as { enabled: boolean; cron_expression: string }, actor, now());
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'testing.schedule.update', resource_type: 'system',
+          resource_id: 'testing-schedule',
+          outcome: 'success', severity: 'info',
+          metadata: { enabled: updated.enabled, cron_expression: updated.cron_expression },
+        }, now());
+      } catch { /* swallow */ }
+      return res.status(201).json(wrapResponse(updated, ctx));
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'schedule_failed';
       return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));

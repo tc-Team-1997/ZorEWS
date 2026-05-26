@@ -1684,6 +1684,57 @@ export const api = {
   auditRetentionDelete: (policy_id: string) =>
     http.delete(`/v1/admin/audit-retention/${encodeURIComponent(policy_id)}`),
 
+  // M6.3 — Testing Hub
+  testingCasesList: (target_type?: string) => {
+    const qs = target_type ? `?target_type=${encodeURIComponent(target_type)}` : '';
+    return http
+      .get<EnvelopeBody<{ cases: TestingCase[] }>>(`/v1/testing/cases${qs}`)
+      .then((r) => r.data);
+  },
+  testingCaseGet: (case_id: string) =>
+    http
+      .get<EnvelopeBody<TestingCase>>(`/v1/testing/cases/${encodeURIComponent(case_id)}`)
+      .then((r) => r.data),
+  testingCaseCreate: (body: TestingCaseCreateInput) =>
+    http
+      .post<EnvelopeBody<TestingCase>>('/v1/testing/cases', body)
+      .then((r) => r.data),
+  testingCaseUpdate: (case_id: string, patch: Partial<TestingCaseCreateInput> & { enabled?: boolean }) =>
+    http
+      .put<EnvelopeBody<TestingCase>>(`/v1/testing/cases/${encodeURIComponent(case_id)}`, patch)
+      .then((r) => r.data),
+  testingCaseDelete: (case_id: string) =>
+    http.delete(`/v1/testing/cases/${encodeURIComponent(case_id)}`),
+  testingCaseRun: (case_id: string) =>
+    http
+      .post<EnvelopeBody<TestingRun>>(`/v1/testing/cases/${encodeURIComponent(case_id)}/run`, {})
+      .then((r) => r.data),
+  testingRunAll: (triggered: 'manual' | 'auto' = 'manual') =>
+    http
+      .post<EnvelopeBody<TestingRunAllReport>>('/v1/testing/run-all', { triggered })
+      .then((r) => r.data),
+  testingBulkUpload: (csv: string) =>
+    http
+      .post<EnvelopeBody<TestingBulkUploadResult>>('/v1/testing/bulk-upload', { csv })
+      .then((r) => r.data),
+  testingRuns: (params: { test_id?: string; status?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.test_id) qs.set('test_id', params.test_id);
+    if (params.status) qs.set('status', params.status);
+    const q = qs.toString();
+    return http
+      .get<EnvelopeBody<{ runs: TestingRun[] }>>(`/v1/testing/runs${q ? `?${q}` : ''}`)
+      .then((r) => r.data);
+  },
+  testingSchedules: () =>
+    http
+      .get<EnvelopeBody<{ schedules: TestingSchedule[] }>>('/v1/testing/schedules')
+      .then((r) => r.data),
+  testingScheduleSet: (body: { enabled: boolean; cron_expression: string }) =>
+    http
+      .post<EnvelopeBody<TestingSchedule>>('/v1/testing/schedules', body)
+      .then((r) => r.data),
+
   aiExplanation: (prediction_id: string) =>
     http
       .get<EnvelopeBody<PredictionExplanation>>(
@@ -3107,6 +3158,87 @@ export interface AuditRetentionPolicyCreateInput {
   max_events?: number | null;
   notes?: string | null;
   active?: boolean;
+}
+
+// M6.3 — Testing Hub types
+export type TestingTarget =
+  | 'rule'
+  | 'indicator'
+  | 'webhook'
+  | 'pipeline'
+  | 'connector'
+  | 'workflow';
+
+export const ALL_TESTING_TARGETS: readonly TestingTarget[] = [
+  'rule', 'indicator', 'webhook', 'pipeline', 'connector', 'workflow',
+];
+
+export type TestingStatus = 'pass' | 'fail' | 'error' | 'pending' | 'skipped';
+
+export interface TestingCase {
+  test_id: string;
+  tenant_id: string;
+  name: string;
+  target_type: TestingTarget;
+  target_id: string;
+  description: string;
+  inputs: Record<string, unknown>;
+  expected: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+export interface TestingCaseCreateInput {
+  name: string;
+  target_type: TestingTarget;
+  target_id: string;
+  description?: string;
+  inputs?: Record<string, unknown>;
+  expected?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface TestingRun {
+  run_id: string;
+  test_id: string;
+  tenant_id: string;
+  status: TestingStatus;
+  duration_ms: number;
+  started_at: string;
+  finished_at: string | null;
+  triggered_by: string;
+  message: string | null;
+  diff?: { key: string; expected: unknown; actual: unknown }[];
+}
+
+export interface TestingRunAllReport {
+  report_id: string;
+  tenant_id: string;
+  triggered_by: string;
+  triggered_at: string;
+  total_tests: number;
+  total_pass: number;
+  total_fail: number;
+  total_error: number;
+  total_skipped: number;
+  duration_ms: number;
+  runs: TestingRun[];
+}
+
+export interface TestingBulkUploadResult {
+  created_count: number;
+  skipped_count: number;
+  rows: { line: number; status: 'created' | 'skipped'; reason?: string }[];
+}
+
+export interface TestingSchedule {
+  tenant_id: string;
+  enabled: boolean;
+  cron_expression: string;
+  updated_at: string;
+  updated_by: string;
 }
 
 // G3 — Portfolio Insights row (Monday Playbook H2)

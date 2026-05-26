@@ -233,6 +233,85 @@ export function runTestCase(tenant_id: string, test_id: string, triggered_by: st
   return run;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// M6.3 — Testing Hub: run-all + report
+//
+// Spec acceptance: "A scheduled auto-run produces a results report and
+// writes per-case events to Audit Trail." This function executes EVERY
+// enabled test case in the tenant + assembles a summary report. The
+// audit fan-out happens at the route layer (we don't want this module
+// to know about the audit store directly — it stays a pure-data store).
+// ──────────────────────────────────────────────────────────────────────
+export interface TestRunAllReport {
+  report_id: string;
+  tenant_id: string;
+  triggered_by: string;
+  triggered_at: string;
+  total_tests: number;
+  total_pass: number;
+  total_fail: number;
+  total_error: number;
+  total_skipped: number;
+  duration_ms: number;
+  runs: TestRun[];
+}
+
+export function runAllTestCases(
+  tenant_id: string,
+  triggered_by: string,
+  now: Date,
+): TestRunAllReport {
+  if (!tenant_id) throw new TestingHubError('invalid_input', 'tenant_id required');
+  if (!triggered_by) throw new TestingHubError('invalid_input', 'triggered_by required');
+  const enabled = listTestCases(tenant_id, { enabled_only: true });
+  const startMs = now.getTime();
+  const runs: TestRun[] = [];
+  for (const tc of enabled) {
+    try {
+      const r = runTestCase(tenant_id, tc.test_id, triggered_by, now);
+      runs.push(r);
+    } catch (e) {
+      // Should not happen since we filtered to enabled — but defensive
+      // skip rather than abort the run-all.
+      const errMsg = e instanceof Error ? e.message : String(e);
+      runs.push({
+        run_id: `tstrun-err-${tc.test_id}`,
+        test_id: tc.test_id,
+        tenant_id,
+        status: 'error',
+        duration_ms: 0,
+        started_at: now.toISOString(),
+        finished_at: now.toISOString(),
+        triggered_by,
+        message: errMsg,
+      });
+    }
+  }
+  const counts = { pass: 0, fail: 0, error: 0, skipped: 0 };
+  for (const r of runs) {
+    if (r.status === 'pass') counts.pass++;
+    else if (r.status === 'fail') counts.fail++;
+    else if (r.status === 'error') counts.error++;
+    else if (r.status === 'skipped') counts.skipped++;
+  }
+  _runAllSeq++;
+  return {
+    report_id: `tstrep-${tenant_id}-${now.toISOString().slice(0, 10).replace(/-/g, '')}-${String(_runAllSeq).padStart(5, '0')}`,
+    tenant_id,
+    triggered_by,
+    triggered_at: now.toISOString(),
+    total_tests: runs.length,
+    total_pass: counts.pass,
+    total_fail: counts.fail,
+    total_error: counts.error,
+    total_skipped: counts.skipped,
+    duration_ms: now.getTime() - startMs + runs.reduce((s, r) => s + r.duration_ms, 0),
+    runs,
+  };
+}
+
+let _runAllSeq = 0;
+
 export function listTestRuns(tenant_id: string, filter: { test_id?: string; status?: TestStatus } = {}): TestRun[] {
   if (!tenant_id) throw new TestingHubError('invalid_input', 'tenant_id required');
   const out: TestRun[] = [];
@@ -278,4 +357,5 @@ export function _resetTestingHubStore() {
   _schedules.clear();
   _testSeq = 0;
   _runSeq = 0;
+  _runAllSeq = 0;
 }

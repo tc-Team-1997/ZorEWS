@@ -11330,3 +11330,329 @@ const __mswWorkflowHandlers = [
 ];
 
 handlers.push(...__mswWorkflowHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
+// M6.3 — Testing Hub MSW handlers
+// ──────────────────────────────────────────────────────────────────────
+
+interface MswTestingCase {
+  test_id: string;
+  tenant_id: string;
+  name: string;
+  target_type: string;
+  target_id: string;
+  description: string;
+  inputs: Record<string, unknown>;
+  expected: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+interface MswTestingRun {
+  run_id: string;
+  test_id: string;
+  tenant_id: string;
+  status: string;
+  duration_ms: number;
+  started_at: string;
+  finished_at: string | null;
+  triggered_by: string;
+  message: string | null;
+}
+
+const __mswTestingCases = new Map<string, MswTestingCase>();
+const __mswTestingRuns = new Map<string, MswTestingRun>();
+let __mswTestingCaseSeq = 0;
+let __mswTestingRunSeq = 0;
+let __mswTestingReportSeq = 0;
+let __mswTestingSchedule = {
+  tenant_id: 'BANK_DEMO',
+  enabled: false,
+  cron_expression: '0 6 * * *',
+  updated_at: '',
+  updated_by: '',
+};
+
+function __mswTestingSeed() {
+  if (__mswTestingCases.size > 0) return;
+  // Two seed cases so the page isn't empty in dev mode
+  for (const c of [
+    {
+      name: 'RULE-001 fires on high DPD',
+      target_type: 'rule',
+      target_id: 'RULE-001',
+      description: 'High-DPD rule should fire CRITICAL when dpd > 90',
+      inputs: { dpd: 95 },
+      expected: { severity: 'CRITICAL', fired: true },
+    },
+    {
+      name: 'FIN-001 indicator computes utilization',
+      target_type: 'indicator',
+      target_id: 'FIN-001',
+      description: 'Utilization indicator stays in [0,1]',
+      inputs: { balance: 800_000, limit: 1_000_000 },
+      expected: { value: 0.8 },
+    },
+  ]) {
+    __mswTestingCaseSeq++;
+    const id = `tst-BANK_DEMO-${String(__mswTestingCaseSeq).padStart(6, '0')}`;
+    __mswTestingCases.set(id, {
+      test_id: id,
+      tenant_id: 'BANK_DEMO',
+      name: c.name,
+      target_type: c.target_type,
+      target_id: c.target_id,
+      description: c.description,
+      inputs: c.inputs,
+      expected: c.expected,
+      enabled: true,
+      created_at: '2026-05-20T10:00:00.000Z',
+      updated_at: '2026-05-20T10:00:00.000Z',
+      created_by: 'alice.admin',
+    });
+  }
+}
+
+function __mswTestingRunCase(tc: MswTestingCase, triggered_by: string): MswTestingRun {
+  __mswTestingRunSeq++;
+  // Deterministic stub: status hinges on a content hash so dev mode is stable
+  const hash = tc.test_id.charCodeAt(tc.test_id.length - 1) + new Date().getUTCDate();
+  const status = hash % 7 === 0 ? 'fail' : 'pass';
+  const run: MswTestingRun = {
+    run_id: `tstrun-BANK_DEMO-${String(__mswTestingRunSeq).padStart(5, '0')}`,
+    test_id: tc.test_id,
+    tenant_id: 'BANK_DEMO',
+    status,
+    duration_ms: 30 + Math.floor(Math.random() * 250),
+    started_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+    triggered_by,
+    message: status === 'pass' ? 'OK' : 'Expected output did not match',
+  };
+  __mswTestingRuns.set(run.run_id, run);
+  return run;
+}
+
+export function __resetMswM63() {
+  __mswTestingCases.clear();
+  __mswTestingRuns.clear();
+  __mswTestingCaseSeq = 0;
+  __mswTestingRunSeq = 0;
+  __mswTestingReportSeq = 0;
+  __mswTestingSchedule = {
+    tenant_id: 'BANK_DEMO',
+    enabled: false,
+    cron_expression: '0 6 * * *',
+    updated_at: '',
+    updated_by: '',
+  };
+}
+
+const __mswTestingHandlers = [
+  http.get('/v1/testing/cases', ({ request }) => {
+    __mswTestingSeed();
+    const url = new URL(request.url);
+    const target_type = url.searchParams.get('target_type');
+    const enabled_only = url.searchParams.get('enabled_only') === 'true';
+    const cases = Array.from(__mswTestingCases.values())
+      .filter((c) => !target_type || c.target_type === target_type)
+      .filter((c) => !enabled_only || c.enabled)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return HttpResponse.json(envelope({ cases }));
+  }),
+  http.post('/v1/testing/cases', async ({ request }) => {
+    __mswTestingSeed();
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    __mswTestingCaseSeq++;
+    const id = `tst-BANK_DEMO-${String(__mswTestingCaseSeq).padStart(6, '0')}`;
+    const tc: MswTestingCase = {
+      test_id: id,
+      tenant_id: 'BANK_DEMO',
+      name: String(inner.name ?? 'Untitled'),
+      target_type: String(inner.target_type ?? 'rule'),
+      target_id: String(inner.target_id ?? ''),
+      description: String(inner.description ?? ''),
+      inputs: (inner.inputs as Record<string, unknown>) ?? {},
+      expected: (inner.expected as Record<string, unknown>) ?? {},
+      enabled: inner.enabled !== false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      created_by: 'alice.admin',
+    };
+    __mswTestingCases.set(id, tc);
+    return HttpResponse.json(envelope(tc), { status: 201 });
+  }),
+  http.get('/v1/testing/cases/:case_id', ({ params }) => {
+    __mswTestingSeed();
+    const id = String(params.case_id);
+    const tc = __mswTestingCases.get(id);
+    if (!tc) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_case', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(tc));
+  }),
+  http.put('/v1/testing/cases/:case_id', async ({ params, request }) => {
+    __mswTestingSeed();
+    const id = String(params.case_id);
+    const tc = __mswTestingCases.get(id);
+    if (!tc) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_case', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    const raw = (await request.json()) as Record<string, unknown>;
+    const patch =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    if (patch.name !== undefined) tc.name = String(patch.name);
+    if (patch.description !== undefined) tc.description = String(patch.description);
+    if (patch.inputs !== undefined) tc.inputs = patch.inputs as Record<string, unknown>;
+    if (patch.expected !== undefined) tc.expected = patch.expected as Record<string, unknown>;
+    if (patch.enabled !== undefined) tc.enabled = !!patch.enabled;
+    tc.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(tc));
+  }),
+  http.delete('/v1/testing/cases/:case_id', ({ params }) => {
+    const id = String(params.case_id);
+    if (!__mswTestingCases.has(id)) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_case', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    __mswTestingCases.delete(id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('/v1/testing/cases/:case_id/run', ({ params }) => {
+    __mswTestingSeed();
+    const id = String(params.case_id);
+    const tc = __mswTestingCases.get(id);
+    if (!tc) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_case', `unknown ${id}`, 'MEDIUM'),
+        { status: 404 },
+      );
+    }
+    if (!tc.enabled) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_case_disabled', 'test is disabled', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const run = __mswTestingRunCase(tc, 'alice.admin');
+    return HttpResponse.json(envelope(run), { status: 201 });
+  }),
+  http.post('/v1/testing/run-all', () => {
+    __mswTestingSeed();
+    const enabled = Array.from(__mswTestingCases.values()).filter((c) => c.enabled);
+    const runs = enabled.map((tc) => __mswTestingRunCase(tc, 'alice.admin'));
+    const counts = { pass: 0, fail: 0, error: 0, skipped: 0 };
+    for (const r of runs) {
+      if (r.status === 'pass') counts.pass++;
+      else if (r.status === 'fail') counts.fail++;
+      else if (r.status === 'error') counts.error++;
+      else if (r.status === 'skipped') counts.skipped++;
+    }
+    __mswTestingReportSeq++;
+    return HttpResponse.json(
+      envelope({
+        report_id: `tstrep-BANK_DEMO-${String(__mswTestingReportSeq).padStart(5, '0')}`,
+        tenant_id: 'BANK_DEMO',
+        triggered_by: 'alice.admin',
+        triggered_at: new Date().toISOString(),
+        total_tests: runs.length,
+        total_pass: counts.pass,
+        total_fail: counts.fail,
+        total_error: counts.error,
+        total_skipped: counts.skipped,
+        duration_ms: runs.reduce((s, r) => s + r.duration_ms, 0),
+        runs,
+      }),
+      { status: 201 },
+    );
+  }),
+  http.post('/v1/testing/bulk-upload', async ({ request }) => {
+    __mswTestingSeed();
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    const csv = String(inner.csv ?? '');
+    if (!csv) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'csv body required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const lines = csv.split('\n').slice(1).filter((l) => l.trim().length > 0);
+    let created = 0;
+    for (const line of lines) {
+      const [name, target_type, target_id, description] = line.split(',');
+      if (!name || !target_type || !target_id) continue;
+      __mswTestingCaseSeq++;
+      const id = `tst-BANK_DEMO-${String(__mswTestingCaseSeq).padStart(6, '0')}`;
+      __mswTestingCases.set(id, {
+        test_id: id,
+        tenant_id: 'BANK_DEMO',
+        name: name.trim(),
+        target_type: target_type.trim(),
+        target_id: target_id.trim(),
+        description: (description ?? '').trim(),
+        inputs: {},
+        expected: {},
+        enabled: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        created_by: 'alice.admin',
+      });
+      created++;
+    }
+    return HttpResponse.json(envelope({
+      created_count: created,
+      skipped_count: lines.length - created,
+      rows: lines.map((_, i) => ({ line: i + 2, status: 'created' as const })),
+    }));
+  }),
+  http.get('/v1/testing/runs', ({ request }) => {
+    const url = new URL(request.url);
+    const test_id = url.searchParams.get('test_id');
+    const status = url.searchParams.get('status');
+    const runs = Array.from(__mswTestingRuns.values())
+      .filter((r) => !test_id || r.test_id === test_id)
+      .filter((r) => !status || r.status === status)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at));
+    return HttpResponse.json(envelope({ runs }));
+  }),
+  http.get('/v1/testing/schedules', () => {
+    return HttpResponse.json(envelope({ schedules: [__mswTestingSchedule] }));
+  }),
+  http.post('/v1/testing/schedules', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner =
+      raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+        ? ((raw as { body: Record<string, unknown> }).body)
+        : raw;
+    __mswTestingSchedule = {
+      tenant_id: 'BANK_DEMO',
+      enabled: !!inner.enabled,
+      cron_expression: String(inner.cron_expression ?? '0 6 * * *'),
+      updated_at: new Date().toISOString(),
+      updated_by: 'alice.admin',
+    };
+    return HttpResponse.json(envelope(__mswTestingSchedule), { status: 201 });
+  }),
+];
+
+handlers.push(...__mswTestingHandlers);
