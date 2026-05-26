@@ -1820,6 +1820,56 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // M5.3 — Thresholds & Limits. Every spec route already exists in BFF
+  // via M4.3/4.4/4.9/4.10/4.12; the page composes them.
+  thresholdsList: () =>
+    http
+      .get<EnvelopeBody<{ items: IndicatorThresholdRow[]; total: number }>>('/v1/indicators/thresholds')
+      .then((r) => r.data),
+  thresholdGet: (indicator_id: string) =>
+    http
+      .get<EnvelopeBody<IndicatorThresholdRow>>(
+        `/v1/indicators/thresholds/${encodeURIComponent(indicator_id)}`,
+      )
+      .then((r) => r.data),
+  thresholdUpdate: (indicator_id: string, body: { yellow_at: number; orange_at: number; red_at: number }) =>
+    http
+      .put<EnvelopeBody<IndicatorThresholdRow>>(
+        `/v1/indicators/thresholds/${encodeURIComponent(indicator_id)}`,
+        body,
+      )
+      .then((r) => r.data),
+  thresholdReset: (indicator_id: string) =>
+    http.delete(`/v1/indicators/thresholds/${encodeURIComponent(indicator_id)}`),
+  thresholdSuggest: (indicator_id: string, values: number[], polarity?: 'higher_is_worse' | 'lower_is_worse') =>
+    http
+      .post<EnvelopeBody<ThresholdSuggestResult>>(
+        `/v1/indicators/thresholds/${encodeURIComponent(indicator_id)}/suggest`,
+        { values, polarity },
+      )
+      .then((r) => r.data),
+  thresholdCheck: (indicator_id: string, value: number) =>
+    http
+      .post<EnvelopeBody<{ band: 'green' | 'yellow' | 'orange' | 'red'; threshold: IndicatorThresholdRow }>>(
+        '/v1/indicators/thresholds/check',
+        { indicator_id, value },
+      )
+      .then((r) => r.data),
+  thresholdsDrift: () =>
+    http
+      .get<EnvelopeBody<ThresholdDriftReport>>('/v1/indicators/thresholds/drift')
+      .then((r) => r.data),
+  thresholdsEffective: () =>
+    http
+      .get<EnvelopeBody<ThresholdEffectiveEnvelope>>('/v1/indicators/thresholds/effective')
+      .then((r) => r.data),
+  thresholdAuditHistory: (indicator_id: string, limit = 20) =>
+    http
+      .get<EnvelopeBody<{ items: ThresholdAuditEvent[] }>>(
+        `/v1/audit/events?resource_type=config&resource_id=${encodeURIComponent(indicator_id)}&action=threshold.update,threshold.reset&page_size=${limit}`,
+      )
+      .then((r) => r.data),
+
   // M5.2 — Rules Engine. The 8 spec routes all already exist; the page
   // re-uses them via these typed wrappers.
   ruleTemplateCategories: () =>
@@ -2945,6 +2995,81 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// M5.3 — Thresholds & Limits types (mirror services/bff/src/indicator_thresholds.ts).
+export interface IndicatorThresholdRow {
+  indicator_id: string;
+  name?: string;
+  vertical?: 'banking' | 'insurance';
+  yellow_at: number;
+  orange_at: number;
+  red_at: number;
+  source?: 'platform_default' | 'tenant_override';
+  description?: string;
+}
+export interface ThresholdSuggestResult {
+  indicator_id: string;
+  suggested: { yellow_at: number; orange_at: number; red_at: number } | null;
+  sample_size: number;
+  polarity: 'higher_is_worse' | 'lower_is_worse';
+  sample_min: number | null;
+  sample_max: number | null;
+  insufficient_reason?: 'too_few_samples' | 'no_finite_values' | null;
+}
+export interface ThresholdDriftRow {
+  indicator_id: string;
+  name?: string;
+  vertical?: string;
+  yellow_at: { default_value: number; effective_value: number; delta_abs: number; delta_rel: number | null };
+  orange_at: { default_value: number; effective_value: number; delta_abs: number; delta_rel: number | null };
+  red_at: { default_value: number; effective_value: number; delta_abs: number; delta_rel: number | null };
+  drift_score: number | null;
+  peak_band_drift: number | null;
+  peak_band: 'yellow' | 'orange' | 'red' | null;
+}
+export interface ThresholdDriftReport {
+  tenant_id: string;
+  generated_at: string;
+  total_overrides: number;
+  total_with_drift: number;
+  total_zero_drift: number;
+  mean_drift_score: number | null;
+  most_drifted_indicator: { indicator_id: string; drift_score: number } | null;
+  indicators: ThresholdDriftRow[];
+}
+export interface ThresholdEffectiveRow {
+  indicator_id: string;
+  name?: string;
+  vertical?: string;
+  source: 'platform_default' | 'tenant_override';
+  effective: { yellow_at: number; orange_at: number; red_at: number };
+  library_default: { yellow_at: number; orange_at: number; red_at: number };
+  override?: { yellow_at: number; orange_at: number; red_at: number } | null;
+}
+export interface ThresholdEffectiveEnvelope {
+  tenant_id: string;
+  generated_at: string;
+  entries?: ThresholdEffectiveRow[];
+  items?: ThresholdEffectiveRow[];
+  total?: number;
+  override_count?: number;
+  library_count?: number;
+}
+export interface ThresholdAuditEvent {
+  event_id: string;
+  ts: string;
+  actor_username: string;
+  action: 'threshold.update' | 'threshold.reset';
+  resource_id: string;
+  outcome: string;
+  severity: string;
+  metadata?: {
+    previous_value?: { yellow_at: number; orange_at: number; red_at: number } | null;
+    new_value?: { yellow_at: number; orange_at: number; red_at: number };
+    default_value?: { yellow_at: number; orange_at: number; red_at: number } | null;
+    source?: string;
+  };
 }
 
 // M5.2 — Rules Engine types (mirror services/bff/src/rule_templates.ts +

@@ -7330,6 +7330,170 @@ export const handlers = [
     return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
   }),
 
+  // M5.3 — Thresholds & Limits MSW handlers. Drives dev mode without
+  // a BFF; the real BFF routes are unchanged. We seed 4 indicator
+  // thresholds + the where-needed envelopes for effective + drift.
+  http.get('/v1/indicators/thresholds', () =>
+    HttpResponse.json(envelope({
+      items: __mswThresholds().map((t) => ({ ...t, source: 'platform_default' })),
+      total: __mswThresholds().length,
+    })),
+  ),
+  http.get('/v1/indicators/thresholds/effective', () => {
+    const eff = __mswThresholds().map((t) => {
+      const ov = __mswThresholdOverrides.get(t.indicator_id);
+      return {
+        indicator_id: t.indicator_id,
+        name: t.name,
+        vertical: t.vertical,
+        source: ov ? 'tenant_override' : 'platform_default',
+        effective: ov ?? { yellow_at: t.yellow_at, orange_at: t.orange_at, red_at: t.red_at },
+        library_default: { yellow_at: t.yellow_at, orange_at: t.orange_at, red_at: t.red_at },
+        override: ov ?? null,
+      };
+    });
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      entries: eff,
+      total: eff.length,
+      override_count: eff.filter((e) => e.source === 'tenant_override').length,
+      library_count: eff.length,
+    }));
+  }),
+  http.get('/v1/indicators/thresholds/drift', () => {
+    const indicators = __mswThresholds()
+      .filter((t) => __mswThresholdOverrides.has(t.indicator_id))
+      .map((t) => {
+        const ov = __mswThresholdOverrides.get(t.indicator_id)!;
+        return {
+          indicator_id: t.indicator_id,
+          name: t.name,
+          vertical: t.vertical,
+          yellow_at: { default_value: t.yellow_at, effective_value: ov.yellow_at, delta_abs: ov.yellow_at - t.yellow_at, delta_rel: t.yellow_at ? Math.abs((ov.yellow_at - t.yellow_at) / t.yellow_at) : null },
+          orange_at: { default_value: t.orange_at, effective_value: ov.orange_at, delta_abs: ov.orange_at - t.orange_at, delta_rel: t.orange_at ? Math.abs((ov.orange_at - t.orange_at) / t.orange_at) : null },
+          red_at: { default_value: t.red_at, effective_value: ov.red_at, delta_abs: ov.red_at - t.red_at, delta_rel: t.red_at ? Math.abs((ov.red_at - t.red_at) / t.red_at) : null },
+          drift_score: 0.15,
+          peak_band_drift: 0.18,
+          peak_band: 'red' as const,
+        };
+      });
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+      total_overrides: indicators.length,
+      total_with_drift: indicators.length,
+      total_zero_drift: 0,
+      mean_drift_score: indicators.length > 0 ? 0.15 : null,
+      most_drifted_indicator: indicators[0] ? { indicator_id: indicators[0].indicator_id, drift_score: 0.18 } : null,
+      indicators,
+    }));
+  }),
+  http.get('/v1/indicators/thresholds/:indicator_id', ({ params }) => {
+    const id = String(params.indicator_id);
+    const t = __mswThresholds().find((x) => x.indicator_id === id);
+    if (!t) return HttpResponse.json(envelopeError('EWS_404_unknown_indicator', `unknown ${id}`, 'LOW'), { status: 404 });
+    const ov = __mswThresholdOverrides.get(id);
+    return HttpResponse.json(envelope({
+      indicator_id: id,
+      name: t.name,
+      vertical: t.vertical,
+      yellow_at: (ov ?? t).yellow_at,
+      orange_at: (ov ?? t).orange_at,
+      red_at: (ov ?? t).red_at,
+      source: ov ? 'tenant_override' : 'platform_default',
+    }));
+  }),
+  http.put('/v1/indicators/thresholds/:indicator_id', async ({ params, request }) => {
+    const id = String(params.indicator_id);
+    const t = __mswThresholds().find((x) => x.indicator_id === id);
+    if (!t) return HttpResponse.json(envelopeError('EWS_404_unknown_indicator', `unknown ${id}`, 'LOW'), { status: 404 });
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { yellow_at?: number; orange_at?: number; red_at?: number };
+    if (typeof body.yellow_at !== 'number' || typeof body.orange_at !== 'number' || typeof body.red_at !== 'number') {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'yellow_at + orange_at + red_at required', 'MEDIUM'), { status: 400 });
+    }
+    if (!(body.yellow_at <= body.orange_at && body.orange_at <= body.red_at)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_monotonic', 'yellow ≤ orange ≤ red required', 'MEDIUM'), { status: 400 });
+    }
+    __mswThresholdOverrides.set(id, { yellow_at: body.yellow_at, orange_at: body.orange_at, red_at: body.red_at });
+    return HttpResponse.json(envelope({
+      indicator_id: id,
+      name: t.name,
+      vertical: t.vertical,
+      yellow_at: body.yellow_at,
+      orange_at: body.orange_at,
+      red_at: body.red_at,
+      source: 'tenant_override',
+    }));
+  }),
+  http.delete('/v1/indicators/thresholds/:indicator_id', ({ params }) => {
+    const id = String(params.indicator_id);
+    if (!__mswThresholdOverrides.has(id)) {
+      return HttpResponse.json(envelopeError('EWS_404_no_override', `no override for ${id}`, 'LOW'), { status: 404 });
+    }
+    __mswThresholdOverrides.delete(id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('/v1/indicators/thresholds/:indicator_id/suggest', async ({ params, request }) => {
+    const id = String(params.indicator_id);
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { values?: number[]; polarity?: 'higher_is_worse' | 'lower_is_worse' };
+    const values = Array.isArray(body.values) ? body.values.filter((v) => Number.isFinite(v)) : [];
+    if (values.length < 5) {
+      return HttpResponse.json(envelope({
+        indicator_id: id,
+        suggested: null,
+        sample_size: values.length,
+        polarity: body.polarity ?? 'higher_is_worse',
+        sample_min: values.length > 0 ? Math.min(...values) : null,
+        sample_max: values.length > 0 ? Math.max(...values) : null,
+        insufficient_reason: 'too_few_samples',
+      }));
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const pct = (p: number) => sorted[Math.floor((sorted.length - 1) * p)]!;
+    const polarity = body.polarity ?? 'higher_is_worse';
+    const suggested = polarity === 'higher_is_worse'
+      ? { yellow_at: pct(0.5), orange_at: pct(0.75), red_at: pct(0.95) }
+      : { yellow_at: pct(0.5), orange_at: pct(0.25), red_at: pct(0.05) };
+    return HttpResponse.json(envelope({
+      indicator_id: id,
+      suggested,
+      sample_size: values.length,
+      polarity,
+      sample_min: sorted[0]!,
+      sample_max: sorted[sorted.length - 1]!,
+      insufficient_reason: null,
+    }));
+  }),
+  http.post('/v1/indicators/thresholds/check', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { indicator_id?: string; value?: number };
+    const id = body.indicator_id ?? '';
+    const t = __mswThresholds().find((x) => x.indicator_id === id);
+    if (!t || typeof body.value !== 'number') {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'indicator_id + value required', 'MEDIUM'), { status: 400 });
+    }
+    const v = body.value;
+    const eff = __mswThresholdOverrides.get(id) ?? t;
+    const band =
+      v >= eff.red_at ? 'red'
+      : v >= eff.orange_at ? 'orange'
+      : v >= eff.yellow_at ? 'yellow'
+      : 'green';
+    return HttpResponse.json(envelope({
+      band,
+      threshold: { indicator_id: id, ...eff, source: __mswThresholdOverrides.has(id) ? 'tenant_override' : 'platform_default' },
+    }));
+  }),
+
   // M5.2 — Rules Engine MSW handlers. Spec routes mostly already exist
   // in the BFF; these stubs cover dev mode so the SPA page renders.
   http.get('/v1/rules/templates/categories', () =>
@@ -7704,6 +7868,17 @@ function __mswDqProfile(source_id: string) {
 
 // M5.2 — custom rule templates in-memory store
 const __mswCustomRuleTemplates: Array<Record<string, unknown>> = [];
+
+// M5.3 — Thresholds & Limits in-memory seed + override store.
+const __mswThresholdOverrides = new Map<string, { yellow_at: number; orange_at: number; red_at: number }>();
+function __mswThresholds() {
+  return [
+    { indicator_id: 'FIN-001', name: 'DPD max (90d)', vertical: 'banking', yellow_at: 0.3, orange_at: 0.55, red_at: 0.8 },
+    { indicator_id: 'FIN-002', name: 'Credit utilisation %', vertical: 'banking', yellow_at: 0.6, orange_at: 0.8, red_at: 0.95 },
+    { indicator_id: 'BEH-002', name: 'Cheque bounce rate (180d)', vertical: 'banking', yellow_at: 0.2, orange_at: 0.4, red_at: 0.7 },
+    { indicator_id: 'INS-CLM-001', name: 'Repeat claim count (180d)', vertical: 'insurance', yellow_at: 0.3, orange_at: 0.6, red_at: 0.85 },
+  ];
+}
 
 // M5.1 — Master Setup MSW seed. One row per tab so the SPA renders
 // non-empty by default; 'INUSE_*' codes demonstrate the 409 EWS_409_in_use

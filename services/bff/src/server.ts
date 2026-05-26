@@ -14699,7 +14699,12 @@ export function makeApp(deps: AppDeps = {}) {
 
   /** PUT /v1/indicators/thresholds/:indicator_id (T6 M4.4) — set
    *  per-tenant override. Body { yellow_at, orange_at, red_at } —
-   *  monotonic + [0,1] enforced. */
+   *  monotonic + [0,1] enforced.
+   *
+   *  M5.3 acceptance: writes an audit event so the SPA's "last-run
+   *  banner" + the Module 13 config-audit history can reconstruct
+   *  every threshold change. The store update is in-memory + sync,
+   *  so the "within 1 minute" half of the acceptance is already <1ms. */
   app.put(
     '/v1/indicators/thresholds/:indicator_id',
     requireTenantMw,
@@ -14713,7 +14718,41 @@ export function makeApp(deps: AppDeps = {}) {
           ? (raw as { body: unknown }).body
           : raw;
       try {
+        // Capture pre-change snapshot for the audit metadata so the
+        // Audit Trail can render before/after.
+        const before = getEffectiveThreshold(thresholdOverrideStore, req.tenant!.tenant_id, id);
         const t = thresholdOverrideStore.setOverride(req.tenant!.tenant_id, id, inner);
+        // M5.3 — best-effort audit fan-out. Never blocks the response.
+        try {
+          const actor =
+            ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+          auditTrailStore.record(
+            req.tenant!.tenant_id,
+            {
+              actor_username: actor,
+              actor_role: 'admin',
+              action: 'threshold.update',
+              resource_type: 'config',
+              resource_id: id,
+              outcome: 'success',
+              severity: 'info',
+              metadata: {
+                previous_value: before
+                  ? {
+                      yellow_at: before.yellow_at,
+                      orange_at: before.orange_at,
+                      red_at: before.red_at,
+                    }
+                  : null,
+                new_value: { yellow_at: t.yellow_at, orange_at: t.orange_at, red_at: t.red_at },
+                source: 'tenant_override',
+              },
+            },
+            now(),
+          );
+        } catch {
+          // swallow — threshold was set; audit failure surfaces via M15.2 chain check.
+        }
         return res.json(wrapResponse(t, ctx));
       } catch (e) {
         if (e instanceof ThresholdError) {
@@ -14735,7 +14774,7 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   /** DELETE /v1/indicators/thresholds/:indicator_id — clear override
-   *  → revert to platform default. 204 / 404. */
+   *  → revert to platform default. 204 / 404. M5.3 audit-fan-out. */
   app.delete(
     '/v1/indicators/thresholds/:indicator_id',
     requireTenantMw,
@@ -14743,6 +14782,9 @@ export function makeApp(deps: AppDeps = {}) {
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.indicator_id ?? '';
+      // Capture override before delete so the audit shows previous value.
+      const before = getEffectiveThreshold(thresholdOverrideStore, req.tenant!.tenant_id, id);
+      const defaultThr = getThreshold(id);
       const removed = thresholdOverrideStore.deleteOverride(req.tenant!.tenant_id, id);
       if (!removed) {
         return res.status(404).json(
@@ -14751,6 +14793,38 @@ export function makeApp(deps: AppDeps = {}) {
             ctx,
           ),
         );
+      }
+      // M5.3 — audit fan-out: threshold reset to platform default.
+      try {
+        const actor =
+          ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          {
+            actor_username: actor,
+            actor_role: 'admin',
+            action: 'threshold.reset',
+            resource_type: 'config',
+            resource_id: id,
+            outcome: 'success',
+            severity: 'info',
+            metadata: {
+              previous_value: before
+                ? { yellow_at: before.yellow_at, orange_at: before.orange_at, red_at: before.red_at }
+                : null,
+              default_value: defaultThr
+                ? {
+                    yellow_at: defaultThr.yellow_at,
+                    orange_at: defaultThr.orange_at,
+                    red_at: defaultThr.red_at,
+                  }
+                : null,
+            },
+          },
+          now(),
+        );
+      } catch {
+        // swallow — reverted successfully; audit failure surfaces via M15.2.
       }
       return res.status(204).send();
     },
