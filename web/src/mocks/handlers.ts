@@ -7330,6 +7330,125 @@ export const handlers = [
     return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
   }),
 
+  // M5.1 — Master Setup MSW handlers. Generic in-memory CRUD over an
+  // open master_type. Special record_id 'inuse-xx' surfaces 12 fake
+  // usages so the SPA can demonstrate the 409 EWS_409_in_use guard.
+  http.get('/v1/master/:master_type', ({ request, params }) => {
+    const type = String(params.master_type);
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q')?.toLowerCase();
+    const rows = __mswMasterByType(type);
+    const filtered = q
+      ? rows.filter((r) => String(r.code).toLowerCase().includes(q) || String(r.name).toLowerCase().includes(q))
+      : rows;
+    return HttpResponse.json(envelope({ master_type: type, records: filtered }));
+  }),
+  http.post('/v1/master/:master_type', async ({ request, params }) => {
+    const type = String(params.master_type);
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { code?: string; name?: string; description?: string; attributes?: Record<string, string | number | boolean>; enabled?: boolean };
+    if (!body.code || !body.name) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'code + name required', 'MEDIUM'), { status: 400 });
+    }
+    const rows = __mswMasterByType(type);
+    if (rows.some((r) => r.code === body.code)) {
+      return HttpResponse.json(envelopeError('EWS_409_duplicate_code', 'duplicate code', 'MEDIUM'), { status: 409 });
+    }
+    const now = new Date().toISOString();
+    const created = {
+      record_id: `m-${type}-BANK_DEMO-${String(rows.length + 1).padStart(6, '0')}`,
+      tenant_id: 'BANK_DEMO',
+      master_type: type,
+      code: body.code,
+      name: body.name,
+      description: body.description ?? '',
+      attributes: body.attributes ?? {},
+      enabled: body.enabled !== false,
+      created_at: now,
+      updated_at: now,
+      created_by: 'alice.admin',
+    };
+    rows.push(created);
+    return HttpResponse.json(envelope(created), { status: 201 });
+  }),
+  http.patch('/v1/master/:master_type/:record_id', async ({ request, params }) => {
+    const type = String(params.master_type);
+    const id = String(params.record_id);
+    const raw = (await request.json()) as Record<string, unknown>;
+    const patch = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { name?: string; description?: string; attributes?: Record<string, string | number | boolean>; enabled?: boolean };
+    const rows = __mswMasterByType(type);
+    const idx = rows.findIndex((r) => r.record_id === id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_record', `unknown ${id}`, 'LOW'), { status: 404 });
+    }
+    const next = { ...rows[idx]!, ...patch, updated_at: new Date().toISOString() };
+    rows[idx] = next;
+    return HttpResponse.json(envelope(next));
+  }),
+  http.get('/v1/master/:master_type/:record_id/where-used', ({ params }) => {
+    const type = String(params.master_type);
+    const id = String(params.record_id);
+    const rows = __mswMasterByType(type);
+    const row = rows.find((r) => r.record_id === id);
+    if (!row) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_record', `unknown ${id}`, 'LOW'), { status: 404 });
+    }
+    // 'inuse-xx' in code triggers the demo in-use path
+    if (String(row.code).toUpperCase().includes('INUSE')) {
+      return HttpResponse.json(envelope({
+        master_type: type,
+        record_id: id,
+        code: row.code,
+        total_references: 12,
+        references: Array.from({ length: 12 }).map((_, i) => ({
+          resource_type: i < 8 ? 'loan' : 'transaction',
+          resource_id: i < 8 ? `L-100${i}` : `T-200${i}`,
+          description: i === 0 ? 'Earliest reference (loan disbursal 2025-Q1)' : undefined,
+        })),
+      }));
+    }
+    return HttpResponse.json(envelope({
+      master_type: type,
+      record_id: id,
+      code: row.code,
+      total_references: 0,
+      references: [],
+    }));
+  }),
+  http.delete('/v1/master/:master_type/:record_id', ({ params }) => {
+    const type = String(params.master_type);
+    const id = String(params.record_id);
+    const rows = __mswMasterByType(type);
+    const idx = rows.findIndex((r) => r.record_id === id);
+    if (idx < 0) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_record', `unknown ${id}`, 'LOW'), { status: 404 });
+    }
+    if (String(rows[idx]!.code).toUpperCase().includes('INUSE')) {
+      return HttpResponse.json(
+        {
+          ...envelopeError('EWS_409_in_use', 'in use by 12 record(s)', 'MEDIUM'),
+          error: {
+            ...envelopeError('EWS_409_in_use', 'in use by 12 record(s)', 'MEDIUM').error,
+            detail: {
+              total_references: 12,
+              references: [
+                { resource_type: 'loan', resource_id: 'L-1000' },
+                { resource_type: 'loan', resource_id: 'L-1001' },
+              ],
+            },
+          },
+        },
+        { status: 409 },
+      );
+    }
+    rows.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   // M4.3 — Explainability MSW handlers. Deterministic synth so dev mode
   // renders without a BFF. Special prediction_ids drive the gate UI:
   // 'expired-xx' → 410, 'missing-xx' → 404.
@@ -7466,6 +7585,94 @@ function __mswDqProfile(source_id: string) {
     { column: 'worst_dpd', type: 'integer', null_count: 0, null_pct: 0, distinct_count: 540, min: 0, max: 540, mean: 32, p50: 12, p95: 180, std_dev: 64, anomaly_score: 0.45, has_drift: true, top_values: [{ value: '0', count: 8400, pct: 0.7 }, { value: '30', count: 1100, pct: 0.092 }], format_detected: null },
   ];
   return { tenant_id: 'BANK_DEMO', source_id, generated_at: new Date().toISOString(), total_rows: 12_000, columns };
+}
+
+// M5.1 — Master Setup MSW seed. One row per tab so the SPA renders
+// non-empty by default; 'INUSE_*' codes demonstrate the 409 EWS_409_in_use
+// guard path.
+const __mswMasterStore = new Map<string, Array<Record<string, unknown>> & { __seeded?: boolean }>();
+function __mswMasterByType(type: string): Array<Record<string, string | number | boolean | Record<string, string | number | boolean>>> {
+  let arr = __mswMasterStore.get(type) as Array<Record<string, string | number | boolean | Record<string, string | number | boolean>>> | undefined;
+  if (!arr) {
+    arr = [] as Array<Record<string, string | number | boolean | Record<string, string | number | boolean>>>;
+    __mswMasterStore.set(type, arr as never);
+  }
+  // Lazy seed once
+  if (!(arr as { __seeded?: boolean }).__seeded) {
+    (arr as { __seeded?: boolean }).__seeded = true;
+    const now = new Date().toISOString();
+    const seed = __mswMasterSeed(type);
+    for (const row of seed) arr.push({ ...row, created_at: now, updated_at: now, created_by: 'alice.admin' } as never);
+  }
+  return arr;
+}
+function __mswMasterSeed(type: string): Array<Record<string, unknown>> {
+  const baseFor = (code: string, name: string, attributes: Record<string, string | number | boolean> = {}, desc = ''): Record<string, unknown> => ({
+    record_id: `m-${type}-BANK_DEMO-seed-${code}`,
+    tenant_id: 'BANK_DEMO',
+    master_type: type,
+    code,
+    name,
+    description: desc,
+    attributes,
+    enabled: true,
+  });
+  switch (type) {
+    case 'currencies':
+      return [
+        baseFor('INR', 'Indian Rupee', { symbol: '₹', decimals: 2 }),
+        baseFor('USD', 'US Dollar', { symbol: '$', decimals: 2 }),
+        baseFor('INUSE_KES', 'Kenyan Shilling (referenced)', { symbol: 'KES', decimals: 2 }, 'Demo row — delete is refused via 409'),
+      ];
+    case 'severity_levels':
+      return [
+        baseFor('S1', 'Critical', { rank: 1, colour: '#dc2626' }),
+        baseFor('S2', 'High', { rank: 2, colour: '#f59e0b' }),
+        baseFor('S3', 'Medium', { rank: 3, colour: '#eab308' }),
+      ];
+    case 'regulators':
+      return [
+        baseFor('RBI', 'Reserve Bank of India', { country: 'IN', framework: 'SMA' }),
+        baseFor('IRDAI', 'Insurance Regulatory and Development Authority', { country: 'IN', framework: 'IRDAI-Form-K' }),
+        baseFor('RMA', 'Royal Monetary Authority of Bhutan', { country: 'BT', framework: 'RMA' }),
+      ];
+    case 'borrower_segments':
+      return [
+        baseFor('RETAIL', 'Retail', {}),
+        baseFor('SME', 'Small + Medium Enterprises', {}),
+        baseFor('CORP', 'Corporate', {}),
+        baseFor('LARGE_CORP', 'Large Corporate', {}),
+        baseFor('NBFC', 'NBFC', {}),
+      ];
+    case 'review_cadences':
+      return [
+        baseFor('DAILY', 'Daily', { interval_days: 1 }),
+        baseFor('WEEKLY', 'Weekly', { interval_days: 7 }),
+        baseFor('MONTHLY', 'Monthly', { interval_days: 30 }),
+      ];
+    case 'ai_models':
+      return [
+        baseFor('PD_XGB_V3', 'PD XGBoost v3 defaults', { model_type: 'pd', score_threshold: 0.7 }),
+        baseFor('FRAUD_LGBM_V1', 'Fraud LightGBM v1', { model_type: 'fraud', score_threshold: 0.85 }),
+      ];
+    case 'reassign_teams':
+      return [
+        baseFor('CREDIT_MUMBAI', 'Credit Mumbai', { team_lead: 'alice.admin' }),
+        baseFor('FRAUD_DESK', 'Fraud Desk', { team_lead: 'ravi.risk' }),
+      ];
+    case 'schedule_frequencies':
+      return [
+        baseFor('HOURLY', 'Hourly', { interval_days: 0 }),
+        baseFor('DAILY', 'Daily', { interval_days: 1 }),
+      ];
+    case 'rule_categories':
+      return [
+        baseFor('RISK_MON', 'Risk Monitoring', {}),
+        baseFor('FRAUD', 'Fraud Detection', {}),
+      ];
+    default:
+      return [];
+  }
 }
 
 // M4.2 — AI model registry seed (4 models covering each status)

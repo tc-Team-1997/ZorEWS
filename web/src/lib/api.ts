@@ -1820,6 +1820,41 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // M5.1 — Master Setup. Uniform CRUD over /v1/master/:type with
+  // a where-used pre-flight check + 409 EWS_409_in_use guard on delete.
+  masterList: (master_type: string, opts: { enabled_only?: boolean; q?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.enabled_only) params.set('enabled_only', 'true');
+    if (opts.q) params.set('q', opts.q);
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<{ master_type: string; records: MasterRow[] }>>(
+        `/v1/master/${encodeURIComponent(master_type)}${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  masterCreate: (master_type: string, body: MasterCreateInput) =>
+    http
+      .post<EnvelopeBody<MasterRow>>(`/v1/master/${encodeURIComponent(master_type)}`, body)
+      .then((r) => r.data),
+  masterUpdate: (master_type: string, record_id: string, patch: MasterUpdateInput) =>
+    http
+      .patch<EnvelopeBody<MasterRow>>(
+        `/v1/master/${encodeURIComponent(master_type)}/${encodeURIComponent(record_id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+  masterDelete: (master_type: string, record_id: string) =>
+    http.delete(
+      `/v1/master/${encodeURIComponent(master_type)}/${encodeURIComponent(record_id)}`,
+    ),
+  masterWhereUsed: (master_type: string, record_id: string) =>
+    http
+      .get<EnvelopeBody<WhereUsedReport>>(
+        `/v1/master/${encodeURIComponent(master_type)}/${encodeURIComponent(record_id)}/where-used`,
+      )
+      .then((r) => r.data),
+
   // M4.3 — Explainability. The 3 explainability surfaces share the
   // 24-month age gate; the SPA renders 410 distinct from 404.
   aiPrediction: (prediction_id: string) =>
@@ -2859,6 +2894,46 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// M5.1 — Master Setup types (mirror services/bff/src/missing_masters.ts).
+export interface MasterRow {
+  record_id: string;
+  tenant_id: string;
+  master_type: string;
+  code: string;
+  name: string;
+  description: string;
+  attributes: Record<string, string | number | boolean>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+export interface MasterCreateInput {
+  code: string;
+  name: string;
+  description?: string;
+  attributes?: Record<string, string | number | boolean>;
+  enabled?: boolean;
+}
+export interface MasterUpdateInput {
+  name?: string;
+  description?: string;
+  attributes?: Record<string, string | number | boolean>;
+  enabled?: boolean;
+}
+export interface UsageReferenceRow {
+  resource_type: string;
+  resource_id: string;
+  description?: string;
+}
+export interface WhereUsedReport {
+  master_type: string;
+  record_id: string;
+  code: string;
+  total_references: number;
+  references: UsageReferenceRow[];
 }
 
 // M4.3 — Explainability types (mirror services/bff/src/ai_explainability.ts).

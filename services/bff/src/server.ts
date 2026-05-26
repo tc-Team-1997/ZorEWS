@@ -36504,6 +36504,53 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** M5.1 — GET /v1/master/:master_type/:record_id/where-used.
+   *  Spec acceptance support — SPA queries this before showing the
+   *  delete button to surface the "in use by N records" message
+   *  upfront. Returns `{master_type, record_id, code, total_references,
+   *  references[]}` with references capped to USAGE_SAMPLE_LIMIT.
+   *  Mounted BEFORE `/v1/master/:master_type/:record_id` PATCH/DELETE
+   *  so the literal `where-used` segment doesn't get captured. */
+  app.get(
+    '/v1/master/:master_type/:record_id/where-used',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { findUsages, isMissingMasterType } =
+          require('./missing_masters') as typeof import('./missing_masters');
+        const type = req.params.master_type;
+        if (!isMissingMasterType(type)) {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_master_type', message: `unknown ${type}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        const out = findUsages(req.tenant!.tenant_id, type, req.params.record_id ?? '');
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === 'unknown_record') {
+          return res.status(404).json(
+            wrapError(
+              { code: 'EWS_404_unknown_record', message: e instanceof Error ? e.message : 'not found', severity: 'LOW' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: e instanceof Error ? e.message : 'where_used_failed', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+    },
+  );
+
   app.delete(
     '/v1/master/:master_type/:record_id',
     requireTenantMw,
@@ -36525,6 +36572,26 @@ export function makeApp(deps: AppDeps = {}) {
             .json(wrapError({ code: 'EWS_404_unknown_record', message: `unknown ${req.params.record_id}`, severity: 'MEDIUM' }, ctx));
         return res.status(204).end();
       } catch (e) {
+        const code = (e as { code?: string }).code;
+        // M5.1 — spec acceptance: in-use guard returns 409 with the
+        // count + sample so the SPA can surface "in use by N records".
+        if (code === 'in_use') {
+          const ext = e as { total_references?: number; references?: unknown[] };
+          return res.status(409).json(
+            wrapError(
+              {
+                code: 'EWS_409_in_use',
+                message: e instanceof Error ? e.message : 'in use',
+                severity: 'MEDIUM',
+                detail: {
+                  total_references: ext.total_references ?? 0,
+                  references: ext.references ?? [],
+                },
+              },
+              ctx,
+            ),
+          );
+        }
         const msg = e instanceof Error ? e.message : 'delete_failed';
         return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
       }

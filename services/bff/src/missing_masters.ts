@@ -29,6 +29,17 @@ export const MISSING_MASTER_TYPES = [
   'reassign_basis',
   'recipients',
   'schedule_formats',
+  // M5.1 additions — Master Setup spec calls out these 4 alongside the
+  // 12 already covered above. reassign_teams pairs with reassign_basis;
+  // schedule_frequencies pairs with schedule_formats; ai_models stores
+  // per-model default-config overrides (distinct from the M7.x model
+  // registry — that's the model versions catalogue, this is the
+  // operator-tunable defaults); rule_categories is the user-managed
+  // version of the platform-static categories from rule_templates.ts.
+  'reassign_teams',
+  'schedule_frequencies',
+  'ai_models',
+  'rule_categories',
 ] as const;
 export type MissingMasterType = (typeof MISSING_MASTER_TYPES)[number];
 
@@ -77,6 +88,11 @@ const REQUIRED_ATTRS: Record<MissingMasterType, string[]> = {
   reassign_basis: [],
   recipients: ['channel', 'address'],
   schedule_formats: ['mime_type'],
+  // M5.1 — new master_types
+  reassign_teams: ['team_lead'],
+  schedule_frequencies: ['interval_days'],
+  ai_models: ['model_type'],
+  rule_categories: [],
 };
 
 function validateAttributesForType(type: MissingMasterType, attrs: Record<string, unknown>): Record<string, string | number | boolean> {
@@ -194,10 +210,100 @@ export function updateMasterRecord(
   return { ...entry, attributes: { ...entry.attributes } };
 }
 
+// ─── M5.1 — Where-used registry ────────────────────────────────────────
+//
+// Spec acceptance: "Deleting a master row that's referenced elsewhere
+// must fail with a clear 'in use by N records' error."
+//
+// Each master_type can register a UsageChecker that counts references
+// across consumer surfaces. When `deleteMasterRecord` fires it consults
+// the registered checker — if count > 0 the delete is refused with
+// MasterDataError('in_use') carrying the count + a few sample references.
+//
+// Checkers are deliberately pluggable rather than baked into this module:
+// the consumer surfaces live in other modules (reference_data uses,
+// regulator-by-country usages, etc.) and registering from those modules
+// keeps the dependency arrow pointing the right way (this module doesn't
+// import from N consumers).
+
+export interface UsageReference {
+  resource_type: string;
+  resource_id: string;
+  description?: string;
+}
+
+export interface UsageReport {
+  master_type: MissingMasterType;
+  record_id: string;
+  code: string;
+  total_references: number;
+  references: UsageReference[]; // capped to top SAMPLE_LIMIT for SPA grid
+}
+
+export const USAGE_SAMPLE_LIMIT = 20;
+
+export type UsageChecker = (
+  tenant_id: string,
+  record: MasterRecord,
+) => { total: number; sample: UsageReference[] };
+
+const _usageRegistry = new Map<MissingMasterType, UsageChecker>();
+
+/** Register a usage checker for a master_type. Production wires the
+ *  real consumers; tests inject ad-hoc checkers via this hook. */
+export function registerUsageChecker(type: MissingMasterType, checker: UsageChecker): void {
+  if (!isMissingMasterType(type)) throw new MasterDataError('unknown_master_type', `unknown ${type}`);
+  _usageRegistry.set(type, checker);
+}
+
+export function clearUsageCheckers(): void {
+  _usageRegistry.clear();
+}
+
+/** Look up usages for the given record. Returns count=0 when no checker
+ *  is registered for the type (consumer references not yet wired). */
+export function findUsages(tenant_id: string, type: MissingMasterType, record_id: string): UsageReport {
+  if (!isMissingMasterType(type)) throw new MasterDataError('unknown_master_type', `unknown ${type}`);
+  const entry = _store.get(record_id);
+  if (!entry || entry.tenant_id !== tenant_id || entry.master_type !== type) {
+    throw new MasterDataError('unknown_record', `unknown ${record_id}`);
+  }
+  const checker = _usageRegistry.get(type);
+  if (!checker) {
+    return { master_type: type, record_id, code: entry.code, total_references: 0, references: [] };
+  }
+  const { total, sample } = checker(tenant_id, entry);
+  return {
+    master_type: type,
+    record_id,
+    code: entry.code,
+    total_references: total,
+    references: sample.slice(0, USAGE_SAMPLE_LIMIT),
+  };
+}
+
 export function deleteMasterRecord(tenant_id: string, type: MissingMasterType, record_id: string): boolean {
   if (!isMissingMasterType(type)) throw new MasterDataError('unknown_master_type', `unknown ${type}`);
   const entry = _store.get(record_id);
   if (!entry || entry.tenant_id !== tenant_id || entry.master_type !== type) return false;
+  // M5.1 — refuse delete when usages exist anywhere. The route layer
+  // catches the MasterDataError('in_use') and routes to 409.
+  const checker = _usageRegistry.get(type);
+  if (checker) {
+    const { total, sample } = checker(tenant_id, entry);
+    if (total > 0) {
+      const err = new MasterDataError(
+        'in_use',
+        `cannot delete ${type} ${entry.code} — in use by ${total} record(s)`,
+      );
+      // Attach metadata so the route can surface count + sample to the SPA.
+      (err as MasterDataError & { total_references?: number; references?: UsageReference[] })
+        .total_references = total;
+      (err as MasterDataError & { total_references?: number; references?: UsageReference[] })
+        .references = sample.slice(0, USAGE_SAMPLE_LIMIT);
+      throw err;
+    }
+  }
   _codeIndex.delete(keyFor(tenant_id, type, entry.code));
   _store.delete(record_id);
   return true;
@@ -206,5 +312,6 @@ export function deleteMasterRecord(tenant_id: string, type: MissingMasterType, r
 export function _resetMissingMastersStore() {
   _store.clear();
   _codeIndex.clear();
+  _usageRegistry.clear();
   _seq = 0;
 }
