@@ -1735,6 +1735,35 @@ export const api = {
       .post<EnvelopeBody<TestingSchedule>>('/v1/testing/schedules', body)
       .then((r) => r.data),
 
+  // M6.4 — Glossary
+  glossaryList: (params: { q?: string; category?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set('q', params.q);
+    if (params.category) qs.set('category', params.category);
+    const q = qs.toString();
+    return http
+      .get<EnvelopeBody<{ terms: GlossaryTerm[] }>>(`/v1/glossary/terms${q ? `?${q}` : ''}`)
+      .then((r) => r.data);
+  },
+  glossaryGet: (term_id: string) =>
+    http
+      .get<EnvelopeBody<GlossaryTerm>>(`/v1/glossary/terms/${encodeURIComponent(term_id)}`)
+      .then((r) => r.data),
+  glossaryCategories: () =>
+    http
+      .get<EnvelopeBody<{ categories: string[] }>>('/v1/glossary/categories')
+      .then((r) => r.data),
+  glossaryCreate: (body: GlossaryTermCreateInput) =>
+    http
+      .post<EnvelopeBody<GlossaryTerm>>('/v1/glossary/terms', body)
+      .then((r) => r.data),
+  glossaryUpdate: (term_id: string, patch: Partial<GlossaryTermCreateInput>) =>
+    http
+      .put<EnvelopeBody<GlossaryTerm>>(`/v1/glossary/terms/${encodeURIComponent(term_id)}`, patch)
+      .then((r) => r.data),
+  glossaryDelete: (term_id: string) =>
+    http.delete(`/v1/glossary/terms/${encodeURIComponent(term_id)}`),
+
   aiExplanation: (prediction_id: string) =>
     http
       .get<EnvelopeBody<PredictionExplanation>>(
@@ -3239,6 +3268,41 @@ export interface TestingSchedule {
   cron_expression: string;
   updated_at: string;
   updated_by: string;
+}
+
+// M6.4 — Glossary types (mirror services/bff/src/glossary.ts)
+export type GlossaryCategory =
+  | 'banking'
+  | 'regulatory'
+  | 'risk'
+  | 'ai_ml'
+  | 'workflow'
+  | 'fraud'
+  | 'insurance';
+
+export const ALL_GLOSSARY_CATEGORIES: readonly GlossaryCategory[] = [
+  'banking', 'regulatory', 'risk', 'ai_ml', 'workflow', 'fraud', 'insurance',
+];
+
+export interface GlossaryTerm {
+  term_id: string;
+  term: string;
+  category: GlossaryCategory;
+  definition: string;
+  source_doc?: string;
+  related_term_ids?: string[];
+  source?: 'platform' | 'tenant';
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export interface GlossaryTermCreateInput {
+  term_id: string;
+  term: string;
+  category: GlossaryCategory;
+  definition: string;
+  source_doc?: string;
+  related_term_ids?: string[];
 }
 
 // G3 — Portfolio Insights row (Monday Playbook H2)

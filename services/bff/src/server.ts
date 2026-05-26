@@ -37251,11 +37251,15 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     try {
       const { listGlossaryTerms } = require('./glossary') as typeof import('./glossary');
+      // M6.4 — thread tenant_id so the per-tenant overlay layers on
+      // top of the platform seed. Platform terms remain visible to
+      // every tenant unless tombstoned.
       return res.json(
         wrapResponse(
           { terms: listGlossaryTerms({
             category: req.query.category as import('./glossary').GlossaryCategory | undefined,
             q: req.query.q as string | undefined,
+            tenant_id: req.tenant!.tenant_id,
           }) },
           ctx,
         ),
@@ -37277,9 +37281,105 @@ export function makeApp(deps: AppDeps = {}) {
   app.get('/v1/glossary/terms/:term_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
     const ctx = extractCtx(req, now);
     const { getGlossaryTerm } = require('./glossary') as typeof import('./glossary');
-    const t = getGlossaryTerm(req.params.term_id);
+    // M6.4 — tenant-aware: returns the override when one exists, else
+    // the platform definition. Tombstoned platform terms return 404.
+    const t = getGlossaryTerm(req.params.term_id, req.tenant!.tenant_id);
     if (!t) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_term', message: `unknown ${req.params.term_id}`, severity: 'LOW' }, ctx));
     return res.json(wrapResponse(t, ctx));
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // M6.4 — Glossary admin CRUD (per-tenant overlay; platform seed
+  // stays immutable). Every mutation writes to the audit trail per
+  // cross-cutting #6.
+  // ──────────────────────────────────────────────────────────────────
+
+  app.post('/v1/glossary/terms', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { createGlossaryTerm } = require('./glossary') as typeof import('./glossary');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const t = createGlossaryTerm(
+        req.tenant!.tenant_id,
+        inner as Parameters<typeof import('./glossary').createGlossaryTerm>[1],
+        actor,
+        now(),
+      );
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'glossary.term.create', resource_type: 'system',
+          resource_id: t.term_id,
+          outcome: 'success', severity: 'info',
+          metadata: { term: t.term, category: t.category },
+        }, now());
+      } catch { /* swallow */ }
+      return res.status(201).json(wrapResponse(t, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'duplicate_term_id' || code === 'platform_term_exists' ? 409 : 400;
+      const ews = code === 'duplicate_term_id' ? 'EWS_409_duplicate_term_id'
+        : code === 'platform_term_exists' ? 'EWS_409_platform_term_exists'
+        : `EWS_400_${code}`;
+      const msg = e instanceof Error ? e.message : 'create_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.put('/v1/glossary/terms/:term_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    try {
+      const { updateGlossaryTerm } = require('./glossary') as typeof import('./glossary');
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+        ? (raw as { body: unknown }).body : raw;
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      const t = updateGlossaryTerm(
+        req.tenant!.tenant_id,
+        req.params.term_id,
+        inner as Parameters<typeof import('./glossary').updateGlossaryTerm>[2],
+        actor,
+        now(),
+      );
+      try {
+        auditTrailStore.record(req.tenant!.tenant_id, {
+          actor_username: actor, actor_role: 'admin',
+          action: 'glossary.term.update', resource_type: 'system',
+          resource_id: t.term_id,
+          outcome: 'success', severity: 'info',
+          metadata: { term: t.term, category: t.category },
+        }, now());
+      } catch { /* swallow */ }
+      return res.json(wrapResponse(t, ctx));
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? 'invalid_input';
+      const httpStatus = code === 'unknown_term' ? 404 : 400;
+      const ews = code === 'unknown_term' ? 'EWS_404_unknown_term' : `EWS_400_${code}`;
+      const msg = e instanceof Error ? e.message : 'update_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  app.delete('/v1/glossary/terms/:term_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { deleteGlossaryTerm } = require('./glossary') as typeof import('./glossary');
+    const ok = deleteGlossaryTerm(req.tenant!.tenant_id, req.params.term_id);
+    if (!ok) {
+      return res.status(404).json(wrapError({ code: 'EWS_404_unknown_term', message: `unknown ${req.params.term_id}`, severity: 'LOW' }, ctx));
+    }
+    try {
+      const actor = ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+      auditTrailStore.record(req.tenant!.tenant_id, {
+        actor_username: actor, actor_role: 'admin',
+        action: 'glossary.term.delete', resource_type: 'system',
+        resource_id: req.params.term_id,
+        outcome: 'success', severity: 'warning',
+      }, now());
+    } catch { /* swallow */ }
+    return res.status(204).end();
   });
 
   // ──────────────────────────────────────────────────────────────────

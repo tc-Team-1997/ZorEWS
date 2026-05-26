@@ -11656,3 +11656,157 @@ const __mswTestingHandlers = [
 ];
 
 handlers.push(...__mswTestingHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
+// M6.4 — Glossary MSW handlers
+// ──────────────────────────────────────────────────────────────────────
+
+interface MswGlossaryTerm {
+  term_id: string;
+  term: string;
+  category: string;
+  definition: string;
+  source_doc?: string;
+  related_term_ids?: string[];
+  source?: 'platform' | 'tenant';
+  updated_at?: string;
+  updated_by?: string;
+}
+
+const __mswGlossarySeed: MswGlossaryTerm[] = [
+  { term_id: 'sma', term: 'SMA — Special Mention Account', category: 'regulatory', definition: 'Per RBI Master Direction (April 2015), accounts overdue 1-90 days are classified as SMA-0/1/2. Accounts overdue >90 days are NPA.', source_doc: 'RBI Master Direction on Stressed Assets', related_term_ids: ['npa', 'dpd'], source: 'platform' },
+  { term_id: 'npa', term: 'NPA — Non-Performing Asset', category: 'regulatory', definition: 'An account where principal/interest is overdue for >90 days.', source_doc: 'RBI IRACP Norms', related_term_ids: ['sma'], source: 'platform' },
+  { term_id: 'dpd', term: 'DPD — Days Past Due', category: 'banking', definition: 'Number of days past the original due date that an installment remains unpaid.', related_term_ids: ['sma', 'npa'], source: 'platform' },
+  { term_id: 'pd', term: 'PD — Probability of Default', category: 'risk', definition: 'Probability that an obligor will default within a defined horizon.', related_term_ids: ['lgd', 'ead', 'ecl'], source: 'platform' },
+  { term_id: 'lgd', term: 'LGD — Loss Given Default', category: 'risk', definition: 'Proportion of exposure that is lost when a default event occurs.', related_term_ids: ['pd', 'ead'], source: 'platform' },
+  { term_id: 'shap', term: 'SHAP — SHapley Additive exPlanations', category: 'ai_ml', definition: 'A game-theoretic approach to explaining ML model output.', source: 'platform' },
+  { term_id: 'maker_checker', term: 'Maker-Checker (4-eyes)', category: 'workflow', definition: 'A control where maker proposes and a distinct checker approves the action.', source_doc: 'RBI Operational Risk Framework', source: 'platform' },
+];
+const __mswGlossaryOverlay = new Map<string, MswGlossaryTerm>();
+const __mswGlossaryTombstones = new Set<string>();
+
+function __mswGlossaryEffective(): MswGlossaryTerm[] {
+  const out: MswGlossaryTerm[] = [];
+  for (const t of __mswGlossarySeed) {
+    if (__mswGlossaryTombstones.has(t.term_id)) continue;
+    const ovr = __mswGlossaryOverlay.get(t.term_id);
+    out.push(ovr ? { ...ovr, source: 'tenant' } : { ...t });
+  }
+  const platformIds = new Set(__mswGlossarySeed.map((t) => t.term_id));
+  for (const t of __mswGlossaryOverlay.values()) {
+    if (!platformIds.has(t.term_id)) out.push({ ...t, source: 'tenant' });
+  }
+  return out;
+}
+
+export function __resetMswM64() {
+  __mswGlossaryOverlay.clear();
+  __mswGlossaryTombstones.clear();
+}
+
+const __mswGlossaryHandlers = [
+  http.get('/v1/glossary/terms', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q')?.toLowerCase();
+    const category = url.searchParams.get('category');
+    let terms = __mswGlossaryEffective();
+    if (category) terms = terms.filter((t) => t.category === category);
+    if (q) {
+      terms = terms.filter(
+        (t) =>
+          t.term.toLowerCase().includes(q) ||
+          t.definition.toLowerCase().includes(q) ||
+          t.term_id.toLowerCase().includes(q),
+      );
+    }
+    return HttpResponse.json(envelope({ terms }));
+  }),
+  http.get('/v1/glossary/categories', () => {
+    return HttpResponse.json(envelope({
+      categories: ['banking', 'regulatory', 'risk', 'ai_ml', 'workflow', 'fraud', 'insurance'],
+    }));
+  }),
+  http.get('/v1/glossary/terms/:term_id', ({ params }) => {
+    const id = String(params.term_id);
+    if (__mswGlossaryTombstones.has(id)) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_term', `unknown ${id}`, 'LOW'), { status: 404 });
+    }
+    const ovr = __mswGlossaryOverlay.get(id);
+    if (ovr) return HttpResponse.json(envelope({ ...ovr, source: 'tenant' }));
+    const platform = __mswGlossarySeed.find((t) => t.term_id === id);
+    if (!platform) return HttpResponse.json(envelopeError('EWS_404_unknown_term', `unknown ${id}`, 'LOW'), { status: 404 });
+    return HttpResponse.json(envelope({ ...platform, source: 'platform' }));
+  }),
+  http.post('/v1/glossary/terms', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const inner = raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+      ? ((raw as { body: Record<string, unknown> }).body) : raw;
+    const term_id = String(inner.term_id ?? '');
+    if (!term_id || !/^[a-z0-9_]{2,64}$/.test(term_id)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_term_id', 'term_id invalid', 'MEDIUM'), { status: 400 });
+    }
+    if (__mswGlossaryOverlay.has(term_id)) {
+      return HttpResponse.json(envelopeError('EWS_409_duplicate_term_id', `${term_id} already exists`, 'MEDIUM'), { status: 409 });
+    }
+    if (__mswGlossarySeed.some((t) => t.term_id === term_id) && !__mswGlossaryTombstones.has(term_id)) {
+      return HttpResponse.json(envelopeError('EWS_409_platform_term_exists', `${term_id} is a platform term`, 'MEDIUM'), { status: 409 });
+    }
+    const entry: MswGlossaryTerm = {
+      term_id,
+      term: String(inner.term ?? ''),
+      category: String(inner.category ?? 'banking'),
+      definition: String(inner.definition ?? ''),
+      source_doc: inner.source_doc as string | undefined,
+      related_term_ids: inner.related_term_ids as string[] | undefined,
+      source: 'tenant',
+      updated_at: new Date().toISOString(),
+      updated_by: 'alice.admin',
+    };
+    __mswGlossaryOverlay.set(term_id, entry);
+    __mswGlossaryTombstones.delete(term_id);
+    return HttpResponse.json(envelope(entry), { status: 201 });
+  }),
+  http.put('/v1/glossary/terms/:term_id', async ({ params, request }) => {
+    const id = String(params.term_id);
+    if (__mswGlossaryTombstones.has(id)) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_term', `${id} is hidden`, 'LOW'), { status: 404 });
+    }
+    const raw = (await request.json()) as Record<string, unknown>;
+    const patch = raw && typeof raw === 'object' && 'body' in raw && 'header' in raw
+      ? ((raw as { body: Record<string, unknown> }).body) : raw;
+    const existing = __mswGlossaryOverlay.get(id) ?? __mswGlossarySeed.find((t) => t.term_id === id);
+    if (!existing) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_term', `unknown ${id}`, 'LOW'), { status: 404 });
+    }
+    const merged: MswGlossaryTerm = {
+      ...existing,
+      ...(patch.term !== undefined ? { term: String(patch.term) } : {}),
+      ...(patch.category !== undefined ? { category: String(patch.category) } : {}),
+      ...(patch.definition !== undefined ? { definition: String(patch.definition) } : {}),
+      ...(patch.source_doc !== undefined ? { source_doc: String(patch.source_doc) } : {}),
+      ...(patch.related_term_ids !== undefined ? { related_term_ids: patch.related_term_ids as string[] } : {}),
+      source: 'tenant',
+      updated_at: new Date().toISOString(),
+      updated_by: 'alice.admin',
+    };
+    __mswGlossaryOverlay.set(id, merged);
+    return HttpResponse.json(envelope(merged));
+  }),
+  http.delete('/v1/glossary/terms/:term_id', ({ params }) => {
+    const id = String(params.term_id);
+    if (__mswGlossaryOverlay.has(id)) {
+      __mswGlossaryOverlay.delete(id);
+      if (__mswGlossarySeed.some((t) => t.term_id === id)) {
+        __mswGlossaryTombstones.add(id);
+      }
+      return new HttpResponse(null, { status: 204 });
+    }
+    if (__mswGlossarySeed.some((t) => t.term_id === id) && !__mswGlossaryTombstones.has(id)) {
+      __mswGlossaryTombstones.add(id);
+      return new HttpResponse(null, { status: 204 });
+    }
+    return HttpResponse.json(envelopeError('EWS_404_unknown_term', `unknown ${id}`, 'LOW'), { status: 404 });
+  }),
+];
+
+handlers.push(...__mswGlossaryHandlers);

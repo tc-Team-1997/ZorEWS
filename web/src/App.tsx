@@ -47,6 +47,7 @@ import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
 import { AuditTrailPage } from '@/modules/admin/AuditTrailPage';
+import { GlossaryPage } from '@/modules/help/GlossaryPage';
 import { DataIngestionPage } from '@/modules/admin/DataIngestionPage';
 import { DataProfilingPage } from '@/modules/admin/DataProfilingPage';
 import { AnomalyDetectionPage } from '@/modules/admin/AnomalyDetectionPage';
@@ -144,6 +145,7 @@ export function App() {
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
             <Route path="admin/audit-trail" element={<AuditTrailPage />} />
+            <Route path="glossary" element={<GlossaryPage />} />
             <Route path="admin/ingestion" element={<DataIngestionPage />} />
             <Route path="admin/data-profiling" element={<DataProfilingPage />} />
             <Route path="admin/anomalies" element={<AnomalyDetectionPage />} />

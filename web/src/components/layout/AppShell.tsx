@@ -43,6 +43,7 @@ import {
   Cog,
   Workflow,
   Beaker,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -97,6 +98,7 @@ const NAV: readonly NavItem[] = [
   { to: '/admin/integrations', i18nKey: 'integrations', icon: Plug, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/audit-log', i18nKey: 'audit_log', icon: ScrollText, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/audit-trail', i18nKey: 'audit_trail', icon: Shield, requireRole: ['admin', 'supervisor'] },
+  { to: '/glossary', i18nKey: 'glossary', icon: BookOpen },
   { to: '/admin/ingestion', i18nKey: 'data_ingestion', icon: Database, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/data-profiling', i18nKey: 'data_profiling', icon: BrainCircuit, requireRole: ['admin', 'supervisor'] },
   { to: '/admin/anomalies', i18nKey: 'anomaly_detection', icon: Activity, requireRole: ['admin', 'supervisor'] },
