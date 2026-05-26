@@ -7330,6 +7330,121 @@ export const handlers = [
     return HttpResponse.json(envelope(__mswAiModelsCustom[idx]));
   }),
 
+  // M5.2 — Rules Engine MSW handlers. Spec routes mostly already exist
+  // in the BFF; these stubs cover dev mode so the SPA page renders.
+  http.get('/v1/rules/templates/categories', () =>
+    HttpResponse.json(envelope({
+      items: ['risk_monitoring', 'fraud_detection', 'compliance', 'operational', 'underwriting'],
+      total: 5,
+    })),
+  ),
+  http.get('/v1/rules/templates', ({ request }) => {
+    const url = new URL(request.url);
+    const vertical = url.searchParams.get('vertical');
+    const category = url.searchParams.get('category');
+    const all = [
+      { id: 'tpl_dpd_30_60', name: 'DPD 30-60 watch list', category: 'risk_monitoring', vertical: 'banking', recommended_severity: 'high', recommended_actions: ['open_case'], supporting_indicators: ['FIN-001', 'FIN-002'], condition_pseudocode: 'dpd_max_90d in [30,60]', source_doc: 'RBI master direction' },
+      { id: 'tpl_repeat_claim_180d', name: 'Repeat claim in 180 days', category: 'fraud_detection', vertical: 'insurance', recommended_severity: 'critical', recommended_actions: ['open_case', 'flag_for_review'], supporting_indicators: ['CLM-002', 'CLM-005'], condition_pseudocode: 'claim_count_180d > 2', source_doc: 'IRDAI claim fraud guide' },
+      { id: 'tpl_velocity_24h', name: 'High velocity in 24h', category: 'fraud_detection', vertical: 'banking', recommended_severity: 'critical', recommended_actions: ['pause_disbursement', 'flag_for_review'], supporting_indicators: ['TXN-001'], condition_pseudocode: 'txn_count_24h > 25', source_doc: 'BIL §11' },
+      { id: 'tpl_aml_high_severity_open', name: 'AML high-severity open', category: 'compliance', vertical: 'both', recommended_severity: 'critical', recommended_actions: ['open_case', 'notify_supervisor'], supporting_indicators: ['FIN-005'], condition_pseudocode: 'open_aml_high_count > 0', source_doc: 'AML KYC framework' },
+      { id: 'tpl_kyc_expired', name: 'KYC expired', category: 'compliance', vertical: 'both', recommended_severity: 'high', recommended_actions: ['request_documents'], supporting_indicators: ['CUS-001'], condition_pseudocode: 'kyc_expires_at < today', source_doc: 'AML KYC framework' },
+    ];
+    const filtered = all.filter((t) =>
+      (!vertical || t.vertical === vertical || t.vertical === 'both') &&
+      (!category || t.category === category),
+    );
+    return HttpResponse.json(envelope({ items: filtered, total: filtered.length }));
+  }),
+  http.get('/v1/rules/templates/custom', () =>
+    HttpResponse.json(envelope({ items: __mswCustomRuleTemplates, total: __mswCustomRuleTemplates.length })),
+  ),
+  http.post('/v1/rules/templates/custom/clone-from-library', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { source_template_id?: string; name?: string };
+    if (!body.source_template_id) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'source_template_id required', 'MEDIUM'), { status: 400 });
+    }
+    const created = {
+      custom_template_id: `ctpl-${Date.now()}`,
+      id: `ctpl-${Date.now()}`,
+      tenant_id: 'BANK_DEMO',
+      cloned_from: body.source_template_id,
+      name: body.name ?? `Copy of ${body.source_template_id}`,
+      category: 'risk_monitoring',
+      vertical: 'banking',
+      recommended_severity: 'high',
+      recommended_actions: ['open_case'],
+      supporting_indicators: ['FIN-001'],
+      condition_pseudocode: '<cloned>',
+      source_doc: 'cloned from library',
+      created_at: new Date().toISOString(),
+      created_by: 'alice.admin',
+    };
+    __mswCustomRuleTemplates.push(created);
+    return HttpResponse.json(envelope(created), { status: 201 });
+  }),
+  http.post('/v1/rules/simulate', async ({ request }) => {
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'header' in raw && 'body' in raw
+      ? (raw.body as Record<string, unknown>)
+      : raw) as { rule_template_id?: string; scenario_preset_id?: string; customer_count?: number };
+    if (!body.rule_template_id || !body.scenario_preset_id) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'rule_template_id + scenario_preset_id required', 'MEDIUM'), { status: 400 });
+    }
+    const total = Number(body.customer_count ?? 500);
+    const fired = Math.round(total * 0.18); // ~18% fire rate for demo
+    return HttpResponse.json(envelope({
+      rule_template_id: body.rule_template_id,
+      rule_name: 'Demo template',
+      rule_category: 'risk_monitoring',
+      recommended_severity: 'high',
+      scenario_preset_id: body.scenario_preset_id,
+      scenario_name: 'Demo scenario',
+      customer_count: total,
+      fired_count: fired,
+      pass_count: fired,
+      fail_count: total - fired,
+      fire_rate: fired / total,
+      baseline_fire_rate: 0.05,
+      amplification: 3.6,
+      by_severity: { critical: Math.round(fired * 0.15), high: Math.round(fired * 0.6), medium: Math.round(fired * 0.2), low: Math.round(fired * 0.05) },
+      sample_matched_records: Array.from({ length: Math.min(10, fired) }).map((_, i) => ({
+        customer_id: `c-sim-${(10000 + i).toString().padStart(5, '0')}`,
+        segment: (['RETAIL', 'SME', 'CORPORATE', 'NBFC'] as const)[i % 4],
+        contribution: Math.round((0.92 - i * 0.06) * 100) / 100,
+      })),
+      projected_alert_volume_per_day: Math.round((fired / 14) * 10) / 10,
+      simulated_at: new Date().toISOString(),
+    }));
+  }),
+  http.get('/v1/scenarios/library', () =>
+    HttpResponse.json(envelope({
+      items: [
+        { id: 'rbi_baseline', name: 'RBI Baseline Stress', category: 'regulatory', regulator: 'RBI', severity: 'mild', shocks: { gdp: -0.5, rate: 50, fx: 2 } },
+        { id: 'rbi_adverse', name: 'RBI Adverse Stress', category: 'regulatory', regulator: 'RBI', severity: 'moderate', shocks: { gdp: -2, rate: 150, fx: 5 } },
+        { id: 'rbi_severely_adverse', name: 'RBI Severely Adverse', category: 'regulatory', regulator: 'RBI', severity: 'severe', shocks: { gdp: -5, rate: 300, fx: 12 } },
+        { id: 'irdai_solvency', name: 'IRDAI Solvency Stress', category: 'regulatory', regulator: 'IRDAI', severity: 'moderate', shocks: { gdp: -2.5, rate: 100, fx: 4 } },
+        { id: 'pandemic_v2', name: 'Pandemic stress (v2)', category: 'black_swan', regulator: 'INTERNAL', severity: 'severe', shocks: { gdp: -7, rate: -100, fx: 8 } },
+        { id: 'baseline_zero', name: 'Baseline (no shock)', category: 'baseline', regulator: 'INTERNAL', severity: 'mild', shocks: { gdp: 0, rate: 0, fx: 0 } },
+      ],
+      total: 6,
+    })),
+  ),
+  http.get('/v1/ews/rules/indicators', () =>
+    HttpResponse.json(envelope({
+      items: [
+        { id: 'EWS-001', name: 'Days Past Due (max 90d)', family: 'credit', description: 'Worst DPD in trailing 90 days', unit: 'days' },
+        { id: 'EWS-002', name: 'Credit utilisation %', family: 'credit', description: 'Outstanding / sanctioned limit', unit: 'percent' },
+        { id: 'EWS-003', name: 'Bureau score', family: 'credit', description: 'CIBIL/Experian score (latest pull)', unit: 'score' },
+        { id: 'EWS-004', name: 'Cheque bounce rate (180d)', family: 'behavioural', description: 'Bounces / total in last 180 days' },
+        { id: 'EWS-005', name: 'Cash withdrawal velocity', family: 'transaction', description: 'Cash withdrawal z-score', unit: 'σ' },
+        { id: 'EWS-006', name: 'AML high-severity open', family: 'fraud', description: 'Count of open high-severity AML matches' },
+      ],
+    })),
+  ),
+
   // M5.1 — Master Setup MSW handlers. Generic in-memory CRUD over an
   // open master_type. Special record_id 'inuse-xx' surfaces 12 fake
   // usages so the SPA can demonstrate the 409 EWS_409_in_use guard.
@@ -7586,6 +7701,9 @@ function __mswDqProfile(source_id: string) {
   ];
   return { tenant_id: 'BANK_DEMO', source_id, generated_at: new Date().toISOString(), total_rows: 12_000, columns };
 }
+
+// M5.2 — custom rule templates in-memory store
+const __mswCustomRuleTemplates: Array<Record<string, unknown>> = [];
 
 // M5.1 — Master Setup MSW seed. One row per tab so the SPA renders
 // non-empty by default; 'INUSE_*' codes demonstrate the 409 EWS_409_in_use

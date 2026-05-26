@@ -71,6 +71,15 @@ export interface SeverityBucket {
   low: number;
 }
 
+/** M5.2 — sample matched record. The simulator doesn't run against
+ *  real customer data — these are deterministic synthetic ids the SPA
+ *  surfaces in the simulator "what would have matched?" preview. */
+export interface SimulatedMatchedRecord {
+  customer_id: string;
+  segment: 'RETAIL' | 'SME' | 'CORPORATE' | 'NBFC';
+  contribution: number; // 0..1 — how strongly the rule would fire on this
+}
+
 export interface RuleSimulationResult {
   rule_template_id: string;
   rule_name: string;
@@ -80,6 +89,11 @@ export interface RuleSimulationResult {
   scenario_name: string;
   customer_count: number;
   fired_count: number;
+  /** M5.2 — pass = matched the rule. Alias for fired_count, surfaced
+   *  explicitly so the SPA can label it as "pass" in the simulator. */
+  pass_count: number;
+  /** M5.2 — fail = NOT matched. customer_count - fired_count. */
+  fail_count: number;
   /** fired_count / customer_count, in [0, 1]. */
   fire_rate: number;
   /** Fire rate the same rule would have on the zero-shock baseline. */
@@ -89,6 +103,14 @@ export interface RuleSimulationResult {
    *  divide-by-near-zero. */
   amplification: number;
   by_severity: SeverityBucket;
+  /** M5.2 — top-10 deterministic synthetic customer_ids that the rule
+   *  would match in this scenario. Drives the simulator's "sample
+   *  matched records" preview. Empty when fired_count=0. */
+  sample_matched_records: SimulatedMatchedRecord[];
+  /** M5.2 — projected alert volume in matches/day, derived from
+   *  fired_count + assumed daily population turnover. Drives the
+   *  "expected operator load" headline on the simulator. */
+  projected_alert_volume_per_day: number;
   simulated_at: string;
 }
 
@@ -247,6 +269,21 @@ export function simulateRule(
       ? 1
       : Math.min(99, fire_rate / baseline_fire_rate);
 
+  // M5.2 — Sample matched records. Deterministic synthetic customer
+  // ids seeded by (template, scenario, day) so the same simulation
+  // returns the same 10 records — useful for regression + UI snapshot.
+  const sample_matched_records = buildSampleMatched(template.id, scenario.id, day, fired_count);
+
+  // M5.2 — Projected alert volume per day. Assumes ~14-day average
+  // population turnover (the scoring engine re-evaluates every customer
+  // ~14 days) → daily alerts = fired_count / 14. Operators consume this
+  // to size the supervisor desk.
+  const POPULATION_TURNOVER_DAYS = 14;
+  const projected_alert_volume_per_day = Math.max(
+    0,
+    Math.round((fired_count / POPULATION_TURNOVER_DAYS) * 10) / 10,
+  );
+
   return {
     rule_template_id: template.id,
     rule_name: template.name,
@@ -256,12 +293,50 @@ export function simulateRule(
     scenario_name: scenario.name,
     customer_count,
     fired_count,
+    pass_count: fired_count,
+    fail_count: Math.max(0, customer_count - fired_count),
     fire_rate,
     baseline_fire_rate,
     amplification,
     by_severity: severityBucket(fired_count, template.recommended_severity),
+    sample_matched_records,
+    projected_alert_volume_per_day,
     simulated_at: asOf.toISOString(),
   };
+}
+
+/** M5.2 — deterministic synthetic match sampler. Returns up to 10 ids
+ *  with descending contribution scores. fired_count=0 → empty. */
+export const SAMPLE_MATCHED_CAP = 10;
+const SAMPLE_SEGMENTS: SimulatedMatchedRecord['segment'][] = [
+  'RETAIL',
+  'SME',
+  'CORPORATE',
+  'NBFC',
+];
+
+function buildSampleMatched(
+  template_id: string,
+  scenario_id: string,
+  day: string,
+  fired_count: number,
+): SimulatedMatchedRecord[] {
+  if (fired_count <= 0) return [];
+  const n = Math.min(SAMPLE_MATCHED_CAP, fired_count);
+  const out: SimulatedMatchedRecord[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = rng(fnv1a(`match|${template_id}|${scenario_id}|${day}|${i}`))();
+    // Descending contribution — first sample is the highest-fit match.
+    const contribution = Math.round((0.95 - i * 0.06 - r * 0.04) * 100) / 100;
+    out.push({
+      customer_id: `c-sim-${(fnv1a(`${template_id}|${scenario_id}|${day}|${i}`) % 100000)
+        .toString()
+        .padStart(5, '0')}`,
+      segment: SAMPLE_SEGMENTS[i % SAMPLE_SEGMENTS.length]!,
+      contribution: Math.max(0.1, contribution),
+    });
+  }
+  return out;
 }
 
 /**

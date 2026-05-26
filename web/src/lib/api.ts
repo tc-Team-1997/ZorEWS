@@ -1820,6 +1820,57 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // M5.2 — Rules Engine. The 8 spec routes all already exist; the page
+  // re-uses them via these typed wrappers.
+  ruleTemplateCategories: () =>
+    http
+      .get<EnvelopeBody<{ items: string[]; total: number }>>('/v1/rules/templates/categories')
+      .then((r) => r.data),
+  ruleTemplates: (opts: { vertical?: string; category?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.vertical) p.set('vertical', opts.vertical);
+    if (opts.category) p.set('category', opts.category);
+    const qs = p.toString();
+    return http
+      .get<EnvelopeBody<{ items: RuleTemplate[]; total: number }>>(
+        `/v1/rules/templates${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  ruleTemplatesCustomList: () =>
+    http
+      .get<EnvelopeBody<{ items: CustomRuleTemplate[]; total: number }>>('/v1/rules/templates/custom')
+      .then((r) => r.data),
+  ruleTemplatesCustomCreate: (body: { source_template_id?: string; name?: string; description?: string }) =>
+    http
+      .post<EnvelopeBody<CustomRuleTemplate>>('/v1/rules/templates/custom', body)
+      .then((r) => r.data),
+  ruleTemplatesCustomUpdate: (id: string, patch: Record<string, unknown>) =>
+    http
+      .put<EnvelopeBody<CustomRuleTemplate>>(
+        `/v1/rules/templates/custom/${encodeURIComponent(id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+  ruleTemplatesCustomDelete: (id: string) =>
+    http.delete(`/v1/rules/templates/custom/${encodeURIComponent(id)}`),
+  ruleTemplateCloneFromLibrary: (body: { source_template_id: string; name?: string }) =>
+    http
+      .post<EnvelopeBody<CustomRuleTemplate>>('/v1/rules/templates/custom/clone-from-library', body)
+      .then((r) => r.data),
+  ruleSimulate: (body: { rule_template_id: string; scenario_preset_id: string; customer_count?: number }) =>
+    http
+      .post<EnvelopeBody<RuleSimulationResult>>('/v1/rules/simulate', body)
+      .then((r) => r.data),
+  scenariosLibrary: () =>
+    http
+      .get<EnvelopeBody<{ items: ScenarioPresetRow[]; total: number }>>('/v1/scenarios/library')
+      .then((r) => r.data),
+  ewsRulesIndicators: () =>
+    http
+      .get<EnvelopeBody<{ items: EwsIndicatorRow[] }>>('/v1/ews/rules/indicators')
+      .then((r) => r.data),
+
   // M5.1 — Master Setup. Uniform CRUD over /v1/master/:type with
   // a where-used pre-flight check + 409 EWS_409_in_use guard on delete.
   masterList: (master_type: string, opts: { enabled_only?: boolean; q?: string } = {}) => {
@@ -2894,6 +2945,75 @@ export interface AiModelRow {
 export interface AiModelListPage {
   items: AiModelRow[];
   total: number;
+}
+
+// M5.2 — Rules Engine types (mirror services/bff/src/rule_templates.ts +
+// rule_simulation.ts + scenario_library.ts + ews_rules indicators).
+export interface RuleTemplate {
+  id: string;
+  name: string;
+  category: string;
+  vertical: 'banking' | 'insurance' | 'both';
+  recommended_severity: 'critical' | 'high' | 'medium' | 'low';
+  recommended_actions: string[];
+  supporting_indicators: string[];
+  condition_pseudocode: string;
+  source_doc: string;
+  description?: string;
+}
+export interface CustomRuleTemplate extends RuleTemplate {
+  custom_template_id: string;
+  tenant_id: string;
+  cloned_from?: string | null;
+  created_at: string;
+  created_by: string;
+  updated_at?: string;
+}
+export interface SeverityBucketRow {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+export interface SimulatedMatchedRecord {
+  customer_id: string;
+  segment: 'RETAIL' | 'SME' | 'CORPORATE' | 'NBFC';
+  contribution: number;
+}
+export interface RuleSimulationResult {
+  rule_template_id: string;
+  rule_name: string;
+  rule_category: string;
+  recommended_severity: 'critical' | 'high' | 'medium' | 'low';
+  scenario_preset_id: string;
+  scenario_name: string;
+  customer_count: number;
+  fired_count: number;
+  pass_count: number;
+  fail_count: number;
+  fire_rate: number;
+  baseline_fire_rate: number;
+  amplification: number;
+  by_severity: SeverityBucketRow;
+  sample_matched_records: SimulatedMatchedRecord[];
+  projected_alert_volume_per_day: number;
+  simulated_at: string;
+}
+export interface ScenarioPresetRow {
+  id: string;
+  name: string;
+  category: string;
+  regulator: string;
+  severity: 'mild' | 'moderate' | 'severe';
+  shocks: { gdp: number; rate: number; fx: number };
+  description?: string;
+}
+export interface EwsIndicatorRow {
+  id: string;
+  name: string;
+  family: string;
+  description?: string;
+  unit?: string;
 }
 
 // M5.1 — Master Setup types (mirror services/bff/src/missing_masters.ts).

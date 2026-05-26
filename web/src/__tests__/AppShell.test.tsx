@@ -25,7 +25,9 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /alerts/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /customers/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /rules/i })).toBeInTheDocument();
+    // M5.2 added a "Rules Engine" sibling alongside the existing "Rules"
+    // nav entry — disambiguate by exact-prefix match on "Rules" alone.
+    expect(screen.getByRole('link', { name: /^rules$/i })).toBeInTheDocument();
     // Legacy "Cases" nav was retired — Case Management is the sole entry now.
     expect(screen.getByRole('link', { name: /case management/i })).toBeInTheDocument();
     // Disambiguated from /admin/case-scenarios admin entry (M14.21)

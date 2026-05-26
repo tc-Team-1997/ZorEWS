@@ -40,6 +40,7 @@ import {
   Boxes,
   Microscope,
   Library,
+  Cog,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -75,6 +76,7 @@ const NAV: readonly NavItem[] = [
   { to: '/ai/registry', i18nKey: 'model_registry', icon: Boxes, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/ai/explainability', i18nKey: 'explainability', icon: Microscope, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'] },
   { to: '/admin/master-setup', i18nKey: 'master_setup', icon: Library, requireRole: ['admin'] },
+  { to: '/rules/engine', i18nKey: 'rules_engine', icon: Cog, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/npa-prediction', i18nKey: 'npa_prediction', icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sma', i18nKey: 'sma_classification', icon: TrendingUp, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
   { to: '/banking/sectors', i18nKey: 'sector_watch', icon: BarChart3, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
