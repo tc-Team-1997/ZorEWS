@@ -1,0 +1,519 @@
+openapi: 3.1.0
+info:
+  title: ZorEWS Authentication API
+  version: "1.0.0"
+  summary: Multi-country, multi-tenant authentication + RBAC.
+  description: |
+    Production authentication surface for the ZorEWS Early Warning System
+    platform. Covers credential login, refresh-token rotation, MFA (TOTP),
+    password reset, session management, public catalogue lookups
+    (countries / domains / tenants) and tenant-scoped service-client
+    OAuth (client_credentials).
+
+    All credentialed endpoints expect a `Bearer` access token in the
+    `Authorization` header. Public catalogue endpoints under
+    `/api/auth/{countries,domains,tenants}` are anonymous — they
+    populate the login picker BEFORE credentials are exchanged.
+
+    Security model:
+      * Argon2id password hashing (≥ 19 MiB / 2 iterations)
+      * RS256 JWT signed by an in-memory keypair (JWKS exposed at
+        `/.well-known/jwks.json`)
+      * Session denylist + refresh-token rotation per device
+      * TOTP MFA (RFC 6238) with 10 single-use backup codes
+      * Rate-limit + auto-lockout + CAPTCHA after 2 failures
+      * Per-tenant audit chain (SHA-256 hash-linked) with WORM S3
+        export for evidence packaging.
+  contact:
+    name: ZorFinotech
+    url: https://zorfinotech.example
+  license:
+    name: Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Local development (make up)
+  - url: https://api.zorews.example
+    description: Production
+tags:
+  - name: Public Catalogue
+    description: Anonymous catalog used by the login picker.
+  - name: Authentication
+    description: Credential exchange + token rotation.
+  - name: MFA
+    description: Multi-factor authentication (TOTP + backup codes).
+  - name: Sessions
+    description: Active device sessions + revoke.
+  - name: Service Clients
+    description: OAuth client_credentials principals (admin only).
+  - name: Audit
+    description: Auth audit trail.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        RS256 JWT signed by the auth-svc keypair. Claims:
+          * sub          — user id
+          * tenant_id    — bound tenant
+          * sid          — server-side session id (revocable)
+          * role         — backend role (1 of 5)
+          * iat / exp / iss / aud
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:    { type: string, example: "invalid_input" }
+        message:  { type: string, example: "username is required" }
+    Country:
+      type: object
+      properties:
+        code:        { type: string, example: "IN" }
+        name:        { type: string, example: "India" }
+        flag:        { type: string, example: "🇮🇳" }
+        currency:
+          type: object
+          properties:
+            code:   { type: string, example: "INR" }
+            symbol: { type: string, example: "₹" }
+        locale:      { type: string, example: "en-IN" }
+        timezone:
+          type: object
+          properties:
+            label: { type: string, example: "IST (UTC+5:30)" }
+            tz:    { type: string, example: "Asia/Kolkata" }
+        date_format: { type: string, example: "DD-MMM-YYYY" }
+        regulators:
+          type: object
+          properties:
+            banking:   { type: array, items: { type: string }, example: ["RBI", "BAC-A 2024"] }
+            insurance: { type: array, items: { type: string }, example: ["IRDAI", "IFRS 9"] }
+    Domain:
+      type: object
+      properties:
+        id:          { type: string, enum: [banking, insurance] }
+        label:       { type: string }
+        description: { type: string }
+    Tenant:
+      type: object
+      properties:
+        id:         { type: string, example: "sbi-in" }
+        name:       { type: string, example: "State Bank of India" }
+        short_name: { type: string, example: "SBI" }
+        domain:     { type: string, enum: [banking, insurance] }
+        country:    { type: string, example: "IN" }
+        regions:    { type: array, items: { type: string } }
+        tenant_id:  { type: string, example: "BANK_DEMO", description: "Operational tenant_id for the X-Tenant-ID header." }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:       { type: string, example: "alice.admin" }
+        password:       { type: string, format: password, example: "Admin!Pass1" }
+        captcha_id:     { type: string, nullable: true }
+        captcha_answer: { type: integer, nullable: true }
+    LoginResponse:
+      type: object
+      properties:
+        access_token:           { type: string, description: "RS256 JWT — 15 min default." }
+        refresh_token:          { type: string }
+        token_type:             { type: string, enum: [Bearer] }
+        expires_in:             { type: integer, description: "Seconds until access_token expires." }
+        role:                   { type: string }
+        display_name:           { type: string }
+        session_id:             { type: string }
+        must_change_password:   { type: boolean }
+        terms_accepted_at:      { type: string, format: date-time, nullable: true }
+        requires_2fa:           { type: boolean, description: "True when MFA enrolment forces a partial-token exchange." }
+        partial_token:          { type: string, nullable: true }
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe.
+      tags: [Public Catalogue]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/auth/countries:
+    get:
+      summary: List supported countries.
+      tags: [Public Catalogue]
+      description: Anonymous. Used by the login picker before credentials.
+      responses:
+        "200":
+          description: Country catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:     { type: integer, example: 6 }
+                  countries: { type: array, items: { $ref: "#/components/schemas/Country" } }
+
+  /api/auth/domains:
+    get:
+      summary: List supported domains (banking + insurance).
+      tags: [Public Catalogue]
+      responses:
+        "200":
+          description: Domain enum.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:   { type: integer, example: 2 }
+                  domains: { type: array, items: { $ref: "#/components/schemas/Domain" } }
+
+  /api/auth/tenants:
+    get:
+      summary: List tenants, optionally filtered by country + domain.
+      tags: [Public Catalogue]
+      parameters:
+        - in: query
+          name: country
+          schema: { type: string }
+          example: IN
+        - in: query
+          name: domain
+          schema: { type: string, enum: [banking, insurance] }
+          example: banking
+      responses:
+        "200":
+          description: Filtered tenant catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:   { type: integer }
+                  filters:
+                    type: object
+                    properties:
+                      country: { type: string, nullable: true }
+                      domain:  { type: string, nullable: true }
+                  tenants: { type: array, items: { $ref: "#/components/schemas/Tenant" } }
+        "400":
+          description: Invalid domain value.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/auth/login:
+    post:
+      summary: Exchange credentials for an access + refresh token.
+      tags: [Authentication]
+      description: |
+        Forwards to the canonical `/auth/login` handler. Returns 200
+        with a token pair, OR a partial-token (`requires_2fa: true`)
+        when the account has MFA enrolled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Successful credential exchange.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401":
+          description: Invalid credentials.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403":
+          description: Account locked.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: Rate-limited.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/auth/logout:
+    post:
+      summary: Revoke the caller's current session.
+      tags: [Authentication]
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Session revoked (or no-op when no Bearer present).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:               { type: boolean }
+                  revoked:          { type: boolean }
+                  reason:           { type: string, nullable: true }
+                  upstream_status:  { type: integer, nullable: true }
+
+  /api/auth/refresh-token:
+    post:
+      summary: Exchange a refresh token for a fresh access token.
+      tags: [Authentication]
+      description: Forwards to the canonical `/auth/refresh` handler. Rotates the refresh token; the old one is denied immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: New token pair.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } }
+        "401":
+          description: Refresh token invalid, expired, or already rotated.
+
+  /api/auth/forgot-password:
+    post:
+      summary: Request a single-use password-reset link.
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:    { type: string, format: email, nullable: true }
+                username: { type: string, nullable: true }
+      responses:
+        "202":
+          description: Request accepted. Link is generated regardless of whether the account exists (anti-enumeration).
+
+  /api/auth/reset-password:
+    post:
+      summary: Consume a reset token + set a new password.
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:    { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Password updated. Old sessions are revoked.
+        "400":
+          description: Password fails complexity policy (≥ 8 chars, mixed case + digit/symbol, not in last-5 history).
+        "401":
+          description: Token invalid or expired.
+
+  /api/auth/send-mfa:
+    post:
+      summary: Trigger an out-of-band MFA challenge.
+      tags: [MFA]
+      description: |
+        ZorEWS uses TOTP — codes are read from the user's authenticator
+        app, so this endpoint returns `channel: totp` with a no-op
+        success message. When a backup SMS/email channel is wired
+        (Africa's Talking / SES — see docs/vendor-accounts.md), this
+        handler grows the actual provider call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string }
+                channel:  { type: string, enum: [totp, sms, email], default: totp }
+      responses:
+        "200":
+          description: Challenge dispatched (or fallback message returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:      { type: boolean }
+                  channel: { type: string, example: totp }
+                  message: { type: string }
+        "400":
+          description: Username missing.
+
+  /api/auth/verify-mfa:
+    post:
+      summary: Complete the MFA partial-token exchange.
+      tags: [MFA]
+      description: Forwards to the canonical `/auth/login/verify-2fa` handler.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partial_token]
+              properties:
+                partial_token: { type: string }
+                code:          { type: string, description: "6-digit TOTP from authenticator app." }
+                backup_code:   { type: string, description: "10-char single-use backup code." }
+      responses:
+        "200":
+          description: MFA successful — full token pair returned.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } }
+        "401":
+          description: TOTP or backup code invalid.
+
+  /auth/sessions:
+    get:
+      summary: List the caller's active sessions.
+      tags: [Sessions]
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200": { description: Session list. }
+    delete:
+      summary: Revoke ALL of caller's sessions (with optional `?except=current`).
+      tags: [Sessions]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: query
+          name: except
+          schema: { type: string, enum: [current] }
+      responses:
+        "200": { description: Revoked count. }
+
+  /auth/sessions/{sid}:
+    delete:
+      summary: Revoke a single session by id.
+      tags: [Sessions]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Session revoked. }
+        "404": { description: Session not found OR not owned by caller. }
+
+  /auth/audit-log:
+    get:
+      summary: Admin-only auth audit query.
+      tags: [Audit]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: target_username
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      responses:
+        "200": { description: Audit events newest-first. }
+        "403": { description: Admin role required. }
+
+  /auth/service-clients:
+    get:
+      summary: List OAuth service-client principals.
+      tags: [Service Clients]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: query
+          name: tenant_id
+          schema: { type: string }
+      responses:
+        "200": { description: Service-client list (no secret hash). }
+        "403": { description: Admin role required. }
+    post:
+      summary: Provision a new OAuth client_credentials principal.
+      tags: [Service Clients]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, client_id, display_name]
+              properties:
+                tenant_id:    { type: string }
+                client_id:    { type: string, pattern: "^[a-z0-9][a-z0-9._-]{2,63}$" }
+                display_name: { type: string }
+                scopes:       { type: array, items: { type: string } }
+      responses:
+        "201":
+          description: Created. Returns the plaintext secret ONCE.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  client_id:     { type: string }
+                  client_secret: { type: string, description: "Plaintext — never returned again." }
+        "409": { description: (tenant_id, client_id) already exists. }
+        "403": { description: Admin role required. }
+
+  /oauth/token:
+    post:
+      summary: OAuth client_credentials grant (RFC 6749 §4.4).
+      tags: [Service Clients]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type:    { type: string, enum: [client_credentials] }
+                client_id:     { type: string }
+                client_secret: { type: string }
+                scope:         { type: string }
+      responses:
+        "200":
+          description: Access token bound to the tenant.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  token_type:   { type: string }
+                  expires_in:   { type: integer }
+                  scope:        { type: string }
+        "401":
+          description: Invalid client credentials.
+
+  /.well-known/jwks.json:
+    get:
+      summary: JWKS — public RS256 key for verifying access + refresh tokens.
+      tags: [Public Catalogue]
+      responses:
+        "200":
+          description: JWK Set (RFC 7517).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kty: { type: string, example: RSA }
+                        kid: { type: string }
+                        alg: { type: string, example: RS256 }
+                        use: { type: string, example: sig }
+                        n:   { type: string }
+                        e:   { type: string }

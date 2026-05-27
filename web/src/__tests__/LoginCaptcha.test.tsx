@@ -9,7 +9,7 @@ describe('LoginPage CAPTCHA flow', () => {
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
 
-    const usernameInput = screen.getByLabelText(/username/i);
+    const usernameInput = screen.getByLabelText(/email or employee/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const submit = screen.getByRole('button', { name: /sign in/i });
 
@@ -42,7 +42,7 @@ describe('LoginPage CAPTCHA flow', () => {
   it('clicking the refresh button replaces the CAPTCHA challenge with a new one', async () => {
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
-    const usernameInput = screen.getByLabelText(/username/i);
+    const usernameInput = screen.getByLabelText(/email or employee/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const submit = screen.getByRole('button', { name: /sign in/i });
 

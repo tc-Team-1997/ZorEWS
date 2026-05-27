@@ -1,5 +1,8 @@
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerPublicCatalogRoutes } from "./routes/public_catalog.js";
+import { registerApiAuthAliasRoutes } from "./routes/api_auth_aliases.js";
+import { registerOpenapiRoutes } from "./routes/openapi.js";
 
 /**
  * OWASP-recommended response headers — same set as the BFF emits.
@@ -39,6 +42,16 @@ export function buildServer() {
   app.get("/healthz", async () => ({ status: "ok" }));
 
   registerAuthRoutes(app);
+  // Public catalogue endpoints (countries / domains / tenants).
+  // Anonymous — used by the login picker BEFORE credentials.
+  registerPublicCatalogRoutes(app);
+  // `/api/auth/*` aliases matching the public spec naming
+  // (login / logout / refresh-token / forgot-password / reset-password /
+  // send-mfa / verify-mfa). These thin-forward to the canonical
+  // `/auth/*` handlers above so there's a single source of truth.
+  registerApiAuthAliasRoutes(app);
+  // OpenAPI spec + Swagger UI at /auth/docs.
+  registerOpenapiRoutes(app);
 
   return app;
 }
