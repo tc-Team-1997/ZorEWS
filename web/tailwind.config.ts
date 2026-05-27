@@ -19,6 +19,26 @@ export default {
           skyLight:  '#E3EFFF',
         },
 
+        // ── ZorEWS enterprise auth/onboarding palette ────────────
+        // Deeper navy used by the immersive login + onboarding
+        // shell — distinct from operational `brand-navy` (which
+        // continues to drive dashboards). Orange is the SINGLE
+        // accent and is used sparingly: CTAs, live tickers, the
+        // active step in the onboarding stepper.
+        ews: {
+          midnight:    '#0A1430',
+          deepNavy:    '#15234B',
+          slate:       '#1F2D52',
+          line:        '#2A3A65',
+          warmWhite:   '#F5F1E8',
+          ivory:       '#F8F5EF',
+          mist:        '#E8E3D6',
+          orange:      '#FF6B35',
+          orangeMuted: '#F47B47',
+          orangeDeep:  '#D9501F',
+          amber:       '#F0B344',
+        },
+
         // Sidebar + action aliases
         sidebar:         '#0D2B6A',
         'sidebar-hover': '#1A3B85',
@@ -54,6 +74,10 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'Menlo', 'monospace'],
+        // ZorEWS editorial display serif — Fraunces variable.
+        // Used ONLY for auth + onboarding hero headlines, not
+        // operational dashboards (those stay on Inter for density).
+        display: ['Fraunces', 'Georgia', 'serif'],
       },
       borderRadius: {
         card:  '12px',

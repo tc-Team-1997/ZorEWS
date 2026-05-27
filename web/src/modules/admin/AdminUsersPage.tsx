@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
@@ -113,6 +113,7 @@ export function AdminUsersPage() {
   const adminListUsers = useAuth((s) => s.adminListUsers);
   const adminResetPassword = useAuth((s) => s.adminResetPassword);
   const adminCreateUser = useAuth((s) => s.adminCreateUser);
+  const navigate = useNavigate();
   const adminDeleteUser = useAuth((s) => s.adminDeleteUser);
   const adminSetLocked = useAuth((s) => s.adminSetLocked);
   // M6.1 — Users & RBAC: role change endpoint
@@ -407,10 +408,16 @@ export function AdminUsersPage() {
               : `${users?.length ?? 0} user${users?.length === 1 ? '' : 's'} · admin only`
         }
         actions={
-          <Button onClick={startCreate}>
-            <Plus size={14} className="mr-1.5" />
-            New user
-          </Button>
+          <>
+            <Button variant="ghost" onClick={() => navigate('/admin/users/new')}>
+              <UserPlus size={14} className="mr-1.5" />
+              Full enrolment
+            </Button>
+            <Button onClick={startCreate}>
+              <Plus size={14} className="mr-1.5" />
+              New user
+            </Button>
+          </>
         }
       />
 

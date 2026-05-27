@@ -20,6 +20,17 @@ export function renderWithProviders(
     ...options
   }: RenderOptions & { route?: string; routes?: string[] } = {},
 ) {
+  // Default the country to India in test mode so the new mandatory
+  // country selector on LoginPage doesn't block credential-flow tests
+  // that don't care about the country choice. Tests that explicitly
+  // want the empty state can clear it before rendering.
+  try {
+    if (typeof window !== 'undefined' && !window.localStorage.getItem('zorews.country')) {
+      window.localStorage.setItem('zorews.country', 'IN');
+    }
+  } catch {
+    /* jsdom localStorage polyfill may not be ready — best effort */
+  }
   const client = makeQueryClient();
   return {
     client,

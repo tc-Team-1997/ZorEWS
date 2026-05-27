@@ -459,6 +459,19 @@ export const useAuth = create<AuthState>((set) => ({
   logout: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    // Clear the 4-step onboarding state so the next sign-in walks the
+    // user through country → domain → tenant selection again. Inlined
+    // (rather than imported from useOnboardingContext) to avoid the
+    // store taking a transitive dependency on the lib hook.
+    try {
+      localStorage.removeItem('zorews.country');
+      localStorage.removeItem('zorews.domainChosen');
+      localStorage.removeItem('zorews.tenantContext');
+      window.dispatchEvent(new Event('zorews:country-changed'));
+      window.dispatchEvent(new Event('zorews:tenant-context-changed'));
+    } catch {
+      /* best effort — private mode / SSR */
+    }
     set({ status: 'idle', user: null, token: null });
   },
 }));

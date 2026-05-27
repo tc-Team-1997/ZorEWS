@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@/lib/i18n';
 import { LoginPage } from '@/modules/auth/LoginPage';
 import { SignupPage } from '@/modules/auth/SignupPage';
+import { OnboardingDomainPage } from '@/modules/onboarding/OnboardingDomainPage';
+import { OnboardingTenantPage } from '@/modules/onboarding/OnboardingTenantPage';
+import { AdminUserCreatePage } from '@/modules/admin/AdminUserCreatePage';
 import { ForgotPasswordPage } from '@/modules/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/modules/auth/ResetPasswordPage';
 import { FirstLoginWizardPage } from '@/modules/auth/FirstLoginWizardPage';
@@ -100,6 +103,27 @@ export function App() {
               so the user can't navigate to other pages until they complete
               the wizard. RequireAuth would otherwise bounce in a loop. */}
           <Route path="/first-login" element={<FirstLoginWizardPage />} />
+
+          {/* Onboarding STEPS 2 + 3 — auth-required but rendered
+              OUTSIDE the AppShell so the user is fully committed to
+              the flow until a domain + tenant are chosen. */}
+          <Route
+            path="/onboarding/domain"
+            element={
+              <RequireAuth>
+                <OnboardingDomainPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/onboarding/tenant"
+            element={
+              <RequireAuth>
+                <OnboardingTenantPage />
+              </RequireAuth>
+            }
+          />
+
           <Route
             element={
               <RequireAuth>
@@ -142,6 +166,7 @@ export function App() {
             <Route path="profile/sessions" element={<SessionsPage />} />
             <Route path="profile/activity" element={<LoginActivityPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
+            <Route path="admin/users/new" element={<AdminUserCreatePage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
             <Route path="admin/audit-trail" element={<AuditTrailPage />} />
