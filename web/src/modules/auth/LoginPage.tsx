@@ -3,11 +3,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Clock, RefreshCw, ShieldCheck, KeyRound } from 'lucide-react';
+import { Clock, RefreshCw, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth, type CaptchaChallenge } from '@/store/auth';
 import { HttpError } from '@/lib/http';
-import { Button, Input } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { EnterpriseShell } from './EnterpriseShell';
 import { CountrySelector } from './CountrySelector';
@@ -49,14 +48,13 @@ export function LoginPage() {
   const [domain, setDomain] = useDomain();
   const [tenantCtx, setTenantCtx] = useTenantContext();
   const [countryError, setCountryError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState<boolean>(
     () => typeof window !== 'undefined' && window.localStorage.getItem(REMEMBER_KEY) === '1',
   );
   const [mfaPreferred, setMfaPreferred] = useState<boolean>(
     () => typeof window !== 'undefined' && window.localStorage.getItem(MFA_PREF_KEY) === '1',
   );
-  // Inline domain + tenant selection (optional). When the user picks
-  // both on the login form, we skip the post-login onboarding redirect.
   const [inlineDomain, setInlineDomain] = useState<DomainChoice | ''>(domain ?? '');
   const [inlineOrgId, setInlineOrgId] = useState<string>(tenantCtx?.organization_id ?? '');
   const { t } = useTranslation();
@@ -75,7 +73,6 @@ export function LoginPage() {
     return <Navigate to={resumeTarget(domain, tenantCtx, fromPath)} replace />;
   }
 
-  // ── tenant picker driven by country + domain ──────────────────
   const tenantOptions = useMemo<OrganizationDef[]>(() => {
     if (!country || !inlineDomain) return [];
     const scoped = organizationsFor(country, inlineDomain);
@@ -114,8 +111,6 @@ export function LoginPage() {
       } catch {
         /* private mode — ignore */
       }
-      // If the user filled in domain + tenant on the login form, persist
-      // them so the resume target skips the onboarding pages.
       if (inlineDomain && inlineOrgId) {
         const org = getOrganization(inlineOrgId);
         if (org) {
@@ -164,9 +159,6 @@ export function LoginPage() {
   });
 
   function startSso(provider: 'okta' | 'azure_ad') {
-    // OIDC backend isn't wired yet (Year-2 Theme A — see TASKS.md
-    // T0.6 + docs/vendor-accounts.md). Surface a clear message so
-    // the operator knows to use credentials for now.
     setServerError(
       provider === 'okta'
         ? 'Okta SSO is configured — contact your administrator to enable for your account.'
@@ -175,25 +167,25 @@ export function LoginPage() {
   }
 
   return (
-    <EnterpriseShell tagline="Spot stress signals before they become NPAs, claims spikes, or solvency breaches. AI-powered early-warning for banks and insurers.">
+    <EnterpriseShell tagline="Spot stress signals before they become NPAs, claims spikes, or solvency breaches. AI-powered early-warning for banks and insurers — one platform, two domains.">
       <div>
         <div className="mb-6">
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orangeDeep mb-2">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orange mb-2">
             Sign in
           </p>
-          <h2 className="font-display text-[26px] font-semibold text-ink tracking-tight leading-[1.1]">
+          <h2 className="text-[26px] font-bold text-ews-warmWhite tracking-tight leading-[1.1]">
             {t('login.heading')}
           </h2>
-          <p className="text-[12.5px] text-sub mt-1.5">{t('login.subtitle')}</p>
+          <p className="text-[12.5px] text-ews-warmWhite/65 mt-1.5">{t('login.subtitle')}</p>
         </div>
 
         {idleSignOut && (
           <div
             role="status"
             data-testid="idle-signout-banner"
-            className="flex items-start gap-2 mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900"
+            className="flex items-start gap-2 mb-4 rounded border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-[12px] text-amber-200"
           >
-            <Clock size={14} className="mt-0.5 shrink-0 text-amber-600" strokeWidth={2} />
+            <Clock size={14} className="mt-0.5 shrink-0 text-amber-300" strokeWidth={2} />
             <p>{t('login.idle_signed_out')}</p>
           </div>
         )}
@@ -208,7 +200,7 @@ export function LoginPage() {
                 setCountry(c);
                 setCountryError(null);
               }}
-              variant="light"
+              variant="dark"
               invalid={!!countryError}
             />
             {countryError && (
@@ -223,7 +215,7 @@ export function LoginPage() {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <FieldLabel>{t('login.domain_label')}</FieldLabel>
-              <SelectField
+              <DarkSelect
                 value={inlineDomain}
                 onChange={(v) => {
                   setInlineDomain(v as DomainChoice | '');
@@ -239,7 +231,7 @@ export function LoginPage() {
             </div>
             <div>
               <FieldLabel>{t('login.tenant_label')}</FieldLabel>
-              <SelectField
+              <DarkSelect
                 value={inlineOrgId}
                 disabled={!country || !inlineDomain}
                 onChange={(v) => setInlineOrgId(v)}
@@ -258,55 +250,65 @@ export function LoginPage() {
             </div>
           </div>
 
-          <Input
-            {...register('username')}
+          <DarkInput
             label={t('login.email_or_emp_id')}
-            autoComplete="username"
             placeholder="alice.admin · or EMP-001234"
-            error={errors.username?.message ?? ''}
+            autoComplete="username"
+            error={errors.username?.message}
             required
+            registerProps={register('username')}
           />
-          <Input
-            {...register('password')}
-            type="password"
+          <DarkInput
             label={t('common.password')}
-            autoComplete="current-password"
+            type={showPassword ? 'text' : 'password'}
             placeholder="••••••••"
-            error={errors.password?.message ?? ''}
+            autoComplete="current-password"
+            error={errors.password?.message}
             required
+            registerProps={register('password')}
+            trailingIcon={
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded text-ews-warmWhite/60 hover:text-ews-warmWhite hover:bg-white/10 transition-colors"
+              >
+                {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            }
           />
 
           {/* MFA toggle + Remember + Forgot */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-0.5">
-            <label className="inline-flex items-center gap-2 text-[12px] text-ink cursor-pointer select-none">
+            <label className="inline-flex items-center gap-2 text-[12px] text-ews-warmWhite/85 cursor-pointer select-none">
               <input
                 type="checkbox"
                 data-testid="remember-me"
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-borderMed text-ews-orange focus:ring-ews-orange/40"
+                className="h-3.5 w-3.5 rounded border-white/30 bg-ews-deepNavy text-ews-orange focus:ring-ews-orange/40"
               />
               {t('login.remember_me')}
             </label>
             <label
               data-testid="mfa-toggle"
-              className="inline-flex items-center gap-2 text-[12px] text-ink cursor-pointer select-none"
+              className="inline-flex items-center gap-2 text-[12px] text-ews-warmWhite/85 cursor-pointer select-none"
             >
               <input
                 type="checkbox"
                 data-testid="mfa-toggle-input"
                 checked={mfaPreferred}
                 onChange={(e) => setMfaPreferred(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-borderMed text-ews-orange focus:ring-ews-orange/40"
+                className="h-3.5 w-3.5 rounded border-white/30 bg-ews-deepNavy text-ews-orange focus:ring-ews-orange/40"
               />
               <span className="inline-flex items-center gap-1">
-                <KeyRound size={11} className="text-ews-orangeDeep" />
+                <KeyRound size={11} className="text-ews-orange" />
                 {t('login.mfa_preferred')}
               </span>
             </label>
             <Link
               to="/forgot-password"
-              className="ml-auto text-[12px] text-ews-orangeDeep font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-ews-orange/40 rounded"
+              className="ml-auto text-[12px] text-ews-orange font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-ews-orange/40 rounded"
             >
               {t('login.forgot_password')}
             </Link>
@@ -315,7 +317,7 @@ export function LoginPage() {
           {serverError && (
             <p
               role="alert"
-              className="text-[11px] text-danger bg-danger-bg border border-danger/20 rounded px-3 py-1.5"
+              className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded px-3 py-1.5"
             >
               {serverError}
             </p>
@@ -324,48 +326,55 @@ export function LoginPage() {
           {captcha && (
             <div
               data-testid="captcha-block"
-              className="rounded border border-divider bg-surface-alt p-3 space-y-2"
+              className="rounded border border-white/12 bg-white/[0.04] p-3 space-y-2"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[12px] text-ink font-medium">{captcha.question}</p>
+                <p className="text-[12px] text-ews-warmWhite font-medium">{captcha.question}</p>
                 <button
                   type="button"
                   onClick={refreshCaptcha}
                   aria-label={t('login.captcha_refresh')}
                   data-testid="captcha-refresh"
-                  className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded border border-divider hover:bg-divider/60 transition-colors"
+                  className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded border border-white/15 text-ews-warmWhite/70 hover:text-ews-warmWhite hover:bg-white/10 transition-colors"
                 >
-                  <RefreshCw size={12} className="text-muted" />
+                  <RefreshCw size={12} />
                 </button>
               </div>
-              <Input
-                {...register('captcha_answer')}
+              <DarkInput
+                label={t('login.captcha_answer_label')}
                 type="number"
                 inputMode="numeric"
-                label={t('login.captcha_answer_label')}
                 placeholder="…"
-                error={errors.captcha_answer?.message ?? ''}
-                data-testid="captcha-answer"
+                error={errors.captcha_answer?.message}
                 required
+                testId="captcha-answer"
+                registerProps={register('captcha_answer')}
               />
             </div>
           )}
 
-          <Button
+          <button
             type="submit"
-            className="w-full !bg-ews-orange hover:!bg-ews-orangeDeep !text-white !border-ews-orangeDeep mt-1 font-semibold tracking-wide"
-            loading={isSubmitting}
+            disabled={isSubmitting}
+            className={cn(
+              'w-full h-11 mt-1 rounded-input bg-ews-orange hover:bg-ews-orangeDeep',
+              'text-white font-semibold tracking-wide text-[13px]',
+              'inline-flex items-center justify-center gap-2',
+              'shadow-[0_8px_22px_-10px_rgba(255,107,53,0.7)]',
+              'focus:outline-none focus:ring-2 focus:ring-ews-orange/40',
+              'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+            )}
           >
-            <ShieldCheck size={14} className="mr-2" strokeWidth={2.25} />
-            {t('login.sign_in_secure')}
-          </Button>
+            <ShieldCheck size={14} strokeWidth={2.25} />
+            {isSubmitting ? '…' : t('login.sign_in_secure')}
+          </button>
 
           {/* SSO row */}
           <div className="pt-3">
-            <div className="flex items-center gap-3 text-[10.5px] uppercase tracking-[0.18em] text-muted">
-              <span className="h-px flex-1 bg-ews-mist" />
+            <div className="flex items-center gap-3 text-[10.5px] uppercase tracking-[0.18em] text-ews-warmWhite/55">
+              <span className="h-px flex-1 bg-white/12" />
               <span>{t('login.or_continue_with')}</span>
-              <span className="h-px flex-1 bg-ews-mist" />
+              <span className="h-px flex-1 bg-white/12" />
             </div>
             <div className="grid grid-cols-2 gap-2 mt-3">
               <SsoButton provider="okta" onClick={() => startSso('okta')} />
@@ -373,24 +382,24 @@ export function LoginPage() {
             </div>
           </div>
 
-          <p className="text-[10.5px] text-muted text-center pt-1 font-mono">
+          <p className="text-[10.5px] text-ews-warmWhite/50 text-center pt-1 font-mono">
             {t('login.mfa_hint')}
           </p>
         </form>
 
-        <p className="mt-5 text-center text-[12px] text-sub">
+        <p className="mt-5 text-center text-[12px] text-ews-warmWhite/65">
           {t('login.new_to_apex')}{' '}
           <Link
             to="/signup"
-            className="text-ews-orangeDeep font-semibold hover:underline focus:outline-none focus:ring-2 focus:ring-ews-orange/40 rounded"
+            className="text-ews-orange font-semibold hover:underline focus:outline-none focus:ring-2 focus:ring-ews-orange/40 rounded"
           >
             {t('login.create_account')}
           </Link>
         </p>
 
-        <div className="mt-5 pt-4 border-t border-ews-mist">
-          <p className="text-center text-[10.5px] text-muted font-mono">
-            <span className="text-ink/60">{t('login.demo_accounts_label')} · </span>
+        <div className="mt-5 pt-4 border-t border-white/8">
+          <p className="text-center text-[10.5px] text-ews-warmWhite/45 font-mono">
+            <span className="text-ews-warmWhite/65">{t('login.demo_accounts_label')} · </span>
             alice.admin · ravi.risk · fiona.field
           </p>
         </div>
@@ -399,8 +408,15 @@ export function LoginPage() {
   );
 }
 
-// ── helpers ──────────────────────────────────────────────────────
+// ── form primitives — dark theme local to LoginPage ────────────────
 
+// Renders as <span> (not <label>) so the wrapping <label> in DarkInput
+// stays the single label element associated with the input — keeps
+// `getByLabelText(/^password$/i)` matching the input cleanly. The
+// required asterisk is a CSS `::after` pseudo so it shows visually
+// but never appears in the label's textContent (testing-library's
+// getByLabelText walks textContent, so a real `*` would break exact
+// regex matches).
 function FieldLabel({
   children,
   required,
@@ -409,18 +425,64 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="text-[11px] font-medium text-ink mb-1.5 inline-flex items-center gap-1">
-      {children}
-      {required && (
-        <span className="text-danger" aria-hidden>
-          *
-        </span>
+    <span
+      className={cn(
+        'block text-[11px] font-medium text-ews-warmWhite/85 mb-1.5',
+        required && "after:content-['*'] after:text-rose-400 after:ml-1",
       )}
+    >
+      {children}
+    </span>
+  );
+}
+
+interface DarkInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'ref'> {
+  label?: string;
+  error?: string;
+  /** Pre-wired props from react-hook-form's register(). */
+  registerProps?: ReturnType<
+    ReturnType<typeof useForm<FormData>>['register']
+  >;
+  testId?: string;
+  trailingIcon?: React.ReactNode;
+}
+
+function DarkInput({
+  label,
+  error,
+  registerProps,
+  testId,
+  trailingIcon,
+  className,
+  ...rest
+}: DarkInputProps) {
+  return (
+    <label className="block">
+      {label && <FieldLabel required={rest.required}>{label}</FieldLabel>}
+      <div className="relative">
+        <input
+          data-testid={testId}
+          {...registerProps}
+          {...rest}
+          className={cn(
+            'w-full h-11 px-3 text-[13px] rounded-input',
+            'bg-ews-deepNavy/60 border border-white/12 text-ews-warmWhite',
+            'placeholder:text-ews-warmWhite/35',
+            'focus:outline-none focus:ring-2 focus:ring-ews-orange/30 focus:border-ews-orange/50',
+            trailingIcon && 'pr-10',
+            error && 'border-rose-400/60 focus:border-rose-400 focus:ring-rose-400/20',
+            className,
+          )}
+        />
+        {trailingIcon}
+      </div>
+      {error && <p className="text-[11px] text-rose-300 mt-1">{error}</p>}
     </label>
   );
 }
 
-function SelectField({
+function DarkSelect({
   value,
   onChange,
   options,
@@ -440,13 +502,14 @@ function SelectField({
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
-        'w-full h-11 px-2.5 rounded-input border border-border bg-white text-[12.5px] text-ink',
-        'focus:outline-none focus:ring-2 focus:ring-ews-orange/40 focus:border-ews-orange',
-        disabled && 'bg-divider/30 text-muted cursor-not-allowed',
+        'w-full h-11 px-2.5 rounded-input text-[12.5px]',
+        'bg-ews-deepNavy/60 border border-white/12 text-ews-warmWhite',
+        'focus:outline-none focus:ring-2 focus:ring-ews-orange/30 focus:border-ews-orange/50',
+        disabled && 'opacity-50 cursor-not-allowed',
       )}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value}>
+        <option key={o.value} value={o.value} className="bg-ews-deepNavy text-ews-warmWhite">
           {o.label}
         </option>
       ))}
@@ -469,9 +532,10 @@ function SsoButton({
       data-testid={`sso-${provider}`}
       onClick={onClick}
       className={cn(
-        'h-10 rounded-input border border-border bg-white text-[12.5px] text-ink font-medium',
+        'h-10 rounded-input border border-white/12 bg-white/[0.04]',
+        'text-[12.5px] text-ews-warmWhite font-medium',
         'flex items-center justify-center gap-2 transition-colors',
-        'hover:border-ews-orangeDeep hover:bg-ews-orange/[0.04]',
+        'hover:border-ews-orange/40 hover:bg-white/[0.08]',
         'focus:outline-none focus:ring-2 focus:ring-ews-orange/40',
       )}
     >
@@ -488,29 +552,27 @@ function SsoButton({
   );
 }
 
-/** Renders the regulatory + locale hint under the country field. */
+/** Regulatory + locale hint under the country field. */
 function CountryHint({ code }: { code: CountryCode }) {
   const c = COUNTRIES.find((x) => x.code === code);
   if (!c) return null;
   return (
     <p
       data-testid="country-hint"
-      className="mt-1.5 text-[10.5px] font-mono text-muted leading-snug"
+      className="mt-1.5 text-[10.5px] font-mono text-ews-warmWhite/55 leading-snug"
     >
-      <span className="text-ink/70">{c.currency.code}</span>
-      <span className="text-muted/70"> · </span>
+      <span className="text-ews-warmWhite/85">{c.currency.code}</span>
+      <span className="text-ews-warmWhite/40"> · </span>
       <span>{c.timezone.label}</span>
-      <span className="text-muted/70"> · </span>
+      <span className="text-ews-warmWhite/40"> · </span>
       <span>{c.regulators.banking[0]}</span>
-      <span className="text-muted/70"> · </span>
+      <span className="text-ews-warmWhite/40"> · </span>
       <span>{c.regulators.insurance[0]}</span>
     </p>
   );
 }
 
-/** Routing helper — figures out where to land after login based on
- *  whichever step of the 4-step onboarding the user has already
- *  completed (either inline on the login form or on a prior visit). */
+/** Resume target based on what step of onboarding is already complete. */
 function resumeTarget(
   domain: 'banking' | 'insurance' | null | '' | undefined,
   tenantCtx: { tenant_id: string } | null | undefined,

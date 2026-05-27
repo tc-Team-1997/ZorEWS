@@ -106,13 +106,13 @@ export function OnboardingTenantPage() {
     >
       <div>
         <div className="mb-7">
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orangeDeep mb-2">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orange mb-2">
             Step 3 of 4
           </p>
-          <h2 className="font-display text-[28px] font-semibold text-ink tracking-tight leading-[1.1]">
+          <h2 className="font-display text-[28px] font-semibold text-ews-warmWhite tracking-tight leading-[1.1]">
             Choose your organisation
           </h2>
-          <p className="text-[13px] text-sub mt-2 leading-relaxed">
+          <p className="text-[13px] text-ews-warmWhite/70 mt-2 leading-relaxed">
             Pick the tenant, region and branch you operate out of. ZorEWS isolates every tenant
             end-to-end — data, audit, and scoring.
           </p>
@@ -214,7 +214,7 @@ export function OnboardingTenantPage() {
           <button
             type="button"
             onClick={() => navigate('/onboarding/domain')}
-            className="text-[12.5px] text-muted hover:text-ink underline underline-offset-2"
+            className="text-[12.5px] text-ews-warmWhite/55 hover:text-ews-warmWhite underline underline-offset-2"
           >
             ← Back
           </button>
@@ -250,12 +250,12 @@ function ContextChip({
   value: string;
 }) {
   return (
-    <div className="rounded border border-ews-mist bg-white px-2.5 py-1.5">
-      <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted flex items-center gap-1">
-        <span className="text-ews-orangeDeep">{icon}</span>
+    <div className="rounded border border-white/12 bg-white/[0.04] px-2.5 py-1.5">
+      <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-ews-warmWhite/55 flex items-center gap-1">
+        <span className="text-ews-orange">{icon}</span>
         {label}
       </p>
-      <p className="text-[12px] font-medium text-ink mt-0.5 truncate">{value}</p>
+      <p className="text-[12px] font-medium text-ews-warmWhite mt-0.5 truncate">{value}</p>
     </div>
   );
 }
@@ -279,18 +279,18 @@ function StepperPill({
       className={cn(
         'rounded border px-2 py-1.5 flex items-center gap-1.5',
         disabled
-          ? 'border-ews-mist/60 bg-ews-ivory/30 text-muted/60'
+          ? 'border-white/8 bg-white/[0.02] text-ews-warmWhite/40'
           : done
-            ? 'border-ews-orange/30 bg-white text-ink'
+            ? 'border-ews-orange/30 bg-white/[0.06] text-ews-warmWhite'
             : active
-              ? 'border-ews-orange bg-ews-orange/[0.06] text-ews-orangeDeep'
-              : 'border-ews-mist bg-white text-ink/70',
+              ? 'border-ews-orange bg-ews-orange/[0.06] text-ews-orange'
+              : 'border-white/12 bg-white/[0.04] text-ews-warmWhite/80',
       )}
     >
       <span
         className={cn(
           'h-4 w-4 rounded-full flex items-center justify-center font-mono text-[8.5px] font-semibold',
-          done ? 'bg-ews-orange text-white' : 'bg-ews-mist/60 text-ink',
+          done ? 'bg-ews-orange text-white' : 'bg-white/15 text-ews-warmWhite',
         )}
       >
         {done ? '✓' : index}
@@ -313,11 +313,11 @@ function Section({
 }) {
   return (
     <div className="mt-4">
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted mb-1.5 flex items-center gap-1.5">
-        <span className="text-ews-orangeDeep">{icon}</span>
+      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ews-warmWhite/55 mb-1.5 flex items-center gap-1.5">
+        <span className="text-ews-orange">{icon}</span>
         {label}
       </p>
-      {hint && <p className="text-[10.5px] text-muted mb-2">{hint}</p>}
+      {hint && <p className="text-[10.5px] text-ews-warmWhite/55 mb-2">{hint}</p>}
       {children}
     </div>
   );
@@ -344,28 +344,28 @@ function OrgRow({
         'group flex items-center gap-3 rounded border px-3 py-2 text-left transition-all',
         'focus:outline-none focus:ring-2 focus:ring-ews-orange/40',
         selected
-          ? 'border-ews-orange bg-white shadow-sm'
-          : 'border-ews-mist bg-white/80 hover:border-ews-orange/50 hover:bg-white',
+          ? 'border-ews-orange bg-white/[0.08] shadow-[0_4px_18px_-8px_rgba(255,107,53,0.45)]'
+          : 'border-white/12 bg-white/[0.04] hover:border-ews-orange/50 hover:bg-white/[0.08]',
       )}
     >
       <div
         className={cn(
           'h-7 w-7 shrink-0 rounded text-[10.5px] font-mono font-semibold flex items-center justify-center',
-          selected ? 'bg-ews-orange text-white' : 'bg-ews-ivory text-ews-orangeDeep border border-ews-mist',
+          selected ? 'bg-ews-orange text-white' : 'bg-ews-orange/10 text-ews-orange border border-white/15',
         )}
       >
         {org.short_name.slice(0, 3)}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-ink leading-tight truncate">{org.name}</p>
-        <p className="text-[10.5px] text-muted font-mono mt-0.5">
+        <p className="text-[13px] font-medium text-ews-warmWhite leading-tight truncate">{org.name}</p>
+        <p className="text-[10.5px] text-ews-warmWhite/55 font-mono mt-0.5">
           {showCountry && (
             <>
               {countryDef.flag} {countryDef.name} ·{' '}
             </>
           )}
           {org.regions.length} region{org.regions.length === 1 ? '' : 's'} · tenant{' '}
-          <span className="text-ink/70">{org.tenant_id}</span>
+          <span className="text-ews-warmWhite/70">{org.tenant_id}</span>
         </p>
       </div>
       {selected && <CheckCircle2 size={16} className="text-ews-orange shrink-0" strokeWidth={2} />}
@@ -393,8 +393,8 @@ function PillButton({
         'rounded border px-2.5 py-1.5 text-left text-[12px] transition-all',
         'focus:outline-none focus:ring-2 focus:ring-ews-orange/40',
         selected
-          ? 'border-ews-orange bg-ews-orange/[0.06] text-ink font-medium'
-          : 'border-ews-mist bg-white text-ink/85 hover:border-ews-orange/50 hover:bg-ews-orange/[0.03]',
+          ? 'border-ews-orange bg-ews-orange/[0.06] text-ews-warmWhite font-medium'
+          : 'border-white/12 bg-white/[0.04] text-ews-warmWhite/85 hover:border-ews-orange/50 hover:bg-ews-orange/[0.08]',
       )}
     >
       {children}

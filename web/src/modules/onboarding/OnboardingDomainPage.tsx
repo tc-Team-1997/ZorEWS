@@ -122,21 +122,21 @@ export function OnboardingDomainPage() {
     >
       <div>
         <div className="mb-7">
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orangeDeep mb-2">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orange mb-2">
             Step 2 of 4
           </p>
-          <h2 className="font-display text-[28px] font-semibold text-ink tracking-tight leading-[1.1]">
+          <h2 className="font-display text-[28px] font-semibold text-ews-warmWhite tracking-tight leading-[1.1]">
             Pick your domain
           </h2>
-          <p className="text-[13px] text-sub mt-2 leading-relaxed">
+          <p className="text-[13px] text-ews-warmWhite/70 mt-2 leading-relaxed">
             ZorEWS routes indicators, models, and dashboards based on whether you run a banking
             book or an insurance book. You can switch later from the user menu.
           </p>
           {countryDef && (
-            <p className="mt-3 font-mono text-[10.5px] text-muted">
-              Signed in as <span className="text-ink font-medium">{user.username}</span>
-              <span className="text-muted/70"> · </span>
-              {countryDef.flag} <span className="text-ink/80">{countryDef.name}</span>
+            <p className="mt-3 font-mono text-[10.5px] text-ews-warmWhite/55">
+              Signed in as <span className="text-ews-warmWhite font-medium">{user.username}</span>
+              <span className="text-ews-warmWhite/55/70"> · </span>
+              {countryDef.flag} <span className="text-ews-warmWhite/80">{countryDef.name}</span>
             </p>
           )}
         </div>
@@ -156,7 +156,7 @@ export function OnboardingDomainPage() {
           <button
             type="button"
             onClick={() => navigate('/login')}
-            className="text-[12.5px] text-muted hover:text-ink underline underline-offset-2"
+            className="text-[12.5px] text-ews-warmWhite/55 hover:text-ews-warmWhite underline underline-offset-2"
           >
             ← Sign out
           </button>
@@ -199,8 +199,8 @@ function DomainCardButton({ card, selected, onClick }: DomainCardProps) {
         'group w-full text-left rounded-card border transition-all p-4',
         'focus:outline-none focus:ring-2 focus:ring-ews-orange/40',
         selected
-          ? 'border-ews-orange bg-white shadow-[0_8px_24px_-12px_rgba(255,107,53,0.45)]'
-          : 'border-ews-mist bg-white/70 hover:border-ews-orange/60 hover:bg-white',
+          ? 'border-ews-orange bg-white/[0.08] shadow-[0_8px_24px_-12px_rgba(255,107,53,0.45)]'
+          : 'border-white/12 bg-white/[0.04] hover:border-ews-orange/60 hover:bg-white/[0.08]',
       )}
     >
       <div className="flex items-start gap-3.5">
@@ -209,24 +209,24 @@ function DomainCardButton({ card, selected, onClick }: DomainCardProps) {
             'shrink-0 h-11 w-11 rounded-md flex items-center justify-center transition-colors',
             selected
               ? 'bg-ews-orange text-white'
-              : 'bg-ews-ivory text-ews-orangeDeep border border-ews-mist group-hover:bg-ews-orange/10',
+              : 'bg-ews-orange/10 text-ews-orange border border-white/12 group-hover:bg-ews-orange/15',
           )}
         >
           <Icon size={20} strokeWidth={1.75} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-3">
-            <p className="font-display text-[20px] font-semibold text-ink leading-tight">
+            <p className="font-display text-[20px] font-semibold text-ews-warmWhite leading-tight">
               {card.title}
             </p>
             {selected && (
               <CheckCircle2 size={18} className="text-ews-orange shrink-0" strokeWidth={2} />
             )}
           </div>
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-ews-orangeDeep mt-0.5">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-ews-orange mt-0.5">
             {card.tagline}
           </p>
-          <p className="text-[12.5px] text-sub leading-relaxed mt-2">{card.description}</p>
+          <p className="text-[12.5px] text-ews-warmWhite/70 leading-relaxed mt-2">{card.description}</p>
 
           <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             <CardSection
@@ -268,16 +268,16 @@ function CardSection({ icon, label, items, tone }: CardSectionProps) {
         'rounded border p-2',
         tone === 'active'
           ? 'border-ews-orange/30 bg-ews-orange/[0.04]'
-          : 'border-ews-mist/80 bg-ews-ivory/40',
+          : 'border-white/10 bg-white/[0.03]',
       )}
     >
-      <p className="flex items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted mb-1.5">
-        <span className={tone === 'active' ? 'text-ews-orangeDeep' : 'text-muted'}>{icon}</span>
+      <p className="flex items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.16em] text-ews-warmWhite/55 mb-1.5">
+        <span className={tone === 'active' ? 'text-ews-orange' : 'text-ews-warmWhite/55'}>{icon}</span>
         {label}
       </p>
       <ul className="space-y-0.5">
         {items.map((it) => (
-          <li key={it} className="text-[10.5px] text-ink/85 leading-snug">
+          <li key={it} className="text-[10.5px] text-ews-warmWhite/85 leading-snug">
             · {it}
           </li>
         ))}

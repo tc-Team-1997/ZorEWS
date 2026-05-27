@@ -128,21 +128,27 @@ export function EnterpriseShell({ children, step, tagline }: EnterpriseShellProp
         </footer>
       </aside>
 
-      {/* ── RIGHT (45%) — glassmorphism card ── */}
+      {/* ── RIGHT (45%) — dark navy elevated card ── */}
       <main className="relative lg:w-[45%] lg:min-h-screen flex items-center justify-center px-5 py-10 lg:px-10">
+        {/* subtle orange wash bleeds into the dark card — adds the
+            "premium banking" warmth without going white */}
         <div
-          className="absolute top-1/2 -right-32 h-[440px] w-[440px] -translate-y-1/2 rounded-full opacity-40 pointer-events-none"
+          className="absolute top-1/2 -right-32 h-[440px] w-[440px] -translate-y-1/2 rounded-full opacity-50 pointer-events-none"
           style={{
             background:
-              'radial-gradient(closest-side, rgba(255,107,53,0.18), rgba(255,107,53,0) 70%)',
+              'radial-gradient(closest-side, rgba(255,107,53,0.22), rgba(255,107,53,0) 70%)',
           }}
         />
         <div className="relative w-full max-w-[440px]">
           <div
             className={cn(
-              'rounded-2xl bg-white/95 backdrop-blur-xl shadow-[0_24px_70px_-30px_rgba(10,20,48,0.6)]',
-              'ring-1 ring-white/40 border border-white/30',
-              'text-ink px-6 py-7 lg:px-8 lg:py-8',
+              // Dark elevated card — translucent deep-navy + backdrop
+              // blur reads as glassmorphism on a darker base. White
+              // hairline ring + 1px border give the edge definition.
+              'rounded-2xl bg-ews-deepNavy/55 backdrop-blur-xl',
+              'shadow-[0_24px_70px_-30px_rgba(0,0,0,0.6)]',
+              'ring-1 ring-white/10 border border-white/8',
+              'text-ews-warmWhite px-6 py-7 lg:px-8 lg:py-8',
             )}
           >
             {children}
