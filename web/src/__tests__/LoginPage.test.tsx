@@ -28,7 +28,7 @@ describe('LoginPage', () => {
   it('calls login() and authenticates on valid credentials', async () => {
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
-    await user.type(screen.getByLabelText(/email or employee/i), 'alice.admin');
+    await user.type(screen.getByLabelText(/username/i), 'alice.admin');
     await user.type(screen.getByLabelText(/^password$/i), 'Admin!Pass1');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
     await waitFor(() => {
@@ -45,7 +45,7 @@ describe('LoginPage', () => {
     );
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
-    await user.type(screen.getByLabelText(/email or employee/i), 'wrong');
+    await user.type(screen.getByLabelText(/username/i), 'wrong');
     await user.type(screen.getByLabelText(/^password$/i), 'wrong');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/invalid credentials/i);
