@@ -175,7 +175,7 @@ export function LoginPage() {
   }
 
   return (
-    <EnterpriseShell tagline="AI-powered risk intelligence platform for Banking and Insurance">
+    <EnterpriseShell tagline="Spot stress signals before they become NPAs, claims spikes, or solvency breaches. AI-powered early-warning for banks and insurers.">
       <div>
         <div className="mb-6">
           <p className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-ews-orangeDeep mb-2">

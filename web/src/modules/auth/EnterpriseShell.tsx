@@ -10,12 +10,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   BadgeCheck,
-  BrainCircuit,
-  Database,
-  Eye,
+  GraduationCap,
   Globe2,
-  Lock,
-  ShieldCheck,
+  Settings2,
+  Sparkles,
   Wand2,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -36,13 +34,31 @@ const TICKER: TickerLine[] = [
   { label: 'Indicators evaluated', value: '32', detail: '4 banking + 5 insurance families' },
 ];
 
-const FEATURES: { icon: typeof Database; label: string }[] = [
-  { icon: Database, label: 'Built-in Data Cleaning' },
-  { icon: BrainCircuit, label: 'AI on every screen' },
-  { icon: Wand2, label: 'Zero hard-coding' },
-  { icon: Eye, label: 'Explainable AI' },
-  { icon: ShieldCheck, label: 'Fraud & NPA detection' },
-  { icon: Lock, label: 'Enterprise-grade security' },
+// Wireframe-aligned 4-feature vertical list (replaces the earlier
+// 6-tile 2-col grid). Each row carries a one-line description so the
+// left panel reads like the executive summary on a banking platform's
+// marketing page rather than a feature checklist.
+const FEATURES: { icon: typeof Wand2; label: string; description: string }[] = [
+  {
+    icon: Wand2,
+    label: 'Built-in Data Cleaning',
+    description: 'Profile, standardise and reconcile every feed before it reaches your models.',
+  },
+  {
+    icon: Sparkles,
+    label: 'AI on every screen',
+    description: 'Every module has a context-aware AI co-pilot that explains, forecasts and recommends.',
+  },
+  {
+    icon: Settings2,
+    label: 'Zero hard-coding',
+    description: 'Every threshold, rule, weight and bucket is editable from Master Setup.',
+  },
+  {
+    icon: GraduationCap,
+    label: 'Self-explanatory UI',
+    description: 'Every screen tells you what it does, who uses it, and where the data comes from.',
+  },
 ];
 
 export interface EnterpriseShellProps {
@@ -75,7 +91,9 @@ export function EnterpriseShell({
 
   const current = TICKER[tickerIdx];
   const heading = useMemo(
-    () => tagline ?? 'AI-powered risk intelligence platform for Banking and Insurance',
+    () =>
+      tagline ??
+      'Spot stress signals before they become NPAs, claims spikes, or solvency breaches. AI-powered early-warning for banks and insurers.',
     [tagline],
   );
 
@@ -180,20 +198,23 @@ export function EnterpriseShell({
           )}
         </section>
 
-        {/* bottom: 6 feature highlights + footer */}
+        {/* bottom: 4 feature highlights (vertical list with descriptions) + footer */}
         <footer className="relative z-10 space-y-5">
-          <ul className="grid grid-cols-2 gap-x-5 gap-y-2.5">
+          <ul className="space-y-3.5">
             {FEATURES.map((f) => (
-              <li key={f.label} className="flex items-center gap-2.5">
-                <span className="h-5 w-5 rounded-sm bg-ews-orange/15 border border-ews-orange/30 inline-flex items-center justify-center shrink-0">
-                  <f.icon size={11} className="text-ews-orange" strokeWidth={2} />
+              <li key={f.label} className="flex items-start gap-3.5">
+                <span className="h-9 w-9 rounded-full bg-ews-orange/12 border border-ews-orange/35 inline-flex items-center justify-center shrink-0">
+                  <f.icon size={16} className="text-ews-orange" strokeWidth={1.75} />
                 </span>
-                <span className="text-[12px] text-ews-warmWhite/85">{f.label}</span>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-ews-warmWhite leading-tight">{f.label}</p>
+                  <p className="text-[11.5px] text-ews-warmWhite/65 leading-snug mt-1">{f.description}</p>
+                </div>
               </li>
             ))}
           </ul>
-          <div className="flex items-center justify-between border-t border-white/8 pt-4 text-[10.5px] font-mono text-ews-warmWhite/45">
-            <span>© 2026 ZorFinotech</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/8 pt-4 text-[10.5px] font-mono text-ews-warmWhite/45">
+            <span>© 2026 ZorFinotech · ZorEWS v1.0 · For demonstration purposes</span>
             <span className="flex items-center gap-1.5">
               <BadgeCheck size={11} className="text-ews-orange" />
               SOC 2 · ISO 27001 · RBI BAC-A
