@@ -8441,6 +8441,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/axis-severity-matrix (T6 M16.23) — 2D
+   *  cross-tab over the scenario library combining shock-axis ×
+   *  severity. Rows = 3 ShockAxis (canonical gdp → rate → fx); cols =
+   *  3 ScenarioSeverity (canonical mild → moderate → severe). A cell
+   *  counts presets that EXERCISE that axis (raw shock ≠ 0) at that
+   *  severity tier — so a multi-axis preset counts in multiple ROWS
+   *  but only one column (its single severity). col.preset_count gives
+   *  the clean per-severity denominator. Envelope: peak_cell (canonical
+   *  iteration tie-break; null on empty), most_exercised_axis (highest
+   *  row total + canonical tie-break), severity_with_widest_axis_coverage
+   *  (most distinct non-zero by_axis entries + canonical tie-break),
+   *  empty_cells[] canonical row-major. Platform-static. Mirror of the
+   *  M8.14 / M14.30 counts-in-multiple-rows cross-tab pattern. Drives
+   *  stress-test coverage analysis: "at the SEVERE tier, which shock
+   *  dimensions do we exercise? where are the axis × severity gaps?".
+   *  Mounted BEFORE `/:preset_id` so the literal segment wins. */
+  app.get(
+    '/v1/scenarios/library/axis-severity-matrix',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioAxisSeverityMatrix } =
+        require('./scenario_axis_severity_matrix') as
+        typeof import('./scenario_axis_severity_matrix');
+      const out = buildScenarioAxisSeverityMatrix(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/coverage-matrix (T6 M16.17) — 2D
    *  rollup over the M16.1 library showing per-(category,
    *  regulator) coverage counts. Cells with `count < expected_min`
