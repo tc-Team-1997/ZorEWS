@@ -10,6 +10,7 @@ import {
   type DemoUser,
 } from './data';
 import type {
+  Alert,
   CaseActionKind,
   CaseDetail,
   CaseOutcome,
@@ -4007,6 +4008,14 @@ const _mswInsuranceChannelRiskHandlers = [
   }),
 ];
 
+// Phase 4 — Alert Center acknowledgement state. In-memory set of acked
+// alert ids; mutated by POST /api/alerts/ack and reflected on GET
+// /api/alerts. Reset between tests via __resetMswAlertAcks().
+const acknowledgedAlertIds = new Set<string>();
+export function __resetMswAlertAcks(): void {
+  acknowledgedAlertIds.clear();
+}
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
@@ -4833,19 +4842,33 @@ export const handlers = [
     const dedupOn = dedupParam === null ? true : dedupParam === 'true';
 
     const customerId = url.searchParams.get('customer_id');
-    let items = alerts.map((a) => ({
+    const statusParam = url.searchParams.get('status'); // open | acknowledged
+    let items: Alert[] = alerts.map((a) => ({
       ...a,
       criticality_score: computeScore(a),
       linked_alert_ids: [] as string[],
+      acknowledged: acknowledgedAlertIds.has(a.id),
     }));
     if (severity) items = items.filter((a) => a.severity === severity);
     if (assignee) items = items.filter((a) => a.assignee === assignee);
     if (customerId) items = items.filter((a) => a.customer.id === customerId);
+    if (statusParam === 'open') items = items.filter((a) => !a.acknowledged);
+    else if (statusParam === 'acknowledged') items = items.filter((a) => a.acknowledged);
     if (dedupOn) items = dedupByCustomer(items);
     const sortKey: 'criticality' | 'severity' | 'age' =
       sortParam === 'severity' || sortParam === 'age' ? sortParam : 'criticality';
     items = sortBy(items, sortKey);
     return HttpResponse.json({ items, total: items.length });
+  }),
+
+  // ── Acknowledge alerts (Phase 4 — single + bulk) ─────────────────
+  http.post('/api/alerts/ack', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { ids?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((x): x is string => typeof x === 'string')
+      : [];
+    for (const id of ids) acknowledgedAlertIds.add(id);
+    return HttpResponse.json({ acknowledged: ids });
   }),
 
   // ── Customer list ────────────────────────────────────────────────

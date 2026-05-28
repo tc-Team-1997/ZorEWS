@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Bell, Link2, MoreHorizontal } from 'lucide-react';
+import { Bell, Check, Link2 } from 'lucide-react';
 import { api, type Alert, type Severity } from '@/lib/api';
 import { Badge, type BadgeTone, Button, DataTable, type Column, FilterChip, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -54,6 +54,8 @@ export function AlertListPage() {
   // Phase 4 — clicking a row opens an in-place detail panel (the
   // customer drill-through lives inside it now, one click deeper).
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  // Phase 4 — multi-select for bulk acknowledge.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // URL-driven so dashboard KPI cards can deep-link (e.g. /alerts?severity=critical).
   const severityParam = searchParams.get('severity');
@@ -93,6 +95,19 @@ export function AlertListPage() {
   // ?domain=banking|insurance; defaults to 'all' so the view is unchanged.
   const domain: AlertDomainFilter = asAlertDomainFilter(searchParams.get('domain'));
 
+  // Phase 4 — acknowledgement status filter. ?status=open|acknowledged;
+  // anything else (incl. absent) → 'all'. Server-side via api.alerts.
+  const statusParam = searchParams.get('status');
+  const status: 'all' | 'open' | 'acknowledged' =
+    statusParam === 'open' || statusParam === 'acknowledged' ? statusParam : 'all';
+  const setStatus = (next: 'all' | 'open' | 'acknowledged') => {
+    const sp = new URLSearchParams(searchParams);
+    if (next === 'all') sp.delete('status');
+    else sp.set('status', next);
+    setSearchParams(sp, { replace: true });
+    setSelectedIds(new Set());
+  };
+
   const setSeverity = (next: Severity | null) => {
     const sp = new URLSearchParams(searchParams);
     if (next) sp.set('severity', next);
@@ -129,7 +144,7 @@ export function AlertListPage() {
     setSearchParams(sp, { replace: true });
   };
 
-  const queryKey = ['alerts', severity, assignee, sort, dedup] as const;
+  const queryKey = ['alerts', severity, assignee, sort, dedup, status] as const;
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: () =>
@@ -138,6 +153,7 @@ export function AlertListPage() {
         assignee: typeof assignee === 'string' && assignee !== 'any' ? assignee : undefined,
         sort,
         dedup,
+        status: status === 'all' ? undefined : status,
       }),
   });
   useChatContext({ page: 'alerts' });
@@ -148,7 +164,38 @@ export function AlertListPage() {
   const qc = useQueryClient();
   const stream = useAlertStream({ invalidateQueryKey: queryKey });
 
+  // Phase 4 — acknowledge (single + bulk share this mutation).
+  const ackMut = useMutation({
+    mutationFn: (ids: string[]) => api.acknowledgeAlerts(ids),
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      void qc.invalidateQueries({ queryKey: ['alerts'] });
+    },
+  });
+  const toggleSelect = (alertId: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(alertId)) next.delete(alertId);
+      else next.add(alertId);
+      return next;
+    });
+
   const columns: Column<Alert>[] = [
+    {
+      key: 'select',
+      header: '',
+      width: 36,
+      render: (a) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(a.id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => toggleSelect(a.id)}
+          aria-label={`Select alert ${a.id}`}
+          data-testid={`alert-select-${a.id}`}
+        />
+      ),
+    },
     {
       key: 'criticality',
       header: 'Score',
@@ -186,6 +233,13 @@ export function AlertListPage() {
               <span data-testid={`linked-badge-${a.id}`}>
                 <Badge tone="blue" className="inline-flex items-center gap-1">
                   <Link2 size={10} />+{a.linked_alert_ids.length}
+                </Badge>
+              </span>
+            )}
+            {a.acknowledged && (
+              <span data-testid={`alert-ack-badge-${a.id}`}>
+                <Badge tone="success" className="inline-flex items-center gap-1">
+                  <Check size={10} />ack
                 </Badge>
               </span>
             )}
@@ -241,23 +295,18 @@ export function AlertListPage() {
           <span className="text-2xs text-muted">unassigned</span>
         ),
     },
-    {
-      key: 'action',
-      header: '',
-      width: 40,
-      align: 'right',
-      render: () => (
-        <button
-          type="button"
-          aria-label="Row actions"
-          className="text-muted hover:text-ink-sub p-1 rounded"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      ),
-    },
   ];
+
+  const visibleRows = (data?.items ?? []).filter(
+    (r) =>
+      (!ruleIdFilter || r.rule.id === ruleIdFilter) && alertMatchesDomain(r, domain),
+  );
+  const allVisibleSelected =
+    visibleRows.length > 0 && visibleRows.every((r) => selectedIds.has(r.id));
+  const toggleSelectAll = () =>
+    setSelectedIds(
+      allVisibleSelected ? new Set() : new Set(visibleRows.map((r) => r.id)),
+    );
 
   return (
     <div>
@@ -329,6 +378,18 @@ export function AlertListPage() {
             ))}
           </span>
           <span className="w-px h-5 bg-divider mx-2" />
+          <span
+            className="flex flex-wrap items-center gap-2"
+            data-testid="alerts-status-filters"
+          >
+            <span className="text-xs text-ink-sub mr-2">Status</span>
+            {(['all', 'open', 'acknowledged'] as const).map((s) => (
+              <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>
+                {s}
+              </FilterChip>
+            ))}
+          </span>
+          <span className="w-px h-5 bg-divider mx-2" />
           <label className="text-xs text-ink-sub flex items-center gap-1.5">
             Sort by
             <select
@@ -379,18 +440,53 @@ export function AlertListPage() {
         </div>
       )}
 
+      {/* Selection + bulk acknowledge bar */}
+      {visibleRows.length > 0 && (
+        <div
+          className="mb-2 flex items-center gap-3 text-xs text-ink-sub"
+          data-testid="alerts-selection-bar"
+        >
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="rounded border border-divider px-2 py-1 hover:border-brand-blue"
+            data-testid="alerts-select-all"
+          >
+            {allVisibleSelected ? 'Clear all' : 'Select all'}
+          </button>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="font-medium text-ink">{selectedIds.size} selected</span>
+              <Button
+                onClick={() => ackMut.mutate([...selectedIds])}
+                disabled={ackMut.isPending}
+                data-testid="alerts-bulk-ack"
+              >
+                <Check size={12} /> Acknowledge
+              </Button>
+              <Button variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                Clear selection
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       <DataTable
         columns={columns}
-        data={(data?.items ?? []).filter(
-          (r) =>
-            (!ruleIdFilter || r.rule.id === ruleIdFilter) &&
-            alertMatchesDomain(r, domain),
-        )}
+        data={visibleRows}
         empty={isLoading ? 'Loading alerts…' : 'No alerts match the filters'}
         onRowClick={(row) => setSelectedAlert(row)}
       />
 
-      <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />
+      <AlertDetailModal
+        alert={selectedAlert}
+        onClose={() => setSelectedAlert(null)}
+        onAcknowledge={(alertId) => {
+          ackMut.mutate([alertId]);
+          setSelectedAlert(null);
+        }}
+      />
       <p
         className="mt-2 text-[11px] text-ink-sub"
         data-testid="alerts-live-status"

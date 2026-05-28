@@ -8,8 +8,8 @@
 // Esc, scroll-lock, a11y) + the AlertSlaBadge + the alert's own data.
 
 import { Link } from 'react-router-dom';
-import { Link2, User, ScrollText, ArrowRight } from 'lucide-react';
-import { Badge, type BadgeTone, Modal } from '@/components/ui';
+import { Link2, User, ScrollText, ArrowRight, Check } from 'lucide-react';
+import { Badge, type BadgeTone, Button, Modal } from '@/components/ui';
 import type { Alert, Severity } from '@/lib/api';
 import { bandFor } from '@/lib/criticality';
 import { AlertSlaBadge } from './AlertSlaBadge';
@@ -53,9 +53,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function AlertDetailModal({
   alert,
   onClose,
+  onAcknowledge,
 }: {
   alert: Alert | null;
   onClose: () => void;
+  /** Acknowledge this alert (Phase 4). Optional — omit to hide the action. */
+  onAcknowledge?: (alertId: string) => void;
 }) {
   if (!alert) return null;
   const sla = computeAlertSla(alert.severity, alert.age_min);
@@ -153,7 +156,23 @@ export function AlertDetailModal({
         )}
 
         {/* Quick actions */}
-        <div className="flex flex-wrap gap-2 border-t border-divider pt-4">
+        <div className="flex flex-wrap items-center gap-2 border-t border-divider pt-4">
+          {onAcknowledge &&
+            (alert.acknowledged ? (
+              <span
+                className="inline-flex items-center gap-1.5 text-sm text-emerald-700"
+                data-testid="alert-detail-acked"
+              >
+                <Check size={14} /> Acknowledged
+              </span>
+            ) : (
+              <Button
+                onClick={() => onAcknowledge(alert.id)}
+                data-testid="alert-detail-acknowledge"
+              >
+                <Check size={14} /> Acknowledge
+              </Button>
+            ))}
           <Link
             to={`/customers/${alert.customer.id}`}
             onClick={onClose}

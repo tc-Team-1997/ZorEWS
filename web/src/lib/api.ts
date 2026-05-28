@@ -47,11 +47,24 @@ export interface Alert {
    * customer has only one open alert.
    */
   linked_alert_ids: string[];
+
+  /**
+   * Acknowledgement state (Phase 4 Alert Center). `false` = open (unread,
+   * needs attention); `true` = an operator has acknowledged it. Drives the
+   * status filter + the acked row indicator. Optional `acknowledged_at`
+   * carries the ISO timestamp when set.
+   */
+  acknowledged?: boolean;
+  acknowledged_at?: string | null;
 }
 
 export interface AlertListResponse {
   items: Alert[];
   total: number;
+}
+
+export interface AcknowledgeAlertsResponse {
+  acknowledged: string[];
 }
 
 export interface DashboardSummary {
@@ -800,10 +813,18 @@ export const api = {
       /** Filter to a single customer's alerts. Used by the
        *  Customer Risk Profile page's Linked Alerts panel. */
       customer_id?: string;
+      /** Phase 4 — acknowledgement status filter. */
+      status?: 'open' | 'acknowledged';
     } = {},
   ) =>
     http
       .get<AlertListResponse>('/api/alerts', { params })
+      .then((r) => r.data),
+
+  /** Phase 4 — acknowledge one or more alerts (single + bulk share this). */
+  acknowledgeAlerts: (ids: string[]) =>
+    http
+      .post<AcknowledgeAlertsResponse>('/api/alerts/ack', { ids })
       .then((r) => r.data),
 
   customerRisk: (id: string) =>

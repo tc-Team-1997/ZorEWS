@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { renderWithProviders } from './utils';
+import { __resetMswAlertAcks } from '@/mocks/handlers';
 
 interface MockESInstance {
   emit(eventName: string, data: unknown): void;
@@ -247,6 +248,56 @@ describe('AlertListPage — SLA column', () => {
     expect(
       document.querySelectorAll('[data-testid^="alert-sla-"]').length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// Phase 4 — acknowledge (single + bulk) + status filter (MSW-backed).
+describe('AlertListPage — acknowledge + status filter', () => {
+  afterEach(() => __resetMswAlertAcks());
+
+  it('renders the status filter chips', async () => {
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    const group = screen.getByTestId('alerts-status-filters');
+    expect(within(group).getByText('open')).toBeInTheDocument();
+    expect(within(group).getByText('acknowledged')).toBeInTheDocument();
+  });
+
+  it('acknowledging from the detail modal moves the alert to the acknowledged view', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    // Open the detail panel for Achieng's alert + acknowledge it.
+    await user.click(screen.getByText(/Achieng Otieno/));
+    await screen.findByTestId('alert-detail-acknowledge');
+    await user.click(screen.getByTestId('alert-detail-acknowledge'));
+    // Modal closes; the acked chip now shows on the row.
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid^="alert-ack-badge-"]')).toBeTruthy();
+    });
+  });
+
+  it('bulk-acknowledges selected alerts via Select all', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    await user.click(screen.getByTestId('alerts-select-all'));
+    // Bulk bar appears with a count + Acknowledge button.
+    await waitFor(() => screen.getByTestId('alerts-bulk-ack'));
+    await user.click(screen.getByTestId('alerts-bulk-ack'));
+    // After bulk ack, the acked chips appear on rows.
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll('[data-testid^="alert-ack-badge-"]').length,
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  it('?status=acknowledged shows nothing until something is acked', async () => {
+    renderWithProviders(<AlertListPage />, { route: '/alerts?status=acknowledged' });
+    await waitFor(() => {
+      expect(screen.getByText(/No alerts match the filters/i)).toBeInTheDocument();
+    });
   });
 });
 
