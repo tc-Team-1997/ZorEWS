@@ -2,10 +2,10 @@
 //
 // The auth-svc backend currently exposes a 5-value `Role` enum (admin /
 // risk_analyst / supervisor / collection_officer / field_officer) but the
-// EWS product surface needs 11 enterprise roles for proper segregation
+// EWS product surface needs 16 enterprise roles for proper segregation
 // of duties in banking + insurance ops.
 //
-// This file holds the 11-role catalog the SPA renders. Each enterprise
+// This file holds the 16-role catalog the SPA renders. Each enterprise
 // role maps to one backend role for the actual /auth/register call,
 // keeping the contract stable until auth-svc grows the enum.
 //
@@ -16,6 +16,7 @@ import type { Role } from '@/store/auth';
 
 export type EnterpriseRoleId =
   | 'super_admin'
+  | 'platform_auditor'
   | 'country_admin'
   | 'bank_admin'
   | 'insurance_admin'
@@ -24,6 +25,10 @@ export type EnterpriseRoleId =
   | 'operations_user'
   | 'fraud_analyst'
   | 'collection_manager'
+  | 'claims_investigator'
+  | 'underwriting_officer'
+  | 'persistency_manager'
+  | 'compliance_officer'
   | 'auditor'
   | 'read_only_user';
 
@@ -54,7 +59,7 @@ export interface EnterpriseRoleDef {
 }
 
 /**
- * Canonical 11-role catalog. Order matters — this is the order in the
+ * Canonical 16-role catalog. Order matters — this is the order in the
  * user-create dropdown + the RBAC preview matrix.
  */
 export const ENTERPRISE_ROLES: EnterpriseRoleDef[] = [
@@ -255,6 +260,97 @@ export const ENTERPRISE_ROLES: EnterpriseRoleDef[] = [
       audit_read: false,
     },
     backend_role: 'field_officer',
+  },
+  // ── 041 additions — completes the spec's enumerated role catalog ──────
+  {
+    id: 'platform_auditor',
+    label: 'Platform Auditor',
+    description: 'Read-only audit access across every country, tenant, and domain.',
+    domain: 'both',
+    capabilities: {
+      view_alerts: true,
+      edit_rules: false,
+      close_cases: false,
+      approve_actions: false,
+      export_reports: true,
+      admin_users: false,
+      admin_tenants: false,
+      admin_config: false,
+      audit_read: true,
+    },
+    backend_role: 'field_officer',
+  },
+  {
+    id: 'claims_investigator',
+    label: 'Claims Investigator',
+    description: 'Investigates suspicious + anomalous insurance claims end to end.',
+    domain: 'insurance',
+    capabilities: {
+      view_alerts: true,
+      edit_rules: false,
+      close_cases: true,
+      approve_actions: false,
+      export_reports: true,
+      admin_users: false,
+      admin_tenants: false,
+      admin_config: false,
+      audit_read: true,
+    },
+    backend_role: 'risk_analyst',
+  },
+  {
+    id: 'underwriting_officer',
+    label: 'Underwriting Officer',
+    description: 'Reviews underwriting deviations + approves exceptions.',
+    domain: 'insurance',
+    capabilities: {
+      view_alerts: true,
+      edit_rules: false,
+      close_cases: true,
+      approve_actions: true,
+      export_reports: true,
+      admin_users: false,
+      admin_tenants: false,
+      admin_config: false,
+      audit_read: false,
+    },
+    backend_role: 'supervisor',
+  },
+  {
+    id: 'persistency_manager',
+    label: 'Persistency Manager',
+    description: 'Drives renewal persistency + lapsed-premium recovery.',
+    domain: 'insurance',
+    capabilities: {
+      view_alerts: true,
+      edit_rules: false,
+      close_cases: true,
+      approve_actions: true,
+      export_reports: true,
+      admin_users: false,
+      admin_tenants: false,
+      admin_config: false,
+      audit_read: false,
+    },
+    backend_role: 'collection_officer',
+  },
+  {
+    id: 'compliance_officer',
+    label: 'Compliance Officer',
+    description: 'Oversees regulatory compliance + reviews the audit trail.',
+    domain: 'insurance',
+    capabilities: {
+      view_alerts: true,
+      edit_rules: false,
+      close_cases: false,
+      approve_actions: false,
+      export_reports: true,
+      admin_users: false,
+      admin_tenants: false,
+      admin_config: false,
+      audit_read: true,
+    },
+    backend_role: 'supervisor',
   },
 ];
 
