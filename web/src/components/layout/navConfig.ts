@@ -150,6 +150,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: Umbrella,
     items: [
       { to: '/insurance/policy-lapse', i18nKey: 'insurance_policy_lapse', icon: TrendingDown, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/insurance/claims-anomaly', i18nKey: 'insurance_claims_anomaly', icon: ShieldAlert, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
     ],
   },
 

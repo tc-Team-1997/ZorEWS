@@ -2563,7 +2563,120 @@ export const api = {
     http
       .post<EnvelopeBody<LapsePredictionShape>>('/v1/insurance/policy-lapse/predict', input)
       .then((r) => r.data),
+
+  // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
+  insuranceClaimsAnomalyDashboard: () =>
+    http
+      .get<EnvelopeBody<ClaimsAnomalyDashboardShape>>('/v1/insurance/claims-anomaly/dashboard')
+      .then((r) => r.data),
+  insuranceClaimsAnomalySuspicious: (q: { severity?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.severity) params.set('severity', q.severity);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<SuspiciousClaimsListShape>>(
+        `/v1/insurance/claims-anomaly/suspicious${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  insuranceClaimsAnomalyAnalyze: (input: AnalyzeClaimInputShape) =>
+    http
+      .post<EnvelopeBody<ClaimAnalysisResultShape>>('/v1/insurance/claims-anomaly/analyze', input)
+      .then((r) => r.data),
 };
+
+// ── Insurance EWS · Module 2 types (mirrors services/bff/src/insurance_claims_anomaly.ts) ──
+export type AnomalySeverityShape = 'low' | 'medium' | 'high' | 'critical';
+export type AnomalyReasonShape =
+  | 'frequency_spike'
+  | 'amount_spike'
+  | 'signature_mismatch'
+  | 'duplicate_claim'
+  | 'rapid_refile'
+  | 'off_template';
+
+export interface ClaimAnomalyRowShape {
+  claim_id: string;
+  policy_id: string;
+  customer_id: string;
+  customer_name: string;
+  claim_type: string;
+  region: string;
+  claim_amount_kes: number;
+  anomaly_score: number;
+  severity: AnomalySeverityShape;
+  anomaly_reasons: AnomalyReasonShape[];
+  fraud_probability: number;
+  cluster_id: string | null;
+  status: 'open' | 'siu_queued' | 'cleared' | 'confirmed_fraud';
+  filed_at: string;
+  model_version: string;
+}
+export interface SiuCaseRowShape {
+  siu_case_id: string;
+  claim_id: string;
+  priority: AnomalySeverityShape;
+  state: 'queued' | 'investigating' | 'escalated' | 'closed';
+  assigned_to: string | null;
+  fraud_probability: number;
+  opened_at: string;
+}
+export interface ClaimsAnomalyDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    claims_scored: number;
+    suspicious_claims: number;
+    critical_count: number;
+    high_count: number;
+    siu_open_cases: number;
+    suspicious_amount_kes: number;
+    mean_anomaly_score: number;
+  };
+  suspicious_claims_queue: ClaimAnomalyRowShape[];
+  fraud_score_distribution: Array<{ range: string; min: number; max: number; count: number }>;
+  claims_heatmap: Array<{
+    claim_type: string;
+    region: string;
+    suspicious_count: number;
+    mean_anomaly_score: number;
+  }>;
+  siu_investigation_queue: SiuCaseRowShape[];
+  model_version: string;
+}
+export interface SuspiciousClaimsListShape {
+  tenant_id: string;
+  generated_at: string;
+  severity_filter: AnomalySeverityShape | 'all';
+  total: number;
+  claims: ClaimAnomalyRowShape[];
+}
+export interface AnalyzeClaimInputShape {
+  claim_id?: string;
+  customer_id: string;
+  claim_type?: string;
+  claim_amount_kes?: number;
+  claims_in_90d?: number;
+  amount_vs_policy_avg?: number;
+  signature_match_score?: number;
+  is_duplicate?: boolean;
+  days_since_last_claim?: number;
+  documents_off_template?: number;
+}
+export interface ClaimAnalysisResultShape {
+  claim_id: string;
+  customer_id: string;
+  anomaly_score: number;
+  severity: AnomalySeverityShape;
+  fraud_probability: number;
+  anomaly_reasons: AnomalyReasonShape[];
+  siu_recommended: boolean;
+  drivers: { signal: string; contribution: number }[];
+  recommended_action: string;
+  model_version: string;
+  scored_at: string;
+}
 
 // ── Insurance EWS · Module 1 types (mirrors services/bff/src/insurance_policy_lapse.ts) ──
 export type RetentionBandShape = 'low' | 'medium' | 'high' | 'critical';

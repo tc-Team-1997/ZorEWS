@@ -61,6 +61,7 @@ import { AccountBehaviourPage } from '@/modules/customers/AccountBehaviourPage';
 import { FinancialRatiosPage } from '@/modules/customers/FinancialRatiosPage';
 import { FraudSignalsPage } from '@/modules/banking/FraudSignalsPage';
 import { PolicyLapsePage } from '@/modules/insurance/PolicyLapsePage';
+import { ClaimsAnomalyPage } from '@/modules/insurance/ClaimsAnomalyPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -182,6 +183,7 @@ export function App() {
             <Route path="financial-ratios" element={<FinancialRatiosPage />} />
             <Route path="fraud-signals" element={<FraudSignalsPage />} />
             <Route path="insurance/policy-lapse" element={<PolicyLapsePage />} />
+            <Route path="insurance/claims-anomaly" element={<ClaimsAnomalyPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

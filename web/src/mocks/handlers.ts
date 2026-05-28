@@ -3026,11 +3026,168 @@ const _mswInsurancePolicyLapseHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 2 — Claims Anomaly (dev/test mock) ──────────
+const _claimReasons = ['frequency_spike', 'amount_spike', 'signature_mismatch', 'duplicate_claim', 'rapid_refile', 'off_template'];
+const _claimTypes = ['health', 'motor', 'life', 'property', 'travel'];
+const _claimRegions = ['North', 'South', 'East', 'West', 'Central'];
+function _anomSeverity(s: number): 'low' | 'medium' | 'high' | 'critical' {
+  if (s >= 0.75) return 'critical';
+  if (s >= 0.5) return 'high';
+  if (s >= 0.25) return 'medium';
+  return 'low';
+}
+function _claimBook() {
+  const rows = [];
+  for (let i = 0; i < 28; i++) {
+    const score = Math.round((((i * 41) % 100) / 100) ** 1.3 * 10000) / 10000;
+    const sev = _anomSeverity(score);
+    const n = sev === 'critical' ? 3 : sev === 'high' ? 2 : sev === 'medium' ? 1 : 0;
+    rows.push({
+      claim_id: `CLM-BANK_DEMO-${300000 + i}`,
+      policy_id: `POL-BANK_DEMO-${100000 + i}`,
+      customer_id: `CUST-BANK_DEMO-${200000 + i}`,
+      customer_name: `Customer ${i + 1}`,
+      claim_type: _claimTypes[i % 5],
+      region: _claimRegions[(i * 3) % 5],
+      claim_amount_kes: 20000 + ((i * 7919) % 480000),
+      anomaly_score: score,
+      severity: sev,
+      anomaly_reasons: _claimReasons.slice(0, n),
+      fraud_probability: Math.min(1, Math.round((score * 0.9 + 0.05) * 10000) / 10000),
+      cluster_id: score >= 0.5 ? `CLUSTER-BANK_DEMO-${i % 6}` : null,
+      status: sev === 'high' || sev === 'critical' ? 'siu_queued' : 'open',
+      filed_at: new Date(Date.now() - (i % 30) * 86400000).toISOString(),
+      model_version: 'claim-anomaly-stub-v1',
+    });
+  }
+  return rows;
+}
+const _mswInsuranceClaimsAnomalyHandlers = [
+  http.get('/v1/insurance/claims-anomaly/dashboard', () => {
+    const book = _claimBook();
+    const suspicious = book.filter((c) => c.severity === 'high' || c.severity === 'critical');
+    const buckets = [
+      { range: '0.0–0.2', min: 0, max: 0.2, count: 0 },
+      { range: '0.2–0.4', min: 0.2, max: 0.4, count: 0 },
+      { range: '0.4–0.6', min: 0.4, max: 0.6, count: 0 },
+      { range: '0.6–0.8', min: 0.6, max: 0.8, count: 0 },
+      { range: '0.8–1.0', min: 0.8, max: 1.0001, count: 0 },
+    ];
+    for (const c of book) {
+      const b = buckets.find((bk) => c.fraud_probability >= bk.min && c.fraud_probability < bk.max);
+      if (b) b.count++;
+    }
+    const heatmap = [];
+    for (const ct of _claimTypes) {
+      for (const rg of _claimRegions) {
+        const cell = suspicious.filter((c) => c.claim_type === ct && c.region === rg);
+        heatmap.push({
+          claim_type: ct,
+          region: rg,
+          suspicious_count: cell.length,
+          mean_anomaly_score: cell.length ? cell.reduce((a, c) => a + c.anomaly_score, 0) / cell.length : 0,
+        });
+      }
+    }
+    const siu = suspicious
+      .map((c, i) => ({
+        siu_case_id: `SIU-BANK_DEMO-${400000 + i}`,
+        claim_id: c.claim_id,
+        priority: c.severity,
+        state: ['queued', 'investigating', 'escalated'][i % 3],
+        assigned_to: ['siu.alice', 'siu.bob', null][i % 3],
+        fraud_probability: c.fraud_probability,
+        opened_at: c.filed_at,
+      }))
+      .sort((a, b) => b.fraud_probability - a.fraud_probability)
+      .slice(0, 12);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          claims_scored: book.length,
+          suspicious_claims: suspicious.length,
+          critical_count: book.filter((c) => c.severity === 'critical').length,
+          high_count: book.filter((c) => c.severity === 'high').length,
+          siu_open_cases: suspicious.length,
+          suspicious_amount_kes: suspicious.reduce((a, c) => a + c.claim_amount_kes, 0),
+          mean_anomaly_score: Math.round((book.reduce((a, c) => a + c.anomaly_score, 0) / book.length) * 10000) / 10000,
+        },
+        suspicious_claims_queue: [...book].sort((a, b) => b.anomaly_score - a.anomaly_score).slice(0, 10),
+        fraud_score_distribution: buckets,
+        claims_heatmap: heatmap,
+        siu_investigation_queue: siu,
+        model_version: 'claim-anomaly-stub-v1',
+      }),
+    );
+  }),
+  http.get('/v1/insurance/claims-anomaly/suspicious', ({ request }) => {
+    const url = new URL(request.url);
+    const severity = url.searchParams.get('severity');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    let rows = _claimBook().filter((c) => c.severity === 'high' || c.severity === 'critical');
+    if (severity && severity !== 'all') rows = rows.filter((c) => c.severity === severity);
+    rows.sort((a, b) => b.anomaly_score - a.anomaly_score);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        severity_filter: severity ?? 'all',
+        total: rows.length,
+        claims: rows.slice(0, limit),
+      }),
+    );
+  }),
+  http.post('/v1/insurance/claims-anomaly/analyze', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    if (!body || !body.customer_id) {
+      return HttpResponse.json(
+        {
+          header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() },
+          error: { code: 'EWS_400_invalid_input', message: 'customer_id required', severity: 'MEDIUM' },
+        },
+        { status: 400 },
+      );
+    }
+    const claims90 = Number(body.claims_in_90d ?? 1);
+    const ratio = Number(body.amount_vs_policy_avg ?? 1);
+    const isDup = body.is_duplicate === true;
+    const score = Math.max(
+      0,
+      Math.min(1, Math.round((0.05 + Math.max(0, (claims90 - 2) * 0.08) + Math.max(0, (ratio - 1) * 0.25) + (isDup ? 0.3 : 0)) * 10000) / 10000),
+    );
+    const sev = _anomSeverity(score);
+    const reasons = [];
+    if (claims90 > 2) reasons.push('frequency_spike');
+    if (ratio > 1) reasons.push('amount_spike');
+    if (isDup) reasons.push('duplicate_claim');
+    return HttpResponse.json(
+      envelope({
+        claim_id: body.claim_id ?? `CLM-${body.customer_id}`,
+        customer_id: body.customer_id,
+        anomaly_score: score,
+        severity: sev,
+        fraud_probability: Math.min(1, Math.round((score * 0.9 + (isDup ? 0.1 : 0)) * 10000) / 10000),
+        anomaly_reasons: reasons,
+        siu_recommended: sev === 'high' || sev === 'critical',
+        drivers: reasons.map((s) => ({ signal: s, contribution: 0.1 })),
+        recommended_action:
+          sev === 'high' || sev === 'critical' ? 'Queue to SIU — freeze payout pending investigation' : 'Proceed — within normal parameters',
+        model_version: 'claim-anomaly-stub-v1',
+        scored_at: new Date().toISOString(),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
   ..._mswStreamingLatencyHandlers,
   ..._mswInsurancePolicyLapseHandlers,
+  ..._mswInsuranceClaimsAnomalyHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {
