@@ -64,6 +64,7 @@ import { PolicyLapsePage } from '@/modules/insurance/PolicyLapsePage';
 import { ClaimsAnomalyPage } from '@/modules/insurance/ClaimsAnomalyPage';
 import { FraudDetectionPage } from '@/modules/insurance/FraudDetectionPage';
 import { SolvencyWatchPage } from '@/modules/insurance/SolvencyWatchPage';
+import { PersistencyWatchPage } from '@/modules/insurance/PersistencyWatchPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -188,6 +189,7 @@ export function App() {
             <Route path="insurance/claims-anomaly" element={<ClaimsAnomalyPage />} />
             <Route path="insurance/fraud" element={<FraudDetectionPage />} />
             <Route path="insurance/solvency" element={<SolvencyWatchPage />} />
+            <Route path="insurance/persistency" element={<PersistencyWatchPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

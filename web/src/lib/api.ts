@@ -2615,7 +2615,101 @@ export const api = {
       .get<EnvelopeBody<ComplianceAlertListShape>>(`/v1/insurance/solvency/compliance${qs ? '?' + qs : ''}`)
       .then((r) => r.data);
   },
+
+  // ── Insurance EWS · Module 5 — Persistency Watch ──────────────────────
+  insurancePersistencyDashboard: () =>
+    http.get<EnvelopeBody<PersistencyDashboardShape>>('/v1/insurance/persistency/dashboard').then((r) => r.data),
+  insurancePersistencyAnalyze: (input: AnalyzePersistencyInputShape) =>
+    http.post<EnvelopeBody<PersistencyAnalysisShape>>('/v1/insurance/persistency/analyze', input).then((r) => r.data),
+  insurancePersistencyAlerts: (q: { severity?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.severity) params.set('severity', q.severity);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<PersistencyAlertListShape>>(`/v1/insurance/persistency/alerts${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
 };
+
+// ── Insurance EWS · Module 5 types (mirrors services/bff/src/insurance_persistency.ts) ──
+export type PersistencyBandShape = 'healthy' | 'watch' | 'concern' | 'critical';
+export type PersistencyDimensionShape = 'product' | 'channel' | 'region';
+
+export interface PersistencyTrendPointShape {
+  period_month: number;
+  persistency_pct: number;
+  target_pct: number;
+  shortfall: number;
+  band: PersistencyBandShape;
+}
+export interface DimensionPersistencyShape {
+  dimension_value: string;
+  persistency_pct: number;
+  target_pct: number;
+  shortfall: number;
+  band: PersistencyBandShape;
+  policies_in_force: number;
+}
+export interface PersistencyDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    headline_13m_pct: number;
+    headline_61m_pct: number;
+    cohorts_below_target: number;
+    open_alerts: number;
+    worst_dimension: string | null;
+  };
+  persistency_trend: PersistencyTrendPointShape[];
+  product_retention: DimensionPersistencyShape[];
+  channel_risk: DimensionPersistencyShape[];
+  location_persistency: DimensionPersistencyShape[];
+  model_version: string;
+}
+export interface AnalyzePersistencyInputShape {
+  dimension: string;
+  dimension_value: string;
+  period_month?: number;
+  persistency_pct?: number;
+  auto_debit_share?: number;
+  claims_settlement_delay_days?: number;
+  agent_attrition_rate?: number;
+  complaint_rate?: number;
+  digital_engagement_score?: number;
+}
+export interface PersistencyAnalysisShape {
+  dimension: PersistencyDimensionShape;
+  dimension_value: string;
+  period_month: number;
+  persistency_pct: number;
+  target_pct: number;
+  shortfall: number;
+  band: PersistencyBandShape;
+  root_causes: { cause: string; weight: number; detail: string }[];
+  recommendation: string;
+  model_version: string;
+  analyzed_at: string;
+}
+export interface PersistencyAlertShape {
+  alert_id: string;
+  dimension: PersistencyDimensionShape;
+  dimension_value: string;
+  period_month: number;
+  persistency_pct: number;
+  threshold_pct: number;
+  shortfall: number;
+  severity: 'info' | 'warning' | 'critical';
+  status: 'open' | 'acknowledged' | 'resolved';
+  raised_at: string;
+}
+export interface PersistencyAlertListShape {
+  tenant_id: string;
+  generated_at: string;
+  severity_filter: 'info' | 'warning' | 'critical' | 'all';
+  total: number;
+  alerts: PersistencyAlertShape[];
+}
 
 // ── Insurance EWS · Module 4 types (mirrors services/bff/src/insurance_solvency.ts) ──
 export type SolvencyStatusShape = 'compliant' | 'watch' | 'breach';

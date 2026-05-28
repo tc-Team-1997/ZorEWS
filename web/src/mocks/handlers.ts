@@ -3491,6 +3491,141 @@ const _mswInsuranceSolvencyHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 5 — Persistency Watch (dev/test mock) ───────
+const _pstTargets: Record<number, number> = { 13: 0.85, 25: 0.75, 37: 0.68, 49: 0.62, 61: 0.55 };
+function _pstBand(shortfall: number): 'healthy' | 'watch' | 'concern' | 'critical' {
+  if (shortfall <= 0) return 'healthy';
+  if (shortfall < 0.05) return 'watch';
+  if (shortfall < 0.12) return 'concern';
+  return 'critical';
+}
+function _pstDimRows(values: string[]): Array<{
+  dimension_value: string;
+  persistency_pct: number;
+  target_pct: number;
+  shortfall: number;
+  band: ReturnType<typeof _pstBand>;
+  policies_in_force: number;
+}> {
+  const target = _pstTargets[13];
+  return values
+    .map((v, i) => {
+      const pct = Math.round(Math.max(0.4, target - ((i * 7) % 30) / 100) * 10000) / 10000;
+      const shortfall = Math.round(Math.max(0, target - pct) * 10000) / 10000;
+      return {
+        dimension_value: v,
+        persistency_pct: pct,
+        target_pct: target,
+        shortfall,
+        band: _pstBand(target - pct),
+        policies_in_force: 3000 + i * 2500,
+      };
+    })
+    .sort((a, b) => b.shortfall - a.shortfall);
+}
+const _mswInsurancePersistencyHandlers = [
+  http.get('/v1/insurance/persistency/dashboard', () => {
+    const trend = [13, 25, 37, 49, 61].map((p) => {
+      const target = _pstTargets[p];
+      const pct = Math.round(Math.max(0.3, target - 0.03) * 10000) / 10000;
+      return { period_month: p, persistency_pct: pct, target_pct: target, shortfall: Math.round(Math.max(0, target - pct) * 10000) / 10000, band: _pstBand(target - pct) };
+    });
+    const products = _pstDimRows(['TERM_LIFE', 'ENDOWMENT', 'ULIP', 'HEALTH', 'PENSION']);
+    const channels = _pstDimRows(['agent', 'broker', 'bancassurance', 'direct', 'online']);
+    const regions = _pstDimRows(['North', 'South', 'East', 'West', 'Central']);
+    const all = [
+      ...products.map((r) => ({ ...r, dimension: 'product' })),
+      ...channels.map((r) => ({ ...r, dimension: 'channel' })),
+      ...regions.map((r) => ({ ...r, dimension: 'region' })),
+    ];
+    const below = all.filter((c) => c.shortfall > 0);
+    const worst = [...below].sort((a, b) => b.shortfall - a.shortfall)[0];
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          headline_13m_pct: trend[0].persistency_pct,
+          headline_61m_pct: trend[4].persistency_pct,
+          cohorts_below_target: below.length,
+          open_alerts: all.filter((c) => c.shortfall > 0.05).length,
+          worst_dimension: worst ? `${worst.dimension}:${worst.dimension_value}` : null,
+        },
+        persistency_trend: trend,
+        product_retention: products,
+        channel_risk: channels,
+        location_persistency: regions,
+        model_version: 'persistency-stub-v1',
+      }),
+    );
+  }),
+  http.post('/v1/insurance/persistency/analyze', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    const dims = ['product', 'channel', 'region'];
+    if (!body || !dims.includes(body.dimension as string)) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_dimension', message: 'dimension must be product | channel | region', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    const period = Number(body.period_month ?? 13);
+    const target = _pstTargets[period] ?? 0.85;
+    const pct = Number(body.persistency_pct ?? target - 0.1);
+    const shortfall = Math.round(Math.max(0, target - pct) * 10000) / 10000;
+    const autoDebit = Number(body.auto_debit_share ?? 0.6);
+    const attrition = Number(body.agent_attrition_rate ?? 0.1);
+    const raw1 = (1 - autoDebit) * 0.4;
+    const raw2 = attrition * 0.5;
+    const tot = raw1 + raw2 + 0.0001;
+    const causes = [
+      { cause: 'low_auto_debit_adoption', weight: Math.round((raw1 / tot) * 10000) / 10000, detail: `Auto-debit share ${(autoDebit * 100).toFixed(0)}%` },
+      { cause: 'agent_attrition', weight: Math.round((raw2 / tot) * 10000) / 10000, detail: `Attrition ${(attrition * 100).toFixed(0)}%` },
+    ].sort((a, b) => b.weight - a.weight);
+    return HttpResponse.json(
+      envelope({
+        dimension: body.dimension,
+        dimension_value: body.dimension_value ?? 'cohort',
+        period_month: period,
+        persistency_pct: Math.round(pct * 10000) / 10000,
+        target_pct: target,
+        shortfall,
+        band: _pstBand(target - pct),
+        root_causes: causes,
+        recommendation: 'Run an auto-debit enrolment drive for this cohort',
+        model_version: 'persistency-stub-v1',
+        analyzed_at: new Date().toISOString(),
+      }),
+    );
+  }),
+  http.get('/v1/insurance/persistency/alerts', ({ request }) => {
+    const url = new URL(request.url);
+    const severity = url.searchParams.get('severity');
+    const products = _pstDimRows(['TERM_LIFE', 'ENDOWMENT', 'ULIP', 'HEALTH', 'PENSION']);
+    const channels = _pstDimRows(['agent', 'broker', 'bancassurance', 'direct', 'online']);
+    let seq = 0;
+    let alerts = [...products.map((r) => ({ ...r, dimension: 'product' })), ...channels.map((r) => ({ ...r, dimension: 'channel' }))]
+      .filter((c) => c.shortfall > 0.05)
+      .map((c) => ({
+        alert_id: `PST-BANK_DEMO-${800000 + seq++}`,
+        dimension: c.dimension,
+        dimension_value: c.dimension_value,
+        period_month: 13,
+        persistency_pct: c.persistency_pct,
+        threshold_pct: c.target_pct,
+        shortfall: c.shortfall,
+        severity: c.band === 'critical' ? 'critical' : c.band === 'concern' ? 'warning' : 'info',
+        status: 'open',
+        raised_at: new Date().toISOString(),
+      }))
+      .sort((a, b) => b.shortfall - a.shortfall);
+    if (severity && severity !== 'all') alerts = alerts.filter((a) => a.severity === severity);
+    return HttpResponse.json(
+      envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), severity_filter: severity ?? 'all', total: alerts.length, alerts }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
@@ -3499,6 +3634,7 @@ export const handlers = [
   ..._mswInsuranceClaimsAnomalyHandlers,
   ..._mswInsuranceFraudHandlers,
   ..._mswInsuranceSolvencyHandlers,
+  ..._mswInsurancePersistencyHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

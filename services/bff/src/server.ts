@@ -574,6 +574,12 @@ import {
   listComplianceAlerts,
   SolvencyError,
 } from './insurance_solvency';
+import {
+  buildPersistencyDashboard,
+  analyzePersistency,
+  listPersistencyAlerts,
+  PersistencyError,
+} from './insurance_persistency';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12810,6 +12816,69 @@ export function makeApp(deps: AppDeps = {}) {
         res.json(wrapResponse(list, ctx));
       } catch (e) {
         if (e instanceof SolvencyError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Insurance EWS · Module 5 — Persistency Watch ─────────────────────
+  //
+  // Tracks policy persistency across the 13/25/37/49/61-month milestones,
+  // sliced by product / channel / region, with AI root-cause. Routes:
+  //   GET  /v1/insurance/persistency/dashboard
+  //   POST /v1/insurance/persistency/analyze
+  //   GET  /v1/insurance/persistency/alerts?severity=&limit=
+
+  app.get(
+    '/v1/insurance/persistency/dashboard',
+    requireTenantMw,
+    requireRole('insurance:persistency:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildPersistencyDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/insurance/persistency/analyze',
+    requireTenantMw,
+    requireRole('insurance:persistency:analyze'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const result = analyzePersistency(raw, now());
+        res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof PersistencyError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/persistency/alerts',
+    requireTenantMw,
+    requireRole('insurance:persistency:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listPersistencyAlerts(req.tenant!.tenant_id, now(), {
+          severity: typeof req.query.severity === 'string' ? req.query.severity : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof PersistencyError) {
           res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
           return;
         }

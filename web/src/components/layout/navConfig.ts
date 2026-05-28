@@ -153,6 +153,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/insurance/claims-anomaly', i18nKey: 'insurance_claims_anomaly', icon: ShieldAlert, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/fraud', i18nKey: 'insurance_fraud', icon: GitBranch, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/solvency', i18nKey: 'insurance_solvency', icon: Gauge, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/insurance/persistency', i18nKey: 'insurance_persistency', icon: Activity, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
     ],
   },
 
