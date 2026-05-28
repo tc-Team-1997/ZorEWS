@@ -2630,7 +2630,99 @@ export const api = {
       .get<EnvelopeBody<PersistencyAlertListShape>>(`/v1/insurance/persistency/alerts${qs ? '?' + qs : ''}`)
       .then((r) => r.data);
   },
+
+  // ── Insurance EWS · Module 6 — Underwriting Deviation ─────────────────
+  insuranceUnderwritingDashboard: () =>
+    http.get<EnvelopeBody<UnderwritingDashboardShape>>('/v1/insurance/underwriting/dashboard').then((r) => r.data),
+  insuranceUnderwritingAnalyze: (input: AnalyzeProposalInputShape) =>
+    http.post<EnvelopeBody<ProposalAnalysisShape>>('/v1/insurance/underwriting/analyze', input).then((r) => r.data),
+  insuranceUnderwritingDeviations: (q: { deviation_type?: string; status?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.deviation_type) params.set('deviation_type', q.deviation_type);
+    if (q.status) params.set('status', q.status);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<DeviationListShape>>(`/v1/insurance/underwriting/deviations${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
 };
+
+// ── Insurance EWS · Module 6 types (mirrors services/bff/src/insurance_underwriting.ts) ──
+export type DeviationTypeShape = 'premium' | 'medical_waiver' | 'sum_assured' | 'rule_violation';
+export type UwSeverityShape = 'low' | 'medium' | 'high' | 'critical';
+export type DeviationStatusShape = 'open' | 'reviewed' | 'accepted' | 'reversed';
+
+export interface DeviationRowShape {
+  deviation_id: string;
+  policy_id: string;
+  underwriter_id: string;
+  underwriter_name: string;
+  channel: string;
+  deviation_type: DeviationTypeShape;
+  rule_code: string;
+  expected_value: number;
+  actual_value: number;
+  deviation_pct: number;
+  severity: UwSeverityShape;
+  status: DeviationStatusShape;
+  detected_at: string;
+}
+export interface UnderwriterScoreShape {
+  underwriter_id: string;
+  underwriter_name: string;
+  risk_score: number;
+  deviation_count_90d: number;
+  policies_underwritten: number;
+  deviation_rate: number;
+  rank: number;
+}
+export interface UnderwritingDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    proposals_reviewed: number;
+    total_deviations: number;
+    open_deviations: number;
+    critical_deviations: number;
+    medical_waivers: number;
+    high_risk_underwriters: number;
+  };
+  high_risk_underwriters: UnderwriterScoreShape[];
+  deviation_heatmap: Array<{ deviation_type: DeviationTypeShape; channel: string; count: number; mean_deviation_pct: number }>;
+  medical_waiver_analysis: Array<{ band: string; waivers_granted: number; waiver_rate: number; high_sum_assured_waivers: number }>;
+  rule_violation_alerts: DeviationRowShape[];
+  model_version: string;
+}
+export interface AnalyzeProposalInputShape {
+  policy_id?: string;
+  underwriter_id?: string;
+  channel?: string;
+  premium_vs_guideline_ratio?: number;
+  sum_assured_vs_limit_ratio?: number;
+  medical_waiver_granted?: boolean;
+  applicant_age?: number;
+  rule_overrides?: number;
+}
+export interface ProposalAnalysisShape {
+  policy_id: string;
+  underwriter_id: string;
+  deviation_score: number;
+  severity: UwSeverityShape;
+  deviations: { deviation_type: DeviationTypeShape; rule_code: string; detail: string; contribution: number }[];
+  requires_exception_approval: boolean;
+  recommended_action: string;
+  model_version: string;
+  analyzed_at: string;
+}
+export interface DeviationListShape {
+  tenant_id: string;
+  generated_at: string;
+  type_filter: DeviationTypeShape | 'all';
+  status_filter: DeviationStatusShape | 'all';
+  total: number;
+  deviations: DeviationRowShape[];
+}
 
 // ── Insurance EWS · Module 5 types (mirrors services/bff/src/insurance_persistency.ts) ──
 export type PersistencyBandShape = 'healthy' | 'watch' | 'concern' | 'critical';

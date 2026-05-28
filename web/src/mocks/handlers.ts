@@ -3626,6 +3626,190 @@ const _mswInsurancePersistencyHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 6 — Underwriting Deviation (dev/test mock) ──
+const _uwDeviationTypes = ['premium', 'medical_waiver', 'sum_assured', 'rule_violation'] as const;
+const _uwChannels = ['agent', 'broker', 'bancassurance', 'direct', 'online'] as const;
+const _uwNames = ['R. Sharma', 'P. Iyer', 'A. Khan', 'M. Nair', 'S. Reddy', 'V. Mehta', 'K. Das', 'N. Gupta'];
+const _uwRuleCodes: Record<string, string> = {
+  premium: 'PREMIUM_BELOW_GUIDELINE',
+  medical_waiver: 'MEDICAL_WAIVER_GRANTED',
+  sum_assured: 'SUM_ASSURED_OVER_LIMIT',
+  rule_violation: 'MANUAL_RULE_OVERRIDE',
+};
+function _uwSeverity(score: number): 'low' | 'medium' | 'high' | 'critical' {
+  if (score >= 0.75) return 'critical';
+  if (score >= 0.5) return 'high';
+  if (score >= 0.25) return 'medium';
+  return 'low';
+}
+function _uwBook(): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < 42; i++) {
+    const dt = _uwDeviationTypes[i % _uwDeviationTypes.length];
+    const ch = _uwChannels[i % _uwChannels.length];
+    const uwIdx = i % _uwNames.length;
+    const score = Math.round(Math.min(1, (((i * 37) % 100) / 100) ** 1.3) * 10000) / 10000;
+    const severity = _uwSeverity(score);
+    const expected = dt === 'premium' ? 120000 : dt === 'sum_assured' ? 8000000 : 0;
+    const actual = dt === 'premium' ? 84000 : dt === 'sum_assured' ? 11200000 : 1;
+    const deviation_pct = expected !== 0 ? Math.round(((actual - expected) / expected) * 10000) / 10000 : 1;
+    out.push({
+      deviation_id: `UWD-BANK_DEMO-${900000 + i}`,
+      policy_id: `POL-BANK_DEMO-${100000 + i}`,
+      underwriter_id: `UW-BANK_DEMO-${10 + uwIdx}`,
+      underwriter_name: _uwNames[uwIdx],
+      channel: ch,
+      deviation_type: dt,
+      rule_code: _uwRuleCodes[dt],
+      expected_value: expected,
+      actual_value: actual,
+      deviation_pct,
+      severity,
+      status: i % 5 === 0 ? 'reviewed' : i % 7 === 0 ? 'accepted' : 'open',
+      detected_at: new Date(Date.now() - (i % 60) * 86400000).toISOString(),
+    });
+  }
+  return out;
+}
+const _mswInsuranceUnderwritingHandlers = [
+  http.get('/v1/insurance/underwriting/dashboard', () => {
+    const book = _uwBook();
+    const byUw = new Map<string, Array<Record<string, unknown>>>();
+    for (const d of book) {
+      const id = d.underwriter_id as string;
+      if (!byUw.has(id)) byUw.set(id, []);
+      byUw.get(id)!.push(d);
+    }
+    const high_risk_underwriters = [...byUw.entries()]
+      .map(([uwId, rows]) => {
+        const critHigh = rows.filter((d) => d.severity === 'high' || d.severity === 'critical').length;
+        const policies = 30 + (parseInt(uwId.slice(-2), 10) % 9) * 12;
+        const risk = Math.round(Math.min(1, rows.length * 0.05 + critHigh * 0.12) * 10000) / 10000;
+        return {
+          underwriter_id: uwId,
+          underwriter_name: rows[0].underwriter_name as string,
+          risk_score: risk,
+          deviation_count_90d: rows.length,
+          policies_underwritten: policies,
+          deviation_rate: Math.round((rows.length / policies) * 10000) / 10000,
+          rank: 0,
+        };
+      })
+      .sort((a, b) => b.risk_score - a.risk_score || a.underwriter_id.localeCompare(b.underwriter_id))
+      .slice(0, 10)
+      .map((u, i) => ({ ...u, rank: i + 1 }));
+    const deviation_heatmap: Array<Record<string, unknown>> = [];
+    for (const dt of _uwDeviationTypes) {
+      for (const ch of _uwChannels) {
+        const cell = book.filter((d) => d.deviation_type === dt && d.channel === ch);
+        deviation_heatmap.push({
+          deviation_type: dt,
+          channel: ch,
+          count: cell.length,
+          mean_deviation_pct: cell.length
+            ? Math.round((cell.reduce((a, d) => a + Math.abs(d.deviation_pct as number), 0) / cell.length) * 10000) / 10000
+            : 0,
+        });
+      }
+    }
+    const waivers = book.filter((d) => d.deviation_type === 'medical_waiver');
+    const medical_waiver_analysis = ['under_35', '35_50', 'over_50'].map((band, idx) => {
+      const granted = Math.round((waivers.length / 3) * (0.8 + idx * 0.2));
+      return {
+        band,
+        waivers_granted: granted,
+        waiver_rate: Math.round((granted / 267) * 10000) / 10000,
+        high_sum_assured_waivers: Math.round(granted * (0.1 + idx * 0.12)),
+      };
+    });
+    const rank = { critical: 0, high: 1, medium: 2, low: 3 } as Record<string, number>;
+    const rule_violation_alerts = book
+      .filter((d) => d.status === 'open')
+      .sort((a, b) => rank[a.severity as string] - rank[b.severity as string] || (a.deviation_id as string).localeCompare(b.deviation_id as string))
+      .slice(0, 12);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          proposals_reviewed: 800,
+          total_deviations: book.length,
+          open_deviations: book.filter((d) => d.status === 'open').length,
+          critical_deviations: book.filter((d) => d.severity === 'critical').length,
+          medical_waivers: waivers.length,
+          high_risk_underwriters: high_risk_underwriters.filter((u) => u.risk_score >= 0.5).length,
+        },
+        high_risk_underwriters,
+        deviation_heatmap,
+        medical_waiver_analysis,
+        rule_violation_alerts,
+        model_version: 'underwriting-stub-v1',
+      }),
+    );
+  }),
+  http.post('/v1/insurance/underwriting/analyze', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    const premiumRatio = Number(body?.premium_vs_guideline_ratio ?? 1);
+    const sumRatio = Number(body?.sum_assured_vs_limit_ratio ?? 1);
+    const waiver = body?.medical_waiver_granted === true;
+    const age = Number(body?.applicant_age ?? 40);
+    const overrides = Number(body?.rule_overrides ?? 0);
+    const deviations: Array<Record<string, unknown>> = [];
+    const dPremium = premiumRatio < 0.9 ? Math.min(0.35, (0.9 - premiumRatio) * 1.2) : 0;
+    if (dPremium > 0) deviations.push({ deviation_type: 'premium', rule_code: _uwRuleCodes.premium, detail: `Premium at ${(premiumRatio * 100).toFixed(0)}% of guideline`, contribution: Math.round(dPremium * 10000) / 10000 });
+    const dSum = sumRatio > 1.0 ? Math.min(0.35, (sumRatio - 1.0) * 0.7) : 0;
+    if (dSum > 0) deviations.push({ deviation_type: 'sum_assured', rule_code: _uwRuleCodes.sum_assured, detail: `Sum assured at ${(sumRatio * 100).toFixed(0)}% of limit`, contribution: Math.round(dSum * 10000) / 10000 });
+    const dWaiver = waiver ? Math.min(0.3, 0.12 + Math.max(0, (age - 45) / 100)) : 0;
+    if (dWaiver > 0) deviations.push({ deviation_type: 'medical_waiver', rule_code: _uwRuleCodes.medical_waiver, detail: `Medical waiver granted at age ${age}`, contribution: Math.round(dWaiver * 10000) / 10000 });
+    const dOverride = Math.min(0.3, overrides * 0.1);
+    if (dOverride > 0) deviations.push({ deviation_type: 'rule_violation', rule_code: _uwRuleCodes.rule_violation, detail: `${overrides} manual rule override(s)`, contribution: Math.round(dOverride * 10000) / 10000 });
+    const score = Math.round(Math.max(0, Math.min(1, deviations.reduce((a, d) => a + (d.contribution as number), 0))) * 10000) / 10000;
+    const severity = _uwSeverity(score);
+    deviations.sort((a, b) => (b.contribution as number) - (a.contribution as number));
+    return HttpResponse.json(
+      envelope({
+        policy_id: body?.policy_id ?? 'POL-ADHOC',
+        underwriter_id: body?.underwriter_id ?? 'UW-ADHOC',
+        deviation_score: score,
+        severity,
+        deviations,
+        requires_exception_approval: severity === 'high' || severity === 'critical',
+        recommended_action:
+          severity === 'critical'
+            ? 'Block issuance — route to senior UW + compliance for exception approval'
+            : severity === 'high'
+              ? 'Route to approval-exception workflow before issuance'
+              : severity === 'medium'
+                ? 'Flag for UW supervisor review'
+                : 'Within underwriting tolerance — proceed',
+        model_version: 'underwriting-stub-v1',
+        analyzed_at: new Date().toISOString(),
+      }),
+    );
+  }),
+  http.get('/v1/insurance/underwriting/deviations', ({ request }) => {
+    const url = new URL(request.url);
+    const typeFilter = url.searchParams.get('deviation_type');
+    const statusFilter = url.searchParams.get('status');
+    let rows = _uwBook();
+    if (typeFilter && typeFilter !== 'all') rows = rows.filter((d) => d.deviation_type === typeFilter);
+    if (statusFilter && statusFilter !== 'all') rows = rows.filter((d) => d.status === statusFilter);
+    const rank = { critical: 0, high: 1, medium: 2, low: 3 } as Record<string, number>;
+    rows.sort((a, b) => rank[a.severity as string] - rank[b.severity as string] || (a.deviation_id as string).localeCompare(b.deviation_id as string));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        type_filter: typeFilter ?? 'all',
+        status_filter: statusFilter ?? 'all',
+        total: rows.length,
+        deviations: rows.slice(0, 50),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
@@ -3635,6 +3819,7 @@ export const handlers = [
   ..._mswInsuranceFraudHandlers,
   ..._mswInsuranceSolvencyHandlers,
   ..._mswInsurancePersistencyHandlers,
+  ..._mswInsuranceUnderwritingHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

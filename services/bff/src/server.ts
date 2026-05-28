@@ -580,6 +580,12 @@ import {
   listPersistencyAlerts,
   PersistencyError,
 } from './insurance_persistency';
+import {
+  buildUnderwritingDashboard as buildInsuranceUnderwritingDashboard,
+  analyzeProposal as analyzeInsuranceProposal,
+  listDeviations as listInsuranceDeviations,
+  UnderwritingError as InsuranceUnderwritingError,
+} from './insurance_underwriting';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12516,7 +12522,7 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('audit:read'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const dashboard = buildUnderwritingDashboard(req.tenant!.tenant_id, now());
+      const dashboard = buildInsuranceUnderwritingDashboard(req.tenant!.tenant_id, now());
       res.json(wrapResponse(dashboard, ctx));
     },
   );
@@ -12879,6 +12885,70 @@ export function makeApp(deps: AppDeps = {}) {
         res.json(wrapResponse(list, ctx));
       } catch (e) {
         if (e instanceof PersistencyError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Insurance EWS · Module 6 — Underwriting Deviation ────────────────
+  //
+  // Policies approved against UW guidelines (premium / medical-waiver /
+  // sum-assured / rule-violation) + per-underwriter risk. Routes:
+  //   GET  /v1/insurance/underwriting/dashboard
+  //   POST /v1/insurance/underwriting/analyze
+  //   GET  /v1/insurance/underwriting/deviations?deviation_type=&status=&limit=
+
+  app.get(
+    '/v1/insurance/underwriting/dashboard',
+    requireTenantMw,
+    requireRole('insurance:underwriting:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildInsuranceUnderwritingDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/insurance/underwriting/analyze',
+    requireTenantMw,
+    requireRole('insurance:underwriting:analyze'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const result = analyzeInsuranceProposal(raw, now());
+        res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof InsuranceUnderwritingError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/underwriting/deviations',
+    requireTenantMw,
+    requireRole('insurance:underwriting:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listInsuranceDeviations(req.tenant!.tenant_id, now(), {
+          deviation_type: typeof req.query.deviation_type === 'string' ? req.query.deviation_type : undefined,
+          status: typeof req.query.status === 'string' ? req.query.status : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof InsuranceUnderwritingError) {
           res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
           return;
         }
