@@ -27740,6 +27740,57 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/actor-outcome-matrix (T6 M15.20) — 2D cross-tab over
+   *  the audit chain combining actor × outcome. Actor axis is OPEN (any
+   *  actor seen in events); outcome axis is CLOSED (3 canonical
+   *  AuditOutcomes: success/failure/denied). Each event lives in exactly
+   *  one (actor_username, outcome) cell — the proper matrix M15.8
+   *  (per-actor 1D) only nested. Per-row {actor_username, total,
+   *  by_outcome (3 keys at 0 when absent — stable grid), outcomes_without
+   *  (canonical order), distinct_outcomes, failure_count (= failure +
+   *  denied)}. Per-col {outcome, total, by_actor (compact), actors_without
+   *  (asc), distinct_actors}. Envelope: peak_cell (canonical iteration
+   *  tie-break: actors asc × outcomes canonical; null on empty),
+   *  most_failing_actor (highest failure_count — the segregation-of-duties
+   *  / suspicious-activity signal + canonical actor asc tie-break; null
+   *  when no failures/denials), actors_with_denials[] (actors with ≥ 1
+   *  denied event; asc), most_common_outcome (highest column total +
+   *  canonical tie-break success > failure > denied; null on empty),
+   *  most_versatile_actor (most distinct outcomes + canonical asc
+   *  tie-break; null on empty), empty_cells[] in canonical actor ×
+   *  outcome row-major order. Mirror of M15.19 / M15.15 / M1.14 matrix
+   *  pattern. Drives BIL access-review + security governance: "which
+   *  actor racks up the most failed/denied actions? who is repeatedly
+   *  denied?". */
+  app.get(
+    '/v1/audit/actor-outcome-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain entire audit chain for this tenant.
+      const out: import('./audit_trail').AuditEvent[] = [];
+      const PAGE = 1000;
+      for (let page = 1; page <= 200; page++) {
+        const result = auditTrailStore.list(req.tenant!.tenant_id, {
+          page,
+          page_size: PAGE,
+        });
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildAuditActorOutcomeMatrix } =
+        require('./audit_actor_outcome_matrix') as
+        typeof import('./audit_actor_outcome_matrix');
+      const summary = buildAuditActorOutcomeMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/audit/resource-hotspots?limit=N (T6 M15.18) — per-
    *  (resource_type, resource_id) hot-spot pivot over the audit chain.
    *  For each unique resource touched, surfaces total_events +
