@@ -562,6 +562,12 @@ import {
   analyzeClaim,
   ClaimsAnomalyError,
 } from './insurance_claims_anomaly';
+import {
+  buildFraudDashboard as buildInsuranceFraudDashboard,
+  listHighRiskEntities as listHighRiskFraudEntities,
+  analyzeFraud as analyzeInsuranceFraud,
+  FraudError as InsuranceFraudError,
+} from './insurance_fraud';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12668,6 +12674,68 @@ export function makeApp(deps: AppDeps = {}) {
         res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof ClaimsAnomalyError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Insurance EWS · Module 3 — Fraud Detection ───────────────────────
+  //
+  // Network/ring detection over an entity-relationship graph. Routes:
+  //   GET  /v1/insurance/fraud/dashboard
+  //   POST /v1/insurance/fraud/analyze
+  //   GET  /v1/insurance/fraud/high-risk?entity_type=&limit=
+
+  app.get(
+    '/v1/insurance/fraud/dashboard',
+    requireTenantMw,
+    requireRole('insurance:fraud:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildInsuranceFraudDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/insurance/fraud/high-risk',
+    requireTenantMw,
+    requireRole('insurance:fraud:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listHighRiskFraudEntities(req.tenant!.tenant_id, now(), {
+          entity_type: typeof req.query.entity_type === 'string' ? req.query.entity_type : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof InsuranceFraudError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/fraud/analyze',
+    requireTenantMw,
+    requireRole('insurance:fraud:analyze'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const result = analyzeInsuranceFraud(raw, now());
+        res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof InsuranceFraudError) {
           res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
           return;
         }

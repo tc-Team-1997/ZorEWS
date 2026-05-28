@@ -3182,12 +3182,196 @@ const _mswInsuranceClaimsAnomalyHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 3 — Fraud Detection (dev/test mock) ─────────
+const _fraudEntityTypes = ['customer', 'provider', 'agent', 'garage', 'hospital', 'bank_account'];
+const _fraudLinkTypes = ['shared_account', 'co_claim', 'referral', 'address', 'phone'];
+function _fraudSeverity(s: number): 'low' | 'medium' | 'high' | 'critical' {
+  if (s >= 0.75) return 'critical';
+  if (s >= 0.5) return 'high';
+  if (s >= 0.25) return 'medium';
+  return 'low';
+}
+function _fraudEntities() {
+  const rows = [];
+  for (let i = 0; i < 40; i++) {
+    const type = _fraudEntityTypes[i % 6];
+    const risk = Math.round((((i * 29) % 100) / 100) ** 1.3 * 10000) / 10000;
+    rows.push({
+      entity_id: `ENT-BANK_DEMO-${500000 + i}`,
+      entity_type: type,
+      display_name: type === 'customer' ? `Customer ${i + 1}` : `${type}-${500000 + i}`,
+      risk_score: risk,
+      flagged: risk >= 0.5,
+    });
+  }
+  return rows;
+}
+const _mswInsuranceFraudHandlers = [
+  http.get('/v1/insurance/fraud/dashboard', () => {
+    const entities = _fraudEntities();
+    const flagged = entities.filter((e) => e.flagged);
+    const rings = [];
+    const ringCount = Math.max(2, Math.round(flagged.length / 8));
+    for (let i = 0; i < ringCount; i++) {
+      const risk = Math.round((0.55 + ((i * 13) % 40) / 100) * 10000) / 10000;
+      rings.push({
+        network_id: `NET-BANK_DEMO-${600000 + i}`,
+        label: `Ring #${i + 1} — ${['staged-accident', 'provider-collusion', 'identity', 'claim-padding'][i % 4]} cluster`,
+        entity_count: 4 + (i % 9),
+        edge_count: 6 + (i % 9),
+        ring_risk_score: risk,
+        estimated_exposure_kes: Math.round((500000 + i * 350000) * (1 + risk)),
+        detection_method: i % 2 ? 'community_detection' : 'shared_attribute_clustering',
+        status: ['detected', 'investigating', 'confirmed', 'dismissed'][i % 4],
+        detected_at: new Date(Date.now() - (i % 21) * 86400000).toISOString(),
+      });
+    }
+    rings.sort((a, b) => b.ring_risk_score - a.ring_risk_score);
+    // Expand top ring into a node/edge graph.
+    const top = rings[0];
+    const graphNodes = flagged.slice(0, top ? top.entity_count : 0);
+    const graphEdges = [];
+    for (let e = 0; e < (top ? top.edge_count : 0) && graphNodes.length >= 2; e++) {
+      const a = graphNodes[e % graphNodes.length];
+      const b = graphNodes[(e + 1) % graphNodes.length];
+      if (a.entity_id === b.entity_id) continue;
+      graphEdges.push({
+        source_entity_id: a.entity_id,
+        target_entity_id: b.entity_id,
+        link_type: _fraudLinkTypes[e % 5],
+        weight: Math.round((0.3 + (e % 7) / 10) * 10000) / 10000,
+        shared_claim_count: 1 + (e % 6),
+      });
+    }
+    const providers = entities
+      .filter((e) => ['provider', 'hospital', 'garage'].includes(e.entity_type))
+      .sort((a, b) => b.risk_score - a.risk_score)
+      .slice(0, 10)
+      .map((e, i) => ({
+        entity_id: e.entity_id,
+        display_name: e.display_name,
+        entity_type: e.entity_type,
+        risk_score: e.risk_score,
+        linked_claims: 3 + (i * 5),
+        linked_entities: 2 + i,
+        estimated_exposure_kes: Math.round((200000 + i * 250000) * (1 + e.risk_score)),
+        rank: i + 1,
+      }));
+    const identity = entities
+      .filter((e) => e.entity_type === 'customer')
+      .map((e) => {
+        const idScore = Math.min(1, Math.round((e.risk_score * 0.7 + 0.2) * 10000) / 10000);
+        const sev = _fraudSeverity(idScore);
+        const n = sev === 'critical' ? 3 : sev === 'high' ? 2 : sev === 'medium' ? 1 : 0;
+        return {
+          customer_id: e.entity_id,
+          customer_name: e.display_name,
+          identity_risk_score: idScore,
+          signals: ['shared_pan', 'duplicate_kyc', 'synthetic_identity'].slice(0, n),
+          shared_accounts: 1,
+          severity: sev,
+        };
+      })
+      .sort((a, b) => b.identity_risk_score - a.identity_risk_score)
+      .slice(0, 10);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          entities_tracked: entities.length,
+          flagged_entities: flagged.length,
+          fraud_rings: rings.length,
+          open_fraud_cases: rings.filter((r) => r.status === 'detected' || r.status === 'investigating').length,
+          estimated_exposure_kes: rings.reduce((a, r) => a + r.estimated_exposure_kes, 0),
+          high_risk_providers: providers.length,
+        },
+        fraud_network_graph: top
+          ? { network_id: top.network_id, label: top.label, nodes: graphNodes, edges: graphEdges }
+          : { network_id: 'NONE', label: 'No ring detected', nodes: [], edges: [] },
+        high_risk_providers: providers,
+        fraud_ring_detection: rings,
+        identity_risk_analysis: identity,
+        model_version: 'fraud-stub-v1',
+      }),
+    );
+  }),
+  http.get('/v1/insurance/fraud/high-risk', ({ request }) => {
+    const url = new URL(request.url);
+    const type = url.searchParams.get('entity_type');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    let rows = _fraudEntities().filter((e) => e.flagged);
+    if (type && type !== 'all') rows = rows.filter((e) => e.entity_type === type);
+    rows.sort((a, b) => b.risk_score - a.risk_score);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        entity_type_filter: type ?? 'all',
+        total: rows.length,
+        entities: rows.slice(0, limit).map((e, i) => ({
+          entity_id: e.entity_id,
+          display_name: e.display_name,
+          entity_type: e.entity_type,
+          risk_score: e.risk_score,
+          linked_claims: 1 + i,
+          linked_entities: 1 + i,
+          estimated_exposure_kes: Math.round((100000 + i * 200000) * (1 + e.risk_score)),
+          rank: i + 1,
+        })),
+      }),
+    );
+  }),
+  http.post('/v1/insurance/fraud/analyze', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    if (!body || !body.customer_id) {
+      return HttpResponse.json(
+        {
+          header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() },
+          error: { code: 'EWS_400_invalid_input', message: 'customer_id required', severity: 'MEDIUM' },
+        },
+        { status: 400 },
+      );
+    }
+    const shared = Number(body.shared_bank_accounts ?? 0);
+    const coClaim = Number(body.co_claim_count ?? 0);
+    const referral = Number(body.provider_referral_count ?? 0);
+    const idMismatch = Number(body.identity_mismatch_score ?? 0);
+    const prior = body.prior_confirmed_fraud === true;
+    const relationship = Math.min(0.25, shared * 0.08) + Math.min(0.25, coClaim * 0.05) + Math.min(0.2, referral * 0.03);
+    const raw2 = 0.05 + relationship + idMismatch * 0.3 + (prior ? 0.25 : 0);
+    const fraud = Math.max(0, Math.min(1, Math.round(raw2 * 10000) / 10000));
+    const ring = Math.max(0, Math.min(1, Math.round((relationship / 0.7) * 10000) / 10000));
+    const sev = _fraudSeverity(fraud);
+    let type = 'claim_padding';
+    if (idMismatch * 0.3 >= 0.18) type = 'identity';
+    else if (referral * 0.03 >= 0.12) type = 'provider_collusion';
+    if (ring >= 0.6) type = 'ring';
+    return HttpResponse.json(
+      envelope({
+        entity_id: body.entity_id ?? `ENT-${body.customer_id}`,
+        customer_id: body.customer_id,
+        fraud_probability: fraud,
+        severity: sev,
+        likely_fraud_type: type,
+        ring_membership_likelihood: ring,
+        signals: [{ signal: 'co_claim_count', contribution: 0.1 }],
+        recommended_action: sev === 'high' || sev === 'critical' ? 'Queue to SIU' : 'Monitor',
+        model_version: 'fraud-stub-v1',
+        scored_at: new Date().toISOString(),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
   ..._mswStreamingLatencyHandlers,
   ..._mswInsurancePolicyLapseHandlers,
   ..._mswInsuranceClaimsAnomalyHandlers,
+  ..._mswInsuranceFraudHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

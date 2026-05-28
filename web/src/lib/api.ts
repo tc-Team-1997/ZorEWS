@@ -2584,7 +2584,125 @@ export const api = {
     http
       .post<EnvelopeBody<ClaimAnalysisResultShape>>('/v1/insurance/claims-anomaly/analyze', input)
       .then((r) => r.data),
+
+  // ── Insurance EWS · Module 3 — Fraud Detection ────────────────────────
+  insuranceFraudDashboard: () =>
+    http.get<EnvelopeBody<FraudDashboardShape>>('/v1/insurance/fraud/dashboard').then((r) => r.data),
+  insuranceFraudHighRisk: (q: { entity_type?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.entity_type) params.set('entity_type', q.entity_type);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<HighRiskEntityListShape>>(`/v1/insurance/fraud/high-risk${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
+  insuranceFraudAnalyze: (input: AnalyzeFraudInputShape) =>
+    http.post<EnvelopeBody<FraudAnalysisResultShape>>('/v1/insurance/fraud/analyze', input).then((r) => r.data),
 };
+
+// ── Insurance EWS · Module 3 types (mirrors services/bff/src/insurance_fraud.ts) ──
+export type FraudEntityTypeShape = 'customer' | 'provider' | 'agent' | 'garage' | 'hospital' | 'bank_account';
+export type FraudLinkTypeShape = 'shared_account' | 'co_claim' | 'referral' | 'address' | 'phone';
+export type FraudTypeShape = 'staged_accident' | 'provider_collusion' | 'identity' | 'claim_padding' | 'ring';
+export type FraudSeverityShape = 'low' | 'medium' | 'high' | 'critical';
+
+export interface FraudGraphNodeShape {
+  entity_id: string;
+  entity_type: FraudEntityTypeShape;
+  display_name: string;
+  risk_score: number;
+  flagged: boolean;
+}
+export interface FraudGraphEdgeShape {
+  source_entity_id: string;
+  target_entity_id: string;
+  link_type: FraudLinkTypeShape;
+  weight: number;
+  shared_claim_count: number;
+}
+export interface FraudRingShape {
+  network_id: string;
+  label: string;
+  entity_count: number;
+  edge_count: number;
+  ring_risk_score: number;
+  estimated_exposure_kes: number;
+  detection_method: string;
+  status: 'detected' | 'investigating' | 'confirmed' | 'dismissed';
+  detected_at: string;
+}
+export interface HighRiskProviderShape {
+  entity_id: string;
+  display_name: string;
+  entity_type: FraudEntityTypeShape;
+  risk_score: number;
+  linked_claims: number;
+  linked_entities: number;
+  estimated_exposure_kes: number;
+  rank: number;
+}
+export interface IdentityRiskRowShape {
+  customer_id: string;
+  customer_name: string;
+  identity_risk_score: number;
+  signals: string[];
+  shared_accounts: number;
+  severity: FraudSeverityShape;
+}
+export interface FraudDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    entities_tracked: number;
+    flagged_entities: number;
+    fraud_rings: number;
+    open_fraud_cases: number;
+    estimated_exposure_kes: number;
+    high_risk_providers: number;
+  };
+  fraud_network_graph: {
+    network_id: string;
+    label: string;
+    nodes: FraudGraphNodeShape[];
+    edges: FraudGraphEdgeShape[];
+  };
+  high_risk_providers: HighRiskProviderShape[];
+  fraud_ring_detection: FraudRingShape[];
+  identity_risk_analysis: IdentityRiskRowShape[];
+  model_version: string;
+}
+export interface HighRiskEntityListShape {
+  tenant_id: string;
+  generated_at: string;
+  entity_type_filter: FraudEntityTypeShape | 'all';
+  total: number;
+  entities: HighRiskProviderShape[];
+}
+export interface AnalyzeFraudInputShape {
+  entity_id?: string;
+  customer_id: string;
+  entity_type?: string;
+  shared_bank_accounts?: number;
+  co_claim_count?: number;
+  address_matches?: number;
+  phone_matches?: number;
+  provider_referral_count?: number;
+  identity_mismatch_score?: number;
+  prior_confirmed_fraud?: boolean;
+}
+export interface FraudAnalysisResultShape {
+  entity_id: string;
+  customer_id: string;
+  fraud_probability: number;
+  severity: FraudSeverityShape;
+  likely_fraud_type: FraudTypeShape;
+  ring_membership_likelihood: number;
+  signals: { signal: string; contribution: number }[];
+  recommended_action: string;
+  model_version: string;
+  scored_at: string;
+}
 
 // ── Insurance EWS · Module 2 types (mirrors services/bff/src/insurance_claims_anomaly.ts) ──
 export type AnomalySeverityShape = 'low' | 'medium' | 'high' | 'critical';
