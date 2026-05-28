@@ -88,6 +88,11 @@ export interface NavGroup {
   i18nKey: string;
   icon: LucideIcon;
   items: ReadonlyArray<NavLeaf>;
+  /** Optional domain gate. When set, the group is shown only when the
+   *  active domain matches (or the user is a super-admin who sees both).
+   *  Groups WITHOUT a domain (data-cleaning, action-center, admin, …) are
+   *  always shown — they are cross-domain. */
+  domain?: 'banking' | 'insurance';
 }
 
 // Home (sits above groups, always visible — no role gate).
@@ -125,6 +130,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     id: 'bank-ews',
     i18nKey: 'cat_bank_ews',
     icon: TrendingUp,
+    domain: 'banking',
     items: [
       { to: '/borrower-watch',         i18nKey: 'borrower_watch',     icon: TrendingUp,   featured: true },
       { to: '/account-behaviour',      i18nKey: 'account_behaviour',  icon: Activity,     featured: true },
@@ -149,6 +155,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     id: 'insurance-ews',
     i18nKey: 'cat_insurance_ews',
     icon: Umbrella,
+    domain: 'insurance',
     items: [
       { to: '/insurance/policy-lapse', i18nKey: 'insurance_policy_lapse', icon: TrendingDown, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/claims-anomaly', i18nKey: 'insurance_claims_anomaly', icon: ShieldAlert, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },

@@ -14,6 +14,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { LanguageToggle } from '@/components/layout/LanguageToggle';
 import { ModeToggle } from '@/components/layout/ModeToggle';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
+import { useDomain } from '@/lib/useOnboardingContext';
 import { Button } from '@/components/ui';
 import { NAV_GROUPS, NAV_HOME, visibleItems, type NavGroup, type NavLeaf } from './navConfig';
 
@@ -73,6 +74,17 @@ export function AppShell() {
   const logout = useAuth((s) => s.logout);
   const { idleMs, warnMs } = readIdleConfig();
   const { t } = useTranslation();
+  const [domain] = useDomain();
+
+  // Domain-scoped sidebar: a domain-tagged group is shown only when it
+  // matches the active domain. Super-admins (the canonical `admin` backend
+  // role) see BOTH domains. When no domain is chosen yet (e.g. a test that
+  // renders AppShell directly, or pre-onboarding), show everything — the
+  // RequireOnboarding gate handles forcing a choice in normal use.
+  const isSuperAdmin = (user?.roles ?? []).includes('admin');
+  const visibleGroups = NAV_GROUPS.filter(
+    (g) => !g.domain || isSuperAdmin || !domain || g.domain === domain,
+  );
 
   // Collapse state — persisted to localStorage so the operator's preference
   // survives reloads. Default: every group expanded.
@@ -164,7 +176,7 @@ export function AppShell() {
 
           {/* 6 enterprise category groups (collapsible) */}
           <div className="mt-2 space-y-1 px-2">
-            {NAV_GROUPS.map((group) => (
+            {visibleGroups.map((group) => (
               <NavGroupSection
                 key={group.id}
                 group={group}

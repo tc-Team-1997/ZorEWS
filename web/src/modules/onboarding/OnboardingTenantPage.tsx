@@ -96,7 +96,10 @@ export function OnboardingTenantPage() {
       tenant_id: chosenOrg.tenant_id,
     };
     setTenantCtx(next);
-    navigate('/', { replace: true });
+    // Dynamic post-onboarding redirect by domain (spec §POST LOGIN REDIRECT).
+    navigate(domain === 'insurance' ? '/insurance/dashboard' : '/banking/dashboard', {
+      replace: true,
+    });
   }
 
   return (

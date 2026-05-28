@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@/lib/i18n';
 import { LoginPage } from '@/modules/auth/LoginPage';
 import { SignupPage } from '@/modules/auth/SignupPage';
+import { OnboardingCountryPage } from '@/modules/onboarding/OnboardingCountryPage';
 import { OnboardingDomainPage } from '@/modules/onboarding/OnboardingDomainPage';
 import { OnboardingTenantPage } from '@/modules/onboarding/OnboardingTenantPage';
 import { AdminUserCreatePage } from '@/modules/admin/AdminUserCreatePage';
@@ -14,6 +15,7 @@ import { ResetPasswordPage } from '@/modules/auth/ResetPasswordPage';
 import { FirstLoginWizardPage } from '@/modules/auth/FirstLoginWizardPage';
 import { AppShell } from '@/components/layout/AppShell';
 import { RequireAuth } from '@/components/layout/RequireAuth';
+import { RequireOnboarding } from '@/components/layout/RequireOnboarding';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
@@ -115,6 +117,14 @@ export function App() {
               OUTSIDE the AppShell so the user is fully committed to
               the flow until a domain + tenant are chosen. */}
           <Route
+            path="/onboarding/country"
+            element={
+              <RequireAuth>
+                <OnboardingCountryPage />
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/onboarding/domain"
             element={
               <RequireAuth>
@@ -134,11 +144,18 @@ export function App() {
           <Route
             element={
               <RequireAuth>
-                <AppShell />
+                <RequireOnboarding>
+                  <AppShell />
+                </RequireOnboarding>
               </RequireAuth>
             }
           >
             <Route index element={<DashboardPage />} />
+            {/* Domain-specific dashboard aliases — post-onboarding redirect
+                targets. DashboardPage is already domain-aware (useVerticalMode),
+                so both render the right view; these give stable deep-links. */}
+            <Route path="banking/dashboard" element={<DashboardPage />} />
+            <Route path="insurance/dashboard" element={<DashboardPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
