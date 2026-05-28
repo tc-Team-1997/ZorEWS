@@ -2539,7 +2539,126 @@ export const api = {
     http
       .post<EnvelopeBody<CmaPackResultShape>>('/v1/banking/cma/pack', { cohort, forms })
       .then((r) => r.data),
+
+  // ── Insurance EWS · Module 1 — Policy Lapse Risk ──────────────────────
+  insurancePolicyLapseDashboard: () =>
+    http
+      .get<EnvelopeBody<LapseDashboardShape>>('/v1/insurance/policy-lapse/dashboard')
+      .then((r) => r.data),
+  insurancePolicyLapseHighRisk: (
+    q: { horizon_days?: number; band?: string; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (q.horizon_days !== undefined) params.set('horizon_days', String(q.horizon_days));
+    if (q.band) params.set('band', q.band);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<HighRiskPolicyListShape>>(
+        `/v1/insurance/policy-lapse/high-risk${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  insurancePolicyLapsePredict: (input: PredictLapseInputShape) =>
+    http
+      .post<EnvelopeBody<LapsePredictionShape>>('/v1/insurance/policy-lapse/predict', input)
+      .then((r) => r.data),
 };
+
+// ── Insurance EWS · Module 1 types (mirrors services/bff/src/insurance_policy_lapse.ts) ──
+export type RetentionBandShape = 'low' | 'medium' | 'high' | 'critical';
+export type LapseChannelShape = 'agent' | 'broker' | 'bancassurance' | 'direct' | 'online';
+
+export interface LapseDriverShape {
+  feature: string;
+  contribution: number;
+}
+export interface PolicyLapseRowShape {
+  policy_id: string;
+  customer_id: string;
+  customer_name: string;
+  product_code: string;
+  channel: LapseChannelShape;
+  region: string;
+  gwp_kes: number;
+  lapse_probability: number;
+  renewal_probability: number;
+  horizon_days: number;
+  retention_risk_band: RetentionBandShape;
+  days_since_last_payment: number;
+  missed_instalments_12m: number;
+  top_drivers: LapseDriverShape[];
+  recommended_action: string;
+  model_version: string;
+  scored_at: string;
+}
+export interface LapseDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    in_force_policies: number;
+    at_risk_policies: number;
+    critical_count: number;
+    high_count: number;
+    gwp_at_risk_kes: number;
+    mean_lapse_probability: number;
+  };
+  high_risk_policies: PolicyLapseRowShape[];
+  upcoming_lapse_trend: Array<{ date: string; expected_lapses: number; gwp_at_risk_kes: number }>;
+  channel_lapse_risk: Array<{
+    channel: LapseChannelShape;
+    policies_at_risk: number;
+    mean_lapse_probability: number;
+    gwp_at_risk_kes: number;
+  }>;
+  region_lapse_risk: Array<{
+    region: string;
+    policies_at_risk: number;
+    mean_lapse_probability: number;
+    gwp_at_risk_kes: number;
+  }>;
+  top_retention_opportunities: Array<{
+    policy_id: string;
+    customer_name: string;
+    gwp_kes: number;
+    lapse_probability: number;
+    renewal_probability: number;
+    recommended_action: string;
+    expected_gwp_saved_kes: number;
+  }>;
+  model_version: string;
+}
+export interface HighRiskPolicyListShape {
+  tenant_id: string;
+  generated_at: string;
+  horizon_days: number;
+  band_filter: RetentionBandShape | 'all';
+  total: number;
+  policies: PolicyLapseRowShape[];
+}
+export interface PredictLapseInputShape {
+  customer_id: string;
+  policy_id?: string;
+  channel?: string;
+  horizon_days?: number;
+  missed_instalments_12m?: number;
+  days_since_last_payment?: number;
+  prior_lapses?: number;
+  claims_in_12m?: number;
+  tenure_months?: number;
+}
+export interface LapsePredictionShape {
+  customer_id: string;
+  policy_id: string;
+  horizon_days: number;
+  lapse_probability: number;
+  renewal_probability: number;
+  retention_risk_band: RetentionBandShape;
+  top_drivers: LapseDriverShape[];
+  recommended_action: string;
+  model_version: string;
+  scored_at: string;
+}
 
 // ── M2.3 — Financial Ratios shapes ─────────────────────────────────────
 export type RatioCode = 'DSCR' | 'ICR' | 'CR' | 'QR' | 'DER' | 'TOL_TNW' | 'STK_TO' | 'DBT_TO';

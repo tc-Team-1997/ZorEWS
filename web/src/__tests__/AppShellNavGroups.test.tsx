@@ -36,13 +36,14 @@ beforeEach(() => {
 });
 
 describe('AppShell sidebar — 6-category enterprise structure', () => {
-  it('exposes exactly 6 collapsible category groups in declared order', () => {
+  it('exposes the enterprise category groups in declared order', () => {
     authenticateAs(['admin']);
     renderShell();
 
     const expectedOrder = [
       'data-cleaning',
       'bank-ews',
+      'insurance-ews',
       'action-center',
       'ai-workbench',
       'configuration',

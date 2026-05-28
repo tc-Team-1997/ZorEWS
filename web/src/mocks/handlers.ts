@@ -2863,10 +2863,174 @@ const _mswStreamingLatencyHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 1 — Policy Lapse Risk (dev/test mock) ───────
+const _lapseBands = ['low', 'medium', 'high', 'critical'] as const;
+const _lapseChannels = ['agent', 'broker', 'bancassurance', 'direct', 'online'] as const;
+const _lapseRegions = ['North', 'South', 'East', 'West', 'Central'];
+function _lapseBand(p: number): (typeof _lapseBands)[number] {
+  if (p >= 0.75) return 'critical';
+  if (p >= 0.5) return 'high';
+  if (p >= 0.25) return 'medium';
+  return 'low';
+}
+function _lapsePolicies() {
+  const rows = [];
+  for (let i = 0; i < 24; i++) {
+    const prob = Math.round((((i * 37) % 100) / 100) ** 1.2 * 10000) / 10000;
+    const band = _lapseBand(prob);
+    const gwp = 5000 + ((i * 7919) % 95000);
+    rows.push({
+      policy_id: `POL-BANK_DEMO-${100000 + i}`,
+      customer_id: `CUST-BANK_DEMO-${200000 + i}`,
+      customer_name: `Customer ${i + 1}`,
+      product_code: ['TERM_LIFE', 'ENDOWMENT', 'ULIP', 'HEALTH', 'MOTOR'][i % 5],
+      channel: _lapseChannels[i % 5],
+      region: _lapseRegions[i % 5],
+      gwp_kes: gwp,
+      lapse_probability: prob,
+      renewal_probability: Math.max(0, Math.round((1 - prob) * 10000) / 10000),
+      horizon_days: [30, 60, 90][i % 3],
+      retention_risk_band: band,
+      days_since_last_payment: 10 + ((i * 13) % 120),
+      missed_instalments_12m: i % 6,
+      top_drivers: [
+        { feature: 'missed_instalments_12m', contribution: 0.12 },
+        { feature: 'days_since_last_payment', contribution: 0.08 },
+      ],
+      recommended_action:
+        band === 'critical' || band === 'high'
+          ? 'Priority outbound retention call'
+          : 'Automated renewal reminder',
+      model_version: 'lapse-stub-v1',
+      scored_at: new Date().toISOString(),
+    });
+  }
+  return rows;
+}
+const _mswInsurancePolicyLapseHandlers = [
+  http.get('/v1/insurance/policy-lapse/dashboard', () => {
+    const book = _lapsePolicies();
+    const atRisk = book.filter((p) => p.retention_risk_band === 'high' || p.retention_risk_band === 'critical');
+    const critical = book.filter((p) => p.retention_risk_band === 'critical');
+    const high = book.filter((p) => p.retention_risk_band === 'high');
+    const gwpAtRisk = Math.round(atRisk.reduce((a, p) => a + p.gwp_kes, 0) * 100) / 100;
+    const highRisk = [...book].sort((a, b) => b.lapse_probability - a.lapse_probability).slice(0, 10);
+    const trend = Array.from({ length: 12 }, (_, w) => ({
+      date: new Date(Date.now() + (w + 1) * 7 * 86400000).toISOString().slice(0, 10),
+      expected_lapses: Math.round(atRisk.length * (0.05 + (w % 5) * 0.01)),
+      gwp_at_risk_kes: Math.round(gwpAtRisk * 0.05),
+    }));
+    const channel_lapse_risk = _lapseChannels.map((ch) => {
+      const r = atRisk.filter((p) => p.channel === ch);
+      return {
+        channel: ch,
+        policies_at_risk: r.length,
+        mean_lapse_probability: r.length ? r.reduce((a, p) => a + p.lapse_probability, 0) / r.length : 0,
+        gwp_at_risk_kes: r.reduce((a, p) => a + p.gwp_kes, 0),
+      };
+    });
+    const region_lapse_risk = _lapseRegions.map((rg) => {
+      const r = atRisk.filter((p) => p.region === rg);
+      return {
+        region: rg,
+        policies_at_risk: r.length,
+        mean_lapse_probability: r.length ? r.reduce((a, p) => a + p.lapse_probability, 0) / r.length : 0,
+        gwp_at_risk_kes: r.reduce((a, p) => a + p.gwp_kes, 0),
+      };
+    });
+    const top_retention_opportunities = [...atRisk]
+      .sort((a, b) => b.gwp_kes * b.lapse_probability - a.gwp_kes * a.lapse_probability)
+      .slice(0, 5)
+      .map((p) => ({
+        policy_id: p.policy_id,
+        customer_name: p.customer_name,
+        gwp_kes: p.gwp_kes,
+        lapse_probability: p.lapse_probability,
+        renewal_probability: p.renewal_probability,
+        recommended_action: p.recommended_action,
+        expected_gwp_saved_kes: Math.round(p.gwp_kes * p.lapse_probability * 0.55 * 100) / 100,
+      }));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          in_force_policies: book.length,
+          at_risk_policies: atRisk.length,
+          critical_count: critical.length,
+          high_count: high.length,
+          gwp_at_risk_kes: gwpAtRisk,
+          mean_lapse_probability:
+            Math.round((book.reduce((a, p) => a + p.lapse_probability, 0) / book.length) * 10000) / 10000,
+        },
+        high_risk_policies: highRisk,
+        upcoming_lapse_trend: trend,
+        channel_lapse_risk,
+        region_lapse_risk,
+        top_retention_opportunities,
+        model_version: 'lapse-stub-v1',
+      }),
+    );
+  }),
+  http.get('/v1/insurance/policy-lapse/high-risk', ({ request }) => {
+    const url = new URL(request.url);
+    const band = url.searchParams.get('band');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    let rows = _lapsePolicies().filter((p) => p.retention_risk_band === 'high' || p.retention_risk_band === 'critical');
+    if (band && band !== 'all') rows = rows.filter((p) => p.retention_risk_band === band);
+    rows.sort((a, b) => b.lapse_probability - a.lapse_probability);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        horizon_days: 30,
+        band_filter: band ?? 'all',
+        total: rows.length,
+        policies: rows.slice(0, limit),
+      }),
+    );
+  }),
+  http.post('/v1/insurance/policy-lapse/predict', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    if (!body || !body.customer_id) {
+      return HttpResponse.json(
+        {
+          header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() },
+          error: { code: 'EWS_400_invalid_input', message: 'customer_id required', severity: 'MEDIUM' },
+        },
+        { status: 400 },
+      );
+    }
+    const missed = Number(body.missed_instalments_12m ?? 0);
+    const daysSince = Number(body.days_since_last_payment ?? 30);
+    const prob = Math.max(0, Math.min(1, Math.round((0.12 + missed * 0.09 + Math.min(0.3, daysSince / 365)) * 10000) / 10000));
+    const band = _lapseBand(prob);
+    return HttpResponse.json(
+      envelope({
+        customer_id: body.customer_id,
+        policy_id: body.policy_id ?? `POL-${body.customer_id}`,
+        horizon_days: body.horizon_days ?? 30,
+        lapse_probability: prob,
+        renewal_probability: Math.round((1 - prob) * 10000) / 10000,
+        retention_risk_band: band,
+        top_drivers: [
+          { feature: 'missed_instalments_12m', contribution: Math.round(missed * 0.09 * 10000) / 10000 },
+          { feature: 'days_since_last_payment', contribution: Math.round(Math.min(0.3, daysSince / 365) * 10000) / 10000 },
+        ],
+        recommended_action: band === 'critical' || band === 'high' ? 'Priority outbound retention call' : 'Automated renewal reminder',
+        model_version: 'lapse-stub-v1',
+        scored_at: new Date().toISOString(),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
   ..._mswStreamingLatencyHandlers,
+  ..._mswInsurancePolicyLapseHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

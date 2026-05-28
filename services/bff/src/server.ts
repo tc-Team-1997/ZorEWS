@@ -550,6 +550,12 @@ import {
   buildOperationalDashboard,
   buildUnderwritingDashboard,
 } from './bil_dashboards';
+import {
+  buildPolicyLapseDashboard,
+  listHighRiskPolicies,
+  predictPolicyLapse,
+  PolicyLapseError,
+} from './insurance_policy_lapse';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12531,6 +12537,73 @@ export function makeApp(deps: AppDeps = {}) {
       const ctx = extractCtx(req, now);
       const watchlist = buildExecutiveWatchlist(req.tenant!.tenant_id, now());
       res.json(wrapResponse(watchlist, ctx));
+    },
+  );
+
+  // ── Insurance EWS · Module 1 — Policy Lapse Risk ─────────────────────
+  //
+  // Predicts which in-force policies lapse in the next 30/60/90 days +
+  // surfaces retention opportunities. Tenant-scoped, RBAC-gated, enveloped.
+  // Deterministic synthesis today; swaps to app_insurance.* when the
+  // insurer's policy + payment feeds land. Routes:
+  //   GET  /v1/insurance/policy-lapse/dashboard
+  //   POST /v1/insurance/policy-lapse/predict
+  //   GET  /v1/insurance/policy-lapse/high-risk?horizon_days=&band=&limit=
+
+  app.get(
+    '/v1/insurance/policy-lapse/dashboard',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildPolicyLapseDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/insurance/policy-lapse/high-risk',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listHighRiskPolicies(req.tenant!.tenant_id, now(), {
+          horizon_days: req.query.horizon_days !== undefined ? Number(req.query.horizon_days) : undefined,
+          band: typeof req.query.band === 'string' ? req.query.band : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof PolicyLapseError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/policy-lapse/predict',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:predict'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Accept both the raw body and the {header, body} envelope shape.
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const prediction = predictPolicyLapse(raw, now());
+        res.json(wrapResponse(prediction, ctx));
+      } catch (e) {
+        if (e instanceof PolicyLapseError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
     },
   );
 

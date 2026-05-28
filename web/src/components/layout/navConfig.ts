@@ -60,6 +60,8 @@ import {
   Workflow,
   Beaker,
   BookOpen,
+  Umbrella,
+  TrendingDown,
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -132,6 +134,22 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/banking/sectors',        i18nKey: 'sector_watch',       icon: BarChart3,    requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Customers list — supporting drill-through anchor for Bank-EWS workflows
       { to: '/customers',              i18nKey: 'customers',          icon: Users },
+    ],
+  },
+
+  // ────────────────────────────────────────────────────────────────────
+  // 2b. INSURANCE — EARLY WARNING
+  //     7-module Insurance EWS (Policy Lapse, Claims Anomaly, Fraud,
+  //     Solvency, Persistency, Underwriting, Channel Risk). Leaves are
+  //     added as each module's SPA page ships — the navConfig contract
+  //     requires every leaf to map to a mounted route.
+  // ────────────────────────────────────────────────────────────────────
+  {
+    id: 'insurance-ews',
+    i18nKey: 'cat_insurance_ews',
+    icon: Umbrella,
+    items: [
+      { to: '/insurance/policy-lapse', i18nKey: 'insurance_policy_lapse', icon: TrendingDown, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
     ],
   },
 

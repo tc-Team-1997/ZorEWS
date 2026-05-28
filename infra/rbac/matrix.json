@@ -10,101 +10,428 @@
     "field_officer"
   ],
   "role_descriptions": {
-    "admin": "Platform admin. Owns user lifecycle, audit log access, and overrides everywhere. Tightly held — quarterly review confirms the holders.",
+    "admin": "Platform admin. Owns user lifecycle, audit log access, and overrides everywhere. Tightly held \u2014 quarterly review confirms the holders.",
     "risk_analyst": "Front-line analyst. Triages alerts, opens + works cases, can author + simulate rules but cannot retire them.",
     "supervisor": "Risk manager. Oversight + assignment authority across the analyst pool. Approves case closure and rule retirements.",
     "collection_officer": "Collection-team operator. Works cases that have been routed to Collection (T3.4); logs actions; closes cases on outcome.",
     "field_officer": "On-the-ground field rep. Mobile-first; logs call/visit actions with optional GPS (FR-CASE-3); read-only on rules + alerts."
   },
   "operations": {
-    "alerts:list":                  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "alerts:read":                  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "alerts:assign":                ["admin", "risk_analyst", "supervisor"],
-    "alerts:ack":                   ["admin", "risk_analyst", "supervisor"],
-    "alerts:close":                 ["admin", "risk_analyst", "supervisor"],
-
-    "cases:create":                 ["admin", "risk_analyst", "supervisor"],
-    "cases:list":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "cases:read":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "cases:download_attachment":    ["admin", "risk_analyst", "supervisor", "collection_officer"],
-    "cases:assign":                 ["admin", "supervisor"],
-    "cases:log_action":             ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "cases:monitor":                ["admin", "risk_analyst", "supervisor", "collection_officer"],
-    "cases:close":                  ["admin", "supervisor", "collection_officer"],
-    "cases:set_category":           ["admin", "supervisor"],
-
-    "cases:cas_submit":              ["admin", "risk_analyst", "supervisor"],
-    "cases:cas_review":              ["admin", "supervisor"],
-    "cases:cap_propose":             ["admin", "risk_analyst", "supervisor"],
-    "cases:cap_approve":             ["admin", "supervisor"],
-    "cases:cap_close":               ["admin", "risk_analyst", "supervisor", "collection_officer"],
-
-    "rules:list":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "rules:read":                   ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "rules:create":                 ["admin", "risk_analyst"],
-    "rules:update":                 ["admin", "risk_analyst"],
-    "rules:simulate":               ["admin", "risk_analyst", "supervisor"],
-    "rules:promote":                ["admin", "supervisor"],
-    "rules:retire":                 ["admin", "supervisor"],
-    "rules:revert":                 ["admin", "supervisor"],
-
-    "customers:list":               ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-    "customers:read_risk_profile":  ["admin", "risk_analyst", "supervisor", "collection_officer", "field_officer"],
-
-    "collection:callback":          ["admin", "supervisor", "collection_officer"],
-
-    "users:list":                   ["admin", "supervisor"],
-    "users:create":                 ["admin"],
-    "users:role_change":            ["admin"],
-    "users:deactivate":             ["admin"],
-
-    "audit:read":                   ["admin", "supervisor"],
-    "webhooks:manage":              ["admin"],
-    "reports:share":                ["admin", "supervisor"],
-    "recovery:list":                ["admin"],
-    "recovery:restore":             ["admin"],
-    "recovery:purge":               ["admin"],
-    "copilot:use":                  ["admin", "risk_analyst", "supervisor"],
-
-    "dashboard:sla_breach_matrix:read":        ["admin", "supervisor", "risk_analyst"],
-
-    "admin:sla_config:list":                   ["admin", "supervisor"],
-    "admin:sla_config:create":                 ["admin"],
-    "admin:sla_config:update":                 ["admin"],
-    "admin:sla_config:archive":                ["admin"],
-
-    "admin:notification_templates:list":       ["admin", "supervisor"],
-    "admin:notification_templates:create":     ["admin"],
-    "admin:notification_templates:update":     ["admin"],
-    "admin:notification_templates:archive":    ["admin"],
-    "admin:notification_templates:preview":    ["admin", "supervisor"],
-    "admin:notification_templates:test_fire":  ["admin"],
-
-    "admin:escalation_matrix:list":            ["admin", "supervisor"],
-    "admin:escalation_matrix:create":          ["admin"],
-    "admin:escalation_matrix:update":          ["admin"],
-    "admin:escalation_matrix:archive":         ["admin"],
-
-    "admin:case_scenarios:list":               ["admin", "supervisor"],
-    "admin:case_scenarios:create":             ["admin"],
-    "admin:case_scenarios:update":             ["admin"],
-    "admin:case_scenarios:lifecycle":          ["admin"],
-    "admin:case_scenarios:archive":            ["admin"],
-
-    "admin:escalations:preview":               ["admin", "supervisor"],
-    "admin:escalations:tick":                  ["admin"],
-
-    "admin:user_access_override:list":         ["admin", "supervisor"],
-    "admin:user_access_override:create":       ["admin"],
-    "admin:user_access_override:approve":      ["admin"],
-    "admin:user_access_override:revoke":       ["admin"],
-    "admin:user_access_override:bulk_revoke":  ["admin"],
-    "admin:user_access_override:audit":        ["admin", "supervisor"],
-
-    "reports:cases:view":                      ["admin", "supervisor", "risk_analyst"],
-    "reports:cases:export":                    ["admin", "supervisor"],
-    "reports:saved_filters:manage":            ["admin", "supervisor", "risk_analyst"],
-
-    "dashboard:analytics:read":                ["admin", "supervisor", "risk_analyst"]
+    "alerts:list": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "alerts:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "alerts:assign": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "alerts:ack": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "alerts:close": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "cases:create": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "cases:list": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "cases:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "cases:download_attachment": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer"
+    ],
+    "cases:assign": [
+      "admin",
+      "supervisor"
+    ],
+    "cases:log_action": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "cases:monitor": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer"
+    ],
+    "cases:close": [
+      "admin",
+      "supervisor",
+      "collection_officer"
+    ],
+    "cases:set_category": [
+      "admin",
+      "supervisor"
+    ],
+    "cases:cas_submit": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "cases:cas_review": [
+      "admin",
+      "supervisor"
+    ],
+    "cases:cap_propose": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "cases:cap_approve": [
+      "admin",
+      "supervisor"
+    ],
+    "cases:cap_close": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer"
+    ],
+    "rules:list": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "rules:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "rules:create": [
+      "admin",
+      "risk_analyst"
+    ],
+    "rules:update": [
+      "admin",
+      "risk_analyst"
+    ],
+    "rules:simulate": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "rules:promote": [
+      "admin",
+      "supervisor"
+    ],
+    "rules:retire": [
+      "admin",
+      "supervisor"
+    ],
+    "rules:revert": [
+      "admin",
+      "supervisor"
+    ],
+    "customers:list": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "customers:read_risk_profile": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "collection:callback": [
+      "admin",
+      "supervisor",
+      "collection_officer"
+    ],
+    "users:list": [
+      "admin",
+      "supervisor"
+    ],
+    "users:create": [
+      "admin"
+    ],
+    "users:role_change": [
+      "admin"
+    ],
+    "users:deactivate": [
+      "admin"
+    ],
+    "audit:read": [
+      "admin",
+      "supervisor"
+    ],
+    "webhooks:manage": [
+      "admin"
+    ],
+    "reports:share": [
+      "admin",
+      "supervisor"
+    ],
+    "recovery:list": [
+      "admin"
+    ],
+    "recovery:restore": [
+      "admin"
+    ],
+    "recovery:purge": [
+      "admin"
+    ],
+    "copilot:use": [
+      "admin",
+      "risk_analyst",
+      "supervisor"
+    ],
+    "dashboard:sla_breach_matrix:read": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "admin:sla_config:list": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:sla_config:create": [
+      "admin"
+    ],
+    "admin:sla_config:update": [
+      "admin"
+    ],
+    "admin:sla_config:archive": [
+      "admin"
+    ],
+    "admin:notification_templates:list": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:notification_templates:create": [
+      "admin"
+    ],
+    "admin:notification_templates:update": [
+      "admin"
+    ],
+    "admin:notification_templates:archive": [
+      "admin"
+    ],
+    "admin:notification_templates:preview": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:notification_templates:test_fire": [
+      "admin"
+    ],
+    "admin:escalation_matrix:list": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:escalation_matrix:create": [
+      "admin"
+    ],
+    "admin:escalation_matrix:update": [
+      "admin"
+    ],
+    "admin:escalation_matrix:archive": [
+      "admin"
+    ],
+    "admin:case_scenarios:list": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:case_scenarios:create": [
+      "admin"
+    ],
+    "admin:case_scenarios:update": [
+      "admin"
+    ],
+    "admin:case_scenarios:lifecycle": [
+      "admin"
+    ],
+    "admin:case_scenarios:archive": [
+      "admin"
+    ],
+    "admin:escalations:preview": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:escalations:tick": [
+      "admin"
+    ],
+    "admin:user_access_override:list": [
+      "admin",
+      "supervisor"
+    ],
+    "admin:user_access_override:create": [
+      "admin"
+    ],
+    "admin:user_access_override:approve": [
+      "admin"
+    ],
+    "admin:user_access_override:revoke": [
+      "admin"
+    ],
+    "admin:user_access_override:bulk_revoke": [
+      "admin"
+    ],
+    "admin:user_access_override:audit": [
+      "admin",
+      "supervisor"
+    ],
+    "reports:cases:view": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "reports:cases:export": [
+      "admin",
+      "supervisor"
+    ],
+    "reports:saved_filters:manage": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "dashboard:analytics:read": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:policy_lapse:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:policy_lapse:predict": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:retention:manage": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:claims_anomaly:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:claims_anomaly:analyze": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:siu:manage": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:fraud:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:fraud:analyze": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:fraud:investigate": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:solvency:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:solvency:forecast": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:compliance:read": [
+      "admin",
+      "supervisor"
+    ],
+    "insurance:persistency:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:persistency:analyze": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:underwriting:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:underwriting:analyze": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
+    "insurance:channel_risk:read": [
+      "admin",
+      "risk_analyst",
+      "supervisor",
+      "collection_officer",
+      "field_officer"
+    ],
+    "insurance:channel_risk:analyze": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ]
   }
 }
