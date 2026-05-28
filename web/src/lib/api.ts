@@ -2599,7 +2599,109 @@ export const api = {
   },
   insuranceFraudAnalyze: (input: AnalyzeFraudInputShape) =>
     http.post<EnvelopeBody<FraudAnalysisResultShape>>('/v1/insurance/fraud/analyze', input).then((r) => r.data),
+
+  // ── Insurance EWS · Module 4 — Solvency Watch ─────────────────────────
+  insuranceSolvencyDashboard: () =>
+    http.get<EnvelopeBody<SolvencyDashboardShape>>('/v1/insurance/solvency/dashboard').then((r) => r.data),
+  insuranceSolvencyForecast: (input: ForecastSolvencyInputShape) =>
+    http.post<EnvelopeBody<SolvencyForecastShape>>('/v1/insurance/solvency/forecast', input).then((r) => r.data),
+  insuranceSolvencyCompliance: (q: { severity?: string; status?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.severity) params.set('severity', q.severity);
+    if (q.status) params.set('status', q.status);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<ComplianceAlertListShape>>(`/v1/insurance/solvency/compliance${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
 };
+
+// ── Insurance EWS · Module 4 types (mirrors services/bff/src/insurance_solvency.ts) ──
+export type SolvencyStatusShape = 'compliant' | 'watch' | 'breach';
+export type StressScenarioShape = 'baseline' | 'adverse' | 'severe';
+export type AlertSeverityShape = 'info' | 'warning' | 'critical';
+
+export interface SolvencySnapshotShape {
+  as_of: string;
+  available_solvency_margin_kes: number;
+  required_solvency_margin_kes: number;
+  solvency_ratio: number;
+  control_level: number;
+  capital_adequacy_pct: number;
+  status: SolvencyStatusShape;
+}
+export interface SolvencyTrendPointShape {
+  date: string;
+  solvency_ratio: number;
+  status: SolvencyStatusShape;
+  is_forecast: boolean;
+}
+export interface StressSimulationShape {
+  scenario: StressScenarioShape;
+  claims_growth_pct: number;
+  projected_ratio: number;
+  status: SolvencyStatusShape;
+  breach_probability: number;
+  capital_shortfall_kes: number;
+}
+export interface ComplianceAlertShape {
+  alert_id: string;
+  regulator: string;
+  rule_code: string;
+  severity: AlertSeverityShape;
+  message: string;
+  metric_value: number;
+  threshold_value: number;
+  status: 'open' | 'acknowledged' | 'resolved';
+  raised_at: string;
+}
+export interface SolvencyDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  current: SolvencySnapshotShape;
+  forecast_trend: SolvencyTrendPointShape[];
+  capital_stress_simulation: StressSimulationShape[];
+  compliance_alerts: ComplianceAlertShape[];
+  totals: {
+    open_alerts: number;
+    critical_alerts: number;
+    min_forecast_ratio: number;
+    breach_horizon_days: number | null;
+  };
+  model_version: string;
+}
+export interface ForecastSolvencyInputShape {
+  available_solvency_margin_kes?: number;
+  required_solvency_margin_kes?: number;
+  current_ratio?: number;
+  claims_growth_pct?: number;
+  premium_growth_pct?: number;
+  horizon_days?: number;
+  scenario?: string;
+}
+export interface SolvencyForecastShape {
+  horizon_days: number;
+  scenario: StressScenarioShape;
+  baseline_ratio: number;
+  projected_ratio: number;
+  claims_growth_pct: number;
+  premium_growth_pct: number;
+  breach_probability: number;
+  status: SolvencyStatusShape;
+  capital_shortfall_kes: number | null;
+  drivers: { signal: string; contribution: number }[];
+  model_version: string;
+  scored_at: string;
+}
+export interface ComplianceAlertListShape {
+  tenant_id: string;
+  generated_at: string;
+  severity_filter: AlertSeverityShape | 'all';
+  status_filter: 'open' | 'acknowledged' | 'resolved' | 'all';
+  total: number;
+  alerts: ComplianceAlertShape[];
+}
 
 // ── Insurance EWS · Module 3 types (mirrors services/bff/src/insurance_fraud.ts) ──
 export type FraudEntityTypeShape = 'customer' | 'provider' | 'agent' | 'garage' | 'hospital' | 'bank_account';

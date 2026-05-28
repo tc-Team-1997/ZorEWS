@@ -568,6 +568,12 @@ import {
   analyzeFraud as analyzeInsuranceFraud,
   FraudError as InsuranceFraudError,
 } from './insurance_fraud';
+import {
+  buildSolvencyDashboard,
+  forecastSolvency,
+  listComplianceAlerts,
+  SolvencyError,
+} from './insurance_solvency';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12736,6 +12742,74 @@ export function makeApp(deps: AppDeps = {}) {
         res.json(wrapResponse(result, ctx));
       } catch (e) {
         if (e instanceof InsuranceFraudError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Insurance EWS · Module 4 — Solvency Watch (IRDAI) ────────────────
+  //
+  // Monitors ASM/RSM vs the 1.50 control level, forecasts under claims
+  // stress, surfaces compliance alerts. Routes:
+  //   GET  /v1/insurance/solvency/dashboard
+  //   POST /v1/insurance/solvency/forecast
+  //   GET  /v1/insurance/solvency/compliance?severity=&status=&limit=
+  //
+  // /compliance is gated tighter (insurance:compliance:read = admin+
+  // supervisor) — the detailed regulatory view; the dashboard's open-alert
+  // summary stays available to every read role.
+
+  app.get(
+    '/v1/insurance/solvency/dashboard',
+    requireTenantMw,
+    requireRole('insurance:solvency:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildSolvencyDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/insurance/solvency/forecast',
+    requireTenantMw,
+    requireRole('insurance:solvency:forecast'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const result = forecastSolvency(raw, now());
+        res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof SolvencyError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/solvency/compliance',
+    requireTenantMw,
+    requireRole('insurance:compliance:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listComplianceAlerts(req.tenant!.tenant_id, now(), {
+          severity: typeof req.query.severity === 'string' ? req.query.severity : undefined,
+          status: typeof req.query.status === 'string' ? req.query.status : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof SolvencyError) {
           res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
           return;
         }

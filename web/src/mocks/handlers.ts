@@ -3365,6 +3365,132 @@ const _mswInsuranceFraudHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 4 — Solvency Watch (dev/test mock) ──────────
+function _solvencyStatus(r: number): 'compliant' | 'watch' | 'breach' {
+  if (r < 1.5) return 'breach';
+  if (r < 1.6) return 'watch';
+  return 'compliant';
+}
+const _mswInsuranceSolvencyHandlers = [
+  http.get('/v1/insurance/solvency/dashboard', () => {
+    const ratio = 1.78;
+    const rsm = 5_000_000_000;
+    const asm = Math.round(rsm * ratio);
+    const trend = [];
+    for (let m = 12; m >= 1; m--) {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() - m);
+      const r = Math.round((ratio + ((m % 5) - 2) * 0.04) * 10000) / 10000;
+      trend.push({ date: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`, solvency_ratio: r, status: _solvencyStatus(r), is_forecast: false });
+    }
+    const nowM = new Date();
+    trend.push({ date: `${nowM.getUTCFullYear()}-${String(nowM.getUTCMonth() + 1).padStart(2, '0')}`, solvency_ratio: ratio, status: _solvencyStatus(ratio), is_forecast: false });
+    for (let m = 1; m <= 3; m++) {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() + m);
+      const r = Math.round((ratio - m * 0.06) * 10000) / 10000;
+      trend.push({ date: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`, solvency_ratio: r, status: _solvencyStatus(r), is_forecast: true });
+    }
+    const stress = [
+      { scenario: 'baseline', growth: 0.05 },
+      { scenario: 'adverse', growth: 0.2 },
+      { scenario: 'severe', growth: 0.4 },
+    ].map(({ scenario, growth }) => {
+      const projected = Math.round(Math.max(0.5, ratio * (1 - growth * 0.6)) * 10000) / 10000;
+      return {
+        scenario,
+        claims_growth_pct: growth,
+        projected_ratio: projected,
+        status: _solvencyStatus(projected),
+        breach_probability: Math.max(0, Math.min(1, Math.round(((1.5 - projected) / 0.5 + 0.1 * growth) * 10000) / 10000)),
+        capital_shortfall_kes: projected < 1.5 ? Math.round(rsm * 1.5 - asm * (1 - growth * 0.6)) : 0,
+      };
+    });
+    const fwd = trend.filter((p) => p.is_forecast);
+    const firstBreach = fwd.findIndex((p) => p.status === 'breach');
+    const alerts = [];
+    const fwdBreach = fwd.find((p) => p.status === 'breach');
+    if (fwdBreach) {
+      alerts.push({ alert_id: 'CMP-BANK_DEMO-700001', regulator: 'IRDAI', rule_code: 'FORECAST_BREACH', severity: 'critical', message: `Forecast solvency ${fwdBreach.solvency_ratio} projected to breach by ${fwdBreach.date}`, metric_value: fwdBreach.solvency_ratio, threshold_value: 1.5, status: 'open', raised_at: new Date().toISOString() });
+    }
+    const fwdWatch = fwd.find((p) => p.status === 'watch');
+    if (fwdWatch && !fwdBreach) {
+      alerts.push({ alert_id: 'CMP-BANK_DEMO-700002', regulator: 'IRDAI', rule_code: 'FORECAST_BUFFER', severity: 'warning', message: `Forecast solvency ${fwdWatch.solvency_ratio} entering watch band by ${fwdWatch.date}`, metric_value: fwdWatch.solvency_ratio, threshold_value: 1.6, status: 'open', raised_at: new Date().toISOString() });
+    }
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        current: {
+          as_of: new Date().toISOString().slice(0, 10),
+          available_solvency_margin_kes: asm,
+          required_solvency_margin_kes: rsm,
+          solvency_ratio: ratio,
+          control_level: 1.5,
+          capital_adequacy_pct: Math.round(Math.min(1, ratio / 2.5) * 10000) / 10000,
+          status: _solvencyStatus(ratio),
+        },
+        forecast_trend: trend,
+        capital_stress_simulation: stress,
+        compliance_alerts: alerts,
+        totals: {
+          open_alerts: alerts.length,
+          critical_alerts: alerts.filter((a) => a.severity === 'critical').length,
+          min_forecast_ratio: Math.min(...fwd.map((p) => p.solvency_ratio)),
+          breach_horizon_days: firstBreach >= 0 ? (firstBreach + 1) * 30 : null,
+        },
+        model_version: 'solvency-stub-v1',
+      }),
+    );
+  }),
+  http.post('/v1/insurance/solvency/forecast', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    const baseline = Number(body.current_ratio ?? 1.7);
+    const claims = Number(body.claims_growth_pct ?? 0);
+    const scenario = (body.scenario as string) ?? 'baseline';
+    const horizon = Number(body.horizon_days ?? 30);
+    const mult = scenario === 'severe' ? 1.5 : scenario === 'adverse' ? 1.2 : 1.0;
+    const hmult = horizon === 90 ? 1.0 : horizon === 60 ? 0.7 : 0.4;
+    const projected = Math.round(Math.max(0.3, baseline * (1 - claims * 0.6 * mult * hmult)) * 10000) / 10000;
+    return HttpResponse.json(
+      envelope({
+        horizon_days: horizon,
+        scenario,
+        baseline_ratio: baseline,
+        projected_ratio: projected,
+        claims_growth_pct: claims,
+        premium_growth_pct: Number(body.premium_growth_pct ?? 0),
+        breach_probability: Math.max(0, Math.min(1, Math.round(((1.5 - projected) / 0.5 + 0.05) * 10000) / 10000)),
+        status: _solvencyStatus(projected),
+        capital_shortfall_kes: null,
+        drivers: [{ signal: 'claims_growth', contribution: -claims }],
+        model_version: 'solvency-stub-v1',
+        scored_at: new Date().toISOString(),
+      }),
+    );
+  }),
+  http.get('/v1/insurance/solvency/compliance', ({ request }) => {
+    const url = new URL(request.url);
+    const severity = url.searchParams.get('severity');
+    let alerts = [
+      { alert_id: 'CMP-BANK_DEMO-700001', regulator: 'IRDAI', rule_code: 'SOLVENCY_RATIO_BUFFER', severity: 'warning', message: 'Solvency within thin buffer of control level', metric_value: 1.55, threshold_value: 1.6, status: 'open', raised_at: new Date().toISOString() },
+      { alert_id: 'CMP-BANK_DEMO-700003', regulator: 'IRDAI', rule_code: 'CAPITAL_ADEQUACY', severity: 'info', message: 'Capital adequacy at 71%', metric_value: 0.71, threshold_value: 0.6, status: 'resolved', raised_at: new Date().toISOString() },
+    ];
+    if (severity && severity !== 'all') alerts = alerts.filter((a) => a.severity === severity);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        severity_filter: severity ?? 'all',
+        status_filter: 'all',
+        total: alerts.length,
+        alerts,
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
@@ -3372,6 +3498,7 @@ export const handlers = [
   ..._mswInsurancePolicyLapseHandlers,
   ..._mswInsuranceClaimsAnomalyHandlers,
   ..._mswInsuranceFraudHandlers,
+  ..._mswInsuranceSolvencyHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {
