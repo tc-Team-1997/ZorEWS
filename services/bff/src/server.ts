@@ -18959,6 +18959,34 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/integrations/adapters/operations/param-name-index (T6
+   *  M14.31) — INVERTED index over the M14.24 operation catalog: group
+   *  every parameter by its `name` and surface which operations declare
+   *  it + whether they AGREE on type and location. Per-name {name,
+   *  reference_count, observed_types[] (canonical; multi-entry = TYPE
+   *  DRIFT), observed_locations[] (canonical; multi-entry = LOCATION
+   *  DRIFT), adapters[] asc, occurrences[] (adapter_id asc + operation_id
+   *  asc), has_type_drift, has_location_drift}. Envelope: names[] sorted
+   *  reference_count desc + name asc, shared_names[] (≥ 2 ops),
+   *  single_use_names[] (unique / refactor candidates), drifting_names[]
+   *  (contract-consistency warnings), most_shared_name. Mirror of M3.8 /
+   *  M10.13 / M11.16 inverted-index pattern. Platform-static. Drives
+   *  integration-contract hygiene ("does every op agree customer_id is a
+   *  string in path?"). Mounted with the operations/* analytics group. */
+  app.get(
+    '/v1/integrations/adapters/operations/param-name-index',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterParameterNameIndex } =
+        require('./adapter_parameter_name_index') as
+        typeof import('./adapter_parameter_name_index');
+      const out = buildAdapterParameterNameIndex(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/integrations/adapters/operations/param-type-required-matrix
    *  (T6 M14.29) — 2D pivot ACROSS every parameter in the M14.24
    *  catalog. Rows = 4 ParameterType (canonical string → integer →
