@@ -336,3 +336,88 @@ describe('CmsCaseDetailPage — re-categorise flow', () => {
     expect(await screen.findByTestId('set-category-error')).toHaveTextContent(/No change/);
   });
 });
+
+// Phase 4 — Option B: investigation panel polish (internal-note
+// visibility + mark-internal-on-add + reassign-with-reason).
+describe('CmsCaseDetailPage — investigation polish (Phase 4)', () => {
+  const PUBLIC_NOTE = {
+    note_id: 'n-pub', case_id: 'cs-1', user_id: 'alice',
+    note_text: 'Customer reachable on phone', is_internal: false,
+    created_at: '2026-05-09T12:00:00.000Z',
+  };
+  const INTERNAL_NOTE = {
+    note_id: 'n-int', case_id: 'cs-1', user_id: 'bob',
+    note_text: 'Suspected first-party fraud — do not disclose', is_internal: true,
+    created_at: '2026-05-09T13:00:00.000Z',
+  };
+  const ASSIGNED = { ...DETAIL, assigned_to: 'bob.risk' };
+
+  beforeEach(() => {
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases/cs-1') return Promise.resolve({ data: { body: ASSIGNED } });
+      if (url === '/v1/cms/cases/cs-1/notes')
+        return Promise.resolve({ data: { body: { items: [PUBLIC_NOTE, INTERNAL_NOTE], total: 2 } } });
+      if (url === '/v1/cms/cases/cs-1/attachments')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-1/history')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+    (http.post as unknown as ReturnType<typeof vi.fn>) = vi
+      .fn()
+      .mockResolvedValue({ data: { body: PUBLIC_NOTE } });
+    (http.patch as unknown as ReturnType<typeof vi.fn>) = vi.fn();
+    (http.delete as unknown as ReturnType<typeof vi.fn>) = vi.fn();
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it('note visibility filter: all → public-only → internal-only', async () => {
+    const user = userEvent.setup();
+    wrap('/cms/cases/cs-1?tab=Investigation');
+    await screen.findByTestId('investigation-note-n-pub');
+    // default 'all' → both
+    expect(screen.getByTestId('investigation-note-n-pub')).toBeInTheDocument();
+    expect(screen.getByTestId('investigation-note-n-int')).toBeInTheDocument();
+    // public-only
+    await user.click(screen.getByTestId('cms-note-visibility-public'));
+    expect(screen.getByTestId('investigation-note-n-pub')).toBeInTheDocument();
+    expect(screen.queryByTestId('investigation-note-n-int')).not.toBeInTheDocument();
+    // internal-only
+    await user.click(screen.getByTestId('cms-note-visibility-internal'));
+    expect(screen.queryByTestId('investigation-note-n-pub')).not.toBeInTheDocument();
+    expect(screen.getByTestId('investigation-note-n-int')).toBeInTheDocument();
+  });
+
+  it('marking the internal toggle posts the note as internal', async () => {
+    const user = userEvent.setup();
+    wrap('/cms/cases/cs-1?tab=Investigation');
+    await screen.findByTestId('cms-note-internal-toggle');
+    await user.type(screen.getByPlaceholderText('Add a note…'), 'eyes only');
+    await user.click(screen.getByTestId('cms-note-internal-toggle'));
+    await user.click(screen.getByTestId('cms-note-add'));
+    await waitFor(() => {
+      expect(http.post).toHaveBeenCalledWith(
+        '/v1/cms/cases/cs-1/notes',
+        expect.objectContaining({ note_text: 'eyes only', is_internal: true }),
+      );
+    });
+  });
+
+  it('Reassign section shows the current assignee + posts a reason', async () => {
+    const user = userEvent.setup();
+    wrap('/cms/cases/cs-1');
+    const section = await screen.findByTestId('cms-assign-section');
+    // assigned_to set → relabelled "Reassign" + shows current assignee
+    expect(within(section).getByText('Reassign')).toBeInTheDocument();
+    expect(within(section).getByText(/bob\.risk/)).toBeInTheDocument();
+    await user.type(screen.getByTestId('cms-assign-username'), 'carol.ops');
+    await user.type(screen.getByTestId('cms-assign-reason'), 'workload rebalance');
+    await user.click(screen.getByTestId('cms-assign-submit'));
+    await waitFor(() => {
+      expect(http.post).toHaveBeenCalledWith(
+        '/v1/cms/cases/cs-1/assign',
+        expect.objectContaining({ assigned_to: 'carol.ops', reason: 'workload rebalance' }),
+      );
+    });
+  });
+});

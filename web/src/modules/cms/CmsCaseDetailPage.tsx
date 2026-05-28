@@ -68,6 +68,7 @@ export function CmsCaseDetailPage() {
   }, [tabParam, noteHighlight, attachmentHighlight]);
 
   const [assigneeInput, setAssigneeInput] = useState('');
+  const [assignReason, setAssignReason] = useState('');
   const [escalateReason, setEscalateReason] = useState('');
   const [showCloseForm, setShowCloseForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState(false);
@@ -122,9 +123,11 @@ export function CmsCaseDetailPage() {
     },
   });
   const assignMut = useMutation({
-    mutationFn: (assigned_to: string) => cmsApi.assign(id, assigned_to),
+    mutationFn: ({ assigned_to, reason }: { assigned_to: string; reason?: string }) =>
+      cmsApi.assign(id, assigned_to, reason),
     onSuccess: () => {
       setAssigneeInput('');
+      setAssignReason('');
       invalidate();
     },
   });
@@ -382,22 +385,43 @@ export function CmsCaseDetailPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              <div>
-                <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Assign</div>
+              <div data-testid="cms-assign-section">
+                <div className="mb-1 text-xs font-semibold uppercase text-slate-500">
+                  {c.assigned_to ? 'Reassign' : 'Assign'}
+                </div>
+                {c.assigned_to && (
+                  <p className="mb-1 text-2xs text-slate-500">
+                    Currently: <span className="font-medium text-slate-700">{c.assigned_to}</span>
+                  </p>
+                )}
                 <div className="flex gap-1">
                   <input
                     value={assigneeInput}
                     onChange={(e) => setAssigneeInput(e.target.value)}
-                    placeholder="username"
+                    placeholder={c.assigned_to ? 'new assignee username' : 'username'}
                     className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                    data-testid="cms-assign-username"
                   />
                   <Button
-                    onClick={() => assignMut.mutate(assigneeInput.trim())}
-                    disabled={!assigneeInput.trim()}
+                    onClick={() =>
+                      assignMut.mutate({
+                        assigned_to: assigneeInput.trim(),
+                        reason: assignReason.trim() || undefined,
+                      })
+                    }
+                    disabled={!assigneeInput.trim() || assignMut.isPending}
+                    data-testid="cms-assign-submit"
                   >
                     <UserPlus size={12} />
                   </Button>
                 </div>
+                <input
+                  value={assignReason}
+                  onChange={(e) => setAssignReason(e.target.value)}
+                  placeholder="reason (optional)"
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                  data-testid="cms-assign-reason"
+                />
               </div>
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Transition</div>
@@ -549,6 +573,8 @@ function InvestigationTab({
   onAttachmentAdd: () => void;
 }) {
   const [noteText, setNoteText] = useState('');
+  const [noteInternal, setNoteInternal] = useState(false);
+  const [noteVisibility, setNoteVisibility] = useState<'all' | 'public' | 'internal'>('all');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(1024);
   const [mimeType, setMimeType] = useState('application/pdf');
@@ -591,9 +617,10 @@ function InvestigationTab({
       : '';
 
   const noteAddMut = useMutation({
-    mutationFn: () => cmsApi.notes.add(caseId, noteText.trim()),
+    mutationFn: () => cmsApi.notes.add(caseId, noteText.trim(), noteInternal),
     onSuccess: () => {
       setNoteText('');
+      setNoteInternal(false);
       onNoteAdd();
     },
   });
@@ -615,24 +642,62 @@ function InvestigationTab({
     <div className="space-y-4" ref={containerRef}>
       <Panel title={`Notes (${(notes as { length: number }).length})`}>
         {!isLocked ? (
-          <div className="mb-3 flex gap-1">
-            <textarea
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              rows={2}
-              placeholder="Add a note…"
-              className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-            />
-            <Button
-              onClick={() => noteAddMut.mutate()}
-              disabled={!noteText.trim() || noteAddMut.isPending}
-            >
-              <Send size={12} />
-            </Button>
+          <div className="mb-3 space-y-1">
+            <div className="flex gap-1">
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                rows={2}
+                placeholder="Add a note…"
+                className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+              />
+              <Button
+                onClick={() => noteAddMut.mutate()}
+                disabled={!noteText.trim() || noteAddMut.isPending}
+                data-testid="cms-note-add"
+              >
+                <Send size={12} />
+              </Button>
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={noteInternal}
+                onChange={(e) => setNoteInternal(e.target.checked)}
+                data-testid="cms-note-internal-toggle"
+              />
+              Internal note (hidden from external view)
+            </label>
           </div>
         ) : null}
+        {/* Visibility filter — show all / public-only / internal-only. */}
+        <div className="mb-2 flex items-center gap-1" data-testid="cms-note-visibility">
+          {(['all', 'public', 'internal'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setNoteVisibility(v)}
+              aria-pressed={noteVisibility === v}
+              data-testid={`cms-note-visibility-${v}`}
+              className={
+                noteVisibility === v
+                  ? 'rounded border border-blue-500 bg-blue-50 px-2 py-0.5 text-xs font-medium capitalize text-blue-700'
+                  : 'rounded border border-slate-300 px-2 py-0.5 text-xs capitalize text-slate-600 hover:border-blue-300'
+              }
+            >
+              {v}
+            </button>
+          ))}
+        </div>
         <div className="space-y-2">
           {(notes as Array<{ note_id: string; user_id: string; note_text: string; created_at: string; is_internal: boolean }>)
+            .filter((n) =>
+              noteVisibility === 'all'
+                ? true
+                : noteVisibility === 'internal'
+                  ? n.is_internal
+                  : !n.is_internal,
+            )
             .map((n) => (
               <div
                 key={n.note_id}
