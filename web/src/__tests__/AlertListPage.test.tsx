@@ -249,3 +249,35 @@ describe('AlertListPage — SLA column', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+// Phase 4 — Alert detail modal (in-place; customer drill-through inside).
+describe('AlertListPage — alert detail modal', () => {
+  it('clicking a row opens the detail panel with the alert + a View-customer link', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    // No modal until a row is clicked.
+    expect(screen.queryByTestId('alert-detail-modal')).not.toBeInTheDocument();
+
+    await user.click(screen.getByText(/Achieng Otieno/));
+    const body = await screen.findByTestId('alert-detail-body');
+    expect(body).toBeInTheDocument();
+    // The customer drill-through is now reachable inside the panel.
+    const link = screen.getByTestId('alert-detail-view-customer');
+    expect(link).toHaveAttribute('href', '/customers/c-101');
+    // Filter-by-rule quick action present too.
+    expect(screen.getByTestId('alert-detail-filter-rule')).toBeInTheDocument();
+  });
+
+  it('Escape closes the detail panel', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    await user.click(screen.getByText(/Achieng Otieno/));
+    await screen.findByTestId('alert-detail-body');
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-detail-body')).not.toBeInTheDocument();
+    });
+  });
+});

@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Bell, Link2, MoreHorizontal } from 'lucide-react';
 import { api, type Alert, type Severity } from '@/lib/api';
 import { Badge, type BadgeTone, Button, DataTable, type Column, FilterChip, Panel } from '@/components/ui';
@@ -13,6 +14,7 @@ import {
   type AlertDomainFilter,
 } from './alertDomain';
 import { AlertSlaBadge } from './AlertSlaBadge';
+import { AlertDetailModal } from './AlertDetailModal';
 
 const DOMAIN_FILTERS: ReadonlyArray<{ value: AlertDomainFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -48,8 +50,10 @@ const SCORE_BAND_TONE: Record<ReturnType<typeof bandFor>, BadgeTone> = {
 };
 
 export function AlertListPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Phase 4 — clicking a row opens an in-place detail panel (the
+  // customer drill-through lives inside it now, one click deeper).
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
 
   // URL-driven so dashboard KPI cards can deep-link (e.g. /alerts?severity=critical).
   const severityParam = searchParams.get('severity');
@@ -383,8 +387,10 @@ export function AlertListPage() {
             alertMatchesDomain(r, domain),
         )}
         empty={isLoading ? 'Loading alerts…' : 'No alerts match the filters'}
-        onRowClick={(row) => navigate(`/customers/${row.customer.id}`)}
+        onRowClick={(row) => setSelectedAlert(row)}
       />
+
+      <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />
       <p
         className="mt-2 text-[11px] text-ink-sub"
         data-testid="alerts-live-status"
