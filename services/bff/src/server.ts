@@ -27691,6 +27691,55 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/actor-resource-matrix (T6 M15.19) — 2D cross-tab
+   *  over the audit chain combining actor × resource_type. Actor axis
+   *  is OPEN (any actor seen in events); resource_type axis is CLOSED
+   *  (10 canonical AuditResourceTypes). Each event lives in exactly one
+   *  (actor_username, resource_type) cell. The proper matrix that M15.8
+   *  (per-actor 1D) only nests. Per-row {actor_username, total,
+   *  by_resource_type (10 keys at 0 when absent — stable grid),
+   *  resource_types_without (canonical order), distinct_resource_types}.
+   *  Per-col {resource_type, total, by_actor (compact), actors_without
+   *  (asc), distinct_actors}. Envelope: peak_cell (canonical iteration
+   *  tie-break: actors asc × types canonical; null on empty),
+   *  most_versatile_actor (highest distinct_resource_types — the
+   *  access-review broadest-footprint signal + canonical actor asc
+   *  tie-break; null on empty), most_touched_resource_type (highest
+   *  distinct_actors + canonical type-order tie-break; null on empty),
+   *  empty_cells[] in canonical actor × resource_type row-major order.
+   *  Mirror of M15.17 / M1.14 / M13.17 matrix pattern but with OPEN
+   *  actor axis (N can grow) × CLOSED resource_type axis. Drives BIL
+   *  access-review: "which actor touches the most resource types — is
+   *  that consistent with their assigned scope?". */
+  app.get(
+    '/v1/audit/actor-resource-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      // Drain entire audit chain for this tenant.
+      const out: import('./audit_trail').AuditEvent[] = [];
+      const PAGE = 1000;
+      for (let page = 1; page <= 200; page++) {
+        const result = auditTrailStore.list(req.tenant!.tenant_id, {
+          page,
+          page_size: PAGE,
+        });
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildAuditActorResourceMatrix } =
+        require('./audit_actor_resource_matrix') as
+        typeof import('./audit_actor_resource_matrix');
+      const summary = buildAuditActorResourceMatrix(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/audit/resource-hotspots?limit=N (T6 M15.18) — per-
    *  (resource_type, resource_id) hot-spot pivot over the audit chain.
    *  For each unique resource touched, surfaces total_events +
