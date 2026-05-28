@@ -26,6 +26,7 @@ import {
   type CmsPriority,
 } from './api';
 import { resolveCaseQueues, caseMatchesQueue, type CaseQueueDef } from './caseQueues';
+import { CaseStatusBadge, CasePriorityBadge } from '@/components/cms/CaseBadges';
 
 const STATES: CmsCaseState[] = [
   'OPEN',
@@ -470,10 +471,10 @@ function CaseRow({
       </td>
       <td className="py-2 pr-2">{c.title}</td>
       <td className="py-2 pr-2">
-        <Badge tone={STATUS_TONE[c.status] as never}>{c.status}</Badge>
+        <CaseStatusBadge status={c.status} />
       </td>
       <td className="py-2 pr-2">
-        <Badge tone={PRIORITY_TONE[c.priority] as never}>{c.priority}</Badge>
+        <CasePriorityBadge priority={c.priority} />
       </td>
       <td className="py-2 pr-2 text-xs text-slate-600">{c.assigned_to ?? '—'}</td>
       <td className="py-2 pr-2 text-xs text-slate-500">

@@ -7,9 +7,12 @@ import { SetCategoryModal } from './SetCategoryModal';
 import { CaseTrackingTimeline } from './CaseTrackingTimeline';
 import { CaseActivityTimeline } from '@/components/cms/CaseActivityTimeline';
 import {
+  CaseStatusBadge,
+  CasePriorityBadge,
+  CaseSlaBadge,
+} from '@/components/cms/CaseBadges';
+import {
   ArrowLeft,
-  AlertTriangle,
-  Clock,
   Send,
   ShieldAlert,
   UserPlus,
@@ -20,8 +23,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { api } from '@/lib/api';
 import {
   cmsApi,
-  PRIORITY_TONE,
-  STATUS_TONE,
   type CmsCaseState,
   type CmsResolutionCategory,
 } from './api';
@@ -174,19 +175,9 @@ export function CmsCaseDetailPage() {
         subtitle={`Created by ${c.created_by} · ${new Date(c.created_at).toLocaleString()}`}
         actions={
           <div className="flex gap-2">
-            <Badge tone={STATUS_TONE[c.status] as never}>{c.status}</Badge>
-            <Badge tone={PRIORITY_TONE[c.priority] as never}>{c.priority}</Badge>
-            {sla.breached ? (
-              <Badge tone={'danger' as never}>
-                <AlertTriangle size={11} className="inline" /> SLA breached
-              </Badge>
-            ) : sla.warning ? (
-              <Badge tone={'warning' as never}>
-                <Clock size={11} className="inline" /> SLA warn ({sla.progress_pct}%)
-              </Badge>
-            ) : (
-              <Badge tone={'success' as never}>SLA {sla.progress_pct}%</Badge>
-            )}
+            <CaseStatusBadge status={c.status} />
+            <CasePriorityBadge priority={c.priority} />
+            <CaseSlaBadge sla={sla} />
           </div>
         }
       />
