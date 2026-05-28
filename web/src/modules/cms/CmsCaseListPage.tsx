@@ -25,6 +25,7 @@ import {
   type CmsListFilters,
   type CmsPriority,
 } from './api';
+import { resolveCaseQueues, caseMatchesQueue, type CaseQueueDef } from './caseQueues';
 
 const STATES: CmsCaseState[] = [
   'OPEN',
@@ -59,6 +60,26 @@ export function CmsCaseListPage() {
   const ageBucket = (searchParams.get('ageBucket') as SlaBucketSlug | null) ?? null;
   const breachedOnly = searchParams.get('breached') === 'true';
   const ageBucketLabel = ageBucket ? SLA_BUCKET_LABEL[ageBucket] : null;
+
+  // Phase 4 — role-based case queues (additive lens). Resolve the queues
+  // this viewer may see (default-first); the active queue comes from
+  // ?queue= when it names a queue the user can actually see (guards
+  // against URL tampering), else the default (first) queue. `user` is a
+  // stable zustand reference so this memo only recomputes on login/out.
+  const queues = useMemo(() => resolveCaseQueues(user?.roles ?? []), [user]);
+  const queueParam = searchParams.get('queue');
+  const activeQueue: CaseQueueDef | null =
+    queues.find((q) => q.id === queueParam) ?? queues[0] ?? null;
+  const readOnlyQueue = activeQueue?.readOnly ?? false;
+  const myUsername = user?.username ?? null;
+  const mineOnly = !!myUsername && filters.assigned_to === myUsername;
+
+  const selectQueue = (id: string) => {
+    const sp = new URLSearchParams(searchParams);
+    sp.set('queue', id);
+    setSearchParams(sp, { replace: true });
+    setSelected(new Set());
+  };
 
   const listQ = useQuery({
     queryKey: ['cms-cases', filters, q, breachedOnly],
@@ -103,19 +124,27 @@ export function CmsCaseListPage() {
 
   // Reset selection when the deep-link filter changes (the visible
   // rows are different, so a stale Set is misleading).
-  useEffect(() => { setSelected(new Set()); }, [ageBucket, breachedOnly]);
+  useEffect(() => { setSelected(new Set()); }, [ageBucket, breachedOnly, queueParam]);
 
   const allItems = listQ.data?.items ?? [];
   const items = useMemo(() => {
-    if (!ageBucketRange) return allItems;
-    const now = Date.now();
-    return allItems.filter((c) => {
-      const ageDays = Math.floor((now - new Date(c.created_at).getTime()) / 86_400_000);
-      if (ageDays < ageBucketRange.min) return false;
-      if (ageBucketRange.max !== null && ageDays > ageBucketRange.max) return false;
-      return true;
-    });
-  }, [allItems, ageBucketRange]);
+    let rows = allItems;
+    // Role-based queue lens: narrow to the active queue's categories
+    // (client-side, mirroring the ageBucket slice — the list API has no
+    // case_category param). '*' queues (all_cases / audit_review) pass
+    // everything through, so the default view is unchanged.
+    if (activeQueue) rows = rows.filter((c) => caseMatchesQueue(activeQueue, c));
+    if (ageBucketRange) {
+      const now = Date.now();
+      rows = rows.filter((c) => {
+        const ageDays = Math.floor((now - new Date(c.created_at).getTime()) / 86_400_000);
+        if (ageDays < ageBucketRange.min) return false;
+        if (ageBucketRange.max !== null && ageDays > ageBucketRange.max) return false;
+        return true;
+      });
+    }
+    return rows;
+  }, [allItems, ageBucketRange, activeQueue]);
 
   const clearDeepLink = () => {
     const sp = new URLSearchParams(searchParams);
@@ -210,6 +239,44 @@ export function CmsCaseListPage() {
 
       {/* Quick filters + search */}
       <Panel title="Cases">
+        {/* Phase 4 — role-based case queue tabs (additive lens). Only shown
+            when the viewer has more than one queue; live backend roles
+            default to the 'All cases' tab so the view is unchanged. */}
+        {queues.length > 1 && activeQueue && (
+          <div
+            className="mb-3 flex flex-wrap items-center gap-1"
+            data-testid="cms-queue-tabs"
+          >
+            <span className="mr-1 text-xs font-medium uppercase text-slate-400">
+              Queue
+            </span>
+            {queues.map((qd) => {
+              const active = qd.id === activeQueue.id;
+              return (
+                <button
+                  key={qd.id}
+                  type="button"
+                  onClick={() => selectQueue(qd.id)}
+                  aria-pressed={active}
+                  title={qd.description}
+                  data-testid={`cms-queue-tab-${qd.id}`}
+                  className={
+                    active
+                      ? 'rounded-md border border-blue-500 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700'
+                      : 'rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:border-blue-300'
+                  }
+                >
+                  {qd.label}
+                  {qd.readOnly && (
+                    <span className="ml-1 text-2xs uppercase text-slate-400">
+                      read-only
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {(ageBucketLabel || breachedOnly) && (
           <div
             className="mb-3 flex items-center gap-2 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm"
@@ -284,6 +351,20 @@ export function CmsCaseListPage() {
             placeholder="Assigned to…"
             className="rounded border border-slate-300 px-2 py-1 text-sm"
           />
+          {myUsername && (
+            <Button
+              variant={mineOnly ? 'primary' : 'ghost'}
+              onClick={() =>
+                setFilters((f) => ({
+                  ...f,
+                  assigned_to: mineOnly ? undefined : myUsername,
+                }))
+              }
+              data-testid="cms-my-cases-toggle"
+            >
+              My cases
+            </Button>
+          )}
           <Button
             variant="ghost"
             onClick={() => {
@@ -295,8 +376,8 @@ export function CmsCaseListPage() {
           </Button>
         </div>
 
-        {/* Bulk actions */}
-        {selected.size > 0 ? (
+        {/* Bulk actions — suppressed in read-only (auditor) queues */}
+        {selected.size > 0 && !readOnlyQueue ? (
           <div className="mb-3 flex items-center gap-2 rounded-md bg-blue-50 p-2 text-sm">
             <span className="font-medium">{selected.size} selected</span>
             <input
@@ -332,11 +413,13 @@ export function CmsCaseListPage() {
             <thead className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
               <tr>
                 <th className="py-2 pr-2 w-6">
-                  <input
-                    type="checkbox"
-                    checked={selected.size === items.length && items.length > 0}
-                    onChange={toggleAll}
-                  />
+                  {!readOnlyQueue && (
+                    <input
+                      type="checkbox"
+                      checked={selected.size === items.length && items.length > 0}
+                      onChange={toggleAll}
+                    />
+                  )}
                 </th>
                 <th className="py-2 pr-2">Case #</th>
                 <th className="py-2 pr-2">Title</th>
@@ -353,6 +436,7 @@ export function CmsCaseListPage() {
                   c={c}
                   selected={selected.has(c.case_id)}
                   onToggle={() => toggleSelected(c.case_id)}
+                  readOnly={readOnlyQueue}
                 />
               ))}
             </tbody>
@@ -367,15 +451,17 @@ function CaseRow({
   c,
   selected,
   onToggle,
+  readOnly,
 }: {
   c: CmsCase;
   selected: boolean;
   onToggle: () => void;
+  readOnly?: boolean;
 }) {
   return (
     <tr className="border-b border-slate-100">
       <td className="py-2 pr-2">
-        <input type="checkbox" checked={selected} onChange={onToggle} />
+        {!readOnly && <input type="checkbox" checked={selected} onChange={onToggle} />}
       </td>
       <td className="py-2 pr-2 font-mono text-xs">
         <Link to={`/cms/cases/${c.case_id}`} className="text-blue-600 hover:underline">

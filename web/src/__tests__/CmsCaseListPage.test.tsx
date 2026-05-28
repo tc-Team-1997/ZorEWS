@@ -9,8 +9,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { CmsCaseListPage } from '@/modules/cms/CmsCaseListPage';
 import { http } from '@/lib/http';
+import { useAuth } from '@/store/auth';
+import type { Role } from '@/store/auth';
 
 vi.mock('@/lib/http');
+
+/** Set the auth-store user for a test, casting enterprise role ids
+ *  (auditor / fraud_analyst …) which aren't in the narrow frontend Role
+ *  union yet but are honoured by the queue resolver (forward-compat). */
+function setUser(username: string, roles: string[]) {
+  useAuth.setState({
+    user: { id: `u-${username}`, username, roles: roles as Role[] },
+    status: 'authenticated',
+  });
+}
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -119,5 +131,87 @@ describe('CmsCaseListPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/No cases match these filters/)).toBeInTheDocument();
     });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────
+// Phase 4 — role-based case queue lens (additive, non-breaking).
+// ──────────────────────────────────────────────────────────────────
+
+const FRAUD_CASE = {
+  ...SAMPLE_CASE,
+  case_id: 'cs-fraud',
+  case_number: 'EWS-FRAUD-1',
+  title: 'Fraud ring suspected',
+  case_category: 'fraud',
+};
+const CREDIT_CASE = {
+  ...SAMPLE_CASE,
+  case_id: 'cs-credit',
+  case_number: 'EWS-CREDIT-1',
+  title: 'Borrower credit stress',
+  case_category: 'credit_risk',
+};
+
+describe('CmsCaseListPage — role-based queues', () => {
+  beforeEach(() => {
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases')
+        return Promise.resolve({
+          data: { body: { items: [FRAUD_CASE, CREDIT_CASE], total: 2 } },
+        });
+      if (url === '/v1/cms/cases/stats')
+        return Promise.resolve({ data: { body: { ...STATS, total: 2 } } });
+      if (url === '/v1/cms/cases/sla-breaches')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    useAuth.setState({ user: null, status: 'idle' });
+  });
+
+  it('admin sees the queue tabs + My cases toggle; default shows every case', async () => {
+    setUser('alice.admin', ['admin']);
+    wrap(<CmsCaseListPage />);
+    await waitFor(() => screen.getByText('Fraud ring suspected'));
+    // both cases visible under the default all_cases queue
+    expect(screen.getByText('Borrower credit stress')).toBeInTheDocument();
+    // queue tabs render (admin = whole registry)
+    expect(screen.getByTestId('cms-queue-tabs')).toBeInTheDocument();
+    expect(screen.getByTestId('cms-queue-tab-fraud_investigation')).toBeInTheDocument();
+    expect(screen.getByTestId('cms-queue-tab-borrower_risk')).toBeInTheDocument();
+    expect(screen.getByTestId('cms-my-cases-toggle')).toBeInTheDocument();
+  });
+
+  it('selecting the Borrower risk tab narrows to that category', async () => {
+    const user = userEvent.setup();
+    setUser('alice.admin', ['admin']);
+    wrap(<CmsCaseListPage />);
+    await waitFor(() => screen.getByText('Fraud ring suspected'));
+    await user.click(screen.getByTestId('cms-queue-tab-borrower_risk'));
+    await waitFor(() => {
+      expect(screen.queryByText('Fraud ring suspected')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Borrower credit stress')).toBeInTheDocument();
+  });
+
+  it('enterprise fraud_analyst lands scoped to fraud cases only', async () => {
+    setUser('fred.fraud', ['fraud_analyst']);
+    wrap(<CmsCaseListPage />);
+    await waitFor(() => screen.getByText('Fraud ring suspected'));
+    expect(screen.queryByText('Borrower credit stress')).not.toBeInTheDocument();
+    // single queue → no tab strip, but still scoped
+    expect(screen.queryByTestId('cms-queue-tabs')).not.toBeInTheDocument();
+  });
+
+  it('auditor queue is read-only — no selection checkboxes', async () => {
+    setUser('avery.audit', ['auditor']);
+    wrap(<CmsCaseListPage />);
+    await waitFor(() => screen.getByText('Fraud ring suspected'));
+    // audit_review is '*' so both cases show, but no checkboxes render
+    expect(screen.getByText('Borrower credit stress')).toBeInTheDocument();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 });
