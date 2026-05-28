@@ -2369,8 +2369,40 @@ export function makeApp(deps: AppDeps = {}) {
 
   // ---------- /api (internal BFF — T3.10) ----------
   app.get('/api/alerts', requireRole('alerts:list'), (req, res) =>
-    listAlerts(req, res, source, lookups, now, unifiedAlertsReader),
+    listAlerts(req, res, source, lookups, now, alertAckStore, unifiedAlertsReader),
   );
+
+  // POST /api/alerts/ack — bulk acknowledge (Phase 4). SPA-internal, so
+  // tenant comes from the header (BANK_DEMO default) like the other
+  // /api/* routes. Idempotent: an already-acknowledged alert still counts
+  // as acknowledged. Mirrors the per-alert /v1/alerts/:id/ack write +
+  // its routing-ledger markAcked side-effect. Ack = cases:log_action.
+  app.post('/api/alerts/ack', requireRole('cases:log_action'), (req, res) => {
+    const tenant_id =
+      ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+    const actor =
+      ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin';
+    const body = (req.body ?? {}) as { ids?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((x): x is string => typeof x === 'string')
+      : [];
+    const acknowledged: string[] = [];
+    for (const id of ids) {
+      try {
+        const out = alertAckStore.acknowledge(tenant_id, id, actor, undefined, now());
+        if (out.acked_at) routingLedger.markAcked(tenant_id, id, out.acked_at);
+        acknowledged.push(id);
+      } catch (e) {
+        // Already acknowledged → idempotent success, not an error.
+        if (e instanceof AlertAckError) {
+          acknowledged.push(id);
+          continue;
+        }
+        throw e;
+      }
+    }
+    res.json({ acknowledged });
+  });
 
   // /api/customers — list of monitored customers (SPA Customers page).
   // Each row is a thin summary; the detail page hydrates via /api/customers/:id/risk.
@@ -3066,10 +3098,20 @@ export function makeApp(deps: AppDeps = {}) {
         ),
       );
     }
+    // Phase 4 — acknowledgement status filter, parity with /api/alerts.
+    const statusRaw = (req.query.status as string | undefined) || undefined;
+    if (statusRaw && statusRaw !== 'open' && statusRaw !== 'acknowledged') {
+      return res.status(400).json(
+        wrapError(
+          { code: 'EWS_400', message: 'status must be one of open,acknowledged', severity: 'MEDIUM' },
+          ctx,
+        ),
+      );
+    }
     const assignee = (req.query.assignee as string | undefined) || undefined;
     // v1.5 B1 — when pg-backed unified.alerts reader is wired, skip the
     // in-code mapAlertList() hydration; SQL JOIN does it.
-    let items;
+    let items: AlertRow[];
     if (unifiedAlertsReader) {
       items = await unifiedAlertsReader.fetch({
         tenant_id: req.tenant!.tenant_id,
@@ -3085,6 +3127,15 @@ export function makeApp(deps: AppDeps = {}) {
         now,
       );
     }
+    // Phase 4 — join the M8.3 ack store (same as /api/alerts) so the
+    // public enveloped alias carries acknowledgement state + ?status.
+    const tenantId = req.tenant!.tenant_id;
+    items = items.map((r) => ({
+      ...r,
+      acknowledged: alertAckStore.get(tenantId, r.id).status === 'acknowledged',
+    }));
+    if (statusRaw === 'open') items = items.filter((r) => !r.acknowledged);
+    else if (statusRaw === 'acknowledged') items = items.filter((r) => r.acknowledged);
     res.json(wrapResponse({ items, total: items.length }, ctx));
   });
 
@@ -38347,6 +38398,7 @@ async function listAlerts(
   source: AlertSource,
   lookups: Lookups,
   now: () => Date,
+  alertAckStore: AlertAckStore,
   reader?: IUnifiedAlertsReader,
 ) {
   const sevRaw = req.query.severity as string | undefined;
@@ -38355,6 +38407,11 @@ async function listAlerts(
       .status(400)
       .json({ error: `severity must be one of ${VALID_SEVERITIES.join(',')}` });
   }
+  // Phase 4 — acknowledgement status filter (open | acknowledged).
+  const statusRaw = (req.query.status as string | undefined) || undefined;
+  if (statusRaw && statusRaw !== 'open' && statusRaw !== 'acknowledged') {
+    return res.status(400).json({ error: 'status must be one of open,acknowledged' });
+  }
   const assignee = (req.query.assignee as string | undefined) || undefined;
   // dedup defaults to true (mirrors MSW); explicit ?dedup=false turns it off.
   const dedup = String(req.query.dedup ?? 'true').toLowerCase() !== 'false';
@@ -38362,15 +38419,16 @@ async function listAlerts(
   const sort: 'criticality' | 'severity' | 'age' =
     sortRaw === 'severity' || sortRaw === 'age' ? sortRaw : 'criticality';
 
-  // v1.5 B1 — when pg-backed unified.alerts reader is wired, fetch from
-  // the SQL view + apply dedup+sort via the shared helper. /api/alerts
-  // isn't tenant-gated by requireTenantMw (SPA-internal route), so the
-  // tenant is read from the header with the established BANK_DEMO
+  // /api/alerts isn't tenant-gated by requireTenantMw (SPA-internal route),
+  // so the tenant is read from the header with the established BANK_DEMO
   // default that all /api/* routes use.
+  const tenant_id =
+    ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
+
+  // v1.5 B1 — when pg-backed unified.alerts reader is wired, fetch from
+  // the SQL view + apply dedup+sort via the shared helper.
   let items: AlertRow[];
   if (reader) {
-    const tenant_id =
-      ((req.headers['x-tenant-id'] as string | undefined) ?? '').trim() || 'BANK_DEMO';
     const raw = await reader.fetch({
       tenant_id,
       severity: sevRaw as UiSeverity | undefined,
@@ -38386,6 +38444,15 @@ async function listAlerts(
       now,
     );
   }
+
+  // Phase 4 — join the M8.3 ack store by alert id, then apply ?status.
+  items = items.map((r) => ({
+    ...r,
+    acknowledged: alertAckStore.get(tenant_id, r.id).status === 'acknowledged',
+  }));
+  if (statusRaw === 'open') items = items.filter((r) => !r.acknowledged);
+  else if (statusRaw === 'acknowledged') items = items.filter((r) => r.acknowledged);
+
   res.json({ items, total: items.length });
 }
 

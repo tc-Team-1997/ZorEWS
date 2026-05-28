@@ -44,6 +44,9 @@ export interface AlertRow {
   customer_exposure_kes: number;
   criticality_score: number;
   linked_alert_ids: string[];
+  /** Phase 4 — acknowledgement state, joined from the M8.3 AlertAckStore
+   *  by alert id. Decorated by listAlerts; absent on the raw mapping. */
+  acknowledged?: boolean;
 }
 
 export interface AlertListResponse {
