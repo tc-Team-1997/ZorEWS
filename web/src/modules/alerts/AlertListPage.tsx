@@ -7,6 +7,17 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
 import { useAlertStream } from '@/components/notifications/useAlertStream';
 import { bandFor, type SortKey } from '@/lib/criticality';
+import {
+  alertMatchesDomain,
+  asAlertDomainFilter,
+  type AlertDomainFilter,
+} from './alertDomain';
+
+const DOMAIN_FILTERS: ReadonlyArray<{ value: AlertDomainFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'banking', label: 'Banking' },
+  { value: 'insurance', label: 'Insurance' },
+];
 
 const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
 const SEVERITY_TONE: Record<Severity, BadgeTone> = {
@@ -72,6 +83,11 @@ export function AlertListPage() {
   const dedupParam = searchParams.get('dedup');
   const dedup: boolean = dedupParam === null ? true : dedupParam === 'true';
 
+  // Phase 4 — Alert Center domain filter. Derived client-side from each
+  // alert's indicator-family prefixes (alertDomain.ts). URL-synced as
+  // ?domain=banking|insurance; defaults to 'all' so the view is unchanged.
+  const domain: AlertDomainFilter = asAlertDomainFilter(searchParams.get('domain'));
+
   const setSeverity = (next: Severity | null) => {
     const sp = new URLSearchParams(searchParams);
     if (next) sp.set('severity', next);
@@ -98,6 +114,13 @@ export function AlertListPage() {
     const sp = new URLSearchParams(searchParams);
     if (next) sp.delete('dedup');
     else sp.set('dedup', 'false');
+    setSearchParams(sp, { replace: true });
+  };
+
+  const setDomain = (next: AlertDomainFilter) => {
+    const sp = new URLSearchParams(searchParams);
+    if (next === 'all') sp.delete('domain');
+    else sp.set('domain', next);
     setSearchParams(sp, { replace: true });
   };
 
@@ -279,6 +302,22 @@ export function AlertListPage() {
             </FilterChip>
           ))}
           <span className="w-px h-5 bg-divider mx-2" />
+          <span
+            className="flex flex-wrap items-center gap-2"
+            data-testid="alerts-domain-filters"
+          >
+            <span className="text-xs text-ink-sub mr-2">Domain</span>
+            {DOMAIN_FILTERS.map((d) => (
+              <FilterChip
+                key={d.value}
+                active={domain === d.value}
+                onClick={() => setDomain(d.value)}
+              >
+                {d.label}
+              </FilterChip>
+            ))}
+          </span>
+          <span className="w-px h-5 bg-divider mx-2" />
           <label className="text-xs text-ink-sub flex items-center gap-1.5">
             Sort by
             <select
@@ -331,11 +370,11 @@ export function AlertListPage() {
 
       <DataTable
         columns={columns}
-        data={
-          ruleIdFilter
-            ? (data?.items ?? []).filter((r) => r.rule.id === ruleIdFilter)
-            : (data?.items ?? [])
-        }
+        data={(data?.items ?? []).filter(
+          (r) =>
+            (!ruleIdFilter || r.rule.id === ruleIdFilter) &&
+            alertMatchesDomain(r, domain),
+        )}
         empty={isLoading ? 'Loading alerts…' : 'No alerts match the filters'}
         onRowClick={(row) => navigate(`/customers/${row.customer.id}`)}
       />

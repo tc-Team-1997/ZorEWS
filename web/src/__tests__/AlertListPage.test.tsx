@@ -198,3 +198,41 @@ describe('AlertListPage — rule_id URL filter', () => {
     });
   });
 });
+
+// Phase 4 — Alert Center domain filter (additive, non-breaking).
+describe('AlertListPage — domain filter', () => {
+  it('renders the All / Banking / Insurance domain chips', async () => {
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    const group = screen.getByTestId('alerts-domain-filters');
+    expect(within(group).getByText('Banking')).toBeInTheDocument();
+    expect(within(group).getByText('Insurance')).toBeInTheDocument();
+  });
+
+  it('Banking keeps the (all-banking) seed alerts; Insurance empties the list', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    const group = screen.getByTestId('alerts-domain-filters');
+
+    await user.click(within(group).getByText('Banking'));
+    await waitFor(() => {
+      expect(screen.getByText(/Achieng Otieno/)).toBeInTheDocument();
+    });
+
+    // The mock seed carries only banking-family indicators (BEH/TXN/FIN/CRD),
+    // so the Insurance lens narrows to nothing.
+    await user.click(within(group).getByText('Insurance'));
+    await waitFor(() => {
+      expect(screen.queryByText(/Achieng Otieno/)).not.toBeInTheDocument();
+      expect(screen.getByText(/No alerts match the filters/i)).toBeInTheDocument();
+    });
+  });
+
+  it('honours ?domain=banking in the URL (banking rows visible)', async () => {
+    renderWithProviders(<AlertListPage />, { route: '/alerts?domain=banking' });
+    await waitFor(() => {
+      expect(screen.getByText(/Achieng Otieno/)).toBeInTheDocument();
+    });
+  });
+});
