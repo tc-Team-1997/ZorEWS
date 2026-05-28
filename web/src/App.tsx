@@ -16,6 +16,7 @@ import { FirstLoginWizardPage } from '@/modules/auth/FirstLoginWizardPage';
 import { AppShell } from '@/components/layout/AppShell';
 import { RequireAuth } from '@/components/layout/RequireAuth';
 import { RequireOnboarding } from '@/components/layout/RequireOnboarding';
+import { RequireDomain } from '@/components/layout/RequireDomain';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
@@ -204,13 +205,18 @@ export function App() {
             <Route path="account-behaviour" element={<AccountBehaviourPage />} />
             <Route path="financial-ratios" element={<FinancialRatiosPage />} />
             <Route path="fraud-signals" element={<FraudSignalsPage />} />
-            <Route path="insurance/policy-lapse" element={<PolicyLapsePage />} />
-            <Route path="insurance/claims-anomaly" element={<ClaimsAnomalyPage />} />
-            <Route path="insurance/fraud" element={<FraudDetectionPage />} />
-            <Route path="insurance/solvency" element={<SolvencyWatchPage />} />
-            <Route path="insurance/persistency" element={<PersistencyWatchPage />} />
-            <Route path="insurance/underwriting" element={<UnderwritingDeviationPage />} />
-            <Route path="insurance/channel-risk" element={<ChannelRiskPage />} />
+            {/* Insurance modules — domain-guarded: a Banking user who
+                URL-hops here is bounced to their own dashboard. Super-admin
+                + unset-domain pass through (non-breaking). */}
+            <Route element={<RequireDomain domain="insurance" />}>
+              <Route path="insurance/policy-lapse" element={<PolicyLapsePage />} />
+              <Route path="insurance/claims-anomaly" element={<ClaimsAnomalyPage />} />
+              <Route path="insurance/fraud" element={<FraudDetectionPage />} />
+              <Route path="insurance/solvency" element={<SolvencyWatchPage />} />
+              <Route path="insurance/persistency" element={<PersistencyWatchPage />} />
+              <Route path="insurance/underwriting" element={<UnderwritingDeviationPage />} />
+              <Route path="insurance/channel-risk" element={<ChannelRiskPage />} />
+            </Route>
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />
