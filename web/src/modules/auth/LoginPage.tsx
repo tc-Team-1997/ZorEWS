@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,11 +9,22 @@ import { useAuth, type CaptchaChallenge } from '@/store/auth';
 import { HttpError } from '@/lib/http';
 import { Button, Input } from '@/components/ui';
 import { CarouselPanel } from './CarouselPanel';
+import { COUNTRIES, type CountryCode } from '@/lib/countries';
+import {
+  ORGANIZATIONS,
+  organizationsFor,
+  getOrganization,
+} from '@/lib/organizations';
+import { useCountry, useDomain, useTenantContext } from '@/lib/useOnboardingContext';
 
 const schema = z.object({
   username: z.string().min(1, 'Username required'),
   password: z.string().min(1, 'Password required'),
   captcha_answer: z.string().optional(),
+  country: z.string().min(1, 'Country required'),
+  domain: z.enum(['banking', 'insurance']),
+  tenant_id: z.string().min(1, 'Organization required'),
+  remember: z.boolean().optional(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -26,25 +37,75 @@ export function LoginPage() {
   const fetchCaptcha = useAuth((s) => s.fetchCaptcha);
   const status = useAuth((s) => s.status);
   const [serverError, setServerError] = useState<string | null>(null);
-  // CAPTCHA challenge from the backend, surfaced after 2+ failed attempts.
-  // Cleared when the user successfully signs in.
   const [captcha, setCaptcha] = useState<CaptchaChallenge | null>(null);
   const { t } = useTranslation();
+
+  // Context selectors are stored via the same hooks the rest of the app +
+  // the RequireOnboarding gate read — so setting them here on a successful
+  // sign-in means the gate passes immediately and no separate onboarding
+  // screen is shown. Everything stays on this one card.
+  const [storedCountry, setCountry] = useCountry();
+  const [storedDomain, setDomain] = useDomain();
+  const [storedTenant, setTenantCtx] = useTenantContext();
+
+  const defaultCountry = (storedCountry ?? 'IN') as CountryCode;
+  const defaultDomain: 'banking' | 'insurance' = storedDomain ?? 'banking';
+  const defaultTenant =
+    storedTenant?.organization_id ??
+    organizationsFor(defaultCountry, defaultDomain)[0]?.id ??
+    '';
 
   const {
     register,
     handleSubmit,
     setValue,
+    getValues,
+    watch,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({ resolver: zodResolver(schema) });
+  } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      country: defaultCountry,
+      domain: defaultDomain,
+      tenant_id: defaultTenant,
+      remember: true,
+    },
+  });
 
-  // RequireAuth pushes the user to /login with state={from: <originalLocation>}
-  // when they hit a protected route while logged out. Send them back there
-  // after authenticating instead of dropping them on the dashboard.
+  const country = watch('country');
+  const domain = watch('domain');
+
+  // Tenant options follow the chosen domain (+ country). Falls back to the
+  // global domain catalogue when a country has no tenant configured.
+  const tenantOptions = useMemo(() => {
+    const scoped = organizationsFor(country as CountryCode, domain);
+    return scoped.length > 0 ? scoped : ORGANIZATIONS.filter((o) => o.domain === domain);
+  }, [country, domain]);
+
+  // Keep the tenant selection valid as domain/country change.
+  useEffect(() => {
+    const current = getValues('tenant_id');
+    if (!tenantOptions.some((o) => o.id === current)) {
+      setValue('tenant_id', tenantOptions[0]?.id ?? '', { shouldValidate: true });
+    }
+  }, [tenantOptions, getValues, setValue]);
+
   const fromPath =
     (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/';
 
-  if (status === 'authenticated') return <Navigate to={fromPath} replace />;
+  if (status === 'authenticated') {
+    // Already signed in → honour a deep-link return, else route to the
+    // stored domain workspace (gate handles the rest when context is unset).
+    const target =
+      fromPath !== '/'
+        ? fromPath
+        : storedDomain === 'insurance'
+          ? '/insurance/dashboard'
+          : storedDomain === 'banking'
+            ? '/banking/dashboard'
+            : '/';
+    return <Navigate to={target} replace />;
+  }
 
   const refreshCaptcha = async () => {
     try {
@@ -52,61 +113,84 @@ export function LoginPage() {
       setCaptcha(c);
       setValue('captcha_answer', '');
     } catch {
-      // Backend down — let the user retry by submitting again; the next
-      // captcha_required will trigger a fresh fetch.
+      /* backend down — next captcha_required retriggers a fetch */
     }
   };
 
-  const onSubmit = handleSubmit(async ({ username, password, captcha_answer }) => {
-    setServerError(null);
-    const captchaPayload =
-      captcha && captcha_answer && captcha_answer.trim()
-        ? { id: captcha.id, answer: Number(captcha_answer.trim()) }
-        : undefined;
-    try {
-      await login(username, password, captchaPayload);
-      setCaptcha(null);
-      navigate(fromPath, { replace: true });
-    } catch (err) {
-      // In dev, surface the actual failure to the console so the user
-      // can debug — the inline message is intentionally short.
-      if (import.meta.env.DEV) console.error('login failed:', err);
-      if (err instanceof HttpError) {
-        const body = err.body as { error?: string; message?: string } | undefined;
-        if (body?.error === 'captcha_required' || body?.error === 'captcha_failed') {
-          // Backend wants a (fresh) captcha — fetch and render. The
-          // existing typed creds stay in the form so the user only has
-          // to add the answer and resubmit.
-          await refreshCaptcha();
-          setServerError(
-            body.error === 'captcha_failed'
-              ? t('login.captcha_failed')
-              : t('login.captcha_required'),
-          );
-          return;
+  const onSubmit = handleSubmit(
+    async ({ username, password, captcha_answer, country, domain, tenant_id, remember }) => {
+      setServerError(null);
+      const captchaPayload =
+        captcha && captcha_answer && captcha_answer.trim()
+          ? { id: captcha.id, answer: Number(captcha_answer.trim()) }
+          : undefined;
+      try {
+        await login(username, password, captchaPayload);
+        setCaptcha(null);
+
+        // Persist the chosen context (same storage the gate + app read).
+        setCountry(country as CountryCode);
+        setDomain(domain);
+        const org = getOrganization(tenant_id);
+        if (org) {
+          const region = org.regions[0] ?? 'HQ';
+          const branch = org.branches[region]?.[0] ?? 'HQ';
+          setTenantCtx({
+            country: country as CountryCode,
+            domain,
+            organization_id: org.id,
+            region,
+            branch,
+            tenant_id: org.tenant_id,
+          });
         }
-        // status 0 means the request never reached a backend (MSW worker
-        // not registered, dev server stopped, etc.) — generic_error is
-        // misleading here since the credentials weren't even checked.
-        if (err.status === 0) {
-          setServerError(t('login.network_unreachable'));
-        } else if (err.status === 401) {
-          setServerError(t('login.invalid_credentials'));
-        } else if (err.status === 403) {
-          setServerError(t('login.locked_account'));
-        } else if (err.status === 429) {
-          setServerError(t('login.rate_limited'));
+        try {
+          window.localStorage.setItem('zorews.rememberMe', remember ? '1' : '0');
+        } catch {
+          /* private mode — best effort */
+        }
+
+        // Domain-aware redirect; deep-link return wins when present.
+        const dest =
+          fromPath !== '/'
+            ? fromPath
+            : domain === 'insurance'
+              ? '/insurance/dashboard'
+              : '/banking/dashboard';
+        navigate(dest, { replace: true });
+      } catch (err) {
+        if (import.meta.env.DEV) console.error('login failed:', err);
+        if (err instanceof HttpError) {
+          const body = err.body as { error?: string; message?: string } | undefined;
+          if (body?.error === 'captcha_required' || body?.error === 'captcha_failed') {
+            await refreshCaptcha();
+            setServerError(
+              body.error === 'captcha_failed'
+                ? t('login.captcha_failed')
+                : t('login.captcha_required'),
+            );
+            return;
+          }
+          if (err.status === 0) {
+            setServerError(t('login.network_unreachable'));
+          } else if (err.status === 401) {
+            setServerError(t('login.invalid_credentials'));
+          } else if (err.status === 403) {
+            setServerError(t('login.locked_account'));
+          } else if (err.status === 429) {
+            setServerError(t('login.rate_limited'));
+          } else {
+            const backendMsg = body?.message;
+            setServerError(
+              backendMsg ? `${t('login.generic_error')} (${backendMsg})` : t('login.generic_error'),
+            );
+          }
         } else {
-          // Last-resort: include the backend's own message if present so
-          // the user has SOMETHING actionable rather than a stock string.
-          const backendMsg = body?.message;
-          setServerError(backendMsg ? `${t('login.generic_error')} (${backendMsg})` : t('login.generic_error'));
+          setServerError(t('login.generic_error'));
         }
-      } else {
-        setServerError(t('login.generic_error'));
       }
-    }
-  });
+    },
+  );
 
   return (
     <div className="min-h-screen flex bg-white">
@@ -176,6 +260,39 @@ export function LoginPage() {
               required
             />
 
+            {/* Country */}
+            <label className="block">
+              <span className="label">{t('login.country_label')}</span>
+              <select {...register('country')} className="input" data-testid="login-country">
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.flag} {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Domain + Tenant side by side */}
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="label">{t('login.domain_label')}</span>
+                <select {...register('domain')} className="input" data-testid="login-domain">
+                  <option value="banking">Banking</option>
+                  <option value="insurance">Insurance</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="label">{t('login.tenant_label')}</span>
+                <select {...register('tenant_id')} className="input" data-testid="login-tenant">
+                  {tenantOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.short_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             {serverError && (
               <p
                 role="alert"
@@ -214,6 +331,17 @@ export function LoginPage() {
                 />
               </div>
             )}
+
+            {/* Remember me */}
+            <label className="flex items-center gap-2 text-[12.5px] text-sub select-none">
+              <input
+                type="checkbox"
+                {...register('remember')}
+                data-testid="login-remember"
+                className="h-3.5 w-3.5 rounded border-divider text-action focus:ring-action/40"
+              />
+              {t('login.remember_me')}
+            </label>
 
             <Button type="submit" className="w-full" loading={isSubmitting}>
               {t('common.sign_in')}
