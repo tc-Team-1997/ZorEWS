@@ -7,7 +7,8 @@
 //   4. Role & access     (role + 9-capability live preview)
 //   5. Operational       (domain, user type, language, timezone)
 //
-// The 11-role enterprise catalogue is rendered via ENTERPRISE_ROLES;
+// The 16-role enterprise catalogue is rendered via ENTERPRISE_ROLES,
+// filtered to the chosen domain (domain==='both' roles always show);
 // the SPA submits the mapped backend_role to auth-svc /auth/register
 // (which currently supports the 5 core roles). The richer payload
 // lives client-side until auth-svc grows the enum.
