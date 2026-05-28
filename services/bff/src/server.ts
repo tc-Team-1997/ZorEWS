@@ -5630,6 +5630,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/framework-status-matrix (T6 M7.19) — 2D cross-tab
+   *  over the M7.1 registry combining framework × status. Rows = 5
+   *  ModelFramework (canonical xgboost → … → isolation_forest); cols =
+   *  5 ModelStatus (canonical experimental → staging → production →
+   *  shadow → retired) = 25 cells. Each model in exactly one
+   *  (framework, status) cell. Per-row {framework, total, by_status (5
+   *  keys at 0 when absent), statuses_without (canonical), distinct_statuses}.
+   *  Per-col {status, total, by_framework (5 keys), frameworks_without
+   *  (canonical), distinct_frameworks}. Envelope: peak_cell (with
+   *  model_ids[]; canonical iteration tie-break; null on empty),
+   *  most_deployed_framework (highest production count), frameworks_in_production[]
+   *  (≥ 1 production model, canonical order — the "what's live?" list),
+   *  most_common_status (highest column total + canonical tie-break),
+   *  most_versatile_framework (most distinct statuses spanned),
+   *  empty_cells[] canonical row-major. Mirror of M7.14 / M5.17 / M3.14
+   *  closed × closed matrix pattern. Mounted BEFORE the /by-type/:type +
+   *  /:model_id catch-alls so the literal segment wins. Drives BIL ML
+   *  governance: "which framework dominates production? is torch stuck
+   *  in experimental while xgboost ships?". */
+  app.get(
+    '/v1/ai/models/framework-status-matrix',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAiModelFrameworkStatusMatrix } =
+        require('./ai_model_framework_status_matrix') as
+        typeof import('./ai_model_framework_status_matrix');
+      const out = buildAiModelFrameworkStatusMatrix(aiModelRegistry, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/framework-distribution (T6 M7.13) —
    *  PIVOT-BY-FRAMEWORK view over the M7.1 registry. Orthogonal to
    *  M7.12 (type coverage). 5 ModelFramework rows. Per row: count,
