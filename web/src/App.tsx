@@ -185,9 +185,16 @@ export function App() {
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />
             <Route path="admin/workflows" element={<WorkflowsPage />} />
             <Route path="admin/testing-hub" element={<TestingHubPage />} />
-            <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
-            <Route path="banking/sma" element={<SmaClassificationPage />} />
-            <Route path="banking/sectors" element={<SectorWatchPage />} />
+            {/* Banking-EWS modules — domain-guarded (symmetric with the
+                Insurance block below): an Insurance user who URL-hops here is
+                bounced to their own dashboard. Super-admin + unset-domain pass
+                through (non-breaking). /customers stays unguarded — it's a
+                cross-workflow drill-through anchor, not a banking-only page. */}
+            <Route element={<RequireDomain domain="banking" />}>
+              <Route path="banking/npa-prediction" element={<NpaPredictionPage />} />
+              <Route path="banking/sma" element={<SmaClassificationPage />} />
+              <Route path="banking/sectors" element={<SectorWatchPage />} />
+            </Route>
             <Route path="profile/sessions" element={<SessionsPage />} />
             <Route path="profile/activity" element={<LoginActivityPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
@@ -201,10 +208,12 @@ export function App() {
             <Route path="admin/anomalies" element={<AnomalyDetectionPage />} />
             <Route path="admin/reconciliation" element={<ReconciliationPage />} />
             <Route path="admin/dq-score" element={<DqScorePage />} />
-            <Route path="borrower-watch" element={<BorrowerWatchPage />} />
-            <Route path="account-behaviour" element={<AccountBehaviourPage />} />
-            <Route path="financial-ratios" element={<FinancialRatiosPage />} />
-            <Route path="fraud-signals" element={<FraudSignalsPage />} />
+            <Route element={<RequireDomain domain="banking" />}>
+              <Route path="borrower-watch" element={<BorrowerWatchPage />} />
+              <Route path="account-behaviour" element={<AccountBehaviourPage />} />
+              <Route path="financial-ratios" element={<FinancialRatiosPage />} />
+              <Route path="fraud-signals" element={<FraudSignalsPage />} />
+            </Route>
             {/* Insurance modules — domain-guarded: a Banking user who
                 URL-hops here is bounced to their own dashboard. Super-admin
                 + unset-domain pass through (non-breaking). */}

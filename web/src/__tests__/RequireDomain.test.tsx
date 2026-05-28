@@ -38,6 +38,19 @@ function renderGuarded() {
   );
 }
 
+function renderGuardedBanking() {
+  return renderWithProviders(
+    <Routes>
+      <Route element={<RequireDomain domain="banking" />}>
+        <Route path="/borrower-watch" element={<div>banking-page</div>} />
+      </Route>
+      <Route path="/banking/dashboard" element={<div>banking-dash</div>} />
+      <Route path="/insurance/dashboard" element={<div>insurance-dash</div>} />
+    </Routes>,
+    { route: '/borrower-watch' },
+  );
+}
+
 beforeEach(() => {
   setDomain(null);
   useAuth.setState({ status: 'idle', token: null, user: null });
@@ -71,5 +84,36 @@ describe('RequireDomain', () => {
     setDomain(null);
     renderGuarded();
     expect(screen.getByText('insurance-page')).toBeInTheDocument();
+  });
+});
+
+describe('RequireDomain — banking (symmetric)', () => {
+  test('insurance user (non-admin) is bounced off a banking route', () => {
+    authenticateAs(['risk_analyst']);
+    setDomain('insurance');
+    renderGuardedBanking();
+    expect(screen.queryByText('banking-page')).not.toBeInTheDocument();
+    expect(screen.getByText('insurance-dash')).toBeInTheDocument();
+  });
+
+  test('banking user reaches the banking route', () => {
+    authenticateAs(['risk_analyst']);
+    setDomain('banking');
+    renderGuardedBanking();
+    expect(screen.getByText('banking-page')).toBeInTheDocument();
+  });
+
+  test('super-admin reaches the banking route regardless of active domain', () => {
+    authenticateAs(['admin']);
+    setDomain('insurance');
+    renderGuardedBanking();
+    expect(screen.getByText('banking-page')).toBeInTheDocument();
+  });
+
+  test('no active domain → pass through (no-op, keeps direct renders working)', () => {
+    authenticateAs(['risk_analyst']);
+    setDomain(null);
+    renderGuardedBanking();
+    expect(screen.getByText('banking-page')).toBeInTheDocument();
   });
 });
