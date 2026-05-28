@@ -21970,6 +21970,55 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/config/change-hourly-volume (T6 M13.19) — CYCLIC
+   *  intraday view over the same M13.2 config-change audit source M13.18
+   *  uses, bucketing every config change by UTC hour-of-day 0..23 across
+   *  the whole drained set (no trailing window — mirrors M12.18 / M3.12).
+   *  Distinct from M13.18 (LINEAR daily trend) — answers "WHEN in the day
+   *  do config changes cluster?". Per-hour {hour, total, by_action (2
+   *  keys), by_category (5 keys), distinct_actors, distinct_keys}.
+   *  Envelope: peak_hour (earliest-hour-wins tie-break; null when zero),
+   *  quiet_hours[], mean_per_hour, busiest_action (canonical tie-break),
+   *  busiest_category, and the headline AFTER-HOURS security signal —
+   *  after_hours_changes + after_hours_pct (UTC 22:00-06:00 heuristic):
+   *  a spike of config changes at 02:00 UTC is a classic insider-threat
+   *  tell a daily trend can't surface. Mounted BEFORE the catch-all
+   *  GET /v1/admin/config + `/:key` routes so the literal segment wins. */
+  app.get(
+    '/v1/admin/config/change-hourly-volume',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { summarizeConfigChangeHourlyVolume, ConfigChangeHourlyVolumeError } =
+        require('./admin_config_change_hourly_volume') as
+        typeof import('./admin_config_change_hourly_volume');
+      const page = auditTrailStore.list(req.tenant!.tenant_id, {
+        resource_type: 'config',
+        action: 'config.update,config.reset',
+        page_size: 10_000,
+      });
+      try {
+        const out = summarizeConfigChangeHourlyVolume(
+          req.tenant!.tenant_id,
+          page.items,
+          now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof ConfigChangeHourlyVolumeError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/admin/config/catalog (T6 M13.10) — schema-only view of the
    *  config registry: per-key {key, category, type, default_value,
    *  description} grouped by category + by_type counts. Lets the SPA
