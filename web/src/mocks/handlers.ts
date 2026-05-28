@@ -3810,6 +3810,203 @@ const _mswInsuranceUnderwritingHandlers = [
   }),
 ];
 
+// ── Insurance EWS · Module 7 — Channel Risk (dev/test mock) ───────────
+const _chrChannels = ['agent', 'broker', 'bancassurance', 'direct', 'online'] as const;
+const _chrIndicators = ['free_look_cancellation', 'early_surrender', 'suitability_mismatch', 'churning'] as const;
+const _chrComplaintCats = ['mis_selling', 'claim_dispute', 'servicing_delay', 'premium_dispute', 'unauthorised_transaction'] as const;
+const _chrNames = [
+  'A. Bhattacharya', 'S. Pillai', 'R. Verma', 'M. Kulkarni', 'J. Thomas',
+  'D. Saxena', 'P. Banerjee', 'N. Krishnan', 'V. Chauhan', 'K. Patel',
+];
+const _chrW = { persistency: 0.25, fraud: 0.3, complaint: 0.15, mis_selling: 0.3 };
+function _chrBand(score: number): 'healthy' | 'watch' | 'elevated' | 'critical' {
+  if (score >= 0.75) return 'critical';
+  if (score >= 0.5) return 'elevated';
+  if (score >= 0.25) return 'watch';
+  return 'healthy';
+}
+function _chrSev(band: string): 'info' | 'warning' | 'critical' {
+  if (band === 'critical') return 'critical';
+  if (band === 'elevated') return 'warning';
+  return 'info';
+}
+function _chrAgents(): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < 40; i++) {
+    const channel = _chrChannels[i % _chrChannels.length];
+    const nameIdx = i % _chrNames.length;
+    const persistency13m = Math.round((0.5 + ((i * 11) % 45) / 100) * 10000) / 10000;
+    const sub = {
+      persistency: Math.round(Math.max(0, 1 - persistency13m) * 10000) / 10000,
+      fraud: Math.round(((i * 13) % 100 / 100) ** 2.2 * 10000) / 10000,
+      complaint: Math.round(((i * 17) % 100 / 100) ** 1.6 * 10000) / 10000,
+      mis_selling: Math.round(((i * 23) % 100 / 100) ** 1.8 * 10000) / 10000,
+    };
+    const composite =
+      Math.round(
+        Math.max(0, Math.min(1, sub.persistency * _chrW.persistency + sub.fraud * _chrW.fraud + sub.complaint * _chrW.complaint + sub.mis_selling * _chrW.mis_selling)) * 10000,
+      ) / 10000;
+    out.push({
+      agent_id: `AGT-BANK_DEMO-${50000 + i}`,
+      agent_name: _chrNames[nameIdx],
+      channel,
+      composite_risk: composite,
+      sub_scores: sub,
+      policies_sold_90d: 10 + ((i * 7) % 140),
+      persistency_13m: persistency13m,
+      band: _chrBand(composite),
+      rank: 0,
+    });
+  }
+  return out
+    .sort((a, b) => (b.composite_risk as number) - (a.composite_risk as number) || (a.agent_id as string).localeCompare(b.agent_id as string))
+    .map((a, i) => ({ ...a, rank: i + 1 }));
+}
+const _mswInsuranceChannelRiskHandlers = [
+  http.get('/v1/insurance/channel-risk/dashboard', () => {
+    const agents = _chrAgents();
+    const channel_health = _chrChannels
+      .map((ch) => {
+        const inCh = agents.filter((a) => a.channel === ch);
+        const n = inCh.length || 1;
+        const mean = (sel: (a: Record<string, unknown>) => number) => Math.round((inCh.reduce((acc, a) => acc + sel(a), 0) / n) * 10000) / 10000;
+        const meanRisk = mean((a) => a.composite_risk as number);
+        return {
+          channel: ch,
+          agent_count: inCh.length,
+          mean_risk: meanRisk,
+          high_risk_agents: inCh.filter((a) => (a.composite_risk as number) >= 0.5).length,
+          persistency_13m: mean((a) => a.persistency_13m as number),
+          complaint_rate: mean((a) => (a.sub_scores as Record<string, number>).complaint),
+          mis_selling_rate: mean((a) => (a.sub_scores as Record<string, number>).mis_selling),
+          band: _chrBand(meanRisk),
+        };
+      })
+      .sort((a, b) => b.mean_risk - a.mean_risk || a.channel.localeCompare(b.channel));
+    let seq = 0;
+    const mis_selling_alerts = agents
+      .filter((a) => (a.sub_scores as Record<string, number>).mis_selling >= 0.4)
+      .map((a) => {
+        const ms = (a.sub_scores as Record<string, number>).mis_selling;
+        const band = _chrBand(ms);
+        return {
+          alert_id: `MSL-BANK_DEMO-${700000 + seq++}`,
+          agent_id: a.agent_id,
+          agent_name: a.agent_name,
+          channel: a.channel,
+          indicator: _chrIndicators[seq % _chrIndicators.length],
+          count_30d: 1 + (seq % 12),
+          severity: _chrSev(band),
+          status: 'open',
+          raised_at: new Date().toISOString(),
+        };
+      })
+      .sort((a, b) => {
+        const rank = { critical: 0, warning: 1, info: 2 } as Record<string, number>;
+        return rank[a.severity] - rank[b.severity] || b.count_30d - a.count_30d || a.alert_id.localeCompare(b.alert_id);
+      });
+    const complaint_analytics = _chrComplaintCats
+      .map((cat, i) => {
+        const count = 30 + i * 18;
+        const resolved = Math.round(count * 0.7);
+        return {
+          category: cat,
+          count_30d: count,
+          resolved,
+          pending: count - resolved,
+          mean_resolution_days: Math.round((5 + i * 3) * 10000) / 10000,
+          trend: i % 3 === 0 ? 'up' : i % 3 === 1 ? 'flat' : 'down',
+        };
+      })
+      .sort((a, b) => b.count_30d - a.count_30d || a.category.localeCompare(b.category));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        totals: {
+          agents_scored: agents.length,
+          high_risk_agents: agents.filter((a) => (a.composite_risk as number) >= 0.5).length,
+          critical_agents: agents.filter((a) => a.band === 'critical').length,
+          open_mis_selling_alerts: mis_selling_alerts.length,
+          complaints_30d: complaint_analytics.reduce((acc, c) => acc + c.count_30d, 0),
+          worst_channel: channel_health[0]?.channel ?? null,
+        },
+        channel_risk_leaderboard: agents.slice(0, 10),
+        channel_health,
+        mis_selling_alerts: mis_selling_alerts.slice(0, 12),
+        complaint_analytics,
+        model_version: 'channel-risk-stub-v1',
+      }),
+    );
+  }),
+  http.post('/v1/insurance/channel-risk/analyze', async ({ request }) => {
+    const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (raw && typeof raw === 'object' && 'body' in raw ? raw.body : raw) as Record<string, unknown>;
+    const persistency13m = Number(body?.persistency_13m ?? 0.8);
+    const fraudFlags = Number(body?.fraud_flag_count ?? 0);
+    const complaintRate = Number(body?.complaint_rate ?? 0.05);
+    const freeLook = Number(body?.free_look_cancellation_rate ?? 0.05);
+    const earlySurrender = Number(body?.early_surrender_rate ?? 0.05);
+    const suitability = Number(body?.suitability_mismatch_rate ?? 0.05);
+    const sub = {
+      persistency: Math.round(Math.max(0, Math.min(1, 1 - persistency13m)) * 10000) / 10000,
+      fraud: Math.round(Math.min(1, fraudFlags * 0.2) * 10000) / 10000,
+      complaint: Math.round(Math.min(1, complaintRate * 2) * 10000) / 10000,
+      mis_selling: Math.round(Math.min(1, freeLook * 0.4 + earlySurrender * 0.35 + suitability * 0.5) * 10000) / 10000,
+    };
+    const composite =
+      Math.round(
+        Math.max(0, Math.min(1, sub.persistency * _chrW.persistency + sub.fraud * _chrW.fraud + sub.complaint * _chrW.complaint + sub.mis_selling * _chrW.mis_selling)) * 10000,
+      ) / 10000;
+    const band = _chrBand(composite);
+    const drivers = [
+      { driver: 'persistency', sub_score: sub.persistency, weight: Math.round(sub.persistency * _chrW.persistency * 10000) / 10000, detail: `13-month persistency ${(persistency13m * 100).toFixed(0)}%` },
+      { driver: 'fraud', sub_score: sub.fraud, weight: Math.round(sub.fraud * _chrW.fraud * 10000) / 10000, detail: `${fraudFlags} open fraud flag(s)` },
+      { driver: 'complaint', sub_score: sub.complaint, weight: Math.round(sub.complaint * _chrW.complaint * 10000) / 10000, detail: `Complaint rate ${(complaintRate * 100).toFixed(1)}%` },
+      { driver: 'mis_selling', sub_score: sub.mis_selling, weight: Math.round(sub.mis_selling * _chrW.mis_selling * 10000) / 10000, detail: `Free-look ${(freeLook * 100).toFixed(0)}% · early-surrender ${(earlySurrender * 100).toFixed(0)}% · suitability-mismatch ${(suitability * 100).toFixed(0)}%` },
+    ].sort((a, b) => b.weight - a.weight);
+    return HttpResponse.json(
+      envelope({
+        agent_id: body?.agent_id ?? 'AGT-ADHOC',
+        channel: body?.channel ?? 'agent',
+        composite_risk: composite,
+        band,
+        sub_scores: sub,
+        drivers,
+        requires_action: band === 'elevated' || band === 'critical',
+        recommended_action:
+          band === 'critical'
+            ? 'Suspend agent code + conduct-risk review before reinstatement'
+            : band === 'elevated'
+              ? 'Escalate to channel-compliance for targeted review'
+              : band === 'watch'
+                ? 'Add to watch-list — sample 10% of policies for QA call-back'
+                : 'Within tolerance — no action',
+        model_version: 'channel-risk-stub-v1',
+        analyzed_at: new Date().toISOString(),
+      }),
+    );
+  }),
+  http.get('/v1/insurance/channel-risk/high-risk', ({ request }) => {
+    const url = new URL(request.url);
+    const channel = url.searchParams.get('channel');
+    const band = url.searchParams.get('band');
+    let rows = _chrAgents();
+    if (channel && channel !== 'all') rows = rows.filter((a) => a.channel === channel);
+    if (band && band !== 'all') rows = rows.filter((a) => a.band === band);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        channel_filter: channel ?? 'all',
+        band_filter: band ?? 'all',
+        total: rows.length,
+        agents: rows.slice(0, 50),
+      }),
+    );
+  }),
+];
+
 export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
@@ -3820,6 +4017,7 @@ export const handlers = [
   ..._mswInsuranceSolvencyHandlers,
   ..._mswInsurancePersistencyHandlers,
   ..._mswInsuranceUnderwritingHandlers,
+  ..._mswInsuranceChannelRiskHandlers,
   // ── Auth ──────────────────────────────────────────────────────────
   http.post('/auth/login', async ({ request }) => {
     const body = (await request.json()) as {

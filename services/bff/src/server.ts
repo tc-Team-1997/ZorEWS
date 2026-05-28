@@ -586,6 +586,12 @@ import {
   listDeviations as listInsuranceDeviations,
   UnderwritingError as InsuranceUnderwritingError,
 } from './insurance_underwriting';
+import {
+  buildChannelRiskDashboard,
+  analyzeAgent,
+  listHighRiskAgents,
+  ChannelRiskError,
+} from './insurance_channel_risk';
 import { computeRiskScore, ScoringInputError, type ScoringItem, type ScoringThresholds } from './bil_scoring';
 import {
   defaultIndicatorWeightLookup,
@@ -12949,6 +12955,70 @@ export function makeApp(deps: AppDeps = {}) {
         res.json(wrapResponse(list, ctx));
       } catch (e) {
         if (e instanceof InsuranceUnderwritingError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  // ── Insurance EWS · Module 7 — Channel Risk ──────────────────────────
+  //
+  // Distribution-force risk scoring. Composite blend of persistency / fraud
+  // / complaint / mis-selling sub-scores per agent + per channel. Routes:
+  //   GET  /v1/insurance/channel-risk/dashboard
+  //   POST /v1/insurance/channel-risk/analyze
+  //   GET  /v1/insurance/channel-risk/high-risk?channel=&band=&limit=
+
+  app.get(
+    '/v1/insurance/channel-risk/dashboard',
+    requireTenantMw,
+    requireRole('insurance:channel_risk:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboard = buildChannelRiskDashboard(req.tenant!.tenant_id, now());
+      res.json(wrapResponse(dashboard, ctx));
+    },
+  );
+
+  app.post(
+    '/v1/insurance/channel-risk/analyze',
+    requireTenantMw,
+    requireRole('insurance:channel_risk:analyze'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body && typeof req.body === 'object' && 'body' in req.body && req.body.body
+        ? req.body.body
+        : req.body;
+      try {
+        const result = analyzeAgent(raw, now());
+        res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof ChannelRiskError) {
+          res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+          return;
+        }
+        throw e;
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/channel-risk/high-risk',
+    requireTenantMw,
+    requireRole('insurance:channel_risk:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const list = listHighRiskAgents(req.tenant!.tenant_id, now(), {
+          channel: typeof req.query.channel === 'string' ? req.query.channel : undefined,
+          band: typeof req.query.band === 'string' ? req.query.band : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        res.json(wrapResponse(list, ctx));
+      } catch (e) {
+        if (e instanceof ChannelRiskError) {
           res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
           return;
         }

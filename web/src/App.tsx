@@ -66,6 +66,7 @@ import { FraudDetectionPage } from '@/modules/insurance/FraudDetectionPage';
 import { SolvencyWatchPage } from '@/modules/insurance/SolvencyWatchPage';
 import { PersistencyWatchPage } from '@/modules/insurance/PersistencyWatchPage';
 import { UnderwritingDeviationPage } from '@/modules/insurance/UnderwritingDeviationPage';
+import { ChannelRiskPage } from '@/modules/insurance/ChannelRiskPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -192,6 +193,7 @@ export function App() {
             <Route path="insurance/solvency" element={<SolvencyWatchPage />} />
             <Route path="insurance/persistency" element={<PersistencyWatchPage />} />
             <Route path="insurance/underwriting" element={<UnderwritingDeviationPage />} />
+            <Route path="insurance/channel-risk" element={<ChannelRiskPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />

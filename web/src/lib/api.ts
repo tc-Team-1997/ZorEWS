@@ -2646,6 +2646,22 @@ export const api = {
       .get<EnvelopeBody<DeviationListShape>>(`/v1/insurance/underwriting/deviations${qs ? '?' + qs : ''}`)
       .then((r) => r.data);
   },
+
+  // ── Insurance EWS · Module 7 — Channel Risk ───────────────────────────
+  insuranceChannelRiskDashboard: () =>
+    http.get<EnvelopeBody<ChannelRiskDashboardShape>>('/v1/insurance/channel-risk/dashboard').then((r) => r.data),
+  insuranceChannelRiskAnalyze: (input: AnalyzeAgentInputShape) =>
+    http.post<EnvelopeBody<AgentRiskAnalysisShape>>('/v1/insurance/channel-risk/analyze', input).then((r) => r.data),
+  insuranceChannelRiskHighRisk: (q: { channel?: string; band?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.channel) params.set('channel', q.channel);
+    if (q.band) params.set('band', q.band);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<HighRiskAgentListShape>>(`/v1/insurance/channel-risk/high-risk${qs ? '?' + qs : ''}`)
+      .then((r) => r.data);
+  },
 };
 
 // ── Insurance EWS · Module 6 types (mirrors services/bff/src/insurance_underwriting.ts) ──
@@ -2722,6 +2738,112 @@ export interface DeviationListShape {
   status_filter: DeviationStatusShape | 'all';
   total: number;
   deviations: DeviationRowShape[];
+}
+
+// ── Insurance EWS · Module 7 types (mirrors services/bff/src/insurance_channel_risk.ts) ──
+export type ChannelTypeShape = 'agent' | 'broker' | 'bancassurance' | 'direct' | 'online';
+export type ChannelRiskBandShape = 'healthy' | 'watch' | 'elevated' | 'critical';
+export type MisSellingIndicatorShape = 'free_look_cancellation' | 'early_surrender' | 'suitability_mismatch' | 'churning';
+export type MisSellingSeverityShape = 'info' | 'warning' | 'critical';
+export type ComplaintCategoryShape =
+  | 'mis_selling'
+  | 'claim_dispute'
+  | 'servicing_delay'
+  | 'premium_dispute'
+  | 'unauthorised_transaction';
+
+export interface SubScoresShape {
+  persistency: number;
+  fraud: number;
+  complaint: number;
+  mis_selling: number;
+}
+export interface AgentRiskRowShape {
+  agent_id: string;
+  agent_name: string;
+  channel: ChannelTypeShape;
+  composite_risk: number;
+  sub_scores: SubScoresShape;
+  policies_sold_90d: number;
+  persistency_13m: number;
+  band: ChannelRiskBandShape;
+  rank: number;
+}
+export interface ChannelHealthRowShape {
+  channel: ChannelTypeShape;
+  agent_count: number;
+  mean_risk: number;
+  high_risk_agents: number;
+  persistency_13m: number;
+  complaint_rate: number;
+  mis_selling_rate: number;
+  band: ChannelRiskBandShape;
+}
+export interface MisSellingAlertShape {
+  alert_id: string;
+  agent_id: string;
+  agent_name: string;
+  channel: ChannelTypeShape;
+  indicator: MisSellingIndicatorShape;
+  count_30d: number;
+  severity: MisSellingSeverityShape;
+  status: 'open' | 'acknowledged' | 'resolved';
+  raised_at: string;
+}
+export interface ComplaintAnalyticsRowShape {
+  category: ComplaintCategoryShape;
+  count_30d: number;
+  resolved: number;
+  pending: number;
+  mean_resolution_days: number;
+  trend: 'up' | 'flat' | 'down';
+}
+export interface ChannelRiskDashboardShape {
+  tenant_id: string;
+  generated_at: string;
+  totals: {
+    agents_scored: number;
+    high_risk_agents: number;
+    critical_agents: number;
+    open_mis_selling_alerts: number;
+    complaints_30d: number;
+    worst_channel: string | null;
+  };
+  channel_risk_leaderboard: AgentRiskRowShape[];
+  channel_health: ChannelHealthRowShape[];
+  mis_selling_alerts: MisSellingAlertShape[];
+  complaint_analytics: ComplaintAnalyticsRowShape[];
+  model_version: string;
+}
+export interface AnalyzeAgentInputShape {
+  agent_id?: string;
+  channel?: string;
+  persistency_13m?: number;
+  fraud_flag_count?: number;
+  complaint_rate?: number;
+  free_look_cancellation_rate?: number;
+  early_surrender_rate?: number;
+  suitability_mismatch_rate?: number;
+}
+export interface AgentRiskAnalysisShape {
+  agent_id: string;
+  channel: ChannelTypeShape;
+  composite_risk: number;
+  band: ChannelRiskBandShape;
+  sub_scores: SubScoresShape;
+  drivers: { driver: string; sub_score: number; weight: number; detail: string }[];
+  requires_action: boolean;
+  recommended_action: string;
+  model_version: string;
+  analyzed_at: string;
+}
+export interface HighRiskAgentListShape {
+  tenant_id: string;
+  generated_at: string;
+  channel_filter: ChannelTypeShape | 'all';
+  band_filter: ChannelRiskBandShape | 'all';
+  total: number;
+  agents: AgentRiskRowShape[];
 }
 
 // ── Insurance EWS · Module 5 types (mirrors services/bff/src/insurance_persistency.ts) ──

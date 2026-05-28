@@ -25,6 +25,7 @@ import {
   Users,
   UsersRound,
   SlidersHorizontal,
+  Network,
   Briefcase,
   FlaskConical,
   FileBarChart,
@@ -155,6 +156,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/insurance/solvency', i18nKey: 'insurance_solvency', icon: Gauge, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/persistency', i18nKey: 'insurance_persistency', icon: Activity, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/underwriting', i18nKey: 'insurance_underwriting', icon: SlidersHorizontal, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/insurance/channel-risk', i18nKey: 'insurance_channel_risk', icon: Network, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
     ],
   },
 
