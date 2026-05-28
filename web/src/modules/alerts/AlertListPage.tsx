@@ -12,6 +12,7 @@ import {
   asAlertDomainFilter,
   type AlertDomainFilter,
 } from './alertDomain';
+import { AlertSlaBadge } from './AlertSlaBadge';
 
 const DOMAIN_FILTERS: ReadonlyArray<{ value: AlertDomainFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -218,6 +219,12 @@ export function AlertListPage() {
       width: 70,
       align: 'right',
       render: (a) => <span className="tabular text-ink-sub">{ageLabel(a.age_min)}</span>,
+    },
+    {
+      key: 'sla',
+      header: 'SLA',
+      width: 120,
+      render: (a) => <AlertSlaBadge severity={a.severity} ageMin={a.age_min} />,
     },
     {
       key: 'assignee',

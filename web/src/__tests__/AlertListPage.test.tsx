@@ -236,3 +236,16 @@ describe('AlertListPage — domain filter', () => {
     });
   });
 });
+
+// Phase 4 — Alert Center SLA column (additive, no API change).
+describe('AlertListPage — SLA column', () => {
+  it('renders the SLA column header + a per-row SLA badge', async () => {
+    renderWithProviders(<AlertListPage />);
+    await waitFor(() => screen.getByText(/Achieng Otieno/));
+    expect(screen.getByText('SLA')).toBeInTheDocument(); // column header
+    // Each row computes an SLA posture (on_time / warning / breached).
+    expect(
+      document.querySelectorAll('[data-testid^="alert-sla-"]').length,
+    ).toBeGreaterThan(0);
+  });
+});
