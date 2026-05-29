@@ -12563,6 +12563,104 @@ const __mswTimelineHandlers = [
 handlers.push(...__mswTimelineHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// §2.1.8 — Branch / Geography heatmap handlers (deterministic synthesis).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswBhHeat = 'low' | 'medium' | 'high' | 'critical';
+type MswBhRegion = 'North' | 'South' | 'East' | 'West' | 'Central' | 'Coastal';
+const __MSW_BH_REGIONS: MswBhRegion[] = ['North', 'South', 'East', 'West', 'Central', 'Coastal'];
+interface MswBranchDef { branch_id: string; branch_name: string; region: MswBhRegion; city: string }
+const __MSW_BRANCHES: MswBranchDef[] = [
+  { branch_id: 'BR-N-01', branch_name: 'Delhi Connaught Place', region: 'North', city: 'Delhi' },
+  { branch_id: 'BR-N-02', branch_name: 'Chandigarh Sector 17', region: 'North', city: 'Chandigarh' },
+  { branch_id: 'BR-N-03', branch_name: 'Jaipur MI Road', region: 'North', city: 'Jaipur' },
+  { branch_id: 'BR-S-01', branch_name: 'Bengaluru MG Road', region: 'South', city: 'Bengaluru' },
+  { branch_id: 'BR-S-02', branch_name: 'Chennai T Nagar', region: 'South', city: 'Chennai' },
+  { branch_id: 'BR-S-03', branch_name: 'Hyderabad Banjara Hills', region: 'South', city: 'Hyderabad' },
+  { branch_id: 'BR-E-01', branch_name: 'Kolkata Park Street', region: 'East', city: 'Kolkata' },
+  { branch_id: 'BR-E-02', branch_name: 'Patna Boring Road', region: 'East', city: 'Patna' },
+  { branch_id: 'BR-W-01', branch_name: 'Mumbai Fort', region: 'West', city: 'Mumbai' },
+  { branch_id: 'BR-W-02', branch_name: 'Pune FC Road', region: 'West', city: 'Pune' },
+  { branch_id: 'BR-W-03', branch_name: 'Ahmedabad CG Road', region: 'West', city: 'Ahmedabad' },
+  { branch_id: 'BR-C-01', branch_name: 'Bhopal MP Nagar', region: 'Central', city: 'Bhopal' },
+  { branch_id: 'BR-C-02', branch_name: 'Nagpur Sitabuldi', region: 'Central', city: 'Nagpur' },
+  { branch_id: 'BR-CO-01', branch_name: 'Kochi Marine Drive', region: 'Coastal', city: 'Kochi' },
+  { branch_id: 'BR-CO-02', branch_name: 'Visakhapatnam Beach Road', region: 'Coastal', city: 'Visakhapatnam' },
+  { branch_id: 'BR-CO-03', branch_name: 'Goa Panaji', region: 'Coastal', city: 'Panaji' },
+];
+function __mswBhHash(s: string): number { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+function __mswBhRng(seed: number): () => number { let a = seed; return () => { a = (a + 0x6d2b79f5) | 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 0x100000000; }; }
+function __mswBhHeatFor(npa: number): MswBhHeat { return npa >= 8 ? 'critical' : npa >= 5 ? 'high' : npa >= 2.5 ? 'medium' : 'low'; }
+const __MSW_BH_RANK: Record<MswBhHeat, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+function __mswBhMetrics(b: MswBranchDef, day: string) {
+  const rng = __mswBhRng(__mswBhHash(`BANK_DEMO|${b.branch_id}|${day}`));
+  return {
+    npa_ratio_pct: Math.round(rng() * 11 * 100) / 100,
+    total_customers: Math.round(30 + rng() * 180),
+    total_outstanding_kes: Math.round(300_000_000 + rng() * 3_500_000_000),
+    delta_30d_pct: Math.round((rng() * 4 - 2) * 100) / 100,
+  };
+}
+
+const __mswBranchHandlers = [
+  http.get('/v1/banking/branches/heatmap', ({ request }) => {
+    const u = new URL(request.url);
+    const dimension = u.searchParams.get('dimension') === 'region' ? 'region' : 'branch';
+    const day = new Date().toISOString().slice(0, 10);
+    const counts: Record<MswBhHeat, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    type Cell = { id: string; label: string; region: MswBhRegion; city: string | null; branch_count: number | null; npa_ratio_pct: number; total_customers: number; total_outstanding_kes: number; delta_30d_pct: number; heat_level: MswBhHeat };
+    let cells: Cell[];
+    if (dimension === 'branch') {
+      cells = __MSW_BRANCHES.map((b) => {
+        const m = __mswBhMetrics(b, day);
+        return { id: b.branch_id, label: b.branch_name, region: b.region, city: b.city, branch_count: null, ...m, heat_level: __mswBhHeatFor(m.npa_ratio_pct) };
+      });
+    } else {
+      cells = __MSW_BH_REGIONS.map((region) => {
+        const branches = __MSW_BRANCHES.filter((b) => b.region === region);
+        let cust = 0, out = 0, npaNum = 0, deltaNum = 0;
+        for (const b of branches) { const m = __mswBhMetrics(b, day); cust += m.total_customers; out += m.total_outstanding_kes; npaNum += m.npa_ratio_pct * m.total_customers; deltaNum += m.delta_30d_pct * m.total_customers; }
+        const npa = cust > 0 ? Math.round((npaNum / cust) * 100) / 100 : 0;
+        return { id: region, label: region, region, city: null, branch_count: branches.length, npa_ratio_pct: npa, total_customers: cust, total_outstanding_kes: out, delta_30d_pct: cust > 0 ? Math.round((deltaNum / cust) * 100) / 100 : 0, heat_level: __mswBhHeatFor(npa) };
+      });
+    }
+    for (const c of cells) counts[c.heat_level]++;
+    cells.sort((a, b) => __MSW_BH_RANK[a.heat_level] - __MSW_BH_RANK[b.heat_level] || b.npa_ratio_pct - a.npa_ratio_pct);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), dimension, total_cells: cells.length, by_heat_level: counts, cells }));
+  }),
+
+  http.get('/v1/banking/branches/:branch_id/deep-dive', ({ params }) => {
+    const id = String(params.branch_id);
+    const branch = __MSW_BRANCHES.find((b) => b.branch_id === id);
+    if (!branch) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_branch', message: `unknown branch ${id}`, severity: 'MEDIUM' } }, { status: 404 });
+    const day = new Date().toISOString().slice(0, 10);
+    const m = __mswBhMetrics(branch, day);
+    const trend = Array.from({ length: 12 }, (_, i) => {
+      const mo = new Date(); mo.setUTCMonth(mo.getUTCMonth() - (11 - i));
+      const base = Math.max(0.4, m.npa_ratio_pct - 2 + i * 0.15 + (i % 3) * 0.3);
+      return { month: mo.toISOString().slice(0, 7), npa_pct: Math.round(base * 100) / 100 };
+    });
+    trend[11].npa_pct = m.npa_ratio_pct;
+    const FIRST = ['Alice', 'Rajesh', 'Priya', 'Mohan', 'Vikram'], LAST = ['Patel', 'Kumar', 'Sharma', 'Singh', 'Reddy'];
+    const top = Array.from({ length: 5 }, (_, i) => { const r = __mswBhRng(__mswBhHash(`BANK_DEMO|${id}|cust|${i}`)); return { customer_id: `c-${200000 + i + Math.floor(r() * 1000)}`, name: `${FIRST[Math.floor(r() * 5)]} ${LAST[Math.floor(r() * 5)]}`, pd: Math.round((0.45 + r() * 0.5) * 100) / 100, outstanding_kes: Math.round(8_000_000 + r() * 80_000_000) }; }).sort((a, b) => b.pd - a.pd);
+    const SECTORS = ['Manufacturing', 'Real_Estate', 'Retail_Trade', 'Textiles', 'Logistics', 'Hospitality'];
+    const sector_mix = SECTORS.map((sector, idx) => { const r = __mswBhRng(__mswBhHash(`BANK_DEMO|${id}|sector|${idx}`)); return { sector, customers: Math.round(5 + r() * 40), npa_ratio_pct: Math.round(r() * 12 * 100) / 100 }; }).sort((a, b) => b.npa_ratio_pct - a.npa_ratio_pct);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', branch_id: id, branch_name: branch.branch_name, region: branch.region, city: branch.city, generated_at: new Date().toISOString(), npa_ratio_pct: m.npa_ratio_pct, total_customers: m.total_customers, total_outstanding_kes: m.total_outstanding_kes, heat_level: __mswBhHeatFor(m.npa_ratio_pct), npa_trend_12m: trend, top_at_risk_customers: top, sector_mix }));
+  }),
+
+  http.get('/v1/banking/branches/:branch_id', ({ params }) => {
+    const id = String(params.branch_id);
+    const branch = __MSW_BRANCHES.find((b) => b.branch_id === id);
+    if (!branch) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_branch', message: `unknown branch ${id}`, severity: 'MEDIUM' } }, { status: 404 });
+    const day = new Date().toISOString().slice(0, 10);
+    const m = __mswBhMetrics(branch, day);
+    return HttpResponse.json(envelope({ id: branch.branch_id, label: branch.branch_name, region: branch.region, city: branch.city, branch_count: null, ...m, heat_level: __mswBhHeatFor(m.npa_ratio_pct), generated_at: new Date().toISOString() }));
+  }),
+];
+
+handlers.push(...__mswBranchHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

@@ -35853,6 +35853,73 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   // ──────────────────────────────────────────────────────────────────
+  // Module #8 — Branch / Geography Risk heatmap (§2.1.8).
+  //   Geographic / org-unit view; distinct from Sector Watch (industry).
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/branches/heatmap',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildBranchHeatmap } =
+          require('./banking_branch_heatmap') as typeof import('./banking_branch_heatmap');
+        const dim = (req.query.dimension as string) === 'region' ? 'region' : 'branch';
+        return res.json(wrapResponse(buildBranchHeatmap(req.tenant!.tenant_id, dim, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews = code === 'invalid_dimension' ? 'EWS_400_invalid_dimension' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'branch_heatmap_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // Deep-dive registered BEFORE the bare /:branch_id so the literal
+  // `/deep-dive` segment isn't captured as a branch id.
+  app.get(
+    '/v1/banking/branches/:branch_id/deep-dive',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildBranchDeepDive } =
+          require('./banking_branch_heatmap') as typeof import('./banking_branch_heatmap');
+        return res.json(wrapResponse(buildBranchDeepDive(req.tenant!.tenant_id, req.params.branch_id, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_branch' ? 404 : 400;
+        const ews = code === 'unknown_branch' ? 'EWS_404_unknown_branch' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'branch_deep_dive_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/branches/:branch_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildBranchSummary } =
+          require('./banking_branch_heatmap') as typeof import('./banking_branch_heatmap');
+        return res.json(wrapResponse(buildBranchSummary(req.tenant!.tenant_id, req.params.branch_id, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_branch' ? 404 : 400;
+        const ews = code === 'unknown_branch' ? 'EWS_404_unknown_branch' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'branch_summary_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #5 — NPA Prediction wrap (§2.1.5)
   // ──────────────────────────────────────────────────────────────────
 

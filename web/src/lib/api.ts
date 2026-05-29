@@ -1925,6 +1925,22 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // §2.1.8 — Branch / Geography Risk heatmap
+  branchHeatmap: (dimension: 'branch' | 'region' = 'branch') =>
+    http
+      .get<EnvelopeBody<BranchHeatmapReport>>(`/v1/banking/branches/heatmap?dimension=${dimension}`)
+      .then((r) => r.data),
+  branchSummary: (branch_id: string) =>
+    http
+      .get<EnvelopeBody<BranchSummary>>(`/v1/banking/branches/${encodeURIComponent(branch_id)}`)
+      .then((r) => r.data),
+  branchDeepDive: (branch_id: string) =>
+    http
+      .get<EnvelopeBody<BranchDeepDiveReport>>(
+        `/v1/banking/branches/${encodeURIComponent(branch_id)}/deep-dive`,
+      )
+      .then((r) => r.data),
+
   // §2.1.9 — Borrower Timeline (per-borrower risk-event stream)
   borrowerTimeline: (
     customer_id: string,
@@ -4895,6 +4911,54 @@ export interface CollectionAccountDetailReport extends CollectionAccount {
   ptp_history: CollectionPtpEntry[];
   contact_history: CollectionContactEntry[];
   recovery_factors: { factor: string; weight: number; direction: 'positive' | 'negative' }[];
+}
+
+// ── §2.1.8 Branch / Geography heatmap shapes (mirror BFF banking_branch_heatmap.ts) ──
+
+export type BranchHeatLevel = 'low' | 'medium' | 'high' | 'critical';
+export type BranchRegion = 'North' | 'South' | 'East' | 'West' | 'Central' | 'Coastal';
+export type BranchHeatmapDimension = 'branch' | 'region';
+
+export interface BranchHeatCell {
+  id: string;
+  label: string;
+  region: BranchRegion;
+  city: string | null;
+  branch_count: number | null;
+  npa_ratio_pct: number;
+  total_customers: number;
+  total_outstanding_kes: number;
+  delta_30d_pct: number;
+  heat_level: BranchHeatLevel;
+}
+
+export interface BranchHeatmapReport {
+  tenant_id: string;
+  generated_at: string;
+  dimension: BranchHeatmapDimension;
+  total_cells: number;
+  by_heat_level: Record<BranchHeatLevel, number>;
+  cells: BranchHeatCell[];
+}
+
+export interface BranchSummary extends BranchHeatCell {
+  generated_at: string;
+}
+
+export interface BranchDeepDiveReport {
+  tenant_id: string;
+  branch_id: string;
+  branch_name: string;
+  region: BranchRegion;
+  city: string;
+  generated_at: string;
+  npa_ratio_pct: number;
+  total_customers: number;
+  total_outstanding_kes: number;
+  heat_level: BranchHeatLevel;
+  npa_trend_12m: { month: string; npa_pct: number }[];
+  top_at_risk_customers: { customer_id: string; name: string; pd: number; outstanding_kes: number }[];
+  sector_mix: { sector: string; customers: number; npa_ratio_pct: number }[];
 }
 
 // ── §2.1.9 Borrower Timeline shapes (mirror BFF banking_borrower_timeline.ts) ──
