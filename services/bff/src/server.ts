@@ -837,6 +837,11 @@ import {
   type ExperimentParamValue,
 } from './ai_experiments';
 import {
+  defaultAiDriftStore,
+  AiDriftError,
+  type AiDriftStore,
+} from './ai_drift';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1303,6 +1308,8 @@ export interface AppDeps {
   aiPredictionStore?: AiPredictionStore;
   /** T7 M10 — experiment tracking store (in-memory default; pg swap via 040_ai_experiments.sql). */
   aiExperimentStore?: AiExperimentStore;
+  /** T7 M7 — drift detection store (operational surface over ml/monitoring/drift.py concepts). */
+  aiDriftStore?: AiDriftStore;
   /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
@@ -1592,6 +1599,7 @@ export function makeApp(deps: AppDeps = {}) {
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const aiPredictionStore = deps.aiPredictionStore ?? defaultAiPredictionStore;
   const aiExperimentStore = deps.aiExperimentStore ?? defaultAiExperimentStore;
+  const aiDriftStore = deps.aiDriftStore ?? defaultAiDriftStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -6542,6 +6550,92 @@ export function makeApp(deps: AppDeps = {}) {
         return res.json(wrapResponse(row, ctx));
       } catch (e) {
         return experimentErr(e, ctx, res);
+      }
+    },
+  );
+
+  // ── Drift detection (T7 M7) ──────────────────────────────────────────
+  //
+  // Operational drift surface over the ml/monitoring/drift.py concepts
+  // (per-feature PSI + KS prediction drift + rolling-AUC + anomaly spike).
+  // Snapshots are synthesised deterministically per (tenant, model, day) so
+  // the SPA renders stable data without running the Python batch job.
+  // Reads gated on `customers:read_risk_profile`; recompute (a write) too,
+  // since it's an analyst-triggered refresh, not an admin config change.
+  //
+  // Route ordering: literal `/v1/ai/drift` (fleet) declared BEFORE
+  // `/v1/ai/drift/:model_id` so the param wildcard doesn't capture it.
+  const driftErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+    if (e instanceof AiDriftError) {
+      const status = e.code === 'unknown_model' ? 404 : 400;
+      return res.status(status).json(
+        wrapError({ code: `EWS_${status}_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    return res.status(500).json(
+      wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'drift op failed', severity: 'HIGH' }, ctx),
+    );
+  };
+
+  // GET /v1/ai/drift — fleet rollup (latest snapshot per monitored model).
+  app.get(
+    '/v1/ai/drift',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        return res.json(wrapResponse(aiDriftStore.fleet(req.tenant!.tenant_id, now()), ctx));
+      } catch (e) {
+        return driftErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/drift/:model_id/history?limit=N — recompute history newest-first.
+  app.get(
+    '/v1/ai/drift/:model_id/history',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+        const items = aiDriftStore.history(req.tenant!.tenant_id, req.params.model_id ?? '', limit);
+        return res.json(wrapResponse({ model_id: req.params.model_id, total: items.length, items }, ctx));
+      } catch (e) {
+        return driftErr(e, ctx, res);
+      }
+    },
+  );
+
+  // POST /v1/ai/drift/:model_id/recompute — force a fresh snapshot.
+  app.post(
+    '/v1/ai/drift/:model_id/recompute',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const snap = aiDriftStore.recompute(req.tenant!.tenant_id, req.params.model_id ?? '', now());
+        return res.status(201).json(wrapResponse(snap, ctx));
+      } catch (e) {
+        return driftErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/drift/:model_id — latest snapshot for one model.
+  app.get(
+    '/v1/ai/drift/:model_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        return res.json(wrapResponse(aiDriftStore.latest(req.tenant!.tenant_id, req.params.model_id ?? '', now()), ctx));
+      } catch (e) {
+        return driftErr(e, ctx, res);
       }
     },
   );

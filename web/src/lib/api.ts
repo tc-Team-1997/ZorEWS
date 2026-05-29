@@ -2745,6 +2745,16 @@ export const api = {
   aiExperimentSetOutcome: (id: string, outcome: string) =>
     http.patch<EnvelopeBody<ExperimentShape>>(`/v1/ai/experiments/${encodeURIComponent(id)}/outcome`, { outcome }).then((r) => r.data),
 
+  // ── AI Workbench · T7 Module 7 — Drift Detection ──────────────────────
+  aiDriftFleet: () =>
+    http.get<EnvelopeBody<DriftFleetShape>>('/v1/ai/drift').then((r) => r.data),
+  aiDriftModel: (model_id: string) =>
+    http.get<EnvelopeBody<DriftSnapshotShape>>(`/v1/ai/drift/${encodeURIComponent(model_id)}`).then((r) => r.data),
+  aiDriftRecompute: (model_id: string) =>
+    http.post<EnvelopeBody<DriftSnapshotShape>>(`/v1/ai/drift/${encodeURIComponent(model_id)}/recompute`, {}).then((r) => r.data),
+  aiDriftHistory: (model_id: string, limit?: number) =>
+    http.get<EnvelopeBody<DriftHistoryShape>>(`/v1/ai/drift/${encodeURIComponent(model_id)}/history${limit != null ? `?limit=${limit}` : ''}`).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6497,4 +6507,49 @@ export interface ExperimentCreateInput {
   metrics?: Record<string, number>;
   owner?: string;
   notes?: string | null;
+}
+
+// ── AI Workbench · T7 Module 7 — Drift Detection ────────────────────────
+export type DriftBandShape = 'stable' | 'warn' | 'drift';
+
+export interface DriftFeatureRowShape {
+  feature: string;
+  psi: number;
+  band: DriftBandShape;
+  feature_type: 'numeric' | 'categorical';
+}
+export interface DriftSnapshotShape {
+  snapshot_id: string;
+  tenant_id: string;
+  model_id: string;
+  model_type: ExperimentModelTypeShape;
+  model_version: string;
+  computed_at: string;
+  reference_window: string;
+  current_window: string;
+  overall_status: DriftBandShape;
+  data_drift: {
+    features: DriftFeatureRowShape[];
+    drifted_count: number;
+    warn_count: number;
+    max_psi: number;
+    worst_feature: string | null;
+  };
+  model_drift: { ks_stat: number; p_value: number; drifted: boolean };
+  performance_drift: { current_auc: number | null; baseline_auc: number | null; delta: number | null; drifted: boolean };
+  anomaly_spike: { baseline_rate: number; current_rate: number; ratio: number; spiked: boolean };
+}
+export interface DriftFleetShape {
+  tenant_id: string;
+  generated_at: string;
+  total_models: number;
+  by_status: Record<DriftBandShape, number>;
+  models_needing_attention: number;
+  worst_offender: { model_id: string; overall_status: DriftBandShape; max_psi: number } | null;
+  models: DriftSnapshotShape[];
+}
+export interface DriftHistoryShape {
+  model_id: string;
+  total: number;
+  items: DriftSnapshotShape[];
 }

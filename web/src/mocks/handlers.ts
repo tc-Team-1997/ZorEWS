@@ -13131,6 +13131,109 @@ const __mswExperimentHandlers = [
 handlers.push(...__mswExperimentHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// T7 Module 7 — Drift Detection handlers (deterministic synth + history)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_DRIFT_MODELS: { model_id: string; model_type: string; version: string; baseline_auc: number | null; features: { name: string; type: 'numeric' | 'categorical' }[] }[] = [
+  { model_id: 'pd_xgb_v3', model_type: 'pd', version: 'v3', baseline_auc: 0.847, features: [{ name: 'utilization', type: 'numeric' }, { name: 'dpd_max_90d', type: 'numeric' }, { name: 'bureau_score', type: 'numeric' }, { name: 'repayment_delay_streak', type: 'numeric' }, { name: 'txn_volume_zscore_90d', type: 'numeric' }, { name: 'tenure_months', type: 'numeric' }, { name: 'product_level', type: 'categorical' }, { name: 'income_level', type: 'categorical' }] },
+  { model_id: 'fraud_lgbm_v1', model_type: 'fraud', version: 'v1', baseline_auc: 0.891, features: [{ name: 'utilization', type: 'numeric' }, { name: 'dpd_max_90d', type: 'numeric' }, { name: 'bureau_score', type: 'numeric' }, { name: 'txn_volume_zscore_90d', type: 'numeric' }, { name: 'product_level', type: 'categorical' }] },
+  { model_id: 'churn_xgb_v1', model_type: 'churn', version: 'v1', baseline_auc: 0.782, features: [{ name: 'tenure_months', type: 'numeric' }, { name: 'utilization', type: 'numeric' }, { name: 'income_level', type: 'categorical' }] },
+  { model_id: 'lapse_xgb_v1', model_type: 'lapse', version: 'v1', baseline_auc: 0.804, features: [{ name: 'premium_to_sum_assured', type: 'numeric' }, { name: 'days_since_last_premium', type: 'numeric' }, { name: 'policy_age_months', type: 'numeric' }, { name: 'agent_persistency', type: 'numeric' }, { name: 'product_category', type: 'categorical' }] },
+  { model_id: 'anomaly_if_v2', model_type: 'anomaly', version: 'v2', baseline_auc: null, features: [{ name: 'txn_volume_zscore_90d', type: 'numeric' }, { name: 'utilization', type: 'numeric' }] },
+];
+const __mswPsiBand = (psi: number) => (psi < 0.1 ? 'stable' : psi < 0.25 ? 'warn' : 'drift');
+const __mswWorstBand = (bands: string[]) => bands.reduce((acc, b) => (['stable', 'warn', 'drift'].indexOf(b) > ['stable', 'warn', 'drift'].indexOf(acc) ? b : acc), 'stable');
+const __mswDriftRound = (n: number, dp = 4) => Math.round(n * 10 ** dp) / 10 ** dp;
+const __mswDriftStore = new Map<string, any[]>(); // tenant::model → newest-first snapshots
+let __mswDriftSeq = 0;
+export function __resetMswDrift() { __mswDriftStore.clear(); __mswDriftSeq = 0; }
+
+function __mswBuildDrift(tenant: string, m: (typeof __MSW_DRIFT_MODELS)[number], salt = '') {
+  const day = new Date().toISOString().slice(0, 10);
+  const rng = __mswSiuRng(__mswSiuHash(`${tenant}|drift|${m.model_id}|${day}|${salt}`));
+  const stress = rng();
+  const features = m.features.map((f) => {
+    const r = rng();
+    let psi = r * 0.06;
+    if (r > 0.78) psi += stress * 0.18;
+    if (r > 0.94) psi += stress * 0.22;
+    psi = __mswDriftRound(Math.max(0, psi));
+    return { feature: f.name, psi, band: __mswPsiBand(psi), feature_type: f.type };
+  });
+  const max_psi = features.reduce((mx, f) => Math.max(mx, f.psi), 0);
+  const worst = features.reduce<any>((acc, f) => (acc === null || f.psi > acc.psi ? f : acc), null);
+  const data_drift = { features, drifted_count: features.filter((f) => f.band === 'drift').length, warn_count: features.filter((f) => f.band === 'warn').length, max_psi: __mswDriftRound(max_psi), worst_feature: worst && worst.psi > 0 ? worst.feature : null };
+  const ks_stat = __mswDriftRound(0.02 + rng() * 0.04 + stress * 0.12);
+  const p_value = __mswDriftRound(Math.max(0.0001, (1 - stress) * (0.2 + rng() * 0.6)));
+  const model_drift = { ks_stat, p_value, drifted: p_value < 0.01 && ks_stat > 0.1 };
+  let performance_drift: any;
+  if (m.baseline_auc === null) {
+    performance_drift = { current_auc: null, baseline_auc: null, delta: null, drifted: false };
+  } else {
+    const delta = __mswDriftRound(-(stress * 0.06) + (rng() - 0.5) * 0.01);
+    const current_auc = __mswDriftRound(Math.max(0.5, Math.min(0.999, m.baseline_auc + delta)));
+    performance_drift = { current_auc, baseline_auc: m.baseline_auc, delta, drifted: delta < -0.03 };
+  }
+  const baseline_rate = __mswDriftRound(8 + rng() * 6, 2);
+  const ratio = __mswDriftRound(0.85 + rng() * 0.5 + stress * 1.1, 3);
+  const anomaly_spike = { baseline_rate, current_rate: __mswDriftRound(baseline_rate * ratio, 2), ratio, spiked: ratio > 1.5 };
+  const overall_status = __mswWorstBand([__mswWorstBand(features.map((f) => f.band)), model_drift.drifted ? 'drift' : 'stable', performance_drift.drifted ? 'warn' : 'stable', anomaly_spike.spiked ? 'warn' : 'stable']);
+  return { snapshot_id: `drift-${tenant}-${m.model_id}-${day}${salt ? '-' + salt : ''}`, tenant_id: tenant, model_id: m.model_id, model_type: m.model_type, model_version: m.version, computed_at: new Date().toISOString(), reference_window: 'training', current_window: 'last_7d', overall_status, data_drift, model_drift, performance_drift, anomaly_spike };
+}
+function __mswDriftLatest(tenant: string, model_id: string) {
+  const m = __MSW_DRIFT_MODELS.find((x) => x.model_id === model_id);
+  if (!m) return null;
+  const k = `${tenant}::${model_id}`;
+  const arr = __mswDriftStore.get(k);
+  if (arr && arr.length) return arr[0];
+  const snap = __mswBuildDrift(tenant, m);
+  __mswDriftStore.set(k, [snap]);
+  return snap;
+}
+const __mswDriftFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+
+const __mswDriftHandlers = [
+  http.get('/v1/ai/drift', () => {
+    const models = __MSW_DRIFT_MODELS.map((m) => __mswDriftLatest('BANK_DEMO', m.model_id));
+    const by_status: Record<string, number> = { stable: 0, warn: 0, drift: 0 };
+    let worst_offender: any = null;
+    for (const s of models) {
+      by_status[s!.overall_status]++;
+      const rank = ['stable', 'warn', 'drift'].indexOf(s!.overall_status);
+      if (worst_offender === null || rank > ['stable', 'warn', 'drift'].indexOf(worst_offender.overall_status) || (rank === ['stable', 'warn', 'drift'].indexOf(worst_offender.overall_status) && s!.data_drift.max_psi > worst_offender.max_psi)) {
+        worst_offender = { model_id: s!.model_id, overall_status: s!.overall_status, max_psi: s!.data_drift.max_psi };
+      }
+    }
+    if (worst_offender && worst_offender.overall_status === 'stable') worst_offender = null;
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), total_models: models.length, by_status, models_needing_attention: by_status.warn + by_status.drift, worst_offender, models }));
+  }),
+  http.get('/v1/ai/drift/:model_id/history', ({ params, request }) => {
+    if (!__MSW_DRIFT_MODELS.find((x) => x.model_id === String(params.model_id))) return __mswDriftFail('EWS_404_unknown_model', 404, `unknown model ${params.model_id}`);
+    const u = new URL(request.url);
+    const limit = Math.min(Math.max(1, parseInt(u.searchParams.get('limit') ?? '20', 10) || 20), 50);
+    const arr = __mswDriftStore.get(`BANK_DEMO::${params.model_id}`) ?? [];
+    return HttpResponse.json(envelope({ model_id: params.model_id, total: Math.min(arr.length, limit), items: arr.slice(0, limit) }));
+  }),
+  http.post('/v1/ai/drift/:model_id/recompute', ({ params }) => {
+    const m = __MSW_DRIFT_MODELS.find((x) => x.model_id === String(params.model_id));
+    if (!m) return __mswDriftFail('EWS_404_unknown_model', 404, `unknown model ${params.model_id}`);
+    const snap = __mswBuildDrift('BANK_DEMO', m, `r${++__mswDriftSeq}`);
+    const k = `BANK_DEMO::${m.model_id}`;
+    const arr = __mswDriftStore.get(k) ?? [];
+    arr.unshift(snap);
+    __mswDriftStore.set(k, arr);
+    return HttpResponse.json(envelope(snap), { status: 201 });
+  }),
+  http.get('/v1/ai/drift/:model_id', ({ params }) => {
+    const snap = __mswDriftLatest('BANK_DEMO', String(params.model_id));
+    if (!snap) return __mswDriftFail('EWS_404_unknown_model', 404, `unknown model ${params.model_id}`);
+    return HttpResponse.json(envelope(snap));
+  }),
+];
+
+handlers.push(...__mswDriftHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────
