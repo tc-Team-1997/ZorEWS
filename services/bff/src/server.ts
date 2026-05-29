@@ -36934,6 +36934,140 @@ export function makeApp(deps: AppDeps = {}) {
   }
 
   // ──────────────────────────────────────────────────────────────────
+  // Master Setup — Case Management Setup (MASTER SETUP spec screen #13)
+  //   Per-tenant case-type master (priority / SLA hours / assigned team).
+  //   audit:read (admin). Distinct from /v1/admin/sla-config (global) and
+  //   reassign_teams master (team vocabulary).
+  // ──────────────────────────────────────────────────────────────────
+  {
+    type CtcMod = typeof import('./case_type_config');
+    const ctcErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+      const code = (e as { code?: string }).code;
+      const httpStatus =
+        code === 'unknown_case_type' ? 404 : code === 'duplicate_code' || code === 'cap_reached' ? 409 : 400;
+      const ews = code ? `EWS_${httpStatus}_${code}` : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'case_type_config_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    };
+    const ctcActor = (req: Request): string =>
+      (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'admin';
+    const ctcPeel = (req: Request): Record<string, unknown> => {
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      return (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+    };
+    const ctcPriorityFilter = (req: Request): CtcMod['ALL_CASE_PRIORITIES'][number] | 'all' => {
+      const p = req.query.priority;
+      return p === undefined || p === '' ? 'all' : (p as CtcMod['ALL_CASE_PRIORITIES'][number] | 'all');
+    };
+    const ctcAudit = (req: Request, action: string, resource_id: string, metadata: Record<string, unknown>) => {
+      try {
+        const actor = ctcActor(req);
+        const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          { actor_username: actor, actor_role: role, action, resource_type: 'config', resource_id, outcome: 'success', severity: 'info', metadata },
+          now(),
+        );
+      } catch {
+        /* swallow */
+      }
+    };
+
+    app.get(
+      '/v1/config/case-types',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod;
+        const enabledOnly = req.query.enabled === 'true';
+        const rows = defaultCaseTypeConfigStore.list(req.tenant!.tenant_id, ctcPriorityFilter(req), enabledOnly);
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, total: rows.length, case_types: rows }, ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/case-types/summary',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultCaseTypeConfigStore, summarizeCaseTypes } = require('./case_type_config') as CtcMod;
+        const rows = defaultCaseTypeConfigStore.list(req.tenant!.tenant_id, 'all', false);
+        return res.json(wrapResponse(summarizeCaseTypes(req.tenant!.tenant_id, rows), ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/case-types/:case_type_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod;
+        const row = defaultCaseTypeConfigStore.get(req.tenant!.tenant_id, req.params.case_type_id);
+        if (!row) {
+          return res.status(404).json(wrapError({ code: 'EWS_404_unknown_case_type', message: `unknown case type '${req.params.case_type_id}'`, severity: 'MEDIUM' }, ctx));
+        }
+        return res.json(wrapResponse(row, ctx));
+      },
+    );
+
+    app.post(
+      '/v1/config/case-types',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod;
+          const body = ctcPeel(req) as unknown as import('./case_type_config').CaseTypeCreateInput;
+          const created = defaultCaseTypeConfigStore.create(req.tenant!.tenant_id, body, ctcActor(req), Date.now());
+          ctcAudit(req, 'case_type.created', created.case_type_id, { code: created.code, priority: created.priority, sla_hours: created.sla_hours });
+          return res.status(201).json(wrapResponse(created, ctx));
+        } catch (e) {
+          return ctcErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.patch(
+      '/v1/config/case-types/:case_type_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod;
+          const patch = ctcPeel(req) as unknown as import('./case_type_config').CaseTypeUpdateInput;
+          const updated = defaultCaseTypeConfigStore.update(req.tenant!.tenant_id, req.params.case_type_id, patch, Date.now());
+          ctcAudit(req, 'case_type.updated', updated.case_type_id, { code: updated.code, priority: updated.priority, sla_hours: updated.sla_hours, enabled: updated.enabled });
+          return res.json(wrapResponse(updated, ctx));
+        } catch (e) {
+          return ctcErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.delete(
+      '/v1/config/case-types/:case_type_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod;
+          defaultCaseTypeConfigStore.remove(req.tenant!.tenant_id, req.params.case_type_id);
+          ctcAudit(req, 'case_type.removed', req.params.case_type_id, {});
+          return res.status(204).end();
+        } catch (e) {
+          return ctcErr(e, ctx, res);
+        }
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #7 — Collections Risk / Recovery desk (§2.1.7)
   //   Distinct from the collection-adapter service (auto case routing) —
   //   this is the read/operate surface for the collections work-queue.

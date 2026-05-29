@@ -13807,6 +13807,153 @@ const __mswAlertClassificationHandlers = [
 handlers.push(...__mswAlertClassificationHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Master Setup — Case Management Setup handlers (case-type master)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_CTY_PRIORITIES = ['P1', 'P2', 'P3', 'P4'];
+const __mswCtyStore = new Map<string, any>();
+let __mswCtySeq = 0;
+let __mswCtySeeded = false;
+export function __resetMswCaseTypes() {
+  __mswCtyStore.clear();
+  __mswCtySeq = 0;
+  __mswCtySeeded = false;
+}
+function __mswCtySeed() {
+  if (__mswCtySeeded) return;
+  __mswCtySeeded = true;
+  const iso = new Date(0).toISOString();
+  const seed = [
+    ['FRAUD_INVESTIGATION', 'Fraud Investigation', 'P1', 4, 'Fraud Desk'],
+    ['CREDIT_RISK_REVIEW', 'Credit Risk Review', 'P2', 24, 'Credit Risk Team'],
+    ['KYC_REMEDIATION', 'KYC Remediation', 'P3', 72, 'Compliance'],
+    ['COLLECTIONS_FOLLOWUP', 'Collections Follow-up', 'P4', 168, 'Recovery Desk'],
+  ] as const;
+  seed.forEach(([code, name, priority, sla, team], i) => {
+    const id = `cty-BANK_DEMO-${String(++__mswCtySeq).padStart(4, '0')}`;
+    __mswCtyStore.set(id, {
+      case_type_id: id,
+      tenant_id: 'BANK_DEMO',
+      code,
+      name,
+      description: null,
+      priority,
+      sla_hours: sla,
+      assigned_team: team,
+      enabled: true,
+      sort_order: i,
+      created_by: 'system',
+      created_at: iso,
+      updated_at: iso,
+    });
+  });
+}
+const __mswCtyList = (priority: string, enabledOnly: boolean) => {
+  __mswCtySeed();
+  return Array.from(__mswCtyStore.values())
+    .filter((r) => (priority === 'all' || r.priority === priority) && (!enabledOnly || r.enabled))
+    .sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
+};
+const __mswCtyFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json(
+    { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } },
+    { status },
+  );
+const __mswCtyPeel = (b: any) => (b && typeof b === 'object' && b.body && typeof b.body === 'object' ? b.body : b);
+
+const __mswCaseTypeHandlers = [
+  http.get('/v1/config/case-types/summary', () => {
+    const rows = __mswCtyList('all', false);
+    const by_priority: Record<string, number> = { P1: 0, P2: 0, P3: 0, P4: 0 };
+    rows.forEach((r) => by_priority[r.priority]++);
+    const enabled = rows.filter((r) => r.enabled);
+    const slas = enabled.map((r) => r.sla_hours);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        total: rows.length,
+        enabled_count: enabled.length,
+        by_priority,
+        mean_sla_hours: slas.length ? Math.round((slas.reduce((s, n) => s + n, 0) / slas.length) * 100) / 100 : null,
+        fastest_sla_hours: slas.length ? Math.min(...slas) : null,
+        slowest_sla_hours: slas.length ? Math.max(...slas) : null,
+      }),
+    );
+  }),
+  http.get('/v1/config/case-types', ({ request }) => {
+    const u = new URL(request.url);
+    const priority = u.searchParams.get('priority') ?? 'all';
+    const enabledOnly = u.searchParams.get('enabled') === 'true';
+    const rows = __mswCtyList(priority, enabledOnly);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', total: rows.length, case_types: rows }));
+  }),
+  http.get('/v1/config/case-types/:id', ({ params }) => {
+    __mswCtySeed();
+    const row = __mswCtyStore.get(String(params.id));
+    if (!row) return __mswCtyFail('EWS_404_unknown_case_type', 404, 'unknown case type');
+    return HttpResponse.json(envelope(row));
+  }),
+  http.post('/v1/config/case-types', async ({ request }) => {
+    __mswCtySeed();
+    const b = __mswCtyPeel(await request.json().catch(() => null));
+    const code = String(b?.code ?? '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) return __mswCtyFail('EWS_400_invalid_input', 400, 'bad code');
+    if (!String(b?.name ?? '').trim()) return __mswCtyFail('EWS_400_invalid_input', 400, 'name required');
+    if (!__MSW_CTY_PRIORITIES.includes(b?.priority)) return __mswCtyFail('EWS_400_invalid_priority', 400, 'bad priority');
+    if (typeof b?.sla_hours !== 'number' || b.sla_hours <= 0 || b.sla_hours > 8760) return __mswCtyFail('EWS_400_invalid_sla', 400, 'bad sla');
+    if (!String(b?.assigned_team ?? '').trim()) return __mswCtyFail('EWS_400_invalid_input', 400, 'team required');
+    if (Array.from(__mswCtyStore.values()).some((r) => r.code === code)) return __mswCtyFail('EWS_409_duplicate_code', 409, 'dup code');
+    const id = `cty-BANK_DEMO-${String(++__mswCtySeq).padStart(4, '0')}`;
+    const iso = new Date().toISOString();
+    const maxOrder = Math.max(-1, ...Array.from(__mswCtyStore.values()).map((r) => r.sort_order));
+    const row = {
+      case_type_id: id,
+      tenant_id: 'BANK_DEMO',
+      code,
+      name: String(b.name).trim(),
+      description: b.description ?? null,
+      priority: b.priority,
+      sla_hours: Math.round(b.sla_hours * 100) / 100,
+      assigned_team: String(b.assigned_team).trim(),
+      enabled: b.enabled ?? true,
+      sort_order: maxOrder + 1,
+      created_by: 'alice.admin',
+      created_at: iso,
+      updated_at: iso,
+    };
+    __mswCtyStore.set(id, row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.patch('/v1/config/case-types/:id', async ({ params, request }) => {
+    __mswCtySeed();
+    const row = __mswCtyStore.get(String(params.id));
+    if (!row) return __mswCtyFail('EWS_404_unknown_case_type', 404, 'unknown case type');
+    const b = __mswCtyPeel(await request.json().catch(() => null));
+    if (b?.priority !== undefined) {
+      if (!__MSW_CTY_PRIORITIES.includes(b.priority)) return __mswCtyFail('EWS_400_invalid_priority', 400, 'bad priority');
+      row.priority = b.priority;
+    }
+    if (b?.sla_hours !== undefined) {
+      if (typeof b.sla_hours !== 'number' || b.sla_hours <= 0 || b.sla_hours > 8760) return __mswCtyFail('EWS_400_invalid_sla', 400, 'bad sla');
+      row.sla_hours = Math.round(b.sla_hours * 100) / 100;
+    }
+    if (b?.name !== undefined) row.name = String(b.name).trim();
+    if (b?.description !== undefined) row.description = b.description ?? null;
+    if (b?.assigned_team !== undefined) row.assigned_team = String(b.assigned_team).trim();
+    if (b?.enabled !== undefined) row.enabled = !!b.enabled;
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+  http.delete('/v1/config/case-types/:id', ({ params }) => {
+    __mswCtySeed();
+    if (!__mswCtyStore.has(String(params.id))) return __mswCtyFail('EWS_404_unknown_case_type', 404, 'unknown case type');
+    __mswCtyStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+handlers.push(...__mswCaseTypeHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

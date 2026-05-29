@@ -2859,6 +2859,25 @@ export const api = {
   alertClassificationReset: () =>
     http.post<EnvelopeBody<AlertClassificationConfigShape>>('/v1/config/alert-classification/reset', {}).then((r) => r.data),
 
+  // ── Master Setup · Case Management Setup (case-type master) ───────────
+  caseTypes: (q: { priority?: CasePriorityShape; enabled?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (q.priority) params.set('priority', q.priority);
+    if (q.enabled) params.set('enabled', 'true');
+    const qs = params.toString();
+    return http.get<EnvelopeBody<CaseTypeListShape>>(`/v1/config/case-types${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  caseTypeSummary: () =>
+    http.get<EnvelopeBody<CaseTypeSummaryShape>>('/v1/config/case-types/summary').then((r) => r.data),
+  caseTypeGet: (case_type_id: string) =>
+    http.get<EnvelopeBody<CaseTypeShape>>(`/v1/config/case-types/${encodeURIComponent(case_type_id)}`).then((r) => r.data),
+  caseTypeCreate: (input: CaseTypeCreateInputShape) =>
+    http.post<EnvelopeBody<CaseTypeShape>>('/v1/config/case-types', input).then((r) => r.data),
+  caseTypeUpdate: (case_type_id: string, patch: CaseTypeUpdateInputShape) =>
+    http.patch<EnvelopeBody<CaseTypeShape>>(`/v1/config/case-types/${encodeURIComponent(case_type_id)}`, patch).then((r) => r.data),
+  caseTypeDelete: (case_type_id: string) =>
+    http.delete(`/v1/config/case-types/${encodeURIComponent(case_type_id)}`).then(() => undefined),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6885,4 +6904,53 @@ export interface ScoreClassificationShape {
   label: string;
   color_hex: string;
   action_required: string;
+}
+
+// ── Master Setup · Case Management Setup (case-type master) ─────────────
+export type CasePriorityShape = 'P1' | 'P2' | 'P3' | 'P4';
+export interface CaseTypeShape {
+  case_type_id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  priority: CasePriorityShape;
+  sla_hours: number;
+  assigned_team: string;
+  enabled: boolean;
+  sort_order: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface CaseTypeListShape {
+  tenant_id: string;
+  total: number;
+  case_types: CaseTypeShape[];
+}
+export interface CaseTypeSummaryShape {
+  tenant_id: string;
+  total: number;
+  enabled_count: number;
+  by_priority: Record<CasePriorityShape, number>;
+  mean_sla_hours: number | null;
+  fastest_sla_hours: number | null;
+  slowest_sla_hours: number | null;
+}
+export interface CaseTypeCreateInputShape {
+  code: string;
+  name: string;
+  description?: string | null;
+  priority: CasePriorityShape;
+  sla_hours: number;
+  assigned_team: string;
+  enabled?: boolean;
+}
+export interface CaseTypeUpdateInputShape {
+  name?: string;
+  description?: string | null;
+  priority?: CasePriorityShape;
+  sla_hours?: number;
+  assigned_team?: string;
+  enabled?: boolean;
 }
