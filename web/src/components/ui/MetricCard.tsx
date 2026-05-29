@@ -42,7 +42,7 @@ export function MetricCard({ label, value, sub, tone = 'neutral', to, ariaLabel,
         to={to}
         data-testid={testId}
         aria-label={ariaLabel ?? `${label}: ${value}`}
-        className="card p-4 min-h-[96px] block transition-all hover:border-brand-blue/50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-blue/40 focus:border-brand-blue/50 cursor-pointer no-underline"
+        className="card p-4 min-h-[96px] block transition-all hover:border-aurora-indigo/40 hover:shadow-float focus:outline-none focus:ring-2 focus:ring-aurora-indigo/30 focus:border-aurora-indigo/40 cursor-pointer no-underline"
       >
         {body}
       </Link>
