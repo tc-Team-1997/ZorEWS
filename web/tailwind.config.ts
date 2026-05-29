@@ -70,6 +70,27 @@ export default {
         surface:        '#FFFFFF',
         'surface-alt':  '#F7F6F2',
         page:           '#F1F4F8',
+
+        // ── Aurora — premium AI-native soft palette (P0 redesign) ──
+        // Additive layer for the modernised surfaces (login, executive
+        // dashboard, AI copilot). Operational screens keep the brand tokens
+        // above until migrated page-by-page.
+        aurora: {
+          canvas:    '#F5F7FB',
+          surface:   '#F8FAFC',
+          tint:      '#EEF2FF',
+          indigo:    '#6366F1',
+          violet:    '#7C3AED',
+          lilac:     '#8B5CF6',
+          banking:   '#2563EB',
+          insurance: '#0EA5A4',
+          warn:      '#F59E0B',
+          critical:  '#EF4444',
+          healthy:   '#10B981',
+          ink:       '#1E1B4B',
+          'ink-sub': '#4B5563',
+          line:      '#E4E7F2',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -83,6 +104,8 @@ export default {
         card:  '12px',
         badge: '11px',
         input: '8px',
+        glass: '20px',
+        xl2:   '28px',
       },
       fontSize: {
         '2xs': ['10px', { lineHeight: '14px' }],
@@ -96,6 +119,10 @@ export default {
       },
       boxShadow: {
         card: '0 1px 2px 0 rgba(16, 24, 40, 0.04)',
+        // Aurora premium depth — soft layered shadows + indigo glow.
+        glass: '0 8px 30px -8px rgba(79, 70, 229, 0.18), 0 2px 8px -2px rgba(16, 24, 40, 0.06)',
+        float: '0 20px 50px -12px rgba(79, 70, 229, 0.25), 0 8px 20px -8px rgba(16, 24, 40, 0.10)',
+        glow:  '0 0 0 1px rgba(99, 102, 241, 0.12), 0 12px 40px -10px rgba(124, 58, 237, 0.35)',
       },
     },
   },

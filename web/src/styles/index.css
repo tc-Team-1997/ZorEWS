@@ -154,3 +154,109 @@
   transform-origin: left center;
   animation: auth-dot-fill var(--auth-interval, 4500ms) linear forwards;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   Aurora — premium AI-native surface system (P0 redesign)
+   Pure CSS (no runtime dep). Glassmorphism + gradient mesh +
+   animated AI network + soft motion. Used by the modernised login
+   + executive surfaces; operational screens unaffected.
+   ════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* Floating glass card — soft blur, hairline ring, layered shadow. */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    box-shadow:
+      0 8px 30px -8px rgba(79, 70, 229, 0.18),
+      0 2px 8px -2px rgba(16, 24, 40, 0.06),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+    border-radius: 20px;
+  }
+  /* Indigo→violet gradient text for premium headings. */
+  .aurora-gradient-text {
+    background: linear-gradient(120deg, #6366F1 0%, #7C3AED 50%, #0EA5A4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Soft canvas with a layered indigo/teal mesh wash. */
+  .aurora-canvas {
+    background-color: #F5F7FB;
+    background-image:
+      radial-gradient(60rem 60rem at 12% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
+      radial-gradient(50rem 50rem at 110% 10%, rgba(14, 165, 164, 0.12), transparent 55%),
+      radial-gradient(40rem 40rem at 50% 120%, rgba(124, 58, 237, 0.12), transparent 55%);
+  }
+  /* "AI thinking" pill / status chip. */
+  .aurora-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium;
+    background: rgba(99, 102, 241, 0.10);
+    color: #4338CA;
+    border: 1px solid rgba(99, 102, 241, 0.18);
+  }
+}
+
+/* Drifting gradient blobs (mesh motion). */
+@keyframes aurora-drift-1 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(40px, 28px, 0) scale(1.12); }
+}
+@keyframes aurora-drift-2 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50%      { transform: translate3d(-34px, -22px, 0) scale(1); }
+}
+.aurora-blob-1 { animation: aurora-drift-1 16s ease-in-out infinite; }
+.aurora-blob-2 { animation: aurora-drift-2 19s ease-in-out infinite; }
+
+/* AI pulse rings — for the copilot dock + live nodes. */
+@keyframes aurora-pulse {
+  0%   { transform: scale(0.85); opacity: 0.7; }
+  70%  { transform: scale(1.6);  opacity: 0; }
+  100% { transform: scale(1.6);  opacity: 0; }
+}
+.aurora-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.5);
+  animation: aurora-pulse 2.4s ease-out infinite;
+}
+
+/* Network edges drawing in + nodes twinkling. */
+@keyframes aurora-edge {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes aurora-node {
+  0%, 100% { opacity: 0.45; r: 3; }
+  50%      { opacity: 1;    r: 4.5; }
+}
+.aurora-edge { stroke-dasharray: 200; stroke-dashoffset: 200; animation: aurora-edge 2.8s ease-out forwards, aurora-edge-pulse 6s ease-in-out 3s infinite; }
+@keyframes aurora-edge-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
+.aurora-node { animation: aurora-node 4s ease-in-out infinite; }
+
+/* Rising particles. */
+@keyframes aurora-particle {
+  0%   { transform: translateY(0) scale(1);    opacity: 0; }
+  10%  { opacity: 0.8; }
+  90%  { opacity: 0.5; }
+  100% { transform: translateY(-120px) scale(0.4); opacity: 0; }
+}
+.aurora-particle { animation: aurora-particle var(--p-dur, 9s) ease-in-out var(--p-delay, 0s) infinite; }
+
+/* Soft entrance for floating cards. */
+@keyframes aurora-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.aurora-rise { animation: aurora-rise 600ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob-1, .aurora-blob-2, .aurora-pulse::after, .aurora-edge,
+  .aurora-node, .aurora-particle, .aurora-rise {
+    animation: none !important;
+  }
+}

@@ -3,12 +3,12 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Clock, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Clock, RefreshCw, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth, type CaptchaChallenge } from '@/store/auth';
 import { HttpError } from '@/lib/http';
-import { Button, Input } from '@/components/ui';
-import { CarouselPanel } from './CarouselPanel';
+import { Button, GlassCard, Input } from '@/components/ui';
+import { AuroraIntelPanel } from './AuroraIntelPanel';
 import { COUNTRIES, type CountryCode } from '@/lib/countries';
 import {
   ORGANIZATIONS,
@@ -193,42 +193,28 @@ export function LoginPage() {
   );
 
   return (
-    <div className="min-h-screen flex bg-white">
-      <div className="hidden lg:block lg:w-1/2">
-        <CarouselPanel />
+    <div className="min-h-screen flex aurora-canvas">
+      <div className="hidden lg:block lg:w-[52%]">
+        <AuroraIntelPanel />
       </div>
 
-      <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-4 relative bg-white overflow-hidden">
-        <div
-          className="absolute top-0 left-0 right-0 h-[46%] pointer-events-none opacity-60"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle, rgba(13,43,106,0.07) 1px, transparent 1px)',
-            backgroundSize: '14px 14px',
-            WebkitMaskImage:
-              'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 40%, rgba(0,0,0,0) 100%)',
-            maskImage:
-              'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 40%, rgba(0,0,0,0) 100%)',
-          }}
-        />
-
-        <div className="w-full max-w-[360px] relative">
-          <div className="flex items-center gap-2.5 mb-5 lg:hidden">
-            <div className="w-8 h-8 bg-action rounded flex items-center justify-center">
-              <ShieldCheck size={14} className="text-white" strokeWidth={2.25} />
+      <div className="w-full lg:w-[48%] flex items-center justify-center px-6 py-8">
+        <GlassCard rise className="w-full max-w-[400px] p-7 sm:p-9">
+          <div className="flex items-center gap-2.5 mb-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow">
+              <ShieldCheck size={18} className="text-white" strokeWidth={2} />
             </div>
             <div>
-              <p className="text-ink text-sm font-semibold leading-tight">ZorEWS</p>
-              <p className="text-muted text-[11px]">Early Warning System</p>
+              <p className="text-[14px] font-semibold text-aurora-ink leading-tight">ZorEWS</p>
+              <p className="text-[11px] text-aurora-ink-sub">Early Warning System</p>
             </div>
           </div>
 
-          <div className="hidden lg:flex w-10 h-10 bg-brand-blue rounded-xl items-center justify-center mb-4 shadow-sm">
-            <ShieldCheck size={18} className="text-white" strokeWidth={2} />
-          </div>
-
-          <h2 className="text-xl font-semibold text-ink mb-1 tracking-tight">{t('login.heading')}</h2>
-          <p className="text-[13px] text-sub mb-5">{t('login.subtitle')}</p>
+          <span className="aurora-chip mb-3">
+            <Sparkles size={12} /> Secure access
+          </span>
+          <h2 className="text-[22px] font-semibold text-aurora-ink mb-1 tracking-tight">{t('login.heading')}</h2>
+          <p className="text-[13px] text-aurora-ink-sub mb-5">{t('login.subtitle')}</p>
 
           {idleSignOut && (
             <div
@@ -367,14 +353,14 @@ export function LoginPage() {
             </Link>
           </p>
 
-          <div className="mt-4 pt-4 border-t border-divider">
+          <div className="mt-4 pt-4 border-t border-aurora-line">
             <p className="text-center text-[11px] text-muted">
               {t('login.demo_accounts_label')} · <span className="font-mono">alice.admin</span>{' '}
               · <span className="font-mono">ravi.risk</span>{' '}
               · <span className="font-mono">fiona.field</span> · {t('login.demo_passwords_in_seed')}
             </p>
           </div>
-        </div>
+        </GlassCard>
       </div>
     </div>
   );
