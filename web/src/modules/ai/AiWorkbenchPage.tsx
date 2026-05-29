@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Database,
   Edit,
+  GitMerge,
   Layers,
   Pencil,
   Plus,
@@ -35,6 +36,7 @@ import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
 import { api, type AiModelRow, type AiPrompt, type PromptCategory } from '@/lib/api';
+import { HybridRulesPanel } from './HybridRulesPanel';
 
 const CATEGORIES: PromptCategory[] = [
   'risk_analysis',
@@ -64,13 +66,17 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'blue' | 'danger'> = {
   retired: 'danger',
 };
 
-type Tab = 'models' | 'prompts' | 'scenarios';
+type Tab = 'models' | 'prompts' | 'scenarios' | 'hybrid';
 
 export function AiWorkbenchPage() {
   const [tab, setTab] = useState<Tab>('models');
   const user = useAuth((s) => s.user);
   const canEditPrompts =
     user?.roles.some((r) => ['admin', 'supervisor'].includes(r)) ?? false;
+  // Hybrid-rule authoring follows the M5 rule-engine RBAC (rules:create) —
+  // analyst-level + above, mirroring who can draft a deterministic rule.
+  const canEditHybrid =
+    user?.roles.some((r) => ['admin', 'supervisor', 'risk_analyst'].includes(r)) ?? false;
 
   return (
     <div className="space-y-6 p-6">
@@ -89,11 +95,15 @@ export function AiWorkbenchPage() {
         <TabBtn active={tab === 'scenarios'} onClick={() => setTab('scenarios')} testId="aiwb-tab-scenarios">
           <Workflow size={14} /> Lifecycle Scenarios
         </TabBtn>
+        <TabBtn active={tab === 'hybrid'} onClick={() => setTab('hybrid')} testId="aiwb-tab-hybrid">
+          <GitMerge size={14} /> Hybrid Rules
+        </TabBtn>
       </div>
 
       {tab === 'models' && <ActiveModelsPanel />}
       {tab === 'prompts' && <PromptLibraryPanel canEdit={canEditPrompts} />}
       {tab === 'scenarios' && <LifecycleScenariosPanel />}
+      {tab === 'hybrid' && <HybridRulesPanel canEdit={canEditHybrid} />}
     </div>
   );
 }

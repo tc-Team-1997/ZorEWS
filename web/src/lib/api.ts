@@ -2787,6 +2787,27 @@ export const api = {
   aiPredictionLogsSummary: () =>
     http.get<EnvelopeBody<PredictionLogSummaryShape>>('/v1/ai/prediction-logs/summary').then((r) => r.data),
 
+  // ── AI Workbench · T7 — AI Rule + ML Hybrid Support ───────────────────
+  aiHybridRules: (q: { domain?: string; status?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.domain) params.set('domain', q.domain);
+    if (q.status) params.set('status', q.status);
+    const qs = params.toString();
+    return http.get<EnvelopeBody<HybridRuleListShape>>(`/v1/ai/hybrid-rules${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  aiHybridRuleGet: (rule_id: string) =>
+    http.get<EnvelopeBody<HybridRuleShape>>(`/v1/ai/hybrid-rules/${encodeURIComponent(rule_id)}`).then((r) => r.data),
+  aiHybridRuleCreate: (input: HybridRuleCreateInput) =>
+    http.post<EnvelopeBody<HybridRuleShape>>('/v1/ai/hybrid-rules', input).then((r) => r.data),
+  aiHybridRuleUpdate: (rule_id: string, patch: Partial<HybridRuleCreateInput> & { status?: string }) =>
+    http.patch<EnvelopeBody<HybridRuleShape>>(`/v1/ai/hybrid-rules/${encodeURIComponent(rule_id)}`, patch).then((r) => r.data),
+  aiHybridRuleDelete: (rule_id: string) =>
+    http.delete(`/v1/ai/hybrid-rules/${encodeURIComponent(rule_id)}`).then(() => undefined),
+  aiHybridRulePreview: (rule: HybridRuleCreateInput, input: HybridPreviewInputShape) =>
+    http.post<EnvelopeBody<HybridPreviewResultShape>>('/v1/ai/hybrid-rules/preview', { rule, input }).then((r) => r.data),
+  aiHybridRulePreviewSaved: (rule_id: string, input: HybridPreviewInputShape) =>
+    http.post<EnvelopeBody<HybridPreviewResultShape>>(`/v1/ai/hybrid-rules/${encodeURIComponent(rule_id)}/preview`, { input }).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6672,4 +6693,58 @@ export interface PredictionLogSummaryShape {
   distinct_actors: number;
   distinct_predictions: number;
   most_recent_at: string | null;
+}
+
+// ── AI Workbench · T7 — AI Rule + ML Hybrid Support ─────────────────────
+export type HybridOpShape = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
+export type HybridLogicShape = 'AND' | 'OR';
+export type HybridActionShape = 'create_alert' | 'open_case' | 'notify' | 'escalate';
+export type HybridSeverityShape = 'critical' | 'high' | 'medium' | 'low';
+export type HybridDomainShape = 'banking' | 'insurance';
+export type HybridStatusShape = 'draft' | 'active' | 'disabled';
+
+export type HybridConditionShape =
+  | { kind: 'metric'; field: string; op: HybridOpShape; value: number }
+  | { kind: 'ai_score'; model_ref: string; op: HybridOpShape; threshold: number };
+
+export interface HybridRuleShape {
+  rule_id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  domain: HybridDomainShape;
+  logic: HybridLogicShape;
+  conditions: HybridConditionShape[];
+  action: HybridActionShape;
+  severity: HybridSeverityShape;
+  status: HybridStatusShape;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface HybridRuleListShape {
+  total: number;
+  items: HybridRuleShape[];
+}
+export interface HybridRuleCreateInput {
+  name: string;
+  description?: string | null;
+  domain: HybridDomainShape;
+  logic: HybridLogicShape;
+  conditions: HybridConditionShape[];
+  action: HybridActionShape;
+  severity: HybridSeverityShape;
+}
+export interface HybridPreviewInputShape {
+  metrics?: Record<string, number>;
+  ai_scores?: Record<string, number>;
+}
+export interface HybridPreviewResultShape {
+  rule_id: string | null;
+  name: string;
+  logic: HybridLogicShape;
+  condition_results: { condition: HybridConditionShape; observed: number | null; matched: boolean; detail: string }[];
+  matched: boolean;
+  would_fire: { action: HybridActionShape; severity: HybridSeverityShape } | null;
+  expression: string;
 }

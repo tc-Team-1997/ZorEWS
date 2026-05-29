@@ -862,6 +862,22 @@ import {
   type RecordPredictionLogInput,
 } from './ai_prediction_logs';
 import {
+  defaultAiHybridRuleStore,
+  evaluateHybridRule,
+  isHybridDomain,
+  isHybridStatus,
+  isHybridLogic,
+  isHybridAction,
+  isHybridSeverity,
+  HybridRuleError,
+  type AiHybridRuleStore,
+  type CreateHybridRuleInput,
+  type UpdateHybridRuleInput,
+  type HybridRuleFilter,
+  type HybridCondition,
+  type HybridPreviewInput,
+} from './ai_hybrid_rules';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1334,6 +1350,8 @@ export interface AppDeps {
   aiInsightStore?: AiInsightStore;
   /** T7 M8 — prediction audit-action log (compliance trail over ai_predictions). */
   aiPredictionLogStore?: AiPredictionLogStore;
+  /** T7 — AI rule + ML hybrid rule definitions (architecture only; no live orchestrator). */
+  aiHybridRuleStore?: AiHybridRuleStore;
   /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
@@ -1626,6 +1644,7 @@ export function makeApp(deps: AppDeps = {}) {
   const aiDriftStore = deps.aiDriftStore ?? defaultAiDriftStore;
   const aiInsightStore = deps.aiInsightStore ?? defaultAiInsightStore;
   const aiPredictionLogStore = deps.aiPredictionLogStore ?? defaultAiPredictionLogStore;
+  const aiHybridRuleStore = deps.aiHybridRuleStore ?? defaultAiHybridRuleStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -6521,6 +6540,197 @@ export function makeApp(deps: AppDeps = {}) {
       } catch (e) {
         return predLogErr(e, ctx, res);
       }
+    },
+  );
+
+  // ── AI Rule + ML Hybrid Support (T7 — architecture only) ─────────────
+  //
+  // Define hybrid rules combining a metric condition with an AI-score
+  // threshold (IF DPD > 90 AND ai_score(pd_xgb_v3) > 0.82 THEN CREATE
+  // CRITICAL ALERT) + a pure dry-run PREVIEW that reports what the rule
+  // WOULD fire against a sample input. NO live orchestrator — no real alert
+  // is raised here. Reads gated on `rules:list`, writes on `rules:create`
+  // (reuses the M5 rule-engine perms — no matrix churn). Literal /preview
+  // before /:rule_id.
+  const hybridErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+    if (e instanceof HybridRuleError) {
+      const status = e.code === 'unknown_rule' ? 404 : e.code === 'invalid_transition' ? 409 : 400;
+      return res.status(status).json(
+        wrapError({ code: `EWS_${status}_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    return res.status(500).json(
+      wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'hybrid-rule op failed', severity: 'HIGH' }, ctx),
+    );
+  };
+  const hybridActor = (req: Request): string =>
+    (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'analyst';
+  const peelBody = (req: Request): Record<string, unknown> => {
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    return (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+  };
+
+  // POST /v1/ai/hybrid-rules — create (lands in draft).
+  app.post(
+    '/v1/ai/hybrid-rules',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const b = peelBody(req);
+        const input: CreateHybridRuleInput = {
+          name: String(b.name ?? ''),
+          description: b.description != null ? String(b.description) : null,
+          domain: b.domain as CreateHybridRuleInput['domain'],
+          logic: b.logic as CreateHybridRuleInput['logic'],
+          conditions: (b.conditions as HybridCondition[]) ?? [],
+          action: b.action as CreateHybridRuleInput['action'],
+          severity: b.severity as CreateHybridRuleInput['severity'],
+          created_by: hybridActor(req),
+        };
+        const row = aiHybridRuleStore.create(req.tenant!.tenant_id, input, now());
+        return res.status(201).json(wrapResponse(row, ctx));
+      } catch (e) {
+        return hybridErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/hybrid-rules?domain=&status= — list.
+  app.get(
+    '/v1/ai/hybrid-rules',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const q = req.query as Record<string, string | undefined>;
+        const filter: HybridRuleFilter = {};
+        if (typeof q.domain === 'string') {
+          if (!isHybridDomain(q.domain)) throw new HybridRuleError('invalid_input', 'domain must be banking|insurance');
+          filter.domain = q.domain;
+        }
+        if (typeof q.status === 'string') {
+          if (!isHybridStatus(q.status)) throw new HybridRuleError('invalid_input', `unknown status ${q.status}`);
+          filter.status = q.status;
+        }
+        const items = aiHybridRuleStore.list(req.tenant!.tenant_id, filter);
+        return res.json(wrapResponse({ total: items.length, items }, ctx));
+      } catch (e) {
+        return hybridErr(e, ctx, res);
+      }
+    },
+  );
+
+  // POST /v1/ai/hybrid-rules/preview — dry-run an UNSAVED definition.
+  app.post(
+    '/v1/ai/hybrid-rules/preview',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const b = peelBody(req);
+        const rule = (b.rule ?? {}) as Record<string, unknown>;
+        if (!isHybridLogic(rule.logic)) throw new HybridRuleError('invalid_input', 'rule.logic must be AND|OR');
+        if (!isHybridAction(rule.action)) throw new HybridRuleError('invalid_input', 'rule.action out of enum');
+        if (!isHybridSeverity(rule.severity)) throw new HybridRuleError('invalid_input', 'rule.severity out of enum');
+        if (!Array.isArray(rule.conditions) || rule.conditions.length === 0) {
+          throw new HybridRuleError('invalid_condition', 'at least one condition is required');
+        }
+        const out = evaluateHybridRule(
+          {
+            rule_id: null,
+            name: String(rule.name ?? 'preview'),
+            logic: rule.logic,
+            conditions: rule.conditions as HybridCondition[],
+            action: rule.action,
+            severity: rule.severity,
+          },
+          (b.input ?? {}) as HybridPreviewInput,
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        return hybridErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/hybrid-rules/:rule_id — single.
+  app.get(
+    '/v1/ai/hybrid-rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const row = aiHybridRuleStore.get(req.tenant!.tenant_id, req.params.rule_id ?? '');
+      if (!row) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_rule', message: `rule ${req.params.rule_id} not found`, severity: 'LOW' }, ctx),
+        );
+      }
+      return res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  // PATCH /v1/ai/hybrid-rules/:rule_id — edit + status transition.
+  app.patch(
+    '/v1/ai/hybrid-rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const b = peelBody(req);
+        const patch: UpdateHybridRuleInput = {};
+        if (b.name !== undefined) patch.name = String(b.name);
+        if (b.description !== undefined) patch.description = b.description != null ? String(b.description) : null;
+        if (b.logic !== undefined) patch.logic = b.logic as UpdateHybridRuleInput['logic'];
+        if (b.action !== undefined) patch.action = b.action as UpdateHybridRuleInput['action'];
+        if (b.severity !== undefined) patch.severity = b.severity as UpdateHybridRuleInput['severity'];
+        if (b.conditions !== undefined) patch.conditions = b.conditions as HybridCondition[];
+        if (b.status !== undefined) patch.status = b.status as UpdateHybridRuleInput['status'];
+        const row = aiHybridRuleStore.update(req.tenant!.tenant_id, req.params.rule_id ?? '', patch, now());
+        return res.json(wrapResponse(row, ctx));
+      } catch (e) {
+        return hybridErr(e, ctx, res);
+      }
+    },
+  );
+
+  // DELETE /v1/ai/hybrid-rules/:rule_id — remove.
+  app.delete(
+    '/v1/ai/hybrid-rules/:rule_id',
+    requireTenantMw,
+    requireRole('rules:create'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const ok = aiHybridRuleStore.remove(req.tenant!.tenant_id, req.params.rule_id ?? '');
+      if (!ok) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_rule', message: `rule ${req.params.rule_id} not found`, severity: 'LOW' }, ctx),
+        );
+      }
+      return res.status(204).end();
+    },
+  );
+
+  // POST /v1/ai/hybrid-rules/:rule_id/preview — dry-run a SAVED rule.
+  app.post(
+    '/v1/ai/hybrid-rules/:rule_id/preview',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const row = aiHybridRuleStore.get(req.tenant!.tenant_id, req.params.rule_id ?? '');
+      if (!row) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_rule', message: `rule ${req.params.rule_id} not found`, severity: 'LOW' }, ctx),
+        );
+      }
+      const out = evaluateHybridRule(row, (peelBody(req).input ?? {}) as HybridPreviewInput);
+      return res.json(wrapResponse(out, ctx));
     },
   );
 

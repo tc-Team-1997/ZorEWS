@@ -13375,6 +13375,144 @@ const __mswPredLogHandlers = [
 handlers.push(...__mswPredLogHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// T7 — AI Rule + ML Hybrid Support handlers (stateful CRUD + dry-run preview)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_HY_OPS = ['gt', 'gte', 'lt', 'lte', 'eq', 'neq'];
+const __MSW_HY_DOMAINS = ['banking', 'insurance'];
+const __MSW_HY_LOGIC = ['AND', 'OR'];
+const __MSW_HY_ACTIONS = ['create_alert', 'open_case', 'notify', 'escalate'];
+const __MSW_HY_SEVERITIES = ['critical', 'high', 'medium', 'low'];
+const __MSW_HY_STATUSES = ['draft', 'active', 'disabled'];
+const __MSW_HY_TRANSITIONS: Record<string, string[]> = { draft: ['active', 'disabled'], active: ['disabled'], disabled: ['active'] };
+const __MSW_HY_OPSYM: Record<string, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '==', neq: '!=' };
+const __mswHyStore = new Map<string, any>(); // rule_id → rule
+let __mswHySeq = 0;
+let __mswHySeeded = false;
+export function __resetMswHybridRules() { __mswHyStore.clear(); __mswHySeq = 0; __mswHySeeded = false; }
+
+const __mswHyExpr = (logic: string, conds: any[], action: string, severity: string) => {
+  const lhs = conds.map((c) => (c.kind === 'metric' ? `${c.field} ${__MSW_HY_OPSYM[c.op]} ${c.value}` : `ai_score(${c.model_ref}) ${__MSW_HY_OPSYM[c.op]} ${c.threshold}`)).join(` ${logic} `);
+  return `IF ${lhs} THEN ${action.toUpperCase()} (${severity})`;
+};
+const __mswHyApplyOp = (a: number, op: string, b: number) => (op === 'gt' ? a > b : op === 'gte' ? a >= b : op === 'lt' ? a < b : op === 'lte' ? a <= b : op === 'eq' ? a === b : a !== b);
+function __mswHyEval(rule: any, input: any) {
+  const metrics = input?.metrics ?? {};
+  const ai_scores = input?.ai_scores ?? {};
+  const condition_results = (rule.conditions ?? []).map((c: any) => {
+    if (c.kind === 'metric') {
+      const observed = Object.prototype.hasOwnProperty.call(metrics, c.field) ? metrics[c.field] : null;
+      if (observed === null || !Number.isFinite(observed)) return { condition: c, observed: null, matched: false, detail: `metric '${c.field}' not supplied` };
+      const matched = __mswHyApplyOp(observed, c.op, c.value);
+      return { condition: c, observed, matched, detail: `${c.field}=${observed} ${__MSW_HY_OPSYM[c.op]} ${c.value} → ${matched}` };
+    }
+    const observed = Object.prototype.hasOwnProperty.call(ai_scores, c.model_ref) ? ai_scores[c.model_ref] : null;
+    if (observed === null || !Number.isFinite(observed)) return { condition: c, observed: null, matched: false, detail: `ai_score '${c.model_ref}' not supplied` };
+    const matched = __mswHyApplyOp(observed, c.op, c.threshold);
+    return { condition: c, observed, matched, detail: `ai_score(${c.model_ref})=${observed} ${__MSW_HY_OPSYM[c.op]} ${c.threshold} → ${matched}` };
+  });
+  const matched = rule.logic === 'AND' ? condition_results.every((r: any) => r.matched) : condition_results.some((r: any) => r.matched);
+  return { rule_id: rule.rule_id ?? null, name: rule.name ?? 'preview', logic: rule.logic, condition_results, matched, would_fire: matched ? { action: rule.action, severity: rule.severity } : null, expression: __mswHyExpr(rule.logic, rule.conditions ?? [], rule.action, rule.severity) };
+}
+const __mswHyFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+function __mswHyValidateCreate(b: any): string | null {
+  if (!b || !String(b.name ?? '').trim()) return 'name required';
+  if (!__MSW_HY_DOMAINS.includes(b.domain)) return 'domain must be banking|insurance';
+  if (!__MSW_HY_LOGIC.includes(b.logic)) return 'logic must be AND|OR';
+  if (!__MSW_HY_ACTIONS.includes(b.action)) return 'action out of enum';
+  if (!__MSW_HY_SEVERITIES.includes(b.severity)) return 'severity out of enum';
+  if (!Array.isArray(b.conditions) || b.conditions.length === 0) return 'at least one condition is required';
+  for (const c of b.conditions) {
+    if (!__MSW_HY_OPS.includes(c.op)) return `bad op ${c.op}`;
+    if (c.kind === 'metric' && (!String(c.field ?? '').trim() || !Number.isFinite(c.value))) return 'bad metric condition';
+    if (c.kind === 'ai_score' && (!String(c.model_ref ?? '').trim() || !Number.isFinite(c.threshold))) return 'bad ai_score condition';
+    if (c.kind !== 'metric' && c.kind !== 'ai_score') return `unknown condition kind ${c.kind}`;
+  }
+  return null;
+}
+function __mswHySeed() {
+  if (__mswHySeeded) return;
+  __mswHySeeded = true;
+  const ts = new Date().toISOString();
+  const mk = (over: any) => {
+    const id = `hyb-BANK_DEMO-${ts.slice(0, 10)}-${String(++__mswHySeq).padStart(4, '0')}`;
+    const row = { rule_id: id, tenant_id: 'BANK_DEMO', description: null, status: 'active', created_by: 'system', created_at: ts, updated_at: ts, ...over };
+    __mswHyStore.set(id, row);
+  };
+  mk({ name: 'High-DPD + high-PD → critical alert', domain: 'banking', logic: 'AND', action: 'create_alert', severity: 'critical', conditions: [{ kind: 'metric', field: 'DPD', op: 'gt', value: 90 }, { kind: 'ai_score', model_ref: 'pd_xgb_v3', op: 'gt', threshold: 0.82 }] });
+  mk({ name: 'Lapse-likely + grace → notify retention', domain: 'insurance', logic: 'AND', action: 'notify', severity: 'high', conditions: [{ kind: 'ai_score', model_ref: 'lapse_xgb_v1', op: 'gt', threshold: 0.7 }, { kind: 'metric', field: 'days_overdue', op: 'gte', value: 15 }] });
+}
+
+const __mswHybridHandlers = [
+  http.get('/v1/ai/hybrid-rules', ({ request }) => {
+    __mswHySeed();
+    const u = new URL(request.url);
+    const domain = u.searchParams.get('domain');
+    const status = u.searchParams.get('status');
+    if (domain && !__MSW_HY_DOMAINS.includes(domain)) return __mswHyFail('EWS_400_invalid_input', 400, `domain ${domain}`);
+    if (status && !__MSW_HY_STATUSES.includes(status)) return __mswHyFail('EWS_400_invalid_input', 400, `status ${status}`);
+    let rows = Array.from(__mswHyStore.values());
+    if (domain) rows = rows.filter((r) => r.domain === domain);
+    if (status) rows = rows.filter((r) => r.status === status);
+    return HttpResponse.json(envelope({ total: rows.length, items: rows }));
+  }),
+  http.post('/v1/ai/hybrid-rules', async ({ request }) => {
+    const b = (await request.json().catch(() => null)) as any;
+    const err = __mswHyValidateCreate(b);
+    if (err) return __mswHyFail(err.includes('condition') ? 'EWS_400_invalid_condition' : 'EWS_400_invalid_input', 400, err);
+    const ts = new Date().toISOString();
+    const id = `hyb-BANK_DEMO-${ts.slice(0, 10)}-${String(++__mswHySeq).padStart(4, '0')}`;
+    const row = { rule_id: id, tenant_id: 'BANK_DEMO', name: String(b.name).trim(), description: b.description ?? null, domain: b.domain, logic: b.logic, conditions: b.conditions, action: b.action, severity: b.severity, status: 'draft', created_by: 'alice.analyst', created_at: ts, updated_at: ts };
+    __mswHyStore.set(id, row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.post('/v1/ai/hybrid-rules/preview', async ({ request }) => {
+    const b = (await request.json().catch(() => null)) as any;
+    const rule = b?.rule ?? {};
+    if (!__MSW_HY_LOGIC.includes(rule.logic) || !__MSW_HY_ACTIONS.includes(rule.action) || !__MSW_HY_SEVERITIES.includes(rule.severity)) return __mswHyFail('EWS_400_invalid_input', 400, 'bad rule');
+    if (!Array.isArray(rule.conditions) || rule.conditions.length === 0) return __mswHyFail('EWS_400_invalid_condition', 400, 'at least one condition is required');
+    return HttpResponse.json(envelope(__mswHyEval(rule, b?.input ?? {})));
+  }),
+  http.get('/v1/ai/hybrid-rules/:id', ({ params }) => {
+    __mswHySeed();
+    const row = __mswHyStore.get(String(params.id));
+    if (!row) return __mswHyFail('EWS_404_unknown_rule', 404, `unknown rule ${params.id}`);
+    return HttpResponse.json(envelope(row));
+  }),
+  http.patch('/v1/ai/hybrid-rules/:id', async ({ params, request }) => {
+    const row = __mswHyStore.get(String(params.id));
+    if (!row) return __mswHyFail('EWS_404_unknown_rule', 404, `unknown rule ${params.id}`);
+    const b = (await request.json().catch(() => null)) as any;
+    if (b?.status !== undefined) {
+      if (!__MSW_HY_STATUSES.includes(b.status)) return __mswHyFail('EWS_400_invalid_input', 400, `status ${b.status}`);
+      if (b.status !== row.status && !(__MSW_HY_TRANSITIONS[row.status] ?? []).includes(b.status)) return __mswHyFail('EWS_409_invalid_transition', 409, `cannot move ${row.status} → ${b.status}`);
+      row.status = b.status;
+    }
+    if (b?.name !== undefined) row.name = String(b.name).trim();
+    if (b?.description !== undefined) row.description = b.description ?? null;
+    if (b?.logic !== undefined) row.logic = b.logic;
+    if (b?.action !== undefined) row.action = b.action;
+    if (b?.severity !== undefined) row.severity = b.severity;
+    if (b?.conditions !== undefined) row.conditions = b.conditions;
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+  http.delete('/v1/ai/hybrid-rules/:id', ({ params }) => {
+    if (!__mswHyStore.has(String(params.id))) return __mswHyFail('EWS_404_unknown_rule', 404, `unknown rule ${params.id}`);
+    __mswHyStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('/v1/ai/hybrid-rules/:id/preview', async ({ params, request }) => {
+    const row = __mswHyStore.get(String(params.id));
+    if (!row) return __mswHyFail('EWS_404_unknown_rule', 404, `unknown rule ${params.id}`);
+    const b = (await request.json().catch(() => null)) as any;
+    return HttpResponse.json(envelope(__mswHyEval(row, b?.input ?? {})));
+  }),
+];
+
+handlers.push(...__mswHybridHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────
