@@ -14107,6 +14107,106 @@ const __mswJobSchedulerHandlers = [
 handlers.push(...__mswJobSchedulerHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Configuration · Access Control Config (read-only RBAC matrix viewer)
+// Static representative matrix mirroring infra/rbac/matrix.json shape.
+// No mutable state — read-only, so no reset.
+// ──────────────────────────────────────────────────────────────────────
+type MswRbacRole = 'admin' | 'risk_analyst' | 'supervisor' | 'collection_officer' | 'field_officer';
+const __MSW_ACC_ROLES: MswRbacRole[] = ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'];
+const __MSW_ACC_ROLE_DESC: Record<MswRbacRole, string> = {
+  admin: 'Full platform administration',
+  risk_analyst: 'Reviews alerts, runs risk profiles',
+  supervisor: 'Approves sensitive actions, oversees teams',
+  collection_officer: 'Works the collections queue',
+  field_officer: 'Logs field visits + actions',
+};
+// operation -> allowed roles
+const __MSW_ACC_OPS: Record<string, MswRbacRole[]> = {
+  'alerts:list': ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'],
+  'alerts:read': ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'],
+  'alerts:assign': ['admin', 'risk_analyst', 'supervisor'],
+  'cases:list': ['admin', 'risk_analyst', 'supervisor', 'collection_officer'],
+  'cases:close': ['admin', 'supervisor'],
+  'cases:log_action': ['admin', 'risk_analyst', 'supervisor', 'collection_officer', 'field_officer'],
+  'rules:list': ['admin', 'risk_analyst', 'supervisor'],
+  'rules:create': ['admin', 'risk_analyst'],
+  'audit:read': ['admin', 'supervisor'],
+  'reports:export': ['admin', 'supervisor', 'risk_analyst'],
+};
+function __mswAccResourceOf(op: string): string {
+  const i = op.indexOf(':');
+  return i < 0 ? op : op.slice(0, i);
+}
+function __mswAccActionOf(op: string): string {
+  const i = op.indexOf(':');
+  return i < 0 ? op : op.slice(i + 1);
+}
+function __mswAccGroup(ops: string[]) {
+  const m = new Map<string, string[]>();
+  for (const op of ops) {
+    const r = __mswAccResourceOf(op);
+    (m.get(r) ?? m.set(r, []).get(r)!).push(op);
+  }
+  return Array.from(m.entries())
+    .map(([resource, operations]) => ({ resource, operation_count: operations.length, operations }))
+    .sort((a, b) => a.resource.localeCompare(b.resource));
+}
+const __mswAccessControlHandlers = [
+  http.get('/v1/config/access-control', () => {
+    const allOps = Object.keys(__MSW_ACC_OPS);
+    return HttpResponse.json(
+      envelope({
+        version: '1.0.0',
+        total_roles: __MSW_ACC_ROLES.length,
+        total_operations: allOps.length,
+        total_resources: __mswAccGroup(allOps).length,
+        roles: __MSW_ACC_ROLES,
+        resources: __mswAccGroup(allOps),
+        role_summaries: __MSW_ACC_ROLES.map((role) => ({
+          role,
+          description: __MSW_ACC_ROLE_DESC[role],
+          operation_count: allOps.filter((op) => __MSW_ACC_OPS[op].includes(role)).length,
+        })),
+      }),
+    );
+  }),
+  http.get('/v1/config/access-control/matrix', () => {
+    const rows = Object.entries(__MSW_ACC_OPS).map(([operation, allowed]) => {
+      const by_role = {} as Record<MswRbacRole, boolean>;
+      for (const role of __MSW_ACC_ROLES) by_role[role] = allowed.includes(role);
+      return {
+        operation,
+        resource: __mswAccResourceOf(operation),
+        action: __mswAccActionOf(operation),
+        allowed_role_count: allowed.length,
+        by_role,
+      };
+    });
+    return HttpResponse.json(envelope({ version: '1.0.0', roles: __MSW_ACC_ROLES, total_operations: rows.length, rows }));
+  }),
+  http.get('/v1/config/access-control/roles/:role', ({ params }) => {
+    const role = params.role as MswRbacRole;
+    if (!__MSW_ACC_ROLES.includes(role)) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_404_unknown_role', message: `unknown role '${String(role)}'`, severity: 'MEDIUM' } },
+        { status: 404 },
+      );
+    }
+    const ops = Object.keys(__MSW_ACC_OPS).filter((op) => __MSW_ACC_OPS[op].includes(role));
+    return HttpResponse.json(
+      envelope({
+        role,
+        description: __MSW_ACC_ROLE_DESC[role],
+        total_operations: ops.length,
+        total_resources: __mswAccGroup(ops).length,
+        resources: __mswAccGroup(ops),
+      }),
+    );
+  }),
+];
+handlers.push(...__mswAccessControlHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

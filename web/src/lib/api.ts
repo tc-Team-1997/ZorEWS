@@ -2896,6 +2896,14 @@ export const api = {
   scheduledJobRun: (job_id: string) =>
     http.post<EnvelopeBody<JobRunResultShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}/run`, {}).then((r) => r.data),
 
+  // ── Configuration · Access Control Config (read-only RBAC matrix viewer) ─
+  accessControlOverview: () =>
+    http.get<EnvelopeBody<AccessControlOverviewShape>>('/v1/config/access-control').then((r) => r.data),
+  accessControlMatrix: () =>
+    http.get<EnvelopeBody<AccessMatrixShape>>('/v1/config/access-control/matrix').then((r) => r.data),
+  accessControlRole: (role: string) =>
+    http.get<EnvelopeBody<RoleAccessShape>>(`/v1/config/access-control/roles/${encodeURIComponent(role)}`).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -7024,4 +7032,46 @@ export interface JobRunResultShape {
   ran_at: string;
   duration_ms: number;
   triggered_by: string;
+}
+
+// ── Configuration · Access Control Config (read-only RBAC matrix viewer) ──
+export type RbacRoleShape = 'admin' | 'risk_analyst' | 'supervisor' | 'collection_officer' | 'field_officer';
+export interface AccessResourceGroupShape {
+  resource: string;
+  operation_count: number;
+  operations: string[];
+}
+export interface AccessRoleSummaryShape {
+  role: RbacRoleShape;
+  description: string;
+  operation_count: number;
+}
+export interface AccessControlOverviewShape {
+  version: string;
+  total_roles: number;
+  total_operations: number;
+  total_resources: number;
+  roles: RbacRoleShape[];
+  resources: AccessResourceGroupShape[];
+  role_summaries: AccessRoleSummaryShape[];
+}
+export interface RoleAccessShape {
+  role: RbacRoleShape;
+  description: string;
+  total_operations: number;
+  total_resources: number;
+  resources: AccessResourceGroupShape[];
+}
+export interface AccessMatrixRowShape {
+  operation: string;
+  resource: string;
+  action: string;
+  allowed_role_count: number;
+  by_role: Record<RbacRoleShape, boolean>;
+}
+export interface AccessMatrixShape {
+  version: string;
+  roles: RbacRoleShape[];
+  total_operations: number;
+  rows: AccessMatrixRowShape[];
 }

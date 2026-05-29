@@ -37188,6 +37188,58 @@ export function makeApp(deps: AppDeps = {}) {
   }
 
   // ──────────────────────────────────────────────────────────────────
+  // Configuration — Access Control Config (MASTER SETUP spec screen #20)
+  //   Read-only viewer over the canonical RBAC matrix (infra/rbac/matrix.json).
+  //   No mutable per-tenant state — the matrix is version-controlled + CI-gated;
+  //   this surface is the human-readable lens. Platform-static (same response
+  //   across tenants). audit:read (admin).
+  // ──────────────────────────────────────────────────────────────────
+  {
+    type AccMod = typeof import('./access_control_view');
+
+    app.get(
+      '/v1/config/access-control',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { buildAccessControlOverview } = require('./access_control_view') as AccMod;
+        return res.json(wrapResponse(buildAccessControlOverview(), ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/access-control/matrix',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { buildAccessMatrix } = require('./access_control_view') as AccMod;
+        return res.json(wrapResponse(buildAccessMatrix(), ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/access-control/roles/:role',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { buildRoleAccess } = require('./access_control_view') as AccMod;
+          return res.json(wrapResponse(buildRoleAccess(req.params.role), ctx));
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          const httpStatus = code === 'unknown_role' ? 404 : 400;
+          const ews = code ? `EWS_${httpStatus}_${code}` : 'EWS_400_invalid_input';
+          const msg = e instanceof Error ? e.message : 'access_control_failed';
+          return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+        }
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #7 — Collections Risk / Recovery desk (§2.1.7)
   //   Distinct from the collection-adapter service (auto case routing) —
   //   this is the read/operate surface for the collections work-queue.
