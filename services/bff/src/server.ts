@@ -13141,6 +13141,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Insurance EWS — Module 9: Policy Timeline (§ Phase-6).
+  //   Per-policy lifecycle + risk event stream; insurance analog of the
+  //   banking Borrower Timeline. Total over policies (drill-through).
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/insurance/policies/:policy_id/timeline',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildPolicyTimeline } =
+          require('./insurance_policy_timeline') as typeof import('./insurance_policy_timeline');
+        type PF = import('./insurance_policy_timeline').PolicyTimelineFilters;
+        const filters: PF = {};
+        if (req.query.event_type) filters.event_type = req.query.event_type as PF['event_type'];
+        if (req.query.since) filters.since = String(req.query.since);
+        if (req.query.limit) {
+          const n = parseInt(String(req.query.limit), 10);
+          if (Number.isFinite(n)) filters.limit = n;
+        }
+        return res.json(
+          wrapResponse(buildPolicyTimeline(req.tenant!.tenant_id, req.params.policy_id, filters, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews =
+          code === 'invalid_event_type'
+            ? 'EWS_400_invalid_event_type'
+            : code === 'invalid_since'
+              ? 'EWS_400_invalid_since'
+              : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'policy_timeline_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   // ── Custom dashboard builder (T6 M11.7) ──────────────────────────────
   //
   // Operator-authored layouts on a 12-col grid. Widget catalog is

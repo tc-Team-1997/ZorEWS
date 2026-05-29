@@ -2664,6 +2664,23 @@ export const api = {
       .post<EnvelopeBody<LapsePredictionShape>>('/v1/insurance/policy-lapse/predict', input)
       .then((r) => r.data),
 
+  // ── Insurance EWS · Module 9 — Policy Timeline ────────────────────────
+  insurancePolicyTimeline: (
+    policy_id: string,
+    filters?: { event_type?: string; since?: string; limit?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.event_type) params.set('event_type', filters.event_type);
+    if (filters?.since) params.set('since', filters.since);
+    if (filters?.limit != null) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<PolicyTimelineShape>>(
+        `/v1/insurance/policies/${encodeURIComponent(policy_id)}/timeline${qs ? '?' + qs : ''}`,
+      )
+      .then((r) => r.data);
+  },
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -3304,6 +3321,63 @@ export interface ClaimAnalysisResultShape {
   recommended_action: string;
   model_version: string;
   scored_at: string;
+}
+
+// ── Insurance EWS · Module 9 types (mirrors services/bff/src/insurance_policy_timeline.ts) ──
+export type PolicyEventTypeShape =
+  | 'policy_issued'
+  | 'premium_paid'
+  | 'premium_missed'
+  | 'grace_period'
+  | 'renewal'
+  | 'claim_filed'
+  | 'claim_settled'
+  | 'claim_rejected'
+  | 'anomaly_flagged'
+  | 'alert_raised'
+  | 'underwriting_event'
+  | 'retention_action'
+  | 'lapse_warning'
+  | 'reinstatement'
+  | 'surrender';
+export type PolicyEventSeverityShape = 'info' | 'warning' | 'critical';
+export type PolicyStatusShape = 'in_force' | 'lapsed' | 'surrendered' | 'matured';
+export type LapseRiskBandShape = 'low' | 'medium' | 'high' | 'critical';
+export type PersistencyTrajectoryShape = 'improving' | 'stable' | 'deteriorating';
+
+export interface PolicyEventShape {
+  event_id: string;
+  occurred_at: string;
+  event_type: PolicyEventTypeShape;
+  severity: PolicyEventSeverityShape;
+  title: string;
+  description: string;
+  linked_ref: string | null;
+  metadata: Record<string, string | number>;
+}
+
+export interface PolicyTimelineShape {
+  tenant_id: string;
+  policy_id: string;
+  policyholder_name: string;
+  product: string;
+  channel: string;
+  generated_at: string;
+  policy_status: PolicyStatusShape;
+  lapse_risk_band: LapseRiskBandShape;
+  persistency_trajectory: PersistencyTrajectoryShape;
+  total_premium_paid_kes: number;
+  claims_filed: number;
+  claims_settled: number;
+  peak_anomaly_score: number;
+  total_events: number;
+  returned_count: number;
+  by_type: Record<PolicyEventTypeShape, number>;
+  by_severity: Record<PolicyEventSeverityShape, number>;
+  first_event_at: string | null;
+  last_event_at: string | null;
+  filters_applied: { event_type: PolicyEventTypeShape | null; since: string | null; limit: number };
+  events: PolicyEventShape[];
 }
 
 // ── Insurance EWS · Module 1 types (mirrors services/bff/src/insurance_policy_lapse.ts) ──

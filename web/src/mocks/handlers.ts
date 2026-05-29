@@ -12661,6 +12661,120 @@ const __mswBranchHandlers = [
 handlers.push(...__mswBranchHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Insurance EWS Module 9 — Policy Timeline handler (deterministic lifecycle).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswPtType =
+  | 'policy_issued' | 'premium_paid' | 'premium_missed' | 'grace_period' | 'renewal'
+  | 'claim_filed' | 'claim_settled' | 'claim_rejected' | 'anomaly_flagged' | 'alert_raised'
+  | 'underwriting_event' | 'retention_action' | 'lapse_warning' | 'reinstatement' | 'surrender';
+type MswPtSev = 'info' | 'warning' | 'critical';
+const __MSW_PT_TYPES: MswPtType[] = ['policy_issued', 'premium_paid', 'premium_missed', 'grace_period', 'renewal', 'claim_filed', 'claim_settled', 'claim_rejected', 'anomaly_flagged', 'alert_raised', 'underwriting_event', 'retention_action', 'lapse_warning', 'reinstatement', 'surrender'];
+function __mswPtHash(s: string): number { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+function __mswPtRng(seed: number): () => number { let a = seed; return () => { a = (a + 0x6d2b79f5) | 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 0x100000000; }; }
+const __MSW_PT_FIRST = ['Asha', 'Ravi', 'Priya', 'Mohan', 'Vikram', 'Meera', 'Arjun', 'Kavya'];
+const __MSW_PT_LAST = ['Patel', 'Kumar', 'Sharma', 'Singh', 'Reddy', 'Nair'];
+const __MSW_PT_PRODUCTS = ['Term Life', 'Endowment', 'ULIP', 'Health Indemnity', 'Critical Illness', 'Money-Back'];
+const __MSW_PT_CHANNELS = ['Agency', 'Bancassurance', 'Broker', 'Direct', 'Corporate'];
+const PT_DAY = 86_400_000;
+
+function __mswBuildPolicyTimeline(policy_id: string) {
+  const rng = __mswPtRng(__mswPtHash(`BANK_DEMO|${policy_id}|timeline`));
+  const now = Date.now();
+  const ev: Array<{ event_id: string; occurred_at: string; event_type: MswPtType; severity: MswPtSev; title: string; description: string; linked_ref: string | null; metadata: Record<string, string | number> }> = [];
+  let seq = 0;
+  const mk = (daysAgo: number, t: MswPtType, sev: MswPtSev, title: string, description: string, metadata: Record<string, string | number> = {}, linked_ref: string | null = null) => {
+    ev.push({ event_id: `pt-${policy_id}-${String(seq).padStart(3, '0')}`, occurred_at: new Date(now - daysAgo * PT_DAY).toISOString(), event_type: t, severity: sev, title, description, linked_ref, metadata }); seq++;
+  };
+  const annual = Math.round(20_000 + rng() * 480_000);
+  const product = __MSW_PT_PRODUCTS[Math.floor(rng() * __MSW_PT_PRODUCTS.length)];
+  mk(1095, 'policy_issued', 'info', 'Policy issued', `${product} policy underwritten and issued.`, { annual_premium_kes: annual, sum_assured_kes: annual * 20 });
+  if (rng() < 0.4) mk(1093, 'underwriting_event', 'info', 'Underwriting decision', 'Medical loading applied at underwriting.', { loading_pct: Math.round(10 + rng() * 40) });
+  let premiumPaid = 0, missed = 0, peak = 0, filed = 0, settled = 0;
+  for (let q = 11; q >= 0; q--) {
+    const daysAgo = q * 90 + Math.floor(rng() * 10);
+    const stress = q <= 5 ? (5 - q) / 5 : 0;
+    if (rng() < 0.1 + stress * 0.5) {
+      missed++;
+      mk(daysAgo, 'premium_missed', missed >= 2 ? 'critical' : 'warning', 'Premium missed', `Quarterly premium not received (streak ${missed}).`, { amount_due_kes: Math.round(annual / 4), missed_streak: missed });
+      if (missed === 1) mk(daysAgo - 3, 'grace_period', 'warning', 'Grace period started', '30-day grace period in effect.', { grace_days: 30 });
+    } else {
+      if (missed > 0) mk(daysAgo + 1, 'reinstatement', 'info', 'Policy reinstated', 'Arrears cleared; policy reinstated.', { cleared_kes: Math.round((annual / 4) * missed) });
+      missed = 0; premiumPaid += Math.round(annual / 4);
+      mk(daysAgo, 'premium_paid', 'info', 'Premium paid', 'Quarterly premium received on schedule.', { amount_kes: Math.round(annual / 4) });
+    }
+    if (q % 4 === 0 && q !== 0) mk(daysAgo - 1, 'renewal', 'info', 'Policy renewed', 'Annual renewal processed.', { renewal_year: Math.floor(q / 4) });
+  }
+  const nClaims = rng() < 0.5 ? 0 : rng() < 0.85 ? 1 : 2;
+  for (let c = 0; c < nClaims; c++) {
+    filed++; const daysAgo = 200 - c * 90 + Math.floor(rng() * 30);
+    const ref = `CLM-${Math.floor(800000 + rng() * 9999)}`, amount = Math.round(annual * (1 + rng() * 6));
+    mk(daysAgo, 'claim_filed', 'info', 'Claim filed', `Claim submitted for ${product}.`, { amount_kes: amount }, ref);
+    if (rng() < 0.35) {
+      const score = Math.round((0.55 + rng() * 0.4) * 100) / 100; if (score > peak) peak = score;
+      mk(daysAgo - 2, 'anomaly_flagged', score >= 0.75 ? 'critical' : 'warning', 'Claim anomaly flagged', `Anomaly score ${score} — amount/frequency deviation.`, { anomaly_score: score }, ref);
+      mk(daysAgo - 3, 'alert_raised', score >= 0.75 ? 'critical' : 'warning', 'EWS alert raised', 'Early-warning alert generated for claims review.', { severity_in: score >= 0.75 ? 'CRITICAL' : 'HIGH' }, `a-${Math.floor(700000 + rng() * 9999)}`);
+      if (score >= 0.75) mk(daysAgo - 5, 'claim_rejected', 'warning', 'Claim rejected', 'Claim repudiated pending SIU review.', { amount_kes: amount }, ref);
+      else { settled++; mk(daysAgo - 10, 'claim_settled', 'info', 'Claim settled', 'Claim approved and paid.', { amount_kes: amount }, ref); }
+    } else { settled++; mk(daysAgo - 8, 'claim_settled', 'info', 'Claim settled', 'Claim approved and paid.', { amount_kes: amount }, ref); }
+  }
+  let lapseScore = Math.min(0.95, 0.1 + missed * 0.25 + rng() * 0.2);
+  let status: 'in_force' | 'lapsed' | 'surrendered' | 'matured' = 'in_force';
+  if (missed >= 1) {
+    mk(25, 'lapse_warning', missed >= 2 ? 'critical' : 'warning', 'Lapse warning', `Lapse probability ${Math.round(lapseScore * 100)}% — retention review triggered.`, { lapse_probability: Math.round(lapseScore * 100) / 100 });
+    mk(18, 'retention_action', 'info', 'Retention call', 'Retention specialist outreach logged.', { outcome: rng() < 0.5 ? 'promised_payment' : 'no_response' });
+  }
+  if (missed >= 3) {
+    if (rng() < 0.5) { status = 'lapsed'; lapseScore = Math.max(lapseScore, 0.8); }
+    else { status = 'surrendered'; mk(6, 'surrender', 'critical', 'Policy surrendered', 'Policyholder surrendered for cash value.', { surrender_value_kes: Math.round(premiumPaid * 0.6) }); }
+  }
+  ev.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+  return { ev, status, peak, premiumPaid, filed, settled, lapseScore };
+}
+
+const __mswPolicyTimelineHandlers = [
+  http.get('/v1/insurance/policies/:policy_id/timeline', ({ params, request }) => {
+    const policy_id = String(params.policy_id);
+    const u = new URL(request.url);
+    const eventType = u.searchParams.get('event_type');
+    const since = u.searchParams.get('since');
+    const limitRaw = u.searchParams.get('limit');
+    if (eventType && !__MSW_PT_TYPES.includes(eventType as MswPtType)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_event_type', message: `unknown event_type ${eventType}`, severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const meta = __mswPtRng(__mswPtHash(`BANK_DEMO|${policy_id}|meta`));
+    const policyholder_name = `${__MSW_PT_FIRST[Math.floor(meta() * __MSW_PT_FIRST.length)]} ${__MSW_PT_LAST[Math.floor(meta() * __MSW_PT_LAST.length)]}`;
+    const product = __MSW_PT_PRODUCTS[Math.floor(meta() * __MSW_PT_PRODUCTS.length)];
+    const channel = __MSW_PT_CHANNELS[Math.floor(meta() * __MSW_PT_CHANNELS.length)];
+    const { ev, status, peak, premiumPaid, filed, settled, lapseScore } = __mswBuildPolicyTimeline(policy_id);
+    const by_type = Object.fromEntries(__MSW_PT_TYPES.map((t) => [t, 0])) as Record<MswPtType, number>;
+    const by_severity: Record<MswPtSev, number> = { info: 0, warning: 0, critical: 0 };
+    for (const e of ev) { by_type[e.event_type]++; by_severity[e.severity]++; }
+    const band = lapseScore >= 0.75 ? 'critical' : lapseScore >= 0.5 ? 'high' : lapseScore >= 0.25 ? 'medium' : 'low';
+    const recentCut = Date.now() - 180 * PT_DAY, priorCut = Date.now() - 360 * PT_DAY;
+    const w: Record<MswPtSev, number> = { info: -1, warning: 2, critical: 4 };
+    let recent = 0, prior = 0;
+    for (const e of ev) { const t = new Date(e.occurred_at).getTime(); if (t >= recentCut) recent += w[e.severity]; else if (t >= priorCut) prior += w[e.severity]; }
+    const trajectory = recent > prior + 2 ? 'deteriorating' : recent < prior - 2 ? 'improving' : 'stable';
+    let view = ev.slice();
+    if (eventType) view = view.filter((e) => e.event_type === eventType);
+    if (since) { const s = new Date(since).getTime(); if (Number.isFinite(s)) view = view.filter((e) => new Date(e.occurred_at).getTime() >= s); }
+    const limit = limitRaw && Number.isFinite(parseInt(limitRaw, 10)) ? Math.max(1, Math.min(500, parseInt(limitRaw, 10))) : 100;
+    const rendered = view.slice(0, limit);
+    return HttpResponse.json(envelope({
+      tenant_id: 'BANK_DEMO', policy_id, policyholder_name, product, channel, generated_at: new Date().toISOString(),
+      policy_status: status, lapse_risk_band: band, persistency_trajectory: trajectory,
+      total_premium_paid_kes: premiumPaid, claims_filed: filed, claims_settled: settled, peak_anomaly_score: peak,
+      total_events: ev.length, returned_count: rendered.length, by_type, by_severity,
+      first_event_at: ev.length ? ev[ev.length - 1].occurred_at : null, last_event_at: ev.length ? ev[0].occurred_at : null,
+      filters_applied: { event_type: eventType ?? null, since: since ?? null, limit }, events: rendered,
+    }));
+  }),
+];
+
+handlers.push(...__mswPolicyTimelineHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────
