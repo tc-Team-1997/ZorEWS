@@ -15,7 +15,7 @@
 // CODE (friendlier for callers + the SPA than opaque factor_ids).
 
 import type { ScoreFactor } from './risk_score_config';
-import { classifyScore, type AlertClassificationConfig, type ScoreClassification } from './alert_classification_config';
+import { classifyScore, type AlertClassificationConfig, type RagBand, type ScoreClassification } from './alert_classification_config';
 
 export class ScorecardEvalError extends Error {
   constructor(
@@ -125,5 +125,103 @@ export function evaluateScorecard(
     unknown_value_codes,
     missing_value_count: missing,
     evaluated_at: new Date(nowMs).toISOString(),
+  };
+}
+
+// ─── Batch evaluation (config drives runtime at scale) ───────────────
+
+export const SCORECARD_BATCH_MAX = 500;
+
+export interface ScorecardBatchInputRow {
+  id: string; // caller's reference (customer id, sample label, …)
+  factor_values: Record<string, number>;
+}
+
+export interface ScorecardBatchRow {
+  id: string;
+  composite_score: number;
+  band: RagBand;
+  label: string;
+  action_required: string;
+}
+
+export interface ScorecardBatchResult {
+  tenant_id: string;
+  domain: string;
+  evaluated_at: string;
+  total: number;
+  total_weight_pct: number;
+  balanced: boolean;
+  // RAG distribution across the batch — every band key present (0 when absent)
+  distribution: Record<RagBand, number>;
+  mean_composite: number | null;
+  max_composite: number | null;
+  min_composite: number | null;
+  rows: ScorecardBatchRow[];
+}
+
+// Score N profiles in one call against the same configured factors + RAG bands,
+// returning a per-row band + a distribution rollup. Reuses evaluateScorecard so
+// the per-row math is identical to the single-evaluate path. Throws on a
+// non-array / oversized batch or a malformed row.
+export function evaluateScorecardBatch(
+  tenant_id: string,
+  domain: string,
+  rows: unknown,
+  enabledFactors: ScoreFactor[],
+  classification: AlertClassificationConfig,
+  nowMs: number,
+): ScorecardBatchResult {
+  if (!Array.isArray(rows)) {
+    throw new ScorecardEvalError('invalid_input', 'rows must be an array');
+  }
+  if (rows.length > SCORECARD_BATCH_MAX) {
+    throw new ScorecardEvalError('invalid_input', `batch exceeds ${SCORECARD_BATCH_MAX} rows`);
+  }
+  const distribution: Record<RagBand, number> = { green: 0, amber: 0, red: 0 };
+  const out: ScorecardBatchRow[] = [];
+  let sum = 0;
+  let max: number | null = null;
+  let min: number | null = null;
+  let total_weight_pct = 0;
+  let balanced = false;
+
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new ScorecardEvalError('invalid_input', 'each row must be an object');
+    }
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== 'string' || r.id.trim() === '') {
+      throw new ScorecardEvalError('invalid_input', 'each row needs a non-empty id');
+    }
+    const fv = normalizeFactorValues(r.factor_values);
+    const ev = evaluateScorecard(tenant_id, domain, enabledFactors, fv, classification, nowMs);
+    total_weight_pct = ev.total_weight_pct;
+    balanced = ev.balanced;
+    distribution[ev.classification.band] += 1;
+    sum += ev.composite_score;
+    max = max === null ? ev.composite_score : Math.max(max, ev.composite_score);
+    min = min === null ? ev.composite_score : Math.min(min, ev.composite_score);
+    out.push({
+      id: r.id,
+      composite_score: ev.composite_score,
+      band: ev.classification.band,
+      label: ev.classification.label,
+      action_required: ev.classification.action_required,
+    });
+  }
+
+  return {
+    tenant_id,
+    domain,
+    evaluated_at: new Date(nowMs).toISOString(),
+    total: out.length,
+    total_weight_pct,
+    balanced,
+    distribution,
+    mean_composite: out.length === 0 ? null : round2(sum / out.length),
+    max_composite: max,
+    min_composite: min,
+    rows: out,
   };
 }

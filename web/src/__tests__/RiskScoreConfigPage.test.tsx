@@ -161,4 +161,18 @@ describe('RiskScoreConfigPage — scorecard evaluator (config → runtime)', () 
     await waitFor(() => expect(screen.getByTestId('rsc-eval-both-note')).toBeInTheDocument());
     expect(screen.queryByTestId('rsc-eval-run')).not.toBeInTheDocument();
   });
+
+  it('Score sample portfolio runs a batch + shows the RAG distribution', async () => {
+    asAdmin();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-inputs')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('rsc-batch-run'));
+    await waitFor(() => expect(screen.getByTestId('rsc-batch-result')).toBeInTheDocument());
+    // 3 profiles scored (low / medium / high signals)
+    const rows = within(screen.getByTestId('rsc-batch-table')).getAllByTestId(/rsc-batch-row-/);
+    expect(rows.length).toBe(3);
+    // distribution badges present; the high-signal profile lands red on default bands
+    expect(screen.getByTestId('rsc-batch-red').textContent).toMatch(/Red \d/);
+    expect(screen.getByTestId('rsc-batch-row-high-signal')).toBeInTheDocument();
+  });
 });

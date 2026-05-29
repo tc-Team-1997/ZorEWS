@@ -32,6 +32,7 @@ import {
   api,
   type ScoreFactorDomainShape,
   type ScoreFactorShape,
+  type ScorecardBatchShape,
   type ScorecardEvaluationShape,
 } from '@/lib/api';
 
@@ -259,6 +260,7 @@ export function RiskScoreConfigPage() {
 function ScorecardTestPanel({ domain, factors }: { domain: 'banking' | 'insurance'; factors: ScoreFactorShape[] }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ScorecardEvaluationShape | null>(null);
+  const [batch, setBatch] = useState<ScorecardBatchShape | null>(null);
 
   const evalMut = useMutation({
     mutationFn: () => {
@@ -270,6 +272,21 @@ function ScorecardTestPanel({ domain, factors }: { domain: 'banking' | 'insuranc
       return api.riskScoreEvaluate(domain, fv);
     },
     onSuccess: (r) => setResult(r),
+  });
+
+  // Run a 3-profile sample (low / medium / high signals across every enabled
+  // factor) through the batch evaluator to preview the RAG distribution the
+  // configured weights + bands produce.
+  const batchMut = useMutation({
+    mutationFn: () => {
+      const profile = (signal: number) => Object.fromEntries(factors.map((f) => [f.code, signal]));
+      return api.riskScoreEvaluateBatch(domain, [
+        { id: 'low-signal', factor_values: profile(15) },
+        { id: 'medium-signal', factor_values: profile(65) },
+        { id: 'high-signal', factor_values: profile(95) },
+      ]);
+    },
+    onSuccess: (r) => setBatch(r),
   });
 
   const bandTone = (band: string): 'success' | 'warning' | 'danger' =>
@@ -293,9 +310,14 @@ function ScorecardTestPanel({ domain, factors }: { domain: 'banking' | 'insuranc
         </span>
       }
       action={
-        <Button variant="primary" onClick={() => evalMut.mutate()} disabled={evalMut.isPending} data-testid="rsc-eval-run">
-          {evalMut.isPending ? 'Evaluating…' : 'Evaluate'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => batchMut.mutate()} disabled={batchMut.isPending} data-testid="rsc-batch-run">
+            {batchMut.isPending ? 'Sampling…' : 'Score sample portfolio'}
+          </Button>
+          <Button variant="primary" onClick={() => evalMut.mutate()} disabled={evalMut.isPending} data-testid="rsc-eval-run">
+            {evalMut.isPending ? 'Evaluating…' : 'Evaluate'}
+          </Button>
+        </div>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="rsc-eval-inputs">
@@ -365,6 +387,40 @@ function ScorecardTestPanel({ domain, factors }: { domain: 'banking' | 'insuranc
                   <td className="font-mono">{c.weight_pct}%</td>
                   <td className="font-mono">{c.signal_value}</td>
                   <td className="font-mono font-medium">{c.contribution}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {batch && (
+        <div className="mt-4 space-y-3 border-t border-divider/40 pt-4" data-testid="rsc-batch-result">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs uppercase text-muted">Sample distribution</span>
+            <span data-testid="rsc-batch-green"><Badge tone="success">Green {batch.distribution.green}</Badge></span>
+            <span data-testid="rsc-batch-amber"><Badge tone="warning">Amber {batch.distribution.amber}</Badge></span>
+            <span data-testid="rsc-batch-red"><Badge tone="danger">Red {batch.distribution.red}</Badge></span>
+            <span className="text-xs text-muted">
+              mean {batch.mean_composite ?? '—'} · range {batch.min_composite ?? '—'}–{batch.max_composite ?? '—'}
+            </span>
+          </div>
+          <table className="w-full text-sm" data-testid="rsc-batch-table">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-divider/40">
+                <th className="py-1">Profile</th>
+                <th className="w-28">Composite</th>
+                <th className="w-24">Band</th>
+              </tr>
+            </thead>
+            <tbody>
+              {batch.rows.map((r) => (
+                <tr key={r.id} className="border-b border-divider/40" data-testid={`rsc-batch-row-${r.id}`}>
+                  <td className="py-1.5 font-mono text-xs">{r.id}</td>
+                  <td className="font-mono">{r.composite_score}</td>
+                  <td>
+                    <Badge tone={bandTone(r.band)}>{r.label}</Badge>
+                  </td>
                 </tr>
               ))}
             </tbody>

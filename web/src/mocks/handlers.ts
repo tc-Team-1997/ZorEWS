@@ -13867,6 +13867,55 @@ const __mswScorecardEvalHandlers = [
       }),
     );
   }),
+  http.post('/v1/config/risk-score/evaluate-batch', async ({ request }) => {
+    const b = __mswRscPeel(await request.json().catch(() => null)) as { domain?: string; rows?: unknown } | null;
+    const domain = b?.domain;
+    if (domain !== 'banking' && domain !== 'insurance') {
+      return __mswRscFail('EWS_400_invalid_input', 400, "domain must be 'banking' or 'insurance'");
+    }
+    if (!Array.isArray(b?.rows)) return __mswRscFail('EWS_400_invalid_input', 400, 'rows must be an array');
+    const enabled = __mswRscList(domain).filter((f) => f.enabled);
+    const cfg = __mswAccConfig();
+    const clamp = (n: number) => (n < 0 ? 0 : n > 100 ? 100 : n);
+    const total_weight_pct = __mswRscRound2(enabled.reduce((s, f) => s + f.weight_pct, 0));
+    const distribution: Record<string, number> = { green: 0, amber: 0, red: 0 };
+    const rows: any[] = [];
+    let sum = 0;
+    let max: number | null = null;
+    let min: number | null = null;
+    for (const raw of b!.rows as any[]) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.id !== 'string' || raw.id.trim() === '') {
+        return __mswRscFail('EWS_400_invalid_input', 400, 'each row needs a non-empty id');
+      }
+      const fv: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw.factor_values ?? {})) {
+        if (typeof v === 'number' && Number.isFinite(v)) fv[k.trim().toUpperCase()] = v;
+      }
+      const composite = __mswRscRound2(enabled.reduce((s, f) => s + (f.weight_pct / 100) * clamp(fv[f.code] ?? 0), 0));
+      const band = composite >= cfg.red_min ? 'red' : composite >= cfg.amber_min ? 'amber' : 'green';
+      const bandRow = cfg.bands.find((x) => x.band === band)!;
+      distribution[band]++;
+      sum += composite;
+      max = max === null ? composite : Math.max(max, composite);
+      min = min === null ? composite : Math.min(min, composite);
+      rows.push({ id: raw.id, composite_score: composite, band, label: bandRow.label, action_required: bandRow.action_required });
+    }
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        domain,
+        evaluated_at: new Date().toISOString(),
+        total: rows.length,
+        total_weight_pct,
+        balanced: Math.abs(total_weight_pct - 100) < 0.01,
+        distribution,
+        mean_composite: rows.length === 0 ? null : __mswRscRound2(sum / rows.length),
+        max_composite: max,
+        min_composite: min,
+        rows,
+      }),
+    );
+  }),
 ];
 handlers.push(...__mswScorecardEvalHandlers);
 

@@ -2843,6 +2843,10 @@ export const api = {
     http
       .post<EnvelopeBody<ScorecardEvaluationShape>>('/v1/config/risk-score/evaluate', { domain, factor_values })
       .then((r) => r.data),
+  riskScoreEvaluateBatch: (domain: 'banking' | 'insurance', rows: { id: string; factor_values: Record<string, number> }[]) =>
+    http
+      .post<EnvelopeBody<ScorecardBatchShape>>('/v1/config/risk-score/evaluate-batch', { domain, rows })
+      .then((r) => r.data),
 
   // ── Master Setup · Alert Classification Setup (RAG score bands) ───────
   alertClassificationConfig: () =>
@@ -6946,6 +6950,26 @@ export interface ScorecardEvaluationShape {
   unknown_value_codes: string[];
   missing_value_count: number;
   evaluated_at: string;
+}
+export interface ScorecardBatchRowShape {
+  id: string;
+  composite_score: number;
+  band: RagBandShape;
+  label: string;
+  action_required: string;
+}
+export interface ScorecardBatchShape {
+  tenant_id: string;
+  domain: 'banking' | 'insurance';
+  evaluated_at: string;
+  total: number;
+  total_weight_pct: number;
+  balanced: boolean;
+  distribution: Record<RagBandShape, number>;
+  mean_composite: number | null;
+  max_composite: number | null;
+  min_composite: number | null;
+  rows: ScorecardBatchRowShape[];
 }
 
 // ── Master Setup · Alert Classification Setup (RAG score bands) ─────────

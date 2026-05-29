@@ -6,7 +6,9 @@ import { StubRiskProfileSource } from '../src/risk_profile';
 import { UnavailableCaseActionSink } from '../src/case_action';
 import {
   evaluateScorecard,
+  evaluateScorecardBatch,
   normalizeFactorValues,
+  SCORECARD_BATCH_MAX,
   ScorecardEvalError,
 } from '../src/scorecard_evaluator';
 import type { ScoreFactor } from '../src/risk_score_config';
@@ -223,5 +225,94 @@ describe('scorecard_evaluator — POST /v1/config/risk-score/evaluate', () => {
     expect(res.status).toBe(200);
     expect(res.body.body.composite_score).toBe(30);
     expect(res.body.body.classification.band).toBe('red'); // 30 ≥ red_min(25)
+  });
+});
+
+// ─── evaluateScorecardBatch ──────────────────────────────────────────
+
+describe('scorecard_evaluator — evaluateScorecardBatch', () => {
+  it('scores N rows + rolls up a RAG distribution', () => {
+    const rows = [
+      { id: 'low', factor_values: { OVERDUE: 10, EMI_BOUNCE: 10, TXN_BEHAVIOUR: 10, BUREAU_SCORE: 10 } }, // 10 → green
+      { id: 'mid', factor_values: { OVERDUE: 80, EMI_BOUNCE: 80, TXN_BEHAVIOUR: 80, BUREAU_SCORE: 80 } }, // 80 → amber
+      { id: 'high', factor_values: { OVERDUE: 100, EMI_BOUNCE: 100, TXN_BEHAVIOUR: 100, BUREAU_SCORE: 100 } }, // 100 → red
+    ];
+    const r = evaluateScorecardBatch(TENANT, 'banking', rows, factors(), classification(), NOW_MS);
+    expect(r.total).toBe(3);
+    expect(r.distribution).toEqual({ green: 1, amber: 1, red: 1 });
+    expect(r.rows.map((x) => x.band)).toEqual(['green', 'amber', 'red']);
+    expect(r.rows.map((x) => x.id)).toEqual(['low', 'mid', 'high']);
+    expect(r.max_composite).toBe(100);
+    expect(r.min_composite).toBe(10);
+    expect(r.mean_composite).toBeCloseTo((10 + 80 + 100) / 3, 2);
+  });
+
+  it('empty batch → zero distribution + null aggregates', () => {
+    const r = evaluateScorecardBatch(TENANT, 'banking', [], factors(), classification(), NOW_MS);
+    expect(r.total).toBe(0);
+    expect(r.distribution).toEqual({ green: 0, amber: 0, red: 0 });
+    expect(r.mean_composite).toBeNull();
+    expect(r.max_composite).toBeNull();
+    expect(r.min_composite).toBeNull();
+  });
+
+  it('per-row band matches single-evaluate for the same input', () => {
+    const fv = { OVERDUE: 100, EMI_BOUNCE: 0, TXN_BEHAVIOUR: 0, BUREAU_SCORE: 0 };
+    const single = evaluateScorecard(TENANT, 'banking', factors(), fv, classification(), NOW_MS);
+    const batch = evaluateScorecardBatch(TENANT, 'banking', [{ id: 'x', factor_values: fv }], factors(), classification(), NOW_MS);
+    expect(batch.rows[0].composite_score).toBe(single.composite_score);
+    expect(batch.rows[0].band).toBe(single.classification.band);
+  });
+
+  it('rejects non-array rows, oversized batch, and malformed rows', () => {
+    expect(() => evaluateScorecardBatch(TENANT, 'banking', 'nope', factors(), classification(), NOW_MS)).toThrow(/must be an array/);
+    const tooMany = Array.from({ length: SCORECARD_BATCH_MAX + 1 }, (_, i) => ({ id: `r${i}`, factor_values: {} }));
+    expect(() => evaluateScorecardBatch(TENANT, 'banking', tooMany, factors(), classification(), NOW_MS)).toThrow(/exceeds/);
+    expect(() => evaluateScorecardBatch(TENANT, 'banking', [{ factor_values: {} }], factors(), classification(), NOW_MS)).toThrow(/non-empty id/);
+    expect(() => evaluateScorecardBatch(TENANT, 'banking', [42], factors(), classification(), NOW_MS)).toThrow(/must be an object/);
+  });
+});
+
+describe('scorecard_evaluator — POST /v1/config/risk-score/evaluate-batch', () => {
+  it('scores a batch against the seeded banking config (analyst)', async () => {
+    const res = await request(app('risk_analyst'))
+      .post('/v1/config/risk-score/evaluate-batch')
+      .set(H)
+      .send({
+        domain: 'banking',
+        rows: [
+          { id: 'c-1', factor_values: { OVERDUE: 20 } },
+          { id: 'c-2', factor_values: { OVERDUE: 100, EMI_BOUNCE: 100, TXN_BEHAVIOUR: 100, BUREAU_SCORE: 100 } },
+        ],
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.body.total).toBe(2);
+    expect(res.body.body.distribution.green + res.body.body.distribution.amber + res.body.body.distribution.red).toBe(2);
+    expect(res.body.body.rows.length).toBe(2);
+  });
+
+  it('400s an invalid domain', async () => {
+    const res = await request(app('admin'))
+      .post('/v1/config/risk-score/evaluate-batch')
+      .set(H)
+      .send({ domain: 'both', rows: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s a malformed row', async () => {
+    const res = await request(app('admin'))
+      .post('/v1/config/risk-score/evaluate-batch')
+      .set(H)
+      .send({ domain: 'banking', rows: [{ factor_values: {} }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('EWS_400_invalid_input');
+  });
+
+  it('403s a role without customers:read_risk_profile', async () => {
+    const res = await request(app('nobody'))
+      .post('/v1/config/risk-score/evaluate-batch')
+      .set(H)
+      .send({ domain: 'banking', rows: [] });
+    expect(res.status).toBe(403);
   });
 });

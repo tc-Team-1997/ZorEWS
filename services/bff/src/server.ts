@@ -36874,6 +36874,37 @@ export function makeApp(deps: AppDeps = {}) {
           }
         },
       );
+
+      // Batch — score N profiles in one call against the configured weights +
+      // RAG bands, returning per-row bands + a distribution rollup.
+      app.post(
+        '/v1/config/risk-score/evaluate-batch',
+        requireTenantMw,
+        requireRole('customers:read_risk_profile'),
+        (req: Request, res: Response) => {
+          const ctx = extractCtx(req, now);
+          try {
+            const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+            const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccCfgMod;
+            const { evaluateScorecardBatch, ScorecardEvalError } = require('./scorecard_evaluator') as ScoreMod;
+            const tenant = req.tenant!.tenant_id;
+            const body = rscPeel(req) as { domain?: unknown; rows?: unknown };
+            const domainRaw = body.domain;
+            if (domainRaw !== 'banking' && domainRaw !== 'insurance') {
+              throw new ScorecardEvalError('invalid_input', "domain must be 'banking' or 'insurance'");
+            }
+            const enabled = defaultRiskScoreConfigStore.list(tenant, domainRaw).filter((f) => f.enabled);
+            const classification = defaultAlertClassificationConfigStore.get(tenant);
+            const result = evaluateScorecardBatch(tenant, domainRaw, body.rows, enabled, classification, now().getTime());
+            return res.json(wrapResponse(result, ctx));
+          } catch (e) {
+            const code = (e as { code?: string }).code;
+            const ews = code ? `EWS_400_${code}` : 'EWS_400_invalid_input';
+            const msg = e instanceof Error ? e.message : 'scorecard_batch_failed';
+            return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+          }
+        },
+      );
     }
   }
 
