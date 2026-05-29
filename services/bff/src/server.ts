@@ -13181,6 +13181,51 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Insurance EWS — Module 10: Insurance Heatmaps (§ Phase-6).
+  //   Reusable engine — 5 metrics × 3 dimensions from one code path.
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/insurance/heatmap/metrics',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { listHeatmapCatalog } =
+        require('./insurance_heatmap') as typeof import('./insurance_heatmap');
+      return res.json(wrapResponse(listHeatmapCatalog(), ctx));
+    },
+  );
+
+  app.get(
+    '/v1/insurance/heatmap',
+    requireTenantMw,
+    requireRole('insurance:policy_lapse:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildInsuranceHeatmap } =
+          require('./insurance_heatmap') as typeof import('./insurance_heatmap');
+        type HM = import('./insurance_heatmap').HeatMetric;
+        type HD = import('./insurance_heatmap').HeatDimension;
+        const metric = (req.query.metric as HM) || 'fraud';
+        const dimension = (req.query.dimension as HD) || 'branch';
+        return res.json(wrapResponse(buildInsuranceHeatmap(req.tenant!.tenant_id, metric, dimension, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews =
+          code === 'invalid_metric'
+            ? 'EWS_400_invalid_metric'
+            : code === 'invalid_dimension'
+              ? 'EWS_400_invalid_dimension'
+              : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'insurance_heatmap_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
   // ── Custom dashboard builder (T6 M11.7) ──────────────────────────────
   //
   // Operator-authored layouts on a 12-col grid. Widget catalog is

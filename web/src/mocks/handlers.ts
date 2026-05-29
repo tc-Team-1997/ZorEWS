@@ -12775,6 +12775,82 @@ const __mswPolicyTimelineHandlers = [
 handlers.push(...__mswPolicyTimelineHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Insurance EWS Module 10 — Insurance Heatmaps (reusable engine).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswIhMetric = 'fraud' | 'lapse_risk' | 'channel_risk' | 'solvency_stress' | 'persistency_weakness';
+type MswIhDim = 'branch' | 'region' | 'channel';
+type MswIhHeat = 'low' | 'medium' | 'high' | 'critical';
+const __MSW_IH_METRICS: MswIhMetric[] = ['fraud', 'lapse_risk', 'channel_risk', 'solvency_stress', 'persistency_weakness'];
+const __MSW_IH_DIMS: MswIhDim[] = ['branch', 'region', 'channel'];
+const __MSW_IH_REGIONS = ['North', 'South', 'East', 'West', 'Central', 'Coastal'];
+const __MSW_IH_CHANNELS = ['Agency', 'Bancassurance', 'Broker', 'Direct', 'Corporate'];
+const __MSW_IH_BRANCHES = [
+  { id: 'IB-N-01', label: 'Delhi North LO', region: 'North' }, { id: 'IB-N-02', label: 'Jaipur LO', region: 'North' },
+  { id: 'IB-S-01', label: 'Bengaluru LO', region: 'South' }, { id: 'IB-S-02', label: 'Chennai LO', region: 'South' },
+  { id: 'IB-E-01', label: 'Kolkata LO', region: 'East' }, { id: 'IB-E-02', label: 'Guwahati LO', region: 'East' },
+  { id: 'IB-W-01', label: 'Mumbai LO', region: 'West' }, { id: 'IB-W-02', label: 'Pune LO', region: 'West' },
+  { id: 'IB-C-01', label: 'Bhopal LO', region: 'Central' }, { id: 'IB-C-02', label: 'Nagpur LO', region: 'Central' },
+  { id: 'IB-CO-01', label: 'Kochi LO', region: 'Coastal' }, { id: 'IB-CO-02', label: 'Goa LO', region: 'Coastal' },
+];
+const __MSW_IH_HEADLINE: Record<MswIhMetric, { label: string; unit: 'count' | 'pct' | 'ratio' }> = {
+  fraud: { label: 'Open fraud cases', unit: 'count' },
+  lapse_risk: { label: 'Lapse rate', unit: 'pct' },
+  channel_risk: { label: 'Complaint ratio', unit: 'pct' },
+  solvency_stress: { label: 'Solvency ratio', unit: 'ratio' },
+  persistency_weakness: { label: '13m persistency', unit: 'pct' },
+};
+const __MSW_IH_CATALOG = [
+  { metric: 'fraud', label: 'Fraud concentration', description: 'Open fraud cases + SIU load by unit.', natural_dimension: 'branch', headline_label: 'Open fraud cases', headline_unit: 'count', higher_is_worse: true },
+  { metric: 'lapse_risk', label: 'Lapse risk', description: 'Policy lapse pressure by unit.', natural_dimension: 'region', headline_label: 'Lapse rate', headline_unit: 'pct', higher_is_worse: true },
+  { metric: 'channel_risk', label: 'Channel risk', description: 'Complaint + mis-sell pressure by channel.', natural_dimension: 'channel', headline_label: 'Complaint ratio', headline_unit: 'pct', higher_is_worse: true },
+  { metric: 'solvency_stress', label: 'Solvency stress', description: 'Solvency-ratio headroom by unit (lower = worse).', natural_dimension: 'region', headline_label: 'Solvency ratio', headline_unit: 'ratio', higher_is_worse: false },
+  { metric: 'persistency_weakness', label: 'Persistency weakness', description: '13-month persistency by unit (lower = worse).', natural_dimension: 'channel', headline_label: '13m persistency', headline_unit: 'pct', higher_is_worse: false },
+];
+function __mswIhHash(s: string): number { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+function __mswIhRng(seed: number): () => number { let a = seed; return () => { a = (a + 0x6d2b79f5) | 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 0x100000000; }; }
+function __mswIhHeat(score: number): MswIhHeat { return score >= 75 ? 'critical' : score >= 50 ? 'high' : score >= 25 ? 'medium' : 'low'; }
+const __MSW_IH_RANK: Record<MswIhHeat, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+const __mswInsuranceHeatmapHandlers = [
+  http.get('/v1/insurance/heatmap/metrics', () =>
+    HttpResponse.json(envelope({ metrics: __MSW_IH_CATALOG, dimensions: __MSW_IH_DIMS })),
+  ),
+  http.get('/v1/insurance/heatmap', ({ request }) => {
+    const u = new URL(request.url);
+    const metric = (u.searchParams.get('metric') || 'fraud') as MswIhMetric;
+    const dimension = (u.searchParams.get('dimension') || 'branch') as MswIhDim;
+    if (!__MSW_IH_METRICS.includes(metric)) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_metric', message: `unknown metric ${metric}`, severity: 'MEDIUM' } }, { status: 400 });
+    if (!__MSW_IH_DIMS.includes(dimension)) return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_dimension', message: `unknown dimension ${dimension}`, severity: 'MEDIUM' } }, { status: 400 });
+    const day = new Date().toISOString().slice(0, 10);
+    const headline = __MSW_IH_HEADLINE[metric];
+    type Unit = { id: string; label: string; group: string | null };
+    const units: Unit[] =
+      dimension === 'branch' ? __MSW_IH_BRANCHES.map((b) => ({ id: b.id, label: b.label, group: b.region }))
+      : dimension === 'region' ? __MSW_IH_REGIONS.map((r) => ({ id: r, label: r, group: null }))
+      : __MSW_IH_CHANNELS.map((c) => ({ id: c, label: c, group: c === 'Agency' || c === 'Broker' ? 'Intermediated' : 'Direct/Partner' }));
+    const counts: Record<MswIhHeat, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    const cells = units.map((un) => {
+      const rng = __mswIhRng(__mswIhHash(`BANK_DEMO|${metric}|${dimension}|${un.id}|${day}`));
+      const base = rng();
+      let headline_value: number, risk_score: number;
+      if (metric === 'fraud') { const n = Math.round(base * 28); headline_value = n; risk_score = Math.round(Math.min(100, (n / 28) * 100)); }
+      else if (metric === 'lapse_risk') { const p = Math.round(base * 22 * 100) / 100; headline_value = p; risk_score = Math.round(Math.min(100, (p / 22) * 100)); }
+      else if (metric === 'channel_risk') { const p = Math.round(base * 9 * 100) / 100; headline_value = p; risk_score = Math.round(Math.min(100, (p / 9) * 100)); }
+      else if (metric === 'solvency_stress') { const r = Math.round((1.1 + base * 1.2) * 100) / 100; headline_value = r; risk_score = Math.round(Math.min(100, Math.max(0, ((2.3 - r) / 1.2) * 100))); }
+      else { const p = Math.round((55 + base * 40) * 100) / 100; headline_value = p; risk_score = Math.round(Math.min(100, Math.max(0, ((95 - p) / 40) * 100))); }
+      const heat_level = __mswIhHeat(risk_score);
+      counts[heat_level]++;
+      return { id: un.id, label: un.label, group: un.group, risk_score, heat_level, headline_value, headline_label: headline.label, headline_unit: headline.unit, volume: Math.round(200 + rng() * 3000), delta_30d_pct: Math.round((rng() * 4 - 2) * 100) / 100 };
+    });
+    cells.sort((a, b) => __MSW_IH_RANK[a.heat_level] - __MSW_IH_RANK[b.heat_level] || b.risk_score - a.risk_score);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), metric, dimension, total_cells: cells.length, by_heat_level: counts, cells }));
+  }),
+];
+
+handlers.push(...__mswInsuranceHeatmapHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

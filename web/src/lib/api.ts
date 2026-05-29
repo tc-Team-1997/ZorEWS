@@ -2664,6 +2664,16 @@ export const api = {
       .post<EnvelopeBody<LapsePredictionShape>>('/v1/insurance/policy-lapse/predict', input)
       .then((r) => r.data),
 
+  // ── Insurance EWS · Module 10 — Insurance Heatmaps ────────────────────
+  insuranceHeatmapMetrics: () =>
+    http.get<EnvelopeBody<HeatmapCatalogShape>>('/v1/insurance/heatmap/metrics').then((r) => r.data),
+  insuranceHeatmap: (metric: string, dimension: string) =>
+    http
+      .get<EnvelopeBody<InsuranceHeatmapShape>>(
+        `/v1/insurance/heatmap?metric=${encodeURIComponent(metric)}&dimension=${encodeURIComponent(dimension)}`,
+      )
+      .then((r) => r.data),
+
   // ── Insurance EWS · Module 9 — Policy Timeline ────────────────────────
   insurancePolicyTimeline: (
     policy_id: string,
@@ -3321,6 +3331,54 @@ export interface ClaimAnalysisResultShape {
   recommended_action: string;
   model_version: string;
   scored_at: string;
+}
+
+// ── Insurance EWS · Module 10 types (mirrors services/bff/src/insurance_heatmap.ts) ──
+export type HeatMetricShape =
+  | 'fraud'
+  | 'lapse_risk'
+  | 'channel_risk'
+  | 'solvency_stress'
+  | 'persistency_weakness';
+export type HeatDimensionShape = 'branch' | 'region' | 'channel';
+export type HeatLevelShape = 'low' | 'medium' | 'high' | 'critical';
+
+export interface HeatMetricDefShape {
+  metric: HeatMetricShape;
+  label: string;
+  description: string;
+  natural_dimension: HeatDimensionShape;
+  headline_label: string;
+  headline_unit: 'count' | 'pct' | 'ratio';
+  higher_is_worse: boolean;
+}
+
+export interface HeatmapCatalogShape {
+  metrics: HeatMetricDefShape[];
+  dimensions: HeatDimensionShape[];
+}
+
+export interface InsuranceHeatCellShape {
+  id: string;
+  label: string;
+  group: string | null;
+  risk_score: number;
+  heat_level: HeatLevelShape;
+  headline_value: number;
+  headline_label: string;
+  headline_unit: 'count' | 'pct' | 'ratio';
+  volume: number;
+  delta_30d_pct: number;
+}
+
+export interface InsuranceHeatmapShape {
+  tenant_id: string;
+  generated_at: string;
+  metric: HeatMetricShape;
+  dimension: HeatDimensionShape;
+  total_cells: number;
+  by_heat_level: Record<HeatLevelShape, number>;
+  cells: InsuranceHeatCellShape[];
 }
 
 // ── Insurance EWS · Module 9 types (mirrors services/bff/src/insurance_policy_timeline.ts) ──

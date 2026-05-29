@@ -169,6 +169,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/insurance/underwriting', i18nKey: 'insurance_underwriting', icon: SlidersHorizontal, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/channel-risk', i18nKey: 'insurance_channel_risk', icon: Network, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       { to: '/insurance/policy-timeline', i18nKey: 'insurance_policy_timeline', icon: History, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/insurance/heatmaps', i18nKey: 'insurance_heatmaps', icon: BarChart3, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
     ],
   },
 

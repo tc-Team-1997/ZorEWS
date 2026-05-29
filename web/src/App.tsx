@@ -74,6 +74,7 @@ import { PersistencyWatchPage } from '@/modules/insurance/PersistencyWatchPage';
 import { UnderwritingDeviationPage } from '@/modules/insurance/UnderwritingDeviationPage';
 import { ChannelRiskPage } from '@/modules/insurance/ChannelRiskPage';
 import { PolicyTimelinePage } from '@/modules/insurance/PolicyTimelinePage';
+import { InsuranceHeatmapPage } from '@/modules/insurance/InsuranceHeatmapPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
@@ -233,6 +234,7 @@ export function App() {
               <Route path="insurance/underwriting" element={<UnderwritingDeviationPage />} />
               <Route path="insurance/channel-risk" element={<ChannelRiskPage />} />
               <Route path="insurance/policy-timeline" element={<PolicyTimelinePage />} />
+              <Route path="insurance/heatmaps" element={<InsuranceHeatmapPage />} />
             </Route>
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
