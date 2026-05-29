@@ -2901,6 +2901,11 @@ export const api = {
     http.patch<EnvelopeBody<ScheduledJobShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}`, patch).then((r) => r.data),
   scheduledJobRun: (job_id: string) =>
     http.post<EnvelopeBody<JobRunResultShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}/run`, {}).then((r) => r.data),
+  // Run telemetry — execution-log drill-down + aggregate stats.
+  scheduledJobRuns: (job_id: string, limit = 20) =>
+    http.get<EnvelopeBody<JobRunListShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}/runs?limit=${limit}`).then((r) => r.data),
+  scheduledJobRunStats: (job_id: string) =>
+    http.get<EnvelopeBody<JobRunStatsShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}/run-stats`).then((r) => r.data),
 
   // ── Configuration · Access Control Config (read-only RBAC matrix viewer) ─
   accessControlOverview: () =>
@@ -7066,6 +7071,29 @@ export interface JobRunResultShape {
   ran_at: string;
   duration_ms: number;
   triggered_by: string;
+}
+export interface JobRunLogEntryShape {
+  run_id: string;
+  job_id: string;
+  status: JobRunStatusShape;
+  triggered_by: string;
+  ran_at: string;
+  duration_ms: number;
+}
+export interface JobRunListShape {
+  tenant_id: string;
+  job_id: string;
+  total: number;
+  runs: JobRunLogEntryShape[];
+}
+export interface JobRunStatsShape {
+  job_id: string;
+  total_runs: number;
+  by_status: Record<JobRunStatusShape, number>;
+  success_rate: number | null;
+  mean_duration_ms: number | null;
+  last_run_at: string | null;
+  last_status: JobRunStatusShape | null;
 }
 
 // ── Configuration · Access Control Config (read-only RBAC matrix viewer) ──

@@ -37257,6 +37257,41 @@ export function makeApp(deps: AppDeps = {}) {
         }
       },
     );
+
+    // Run telemetry — execution log + aggregate stats. Turns the registry's
+    // Last_Run_Status column into a drill-down ("recent runs + success rate").
+    app.get(
+      '/v1/config/jobs/:job_id/runs',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+          const limit = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+          const runs = defaultJobSchedulerStore.listRuns(req.tenant!.tenant_id, req.params.job_id, now().getTime(), limit);
+          return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, job_id: req.params.job_id, total: runs.length, runs }, ctx));
+        } catch (e) {
+          return jscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.get(
+      '/v1/config/jobs/:job_id/run-stats',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+          const stats = defaultJobSchedulerStore.runStats(req.tenant!.tenant_id, req.params.job_id, now().getTime());
+          return res.json(wrapResponse(stats, ctx));
+        } catch (e) {
+          return jscErr(e, ctx, res);
+        }
+      },
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────

@@ -123,6 +123,30 @@ export interface JobRunResult {
   triggered_by: string;
 }
 
+// ─── Run telemetry (execution log) ───────────────────────────────────
+
+export interface JobRunLogEntry {
+  run_id: string;
+  job_id: string;
+  status: JobRunStatus;
+  triggered_by: string; // 'scheduler' for synthesised history, the actor for run-now
+  ran_at: string;
+  duration_ms: number;
+}
+
+export interface JobRunStats {
+  job_id: string;
+  total_runs: number;
+  by_status: Record<JobRunStatus, number>;
+  // success / (success + partial + failure) — terminal runs only; null when none
+  success_rate: number | null;
+  mean_duration_ms: number | null; // over terminal runs; null when none
+  last_run_at: string | null;
+  last_status: JobRunStatus | null;
+}
+
+export const JOB_RUN_LOG_CAP = 50;
+
 // ─── Error ───────────────────────────────────────────────────────────
 
 export type JobSchedulerConfigErrorCode = 'invalid_input' | 'invalid_frequency' | 'unknown_job';
@@ -184,6 +208,83 @@ function computeNextRun(frequency: JobFrequency, fromMs: number): string {
 
 export class InMemoryJobSchedulerStore {
   private byTenant = new Map<string, ScheduledJob[]>();
+  private runLog = new Map<string, JobRunLogEntry[]>(); // ck → newest-first
+
+  // Lazily synthesise a job's recent run history. The NEWEST entry mirrors the
+  // job's current last_run_* (so the drill-down's top row matches the table),
+  // and older entries step back by the job's frequency interval — giving the
+  // SPA telemetry view a populated, internally-consistent history on first
+  // open. `runNow` prepends real entries on top. never_run jobs → empty log.
+  private seededRuns(tenant: string, job_id: string, nowMs: number): JobRunLogEntry[] {
+    const ck = `${tenant}|${job_id}`;
+    const existing = this.runLog.get(ck);
+    if (existing) return existing;
+    const job = this.seeded(tenant, nowMs).find((r) => r.job_id === job_id);
+    const log: JobRunLogEntry[] = [];
+    if (job && job.last_run_at !== null) {
+      log.push({
+        run_id: `${job_id}-h0`,
+        job_id,
+        status: job.last_run_status,
+        triggered_by: 'scheduler',
+        ran_at: job.last_run_at,
+        duration_ms: job.last_run_duration_ms ?? 0,
+      });
+      const stepMs = FREQUENCY_MINUTES[job.frequency] * 60_000;
+      let t = Date.parse(job.last_run_at);
+      for (let i = 1; i < 8; i++) {
+        t -= stepMs;
+        const rng = mulberry32(fnv1a(`${ck}|hist|${i}`));
+        const roll = rng();
+        // historical runs are terminal (no 'running'): 84% success / 8% partial / 8% failure
+        const status: JobRunStatus = roll < 0.84 ? 'success' : roll < 0.92 ? 'partial' : 'failure';
+        log.push({
+          run_id: `${job_id}-h${i}`,
+          job_id,
+          status,
+          triggered_by: 'scheduler',
+          ran_at: new Date(t).toISOString(),
+          duration_ms: 200 + Math.floor(rng() * 9800),
+        });
+      }
+    }
+    this.runLog.set(ck, log);
+    return log;
+  }
+
+  // Recent run history, newest-first. Validates the job exists. limit 1..JOB_RUN_LOG_CAP.
+  listRuns(tenant: string, job_id: string, nowMs: number, limit = 20): JobRunLogEntry[] {
+    const job = this.seeded(tenant, nowMs).find((r) => r.job_id === job_id);
+    if (!job) throw new JobSchedulerConfigError('unknown_job', `unknown job '${job_id}'`);
+    const n = Math.max(1, Math.min(JOB_RUN_LOG_CAP, Math.floor(Number.isFinite(limit) ? limit : 20)));
+    return this.seededRuns(tenant, job_id, nowMs).slice(0, n).map((e) => structuredClone(e));
+  }
+
+  // Aggregate run stats over the full log. Validates the job exists.
+  runStats(tenant: string, job_id: string, nowMs: number): JobRunStats {
+    const job = this.seeded(tenant, nowMs).find((r) => r.job_id === job_id);
+    if (!job) throw new JobSchedulerConfigError('unknown_job', `unknown job '${job_id}'`);
+    const log = this.seededRuns(tenant, job_id, nowMs);
+    const by_status: Record<JobRunStatus, number> = { success: 0, failure: 0, partial: 0, running: 0, never_run: 0 };
+    let terminal = 0;
+    let durationSum = 0;
+    for (const e of log) {
+      by_status[e.status]++;
+      if (e.status === 'success' || e.status === 'partial' || e.status === 'failure') {
+        terminal++;
+        durationSum += e.duration_ms;
+      }
+    }
+    return {
+      job_id,
+      total_runs: log.length,
+      by_status,
+      success_rate: terminal === 0 ? null : round2(by_status.success / terminal),
+      mean_duration_ms: terminal === 0 ? null : Math.round(durationSum / terminal),
+      last_run_at: log.length > 0 ? log[0].ran_at : null,
+      last_status: log.length > 0 ? log[0].status : null,
+    };
+  }
 
   private seeded(tenant: string, nowMs: number): ScheduledJob[] {
     let rows = this.byTenant.get(tenant);
@@ -271,6 +372,11 @@ export class InMemoryJobSchedulerStore {
     j.consecutive_failures = status === 'failure' ? j.consecutive_failures + 1 : 0;
     j.next_run_at = computeNextRun(j.frequency, nowMs);
     j.updated_at = ran_at;
+    // Append to the execution log (newest-first, capped). Seed history first so
+    // the run-now entry sits atop the synthesised past.
+    const log = this.seededRuns(tenant, job_id, nowMs);
+    log.unshift({ run_id: `${job_id}-r${n}`, job_id, status, triggered_by: triggeredBy, ran_at, duration_ms });
+    if (log.length > JOB_RUN_LOG_CAP) log.length = JOB_RUN_LOG_CAP;
     return { job_id, status, ran_at, duration_ms: round2(duration_ms), triggered_by: triggeredBy };
   }
 
@@ -320,8 +426,9 @@ export class InMemoryJobSchedulerStore {
 export const defaultJobSchedulerStore = new InMemoryJobSchedulerStore();
 export function _resetJobSchedulerStore(): void {
   const fresh = new InMemoryJobSchedulerStore();
-  const target = defaultJobSchedulerStore as unknown as { byTenant: Map<string, unknown>; runCounter: Map<string, unknown> };
-  const src = fresh as unknown as { byTenant: Map<string, unknown>; runCounter: Map<string, unknown> };
+  const target = defaultJobSchedulerStore as unknown as { byTenant: Map<string, unknown>; runCounter: Map<string, unknown>; runLog: Map<string, unknown> };
+  const src = fresh as unknown as { byTenant: Map<string, unknown>; runCounter: Map<string, unknown>; runLog: Map<string, unknown> };
   target.byTenant = src.byTenant;
   target.runCounter = src.runCounter;
+  target.runLog = src.runLog;
 }

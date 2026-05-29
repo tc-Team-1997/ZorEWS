@@ -85,3 +85,35 @@ describe('JobSchedulerConfigPage', () => {
     expect(screen.queryByTestId('jsc-toggle-job-BANK_DEMO-CBS_INGESTION')).not.toBeInTheDocument();
   });
 });
+
+describe('JobSchedulerConfigPage — run telemetry drill-down', () => {
+  it('opening History shows run stats + recent runs for a job with history', async () => {
+    asAdmin();
+    renderWithProviders(<JobSchedulerConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('jsc-row-job-BANK_DEMO-CBS_INGESTION')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('jsc-history-job-BANK_DEMO-CBS_INGESTION'));
+    await waitFor(() => expect(screen.getByTestId('jsc-history-modal')).toBeInTheDocument());
+    // stats KPIs + 8 seeded run rows (both queries resolve async)
+    await waitFor(() => expect(screen.getByTestId('jsc-stats-total').textContent).toMatch(/8/));
+    await waitFor(() => expect(screen.getByTestId('jsc-history-table')).toBeInTheDocument());
+    const rows = within(screen.getByTestId('jsc-history-table')).getAllByTestId(/jsc-history-row-/);
+    expect(rows.length).toBe(8);
+  });
+
+  it('a never-run job shows the empty-history note', async () => {
+    asAdmin();
+    renderWithProviders(<JobSchedulerConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('jsc-row-job-BANK_DEMO-FEATURE_STORE_BACKFILL')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('jsc-history-job-BANK_DEMO-FEATURE_STORE_BACKFILL'));
+    await waitFor(() => expect(screen.getByTestId('jsc-history-empty')).toBeInTheDocument());
+  });
+
+  it('non-admin can open run history (read-only telemetry)', async () => {
+    asViewer();
+    renderWithProviders(<JobSchedulerConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('jsc-table')).toBeInTheDocument());
+    expect(screen.getByTestId('jsc-history-job-BANK_DEMO-CBS_INGESTION')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('jsc-history-job-BANK_DEMO-CBS_INGESTION'));
+    await waitFor(() => expect(screen.getByTestId('jsc-history-modal')).toBeInTheDocument());
+  });
+});

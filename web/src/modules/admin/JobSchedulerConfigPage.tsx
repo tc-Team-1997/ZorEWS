@@ -10,8 +10,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Pause, Play, PlayCircle, RefreshCw } from 'lucide-react';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { AlertTriangle, History, Pause, Play, PlayCircle, RefreshCw, X } from 'lucide-react';
+import { Badge, Button, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
 import {
@@ -50,6 +50,7 @@ function fmtWhen(iso: string | null): string {
 export function JobSchedulerConfigPage() {
   const qc = useQueryClient();
   const [category, setCategory] = useState<JobCategoryShape | 'all'>('all');
+  const [historyJob, setHistoryJob] = useState<ScheduledJobShape | null>(null);
 
   const user = useAuth((s) => s.user);
   const canEdit = user?.roles.includes('admin') ?? false;
@@ -140,7 +141,7 @@ export function JobSchedulerConfigPage() {
                 <th className="w-32">Frequency</th>
                 <th className="w-28">Last run</th>
                 <th className="w-40">Next run</th>
-                {canEdit && <th className="w-28"></th>}
+                <th className="w-32"></th>
               </tr>
             </thead>
             <tbody>
@@ -152,6 +153,7 @@ export function JobSchedulerConfigPage() {
                   onFreq={(frequency) => updateMut.mutate({ job_id: j.job_id, patch: { frequency } })}
                   onToggle={(enabled) => updateMut.mutate({ job_id: j.job_id, patch: { enabled } })}
                   onRun={() => runMut.mutate(j.job_id)}
+                  onHistory={() => setHistoryJob(j)}
                   running={runMut.isPending && runMut.variables === j.job_id}
                 />
               ))}
@@ -159,6 +161,8 @@ export function JobSchedulerConfigPage() {
           </table>
         )}
       </Panel>
+
+      {historyJob && <JobHistoryModal job={historyJob} onClose={() => setHistoryJob(null)} />}
     </div>
   );
 }
@@ -169,6 +173,7 @@ function JobRow({
   onFreq,
   onToggle,
   onRun,
+  onHistory,
   running,
 }: {
   j: ScheduledJobShape;
@@ -176,6 +181,7 @@ function JobRow({
   onFreq: (f: JobFrequencyShape) => void;
   onToggle: (enabled: boolean) => void;
   onRun: () => void;
+  onHistory: () => void;
   running: boolean;
 }) {
   return (
@@ -210,29 +216,100 @@ function JobRow({
         {j.consecutive_failures > 0 && <div className="text-xs text-rose-600 mt-0.5">×{j.consecutive_failures}</div>}
       </td>
       <td className="text-xs text-muted">{j.enabled ? fmtWhen(j.next_run_at) : 'paused'}</td>
-      {canEdit && (
-        <td className="text-right">
-          <div className="flex justify-end gap-1">
-            <Button
-              variant="ghost"
-              onClick={onRun}
-              disabled={!j.enabled || running}
-              aria-label={`Run ${j.name} now`}
-              data-testid={`jsc-run-${j.job_id}`}
-            >
-              <PlayCircle size={14} />
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => onToggle(!j.enabled)}
-              aria-label={j.enabled ? `Pause ${j.name}` : `Resume ${j.name}`}
-              data-testid={`jsc-toggle-${j.job_id}`}
-            >
-              {j.enabled ? <Pause size={14} /> : <Play size={14} className="text-emerald-600" />}
-            </Button>
-          </div>
-        </td>
-      )}
+      <td className="text-right">
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" onClick={onHistory} aria-label={`Run history for ${j.name}`} data-testid={`jsc-history-${j.job_id}`}>
+            <History size={14} />
+          </Button>
+          {canEdit && (
+            <>
+              <Button
+                variant="ghost"
+                onClick={onRun}
+                disabled={!j.enabled || running}
+                aria-label={`Run ${j.name} now`}
+                data-testid={`jsc-run-${j.job_id}`}
+              >
+                <PlayCircle size={14} />
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => onToggle(!j.enabled)}
+                aria-label={j.enabled ? `Pause ${j.name}` : `Resume ${j.name}`}
+                data-testid={`jsc-toggle-${j.job_id}`}
+              >
+                {j.enabled ? <Pause size={14} /> : <Play size={14} className="text-emerald-600" />}
+              </Button>
+            </>
+          )}
+        </div>
+      </td>
     </tr>
+  );
+}
+
+function JobHistoryModal({ job, onClose }: { job: ScheduledJobShape; onClose: () => void }) {
+  const runsQ = useQuery({ queryKey: ['jsc-runs', job.job_id], queryFn: () => api.scheduledJobRuns(job.job_id, 20) });
+  const statsQ = useQuery({ queryKey: ['jsc-run-stats', job.job_id], queryFn: () => api.scheduledJobRunStats(job.job_id) });
+  const stats = statsQ.data;
+  const runs = runsQ.data?.runs ?? [];
+
+  return (
+    <Modal open onClose={onClose} ariaLabel={`Run history — ${job.name}`} size="lg" testId="jsc-history-modal">
+      <div className="p-6 space-y-4">
+        <header className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">{job.name}</h2>
+            <p className="text-xs text-muted">{job.owner_service} · {job.category}</p>
+          </div>
+          <Button variant="ghost" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </Button>
+        </header>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <MetricCard label="Total runs" value={String(stats?.total_runs ?? 0)} testId="jsc-stats-total" />
+          <MetricCard
+            label="Success rate"
+            value={stats?.success_rate != null ? `${Math.round(stats.success_rate * 100)}%` : '—'}
+            tone={stats && stats.success_rate != null && stats.success_rate >= 0.9 ? 'success' : stats && stats.success_rate != null && stats.success_rate >= 0.7 ? 'warning' : 'danger'}
+            testId="jsc-stats-success"
+          />
+          <MetricCard label="Mean duration" value={stats?.mean_duration_ms != null ? `${stats.mean_duration_ms} ms` : '—'} testId="jsc-stats-duration" />
+          <MetricCard label="Last status" value={stats?.last_status ?? 'never_run'} tone={stats?.last_status ? STATUS_TONE[stats.last_status] : 'neutral'} testId="jsc-stats-last" />
+        </div>
+
+        {runsQ.isLoading ? (
+          <p className="text-sm text-muted">Loading runs…</p>
+        ) : runs.length === 0 ? (
+          <p className="rounded border border-dashed border-divider p-6 text-center text-sm text-muted" data-testid="jsc-history-empty">
+            No runs recorded yet — this job has never run.
+          </p>
+        ) : (
+          <table className="w-full text-sm" data-testid="jsc-history-table">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-divider/40">
+                <th className="py-2">Status</th>
+                <th>Triggered by</th>
+                <th className="w-44">Ran at</th>
+                <th className="w-28">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.run_id} className="border-b border-divider/40" data-testid={`jsc-history-row-${r.run_id}`}>
+                  <td className="py-1.5">
+                    <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                  </td>
+                  <td className="text-xs">{r.triggered_by}</td>
+                  <td className="text-xs text-muted">{fmtWhen(r.ran_at)}</td>
+                  <td className="text-xs font-mono">{r.duration_ms} ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </Modal>
   );
 }

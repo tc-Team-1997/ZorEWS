@@ -14025,10 +14025,12 @@ const __MSW_JSC_FREQ_MIN: Record<string, number> = {
   realtime: 1, every_5min: 5, every_15min: 15, hourly: 60, every_6h: 360, daily: 1440, weekly: 10080, monthly: 43200,
 };
 const __mswJscStore = new Map<string, any>();
+const __mswJscRunLog = new Map<string, any[]>(); // job_id → newest-first
 let __mswJscSeeded = false;
 let __mswJscRunCounter = 0;
 export function __resetMswJobScheduler() {
   __mswJscStore.clear();
+  __mswJscRunLog.clear();
   __mswJscSeeded = false;
   __mswJscRunCounter = 0;
 }
@@ -14082,6 +14084,27 @@ const __mswJscFail = (code: string, status: number, msg: string) =>
     { status },
   );
 const __mswJscPeel = (b: any) => (b && typeof b === 'object' && b.body && typeof b.body === 'object' ? b.body : b);
+// Lazily synthesise an 8-entry run history whose newest entry mirrors the
+// job's current last_run_* (mirrors the BFF). never_run jobs → empty log.
+function __mswJscSeededRuns(id: string): any[] {
+  const existing = __mswJscRunLog.get(id);
+  if (existing) return existing;
+  const job = __mswJscStore.get(id);
+  const log: any[] = [];
+  if (job && job.last_run_at !== null) {
+    log.push({ run_id: `${id}-h0`, job_id: id, status: job.last_run_status, triggered_by: 'scheduler', ran_at: job.last_run_at, duration_ms: job.last_run_duration_ms ?? 0 });
+    const stepMs = __MSW_JSC_FREQ_MIN[job.frequency] * 60_000;
+    let t = Date.parse(job.last_run_at);
+    for (let i = 1; i < 8; i++) {
+      t -= stepMs;
+      const roll = (i * 0.31 + 0.17) % 1;
+      const status = roll < 0.84 ? 'success' : roll < 0.92 ? 'partial' : 'failure';
+      log.push({ run_id: `${id}-h${i}`, job_id: id, status, triggered_by: 'scheduler', ran_at: new Date(t).toISOString(), duration_ms: 200 + Math.floor(roll * 9800) });
+    }
+  }
+  __mswJscRunLog.set(id, log);
+  return log;
+}
 
 const __mswJobSchedulerHandlers = [
   http.get('/v1/config/jobs/summary', () => {
@@ -14164,7 +14187,45 @@ const __mswJobSchedulerHandlers = [
     row.consecutive_failures = status === 'failure' ? row.consecutive_failures + 1 : 0;
     row.next_run_at = __mswJscNextRun(row.frequency);
     row.updated_at = ran_at;
+    const log = __mswJscSeededRuns(row.job_id);
+    log.unshift({ run_id: `${row.job_id}-r${__mswJscRunCounter}`, job_id: row.job_id, status, triggered_by: 'alice.admin', ran_at, duration_ms });
     return HttpResponse.json(envelope({ job_id: row.job_id, status, ran_at, duration_ms, triggered_by: 'alice.admin' }), { status: 202 });
+  }),
+  http.get('/v1/config/jobs/:id/runs', ({ params, request }) => {
+    __mswJscSeed();
+    const id = String(params.id);
+    if (!__mswJscStore.get(id)) return __mswJscFail('EWS_404_unknown_job', 404, 'unknown job');
+    const limRaw = Number(new URL(request.url).searchParams.get('limit') ?? 20);
+    const lim = Math.max(1, Math.min(50, Number.isFinite(limRaw) ? Math.floor(limRaw) : 20));
+    const runs = __mswJscSeededRuns(id).slice(0, lim);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', job_id: id, total: runs.length, runs }));
+  }),
+  http.get('/v1/config/jobs/:id/run-stats', ({ params }) => {
+    __mswJscSeed();
+    const id = String(params.id);
+    if (!__mswJscStore.get(id)) return __mswJscFail('EWS_404_unknown_job', 404, 'unknown job');
+    const log = __mswJscSeededRuns(id);
+    const by_status: Record<string, number> = { success: 0, failure: 0, partial: 0, running: 0, never_run: 0 };
+    let terminal = 0;
+    let durSum = 0;
+    log.forEach((e) => {
+      by_status[e.status]++;
+      if (e.status === 'success' || e.status === 'partial' || e.status === 'failure') {
+        terminal++;
+        durSum += e.duration_ms;
+      }
+    });
+    return HttpResponse.json(
+      envelope({
+        job_id: id,
+        total_runs: log.length,
+        by_status,
+        success_rate: terminal === 0 ? null : Math.round((by_status.success / terminal) * 100) / 100,
+        mean_duration_ms: terminal === 0 ? null : Math.round(durSum / terminal),
+        last_run_at: log.length > 0 ? log[0].ran_at : null,
+        last_status: log.length > 0 ? log[0].status : null,
+      }),
+    );
   }),
 ];
 
