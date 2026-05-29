@@ -823,6 +823,20 @@ import {
   type AiPredictionStore,
 } from './ai_predictions';
 import {
+  defaultAiExperimentStore,
+  isExperimentDomain,
+  isExperimentStatus,
+  isExperimentModelType,
+  isExperimentOutcome,
+  AiExperimentError,
+  EXPERIMENT_PAGE_SIZE_DEFAULT,
+  EXPERIMENT_PAGE_SIZE_MAX,
+  type AiExperimentStore,
+  type CreateExperimentInput,
+  type ExperimentFilter,
+  type ExperimentParamValue,
+} from './ai_experiments';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1287,6 +1301,8 @@ export interface AppDeps {
    * BFF_PG_URL is set; rows land in app_copilot.ai_predictions.
    */
   aiPredictionStore?: AiPredictionStore;
+  /** T7 M10 — experiment tracking store (in-memory default; pg swap via 040_ai_experiments.sql). */
+  aiExperimentStore?: AiExperimentStore;
   /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
@@ -1575,6 +1591,7 @@ export function makeApp(deps: AppDeps = {}) {
   const makerCheckerEngine = deps.makerCheckerEngine ?? defaultMakerCheckerEngine;
   const aiModelRegistry = deps.aiModelRegistry ?? defaultAiModelRegistry;
   const aiPredictionStore = deps.aiPredictionStore ?? defaultAiPredictionStore;
+  const aiExperimentStore = deps.aiExperimentStore ?? defaultAiExperimentStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -6365,6 +6382,167 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  // ── Experiment tracking (T7 M10) ─────────────────────────────────────
+  //
+  // ML experiment RUNS — the pre-deployment R&D record (dataset / params /
+  // metrics / outcome / owner) that feeds the M7.2 promotion decision.
+  // Reads + writes gated on `customers:read_risk_profile` (the AI analyst
+  // scope — same as /v1/ai/predictions + /v1/ai/models/:id/score).
+  //
+  // Route ordering: literal `/summary` declared BEFORE `/:experiment_id`
+  // so the param wildcard doesn't capture it.
+  const experimentErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+    if (e instanceof AiExperimentError) {
+      const status =
+        e.code === 'unknown_experiment'
+          ? 404
+          : e.code === 'invalid_transition' || e.code === 'outcome_requires_completion'
+            ? 409
+            : 400;
+      return res.status(status).json(
+        wrapError({ code: `EWS_${status}_${e.code}`, message: e.message, severity: status >= 500 ? 'HIGH' : 'MEDIUM' }, ctx),
+      );
+    }
+    return res.status(500).json(
+      wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'experiment op failed', severity: 'HIGH' }, ctx),
+    );
+  };
+  const experimentActor = (req: Request): string =>
+    (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'analyst';
+
+  // POST /v1/ai/experiments — log a new experiment run (starts `running`).
+  app.post(
+    '/v1/ai/experiments',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        const body = (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+        const input: CreateExperimentInput = {
+          name: String(body.name ?? ''),
+          domain: body.domain as CreateExperimentInput['domain'],
+          model_type: body.model_type as CreateExperimentInput['model_type'],
+          dataset_ref: String(body.dataset_ref ?? ''),
+          dataset_rows: typeof body.dataset_rows === 'number' ? body.dataset_rows : NaN,
+          params: (body.params as Record<string, ExperimentParamValue>) ?? undefined,
+          metrics: (body.metrics as Record<string, number>) ?? undefined,
+          owner: String(body.owner ?? experimentActor(req)),
+          notes: body.notes != null ? String(body.notes) : null,
+        };
+        const row = aiExperimentStore.create(req.tenant!.tenant_id, input, now());
+        return res.status(201).json(wrapResponse(row, ctx));
+      } catch (e) {
+        return experimentErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/experiments?domain=&status=&model_type=&owner=&page=&page_size=
+  app.get(
+    '/v1/ai/experiments',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const q = req.query as Record<string, string | undefined>;
+        const filter: ExperimentFilter = {};
+        if (typeof q.domain === 'string') {
+          if (!isExperimentDomain(q.domain)) throw new AiExperimentError('invalid_input', 'domain must be banking|insurance');
+          filter.domain = q.domain;
+        }
+        if (typeof q.status === 'string') {
+          if (!isExperimentStatus(q.status)) throw new AiExperimentError('invalid_status', `unknown status ${q.status}`);
+          filter.status = q.status;
+        }
+        if (typeof q.model_type === 'string') {
+          if (!isExperimentModelType(q.model_type)) throw new AiExperimentError('invalid_input', 'model_type out of enum');
+          filter.model_type = q.model_type;
+        }
+        if (typeof q.owner === 'string') filter.owner = q.owner;
+        if (typeof q.page === 'string') filter.page = parseInt(q.page, 10);
+        if (typeof q.page_size === 'string') filter.page_size = parseInt(q.page_size, 10);
+        const out = aiExperimentStore.list(req.tenant!.tenant_id, filter);
+        return res.json(
+          wrapResponse({ ...out, page_size_default: EXPERIMENT_PAGE_SIZE_DEFAULT, page_size_max: EXPERIMENT_PAGE_SIZE_MAX }, ctx),
+        );
+      } catch (e) {
+        return experimentErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/experiments/summary — rollup for the workbench header.
+  app.get(
+    '/v1/ai/experiments/summary',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const out = aiExperimentStore.summarize(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // GET /v1/ai/experiments/:experiment_id — single, tenant-scoped 404.
+  app.get(
+    '/v1/ai/experiments/:experiment_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const row = aiExperimentStore.get(req.tenant!.tenant_id, req.params.experiment_id ?? '');
+      if (!row) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_experiment', message: `experiment ${req.params.experiment_id} not found`, severity: 'LOW' }, ctx),
+        );
+      }
+      return res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  // PATCH /v1/ai/experiments/:experiment_id/status — lifecycle transition.
+  app.patch(
+    '/v1/ai/experiments/:experiment_id/status',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        const body = (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+        const to = String(body.status ?? '');
+        if (!isExperimentStatus(to)) throw new AiExperimentError('invalid_status', `unknown status ${to}`);
+        const row = aiExperimentStore.updateStatus(req.tenant!.tenant_id, req.params.experiment_id ?? '', to, now());
+        return res.json(wrapResponse(row, ctx));
+      } catch (e) {
+        return experimentErr(e, ctx, res);
+      }
+    },
+  );
+
+  // PATCH /v1/ai/experiments/:experiment_id/outcome — record the post-run judgment.
+  app.patch(
+    '/v1/ai/experiments/:experiment_id/outcome',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        const body = (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+        const outcome = String(body.outcome ?? '');
+        if (!isExperimentOutcome(outcome)) throw new AiExperimentError('invalid_outcome', `unknown outcome ${outcome}`);
+        const row = aiExperimentStore.setOutcome(req.tenant!.tenant_id, req.params.experiment_id ?? '', outcome, now());
+        return res.json(wrapResponse(row, ctx));
+      } catch (e) {
+        return experimentErr(e, ctx, res);
+      }
     },
   );
 

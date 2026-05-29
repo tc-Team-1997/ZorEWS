@@ -12994,6 +12994,143 @@ const __mswSiuHandlers = [
 handlers.push(...__mswSiuHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// T7 Module 10 — Experiment Tracking handlers (stateful in-memory)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_EXP_STATUSES = ['running', 'completed', 'failed', 'archived'] as const;
+type MswExpStatus = (typeof __MSW_EXP_STATUSES)[number];
+const __MSW_EXP_TRANSITIONS: Record<MswExpStatus, MswExpStatus[]> = {
+  running: ['completed', 'failed'],
+  completed: ['archived'],
+  failed: ['archived'],
+  archived: [],
+};
+const __MSW_EXP_DOMAINS = ['banking', 'insurance'];
+const __MSW_EXP_MODEL_TYPES = ['pd', 'fraud', 'churn', 'lapse', 'anomaly', 'claim_severity'];
+const __MSW_EXP_OUTCOMES = ['promoted', 'rejected', 'inconclusive'];
+
+const __mswExpStore = new Map<string, any>(); // experiment_id → row
+let __mswExpSeq = 0;
+export function __resetMswExperiments() { __mswExpStore.clear(); __mswExpSeq = 0; }
+
+// Seed a couple of deterministic runs so the page renders data on first load.
+function __mswExpSeed() {
+  if (__mswExpStore.size > 0) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const mk = (over: Record<string, unknown>): any => {
+    const ts = new Date().toISOString();
+    const id = `exp-BANK_DEMO-${day}-${String(++__mswExpSeq).padStart(4, '0')}`;
+    const row: any = {
+      experiment_id: id, tenant_id: 'BANK_DEMO', status: 'running' as MswExpStatus, outcome: null,
+      params: {}, metrics: {}, notes: null, started_at: ts, completed_at: null, created_at: ts, updated_at: ts,
+      ...over,
+    };
+    __mswExpStore.set(id, row);
+    return row;
+  };
+  const a = mk({ name: 'XGBoost PD v4 depth sweep', domain: 'banking', model_type: 'pd', dataset_ref: 'mart.customer_360@2026-Q1', dataset_rows: 12000, params: { max_depth: 6, n_estimators: 400, learning_rate: 0.05 }, metrics: { auc: 0.842, precision: 0.71, recall: 0.64 }, owner: 'dsci.alice' });
+  a.status = 'completed'; a.completed_at = a.started_at; a.outcome = 'promoted';
+  const b = mk({ name: 'Lapse LightGBM persistency features', domain: 'insurance', model_type: 'lapse', dataset_ref: 'mart.policy_360@2026-Q1', dataset_rows: 8400, params: { num_leaves: 31, max_depth: 8 }, metrics: { auc: 0.808, precision: 0.66 }, owner: 'dsci.bob' });
+  b.status = 'completed'; b.completed_at = b.started_at;
+  mk({ name: 'Fraud isolation-forest contamination grid', domain: 'banking', model_type: 'fraud', dataset_ref: 'mart.txn_features@2026-Q1', dataset_rows: 21000, params: { contamination: 0.02 }, metrics: {}, owner: 'dsci.alice' });
+}
+
+const __mswExpFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+
+function __mswExpSummary() {
+  const rows = Array.from(__mswExpStore.values());
+  const by_status: Record<string, number> = { running: 0, completed: 0, failed: 0, archived: 0 };
+  const by_domain: Record<string, number> = { banking: 0, insurance: 0 };
+  const by_model_type: Record<string, number> = { pd: 0, fraud: 0, churn: 0, lapse: 0, anomaly: 0, claim_severity: 0 };
+  const by_outcome: Record<string, number> = { promoted: 0, rejected: 0, inconclusive: 0 };
+  let pending_outcome_count = 0;
+  let best_auc: { experiment_id: string; name: string; auc: number } | null = null;
+  let most_recent_at: string | null = null;
+  for (const e of rows) {
+    by_status[e.status] = (by_status[e.status] ?? 0) + 1;
+    by_domain[e.domain] = (by_domain[e.domain] ?? 0) + 1;
+    by_model_type[e.model_type] = (by_model_type[e.model_type] ?? 0) + 1;
+    if (e.outcome) by_outcome[e.outcome] = (by_outcome[e.outcome] ?? 0) + 1;
+    const resolved = e.status === 'completed' || e.status === 'archived';
+    if (resolved && e.outcome === null) pending_outcome_count++;
+    if (resolved && typeof e.metrics?.auc === 'number' && (best_auc === null || e.metrics.auc > best_auc.auc)) best_auc = { experiment_id: e.experiment_id, name: e.name, auc: e.metrics.auc };
+    if (most_recent_at === null || e.started_at > most_recent_at) most_recent_at = e.started_at;
+  }
+  return { tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), total: rows.length, by_status, by_domain, by_model_type, by_outcome, pending_outcome_count, best_auc, most_recent_at };
+}
+
+const __mswExperimentHandlers = [
+  http.get('/v1/ai/experiments/summary', () => {
+    __mswExpSeed();
+    return HttpResponse.json(envelope(__mswExpSummary()));
+  }),
+  http.get('/v1/ai/experiments', ({ request }) => {
+    __mswExpSeed();
+    const u = new URL(request.url);
+    let rows = Array.from(__mswExpStore.values());
+    const domain = u.searchParams.get('domain');
+    const status = u.searchParams.get('status');
+    const model_type = u.searchParams.get('model_type');
+    const owner = u.searchParams.get('owner');
+    if (domain) rows = rows.filter((e) => e.domain === domain);
+    if (status) rows = rows.filter((e) => e.status === status);
+    if (model_type) rows = rows.filter((e) => e.model_type === model_type);
+    if (owner) rows = rows.filter((e) => e.owner === owner);
+    rows.sort((a, b) => b.started_at.localeCompare(a.started_at) || b.experiment_id.localeCompare(a.experiment_id));
+    return HttpResponse.json(envelope({ items: rows, page: 1, page_size: 50, total: rows.length, page_size_default: 50, page_size_max: 200 }));
+  }),
+  http.post('/v1/ai/experiments', async ({ request }) => {
+    const b = (await request.json().catch(() => null)) as Record<string, any> | null;
+    const name = String(b?.name ?? '').trim();
+    if (!name) return __mswExpFail('EWS_400_invalid_input', 400, 'name required');
+    if (!__MSW_EXP_DOMAINS.includes(String(b?.domain))) return __mswExpFail('EWS_400_invalid_input', 400, 'domain must be banking|insurance');
+    if (!__MSW_EXP_MODEL_TYPES.includes(String(b?.model_type))) return __mswExpFail('EWS_400_invalid_input', 400, 'model_type out of enum');
+    if (!String(b?.dataset_ref ?? '').trim()) return __mswExpFail('EWS_400_invalid_input', 400, 'dataset_ref required');
+    const ts = new Date().toISOString();
+    const id = `exp-BANK_DEMO-${ts.slice(0, 10)}-${String(++__mswExpSeq).padStart(4, '0')}`;
+    const row = {
+      experiment_id: id, tenant_id: 'BANK_DEMO', name, domain: b!.domain, model_type: b!.model_type,
+      status: 'running' as MswExpStatus, dataset_ref: String(b!.dataset_ref).trim(),
+      dataset_rows: typeof b!.dataset_rows === 'number' ? b!.dataset_rows : 0,
+      params: b!.params ?? {}, metrics: b!.metrics ?? {}, outcome: null,
+      owner: String(b!.owner ?? 'analyst'), notes: b!.notes != null ? String(b!.notes) : null,
+      started_at: ts, completed_at: null, created_at: ts, updated_at: ts,
+    };
+    __mswExpStore.set(id, row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.get('/v1/ai/experiments/:id', ({ params }) => {
+    const row = __mswExpStore.get(String(params.id));
+    if (!row) return __mswExpFail('EWS_404_unknown_experiment', 404, `unknown experiment ${params.id}`);
+    return HttpResponse.json(envelope(row));
+  }),
+  http.patch('/v1/ai/experiments/:id/status', async ({ params, request }) => {
+    const row = __mswExpStore.get(String(params.id));
+    if (!row) return __mswExpFail('EWS_404_unknown_experiment', 404, `unknown experiment ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { status?: string } | null;
+    const to = String(b?.status ?? '') as MswExpStatus;
+    if (!__MSW_EXP_STATUSES.includes(to)) return __mswExpFail('EWS_400_invalid_status', 400, `unknown status ${to}`);
+    if (!(__MSW_EXP_TRANSITIONS[row.status as MswExpStatus] ?? []).includes(to)) return __mswExpFail('EWS_409_invalid_transition', 409, `cannot move ${row.status} → ${to}`);
+    row.status = to;
+    if (to === 'completed' || to === 'failed') row.completed_at = row.completed_at ?? new Date().toISOString();
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+  http.patch('/v1/ai/experiments/:id/outcome', async ({ params, request }) => {
+    const row = __mswExpStore.get(String(params.id));
+    if (!row) return __mswExpFail('EWS_404_unknown_experiment', 404, `unknown experiment ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { outcome?: string } | null;
+    const outcome = String(b?.outcome ?? '');
+    if (!__MSW_EXP_OUTCOMES.includes(outcome)) return __mswExpFail('EWS_400_invalid_outcome', 400, `unknown outcome ${outcome}`);
+    if (row.status === 'running') return __mswExpFail('EWS_409_outcome_requires_completion', 409, 'experiment must be resolved first');
+    row.outcome = outcome; row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+];
+
+handlers.push(...__mswExperimentHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

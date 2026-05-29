@@ -208,6 +208,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/ai/workbench',       i18nKey: 'ai_workbench',     icon: Bot,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/ai/registry',        i18nKey: 'model_registry',   icon: Boxes,      requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/ai/explainability',  i18nKey: 'explainability',   icon: Microscope, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/ai/experiments',     i18nKey: 'experiment_tracking', icon: FlaskConical, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Feature store underpins every model — surface here as the supporting tool
       { to: '/admin/feature-store', i18nKey: 'feature_store',   icon: Database,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
     ],

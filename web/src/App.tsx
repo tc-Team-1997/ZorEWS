@@ -41,6 +41,7 @@ import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AiWorkbenchPage } from '@/modules/ai/AiWorkbenchPage';
 import { ModelRegistryPage } from '@/modules/ai/ModelRegistryPage';
 import { ExplainabilityPage } from '@/modules/ai/ExplainabilityPage';
+import { ExperimentTrackingPage } from '@/modules/ai/ExperimentTrackingPage';
 import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RulesEnginePage } from '@/modules/rules/RulesEnginePage';
 import { ThresholdsLimitsPage } from '@/modules/admin/ThresholdsLimitsPage';
@@ -186,6 +187,7 @@ export function App() {
             <Route path="ai/workbench" element={<AiWorkbenchPage />} />
             <Route path="ai/registry" element={<ModelRegistryPage />} />
             <Route path="ai/explainability" element={<ExplainabilityPage />} />
+            <Route path="ai/experiments" element={<ExperimentTrackingPage />} />
             <Route path="admin/master-setup" element={<MasterSetupPage />} />
             <Route path="rules/engine" element={<RulesEnginePage />} />
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />

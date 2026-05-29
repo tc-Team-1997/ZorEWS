@@ -2722,6 +2722,29 @@ export const api = {
       .then((r) => r.data);
   },
 
+  // ── AI Workbench · T7 Module 10 — Experiment Tracking ─────────────────
+  aiExperiments: (q: { domain?: string; status?: string; model_type?: string; owner?: string; page?: number; page_size?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.domain) params.set('domain', q.domain);
+    if (q.status) params.set('status', q.status);
+    if (q.model_type) params.set('model_type', q.model_type);
+    if (q.owner) params.set('owner', q.owner);
+    if (q.page != null) params.set('page', String(q.page));
+    if (q.page_size != null) params.set('page_size', String(q.page_size));
+    const qs = params.toString();
+    return http.get<EnvelopeBody<ExperimentListShape>>(`/v1/ai/experiments${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  aiExperimentSummary: () =>
+    http.get<EnvelopeBody<ExperimentSummaryShape>>('/v1/ai/experiments/summary').then((r) => r.data),
+  aiExperimentGet: (id: string) =>
+    http.get<EnvelopeBody<ExperimentShape>>(`/v1/ai/experiments/${encodeURIComponent(id)}`).then((r) => r.data),
+  aiExperimentCreate: (input: ExperimentCreateInput) =>
+    http.post<EnvelopeBody<ExperimentShape>>('/v1/ai/experiments', input).then((r) => r.data),
+  aiExperimentSetStatus: (id: string, status: string) =>
+    http.patch<EnvelopeBody<ExperimentShape>>(`/v1/ai/experiments/${encodeURIComponent(id)}/status`, { status }).then((r) => r.data),
+  aiExperimentSetOutcome: (id: string, outcome: string) =>
+    http.patch<EnvelopeBody<ExperimentShape>>(`/v1/ai/experiments/${encodeURIComponent(id)}/outcome`, { outcome }).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6414,4 +6437,64 @@ export interface WatchlistEntryShape {
   vertical: 'banking' | 'insurance' | null;
   added_by: string;
   added_at: string;
+}
+
+// ── AI Workbench · T7 Module 10 — Experiment Tracking ───────────────────
+export type ExperimentStatusShape = 'running' | 'completed' | 'failed' | 'archived';
+export type ExperimentDomainShape = 'banking' | 'insurance';
+export type ExperimentOutcomeShape = 'promoted' | 'rejected' | 'inconclusive';
+export type ExperimentModelTypeShape = 'pd' | 'fraud' | 'churn' | 'lapse' | 'anomaly' | 'claim_severity';
+
+export interface ExperimentShape {
+  experiment_id: string;
+  tenant_id: string;
+  name: string;
+  domain: ExperimentDomainShape;
+  model_type: ExperimentModelTypeShape;
+  status: ExperimentStatusShape;
+  dataset_ref: string;
+  dataset_rows: number;
+  params: Record<string, string | number | boolean>;
+  metrics: Record<string, number>;
+  outcome: ExperimentOutcomeShape | null;
+  owner: string;
+  notes: string | null;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExperimentListShape {
+  items: ExperimentShape[];
+  page: number;
+  page_size: number;
+  total: number;
+  page_size_default: number;
+  page_size_max: number;
+}
+
+export interface ExperimentSummaryShape {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  by_status: Record<ExperimentStatusShape, number>;
+  by_domain: Record<ExperimentDomainShape, number>;
+  by_model_type: Record<ExperimentModelTypeShape, number>;
+  by_outcome: Record<ExperimentOutcomeShape, number>;
+  pending_outcome_count: number;
+  best_auc: { experiment_id: string; name: string; auc: number } | null;
+  most_recent_at: string | null;
+}
+
+export interface ExperimentCreateInput {
+  name: string;
+  domain: ExperimentDomainShape;
+  model_type: ExperimentModelTypeShape;
+  dataset_ref: string;
+  dataset_rows: number;
+  params?: Record<string, string | number | boolean>;
+  metrics?: Record<string, number>;
+  owner?: string;
+  notes?: string | null;
 }
