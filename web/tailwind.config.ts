@@ -39,10 +39,12 @@ export default {
           amber:       '#F0B344',
         },
 
-        // Sidebar + action aliases
-        sidebar:         '#0D2B6A',
-        'sidebar-hover': '#1A3B85',
-        'sidebar-text':  '#A5C3EB',
+        // Sidebar + action aliases — Aurora premium deep-indigo family
+        // (replaces the legacy navy; class names preserved so the active-link
+        // `bg-sidebar-hover` contract still holds).
+        sidebar:         '#1E1B4B',
+        'sidebar-hover': '#312E81',
+        'sidebar-text':  '#C7D2FE',
         action:          '#1565C0',
         'action-hover':  '#104a94',
         'action-subtle': '#E3EFFF',
