@@ -90,6 +90,7 @@ export interface CmsCaseStore {
     input: unknown,
     created_by: string,
     now: Date,
+    opts?: { sla_hours_override?: number; case_category?: string },
   ): CmsCase;
   update(
     tenant_id: string,
@@ -372,6 +373,13 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
     input: unknown,
     created_by: string,
     now: Date,
+    // Optional seeding from the Case Management Setup master (screen #13).
+    // When a case is opened with a configured case_type, the ROUTE resolves
+    // that type's SLA + category and passes them here — keeping this store
+    // generic (it doesn't import the case-type config). sla_hours_override,
+    // when present, replaces the priority-derived SLA window with an explicit
+    // time-to-resolve; case_category seeds the case's category column.
+    opts?: { sla_hours_override?: number; case_category?: string },
   ): CmsCase {
     if (!created_by || !created_by.trim()) {
       throw new CmsCaseError('invalid_input', 'created_by required');
@@ -385,7 +393,10 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
       );
     }
     const case_id = randomUUID();
-    const sla_due_at = computeSlaDueAt(valid.priority, now);
+    const sla_due_at =
+      opts?.sla_hours_override !== undefined && Number.isFinite(opts.sla_hours_override)
+        ? new Date(now.getTime() + opts.sla_hours_override * 3_600_000)
+        : computeSlaDueAt(valid.priority, now);
     const c: CmsCase = {
       case_id,
       case_number: this.nextCaseNumber(tenant_id, now),
@@ -403,7 +414,7 @@ export class InMemoryCmsCaseStore implements CmsCaseStore {
       resolution_notes: '',
       tags: valid.tags ?? [],
       is_locked: false,
-      case_category: null,
+      case_category: opts?.case_category ?? null,
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
     };

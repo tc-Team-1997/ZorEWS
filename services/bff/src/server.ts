@@ -11197,10 +11197,45 @@ export function makeApp(deps: AppDeps = {}) {
           : raw;
       const created_by = cmsApexUser(req);
       try {
-        const c = cmsCaseStore.create(req.tenant!.tenant_id, inner, created_by, now());
+        // Case Management Setup (#13) → runtime: when a case_type code is
+        // supplied, seed priority + SLA + category from the configured master.
+        // An explicit priority in the body still wins; the SLA + category come
+        // from the type. Unknown / disabled type → 400.
+        let createOpts: { sla_hours_override?: number; case_category?: string } | undefined;
+        let caseTypeCode: string | null = null;
+        const rawCaseType = (inner as { case_type?: unknown } | null)?.case_type;
+        if (rawCaseType !== undefined && rawCaseType !== null && rawCaseType !== '') {
+          if (typeof rawCaseType !== 'string') {
+            throw new Error('case_type must be a string');
+          }
+          const code = rawCaseType.trim().toUpperCase();
+          type CtcMod2 = typeof import('./case_type_config');
+          const { defaultCaseTypeConfigStore } = require('./case_type_config') as CtcMod2;
+          const cfg = defaultCaseTypeConfigStore
+            .list(req.tenant!.tenant_id, 'all', true)
+            .find((t) => t.code === code);
+          if (!cfg) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_unknown_case_type', message: `unknown or disabled case type '${code}'`, severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          caseTypeCode = cfg.code;
+          const innerObj = inner as Record<string, unknown>;
+          // explicit priority wins; otherwise seed from the configured type
+          if (innerObj.priority === undefined || innerObj.priority === null || innerObj.priority === '') {
+            innerObj.priority = cfg.priority;
+          }
+          createOpts = { sla_hours_override: cfg.sla_hours, case_category: cfg.code };
+        }
+        const c = cmsCaseStore.create(req.tenant!.tenant_id, inner, created_by, now(), createOpts);
         writeCmsAuditEvents(req.tenant!.tenant_id, 'create', created_by, c, {
           priority: c.priority,
           alert_id: c.alert_id,
+          case_type: caseTypeCode,
+          sla_due_at: c.sla_due_at,
         });
         return res.status(201).json(wrapResponse(c, ctx));
       } catch (e) {

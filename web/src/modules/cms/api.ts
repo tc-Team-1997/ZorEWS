@@ -297,7 +297,9 @@ export const cmsApi = {
   detail: (case_id: string) =>
     unwrap<CmsCaseDetail>(http.get(`${cmsBase}/${case_id}`)),
 
-  create: (body: Partial<CmsCase> & { title: string; priority: CmsPriority }) =>
+  // priority is optional when case_type is supplied — the BFF seeds priority +
+  // SLA + category from the Case Management Setup master (#13) for that type.
+  create: (body: Partial<CmsCase> & { title: string; priority?: CmsPriority; case_type?: string }) =>
     unwrap<CmsCase>(http.post(cmsBase, body)),
 
   update: (case_id: string, body: Record<string, unknown>) =>
