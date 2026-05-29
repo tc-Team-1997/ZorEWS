@@ -13513,6 +13513,182 @@ const __mswHybridHandlers = [
 handlers.push(...__mswHybridHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Master Setup — Risk Score Configuration handlers (stateful per domain)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_RSC_DOMAINS = ['banking', 'insurance', 'both'];
+// rule_id → factor row
+const __mswRscStore = new Map<string, any>();
+let __mswRscSeq = 0;
+let __mswRscSeeded = false;
+export function __resetMswRiskScore() {
+  __mswRscStore.clear();
+  __mswRscSeq = 0;
+  __mswRscSeeded = false;
+}
+const __mswRscRound2 = (n: number) => Math.round(n * 100) / 100;
+function __mswRscSeed() {
+  if (__mswRscSeeded) return;
+  __mswRscSeeded = true;
+  const iso = new Date(0).toISOString();
+  const seed = [
+    ['OVERDUE', 'Overdue / DPD', 'banking', 30],
+    ['EMI_BOUNCE', 'EMI Bounce', 'banking', 25],
+    ['TXN_BEHAVIOUR', 'Transaction Behaviour', 'banking', 25],
+    ['BUREAU_SCORE', 'Bureau Score', 'banking', 20],
+    ['PREMIUM_MISSED', 'Premium Missed', 'insurance', 35],
+    ['CLAIM_FREQUENCY', 'Claim Frequency', 'insurance', 30],
+    ['PERSISTENCY', 'Persistency', 'insurance', 20],
+    ['LAPSE_RISK', 'Lapse Risk', 'insurance', 15],
+  ] as const;
+  seed.forEach(([code, name, domain, weight], i) => {
+    const id = `rsf-BANK_DEMO-${String(++__mswRscSeq).padStart(4, '0')}`;
+    __mswRscStore.set(id, {
+      factor_id: id,
+      tenant_id: 'BANK_DEMO',
+      code,
+      name,
+      description: null,
+      domain,
+      weight_pct: weight,
+      enabled: true,
+      sort_order: i,
+      created_by: 'system',
+      created_at: iso,
+      updated_at: iso,
+    });
+  });
+}
+const __mswRscList = (domain: string) => {
+  __mswRscSeed();
+  return Array.from(__mswRscStore.values())
+    .filter((r) => domain === 'all' || r.domain === domain)
+    .sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
+};
+const __mswRscSummary = (domain: string, factors: any[]) => {
+  const enabled = factors.filter((f) => f.enabled);
+  const total = __mswRscRound2(enabled.reduce((s, f) => s + f.weight_pct, 0));
+  return {
+    domain,
+    factor_count: factors.length,
+    enabled_count: enabled.length,
+    total_weight_pct: total,
+    balanced: Math.abs(total - 100) < 0.01,
+    remainder_pct: __mswRscRound2(100 - total),
+  };
+};
+const __mswRscFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json(
+    { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } },
+    { status },
+  );
+const __mswRscPeel = (b: any) => (b && typeof b === 'object' && b.body && typeof b.body === 'object' ? b.body : b);
+
+const __mswRiskScoreHandlers = [
+  http.get('/v1/config/risk-score/factors', ({ request }) => {
+    const domain = new URL(request.url).searchParams.get('domain') ?? 'all';
+    const factors = __mswRscList(domain);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', total: factors.length, factors }));
+  }),
+  http.get('/v1/config/risk-score/summary', ({ request }) => {
+    const domain = new URL(request.url).searchParams.get('domain') ?? 'all';
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', ...__mswRscSummary(domain, __mswRscList(domain)) }));
+  }),
+  http.post('/v1/config/risk-score/factors', async ({ request }) => {
+    __mswRscSeed();
+    const b = __mswRscPeel(await request.json().catch(() => null));
+    const code = String(b?.code ?? '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) return __mswRscFail('EWS_400_invalid_input', 400, 'bad code');
+    if (!String(b?.name ?? '').trim()) return __mswRscFail('EWS_400_invalid_input', 400, 'name required');
+    if (!__MSW_RSC_DOMAINS.includes(b?.domain)) return __mswRscFail('EWS_400_invalid_domain', 400, 'bad domain');
+    if (typeof b?.weight_pct !== 'number' || b.weight_pct < 0 || b.weight_pct > 100) return __mswRscFail('EWS_400_invalid_weight', 400, 'bad weight');
+    if (Array.from(__mswRscStore.values()).some((r) => r.code === code)) return __mswRscFail('EWS_409_duplicate_code', 409, 'dup code');
+    const id = `rsf-BANK_DEMO-${String(++__mswRscSeq).padStart(4, '0')}`;
+    const iso = new Date().toISOString();
+    const maxOrder = Math.max(-1, ...Array.from(__mswRscStore.values()).map((r) => r.sort_order));
+    const row = {
+      factor_id: id,
+      tenant_id: 'BANK_DEMO',
+      code,
+      name: String(b.name).trim(),
+      description: b.description ?? null,
+      domain: b.domain,
+      weight_pct: __mswRscRound2(b.weight_pct),
+      enabled: b.enabled ?? true,
+      sort_order: maxOrder + 1,
+      created_by: 'alice.admin',
+      created_at: iso,
+      updated_at: iso,
+    };
+    __mswRscStore.set(id, row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.patch('/v1/config/risk-score/factors/:id', async ({ params, request }) => {
+    __mswRscSeed();
+    const row = __mswRscStore.get(String(params.id));
+    if (!row) return __mswRscFail('EWS_404_unknown_factor', 404, 'unknown factor');
+    const b = __mswRscPeel(await request.json().catch(() => null));
+    if (b?.weight_pct !== undefined) {
+      if (typeof b.weight_pct !== 'number' || b.weight_pct < 0 || b.weight_pct > 100) return __mswRscFail('EWS_400_invalid_weight', 400, 'bad weight');
+      row.weight_pct = __mswRscRound2(b.weight_pct);
+    }
+    if (b?.name !== undefined) row.name = String(b.name).trim();
+    if (b?.description !== undefined) row.description = b.description ?? null;
+    if (b?.enabled !== undefined) row.enabled = !!b.enabled;
+    if (b?.domain !== undefined && __MSW_RSC_DOMAINS.includes(b.domain)) row.domain = b.domain;
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+  http.delete('/v1/config/risk-score/factors/:id', ({ params }) => {
+    __mswRscSeed();
+    if (!__mswRscStore.has(String(params.id))) return __mswRscFail('EWS_404_unknown_factor', 404, 'unknown factor');
+    __mswRscStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('/v1/config/risk-score/reorder', async ({ request }) => {
+    __mswRscSeed();
+    const b = __mswRscPeel(await request.json().catch(() => null));
+    const domain = b?.domain;
+    const ids: string[] = Array.isArray(b?.ordered_ids) ? b.ordered_ids : [];
+    const domainRows = Array.from(__mswRscStore.values()).filter((r) => r.domain === domain);
+    const domainIds = new Set(domainRows.map((r) => r.factor_id));
+    if (ids.length !== domainRows.length || ids.some((id) => !domainIds.has(id)) || new Set(ids).size !== ids.length) {
+      return __mswRscFail('EWS_400_invalid_input', 400, 'ordered_ids must be the exact set');
+    }
+    ids.forEach((id, i) => {
+      const r = __mswRscStore.get(id);
+      r.sort_order = i;
+      r.updated_at = new Date().toISOString();
+    });
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', domain, factors: __mswRscList(domain) }));
+  }),
+  http.post('/v1/config/risk-score/normalize', async ({ request }) => {
+    __mswRscSeed();
+    const b = __mswRscPeel(await request.json().catch(() => null));
+    const domain = b?.domain;
+    const enabled = Array.from(__mswRscStore.values())
+      .filter((r) => r.domain === domain && r.enabled)
+      .sort((a, b2) => a.sort_order - b2.sort_order);
+    if (enabled.length === 0) return __mswRscFail('EWS_400_invalid_input', 400, 'no enabled factors');
+    const sum = enabled.reduce((s, r) => s + r.weight_pct, 0);
+    if (sum <= 0) return __mswRscFail('EWS_400_invalid_input', 400, 'weights sum to 0');
+    let running = 0;
+    enabled.forEach((r, i) => {
+      if (i === enabled.length - 1) r.weight_pct = __mswRscRound2(100 - running);
+      else {
+        const scaled = __mswRscRound2((r.weight_pct / sum) * 100);
+        r.weight_pct = scaled;
+        running += scaled;
+      }
+      r.updated_at = new Date().toISOString();
+    });
+    const factors = __mswRscList(domain);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', domain, factors, summary: __mswRscSummary(domain, factors) }));
+  }),
+];
+
+handlers.push(...__mswRiskScoreHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

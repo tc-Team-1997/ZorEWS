@@ -2808,6 +2808,36 @@ export const api = {
   aiHybridRulePreviewSaved: (rule_id: string, input: HybridPreviewInputShape) =>
     http.post<EnvelopeBody<HybridPreviewResultShape>>(`/v1/ai/hybrid-rules/${encodeURIComponent(rule_id)}/preview`, { input }).then((r) => r.data),
 
+  // ── Master Setup · Risk Score Configuration (named-factor weights) ────
+  riskScoreFactors: (domain?: ScoreFactorDomainFilterShape) =>
+    http
+      .get<EnvelopeBody<RiskScoreFactorListShape>>(
+        `/v1/config/risk-score/factors${domain && domain !== 'all' ? `?domain=${domain}` : ''}`,
+      )
+      .then((r) => r.data),
+  riskScoreSummary: (domain?: ScoreFactorDomainFilterShape) =>
+    http
+      .get<EnvelopeBody<RiskScoreWeightSummaryShape>>(
+        `/v1/config/risk-score/summary${domain && domain !== 'all' ? `?domain=${domain}` : ''}`,
+      )
+      .then((r) => r.data),
+  riskScoreFactorCreate: (input: ScoreFactorCreateInputShape) =>
+    http.post<EnvelopeBody<ScoreFactorShape>>('/v1/config/risk-score/factors', input).then((r) => r.data),
+  riskScoreFactorUpdate: (factor_id: string, patch: ScoreFactorUpdateInputShape) =>
+    http
+      .patch<EnvelopeBody<ScoreFactorShape>>(`/v1/config/risk-score/factors/${encodeURIComponent(factor_id)}`, patch)
+      .then((r) => r.data),
+  riskScoreFactorDelete: (factor_id: string) =>
+    http.delete(`/v1/config/risk-score/factors/${encodeURIComponent(factor_id)}`).then(() => undefined),
+  riskScoreReorder: (domain: ScoreFactorDomainShape, ordered_ids: string[]) =>
+    http
+      .post<EnvelopeBody<RiskScoreReorderResultShape>>('/v1/config/risk-score/reorder', { domain, ordered_ids })
+      .then((r) => r.data),
+  riskScoreNormalize: (domain: ScoreFactorDomainShape) =>
+    http
+      .post<EnvelopeBody<RiskScoreNormalizeResultShape>>('/v1/config/risk-score/normalize', { domain })
+      .then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6747,4 +6777,62 @@ export interface HybridPreviewResultShape {
   matched: boolean;
   would_fire: { action: HybridActionShape; severity: HybridSeverityShape } | null;
   expression: string;
+}
+
+// ── Master Setup · Risk Score Configuration ─────────────────────────────
+export type ScoreFactorDomainShape = 'banking' | 'insurance' | 'both';
+export type ScoreFactorDomainFilterShape = ScoreFactorDomainShape | 'all';
+export interface ScoreFactorShape {
+  factor_id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  domain: ScoreFactorDomainShape;
+  weight_pct: number;
+  enabled: boolean;
+  sort_order: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface RiskScoreFactorListShape {
+  tenant_id: string;
+  total: number;
+  factors: ScoreFactorShape[];
+}
+export interface RiskScoreWeightSummaryShape {
+  tenant_id: string;
+  domain: ScoreFactorDomainFilterShape;
+  factor_count: number;
+  enabled_count: number;
+  total_weight_pct: number;
+  balanced: boolean;
+  remainder_pct: number;
+}
+export interface ScoreFactorCreateInputShape {
+  code: string;
+  name: string;
+  description?: string | null;
+  domain: ScoreFactorDomainShape;
+  weight_pct: number;
+  enabled?: boolean;
+}
+export interface ScoreFactorUpdateInputShape {
+  name?: string;
+  description?: string | null;
+  domain?: ScoreFactorDomainShape;
+  weight_pct?: number;
+  enabled?: boolean;
+}
+export interface RiskScoreReorderResultShape {
+  tenant_id: string;
+  domain: ScoreFactorDomainShape;
+  factors: ScoreFactorShape[];
+}
+export interface RiskScoreNormalizeResultShape {
+  tenant_id: string;
+  domain: ScoreFactorDomainShape;
+  factors: ScoreFactorShape[];
+  summary: Omit<RiskScoreWeightSummaryShape, 'tenant_id'>;
 }

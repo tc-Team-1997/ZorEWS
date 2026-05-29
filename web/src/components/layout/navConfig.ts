@@ -65,6 +65,7 @@ import {
   Umbrella,
   TrendingDown,
   HandCoins,
+  Scale,
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -225,6 +226,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: Cog,
     items: [
       { to: '/admin/master-setup',         i18nKey: 'master_setup',         icon: Library,             requireRole: ['admin'], featured: true },
+      { to: '/admin/risk-score-config',    i18nKey: 'risk_score_config',    icon: Scale,               requireRole: ['admin'], featured: true },
       { to: '/rules/engine',               i18nKey: 'rules_engine',         icon: Cog,                 requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/admin/thresholds-limits',    i18nKey: 'thresholds_limits',    icon: Gauge,               requireRole: ['admin'], featured: true },
       { to: '/admin/workflows',            i18nKey: 'workflows',            icon: Workflow,            requireRole: ['admin'], featured: true },

@@ -36639,6 +36639,173 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   // ──────────────────────────────────────────────────────────────────
+  // Master Setup — Risk Score Configuration (MASTER SETUP spec screen #11)
+  //   Named scoring FACTORS with percentage weights summing to 100%.
+  //   Distinct from /v1/scoring/presets (per-indicator multipliers) and
+  //   /v1/master/:type (flat reference data — no sum constraint).
+  //   audit:read (admin) — config surface, mirrors /v1/admin/config.
+  // ──────────────────────────────────────────────────────────────────
+  {
+    type RscMod = typeof import('./risk_score_config');
+    const rscErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+      const code = (e as { code?: string }).code;
+      const httpStatus =
+        code === 'unknown_factor' ? 404 : code === 'duplicate_code' || code === 'cap_reached' ? 409 : 400;
+      const ews = code ? `EWS_${httpStatus}_${code}` : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'risk_score_config_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    };
+    const rscActor = (req: Request): string =>
+      (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'admin';
+    const rscPeel = (req: Request): Record<string, unknown> => {
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      return (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+    };
+    const rscDomainFilter = (req: Request): RscMod['ALL_SCORE_FACTOR_DOMAINS'][number] | 'all' => {
+      const d = req.query.domain;
+      return d === undefined || d === '' ? 'all' : (d as RscMod['ALL_SCORE_FACTOR_DOMAINS'][number] | 'all');
+    };
+    const rscAudit = (
+      req: Request,
+      action: string,
+      resource_id: string,
+      metadata: Record<string, unknown>,
+    ) => {
+      try {
+        const actor = rscActor(req);
+        const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          { actor_username: actor, actor_role: role, action, resource_type: 'config', resource_id, outcome: 'success', severity: 'info', metadata },
+          now(),
+        );
+      } catch {
+        /* swallow */
+      }
+    };
+
+    app.get(
+      '/v1/config/risk-score/factors',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+        const factors = defaultRiskScoreConfigStore.list(req.tenant!.tenant_id, rscDomainFilter(req));
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, total: factors.length, factors }, ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/risk-score/summary',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultRiskScoreConfigStore, summarizeWeights } = require('./risk_score_config') as RscMod;
+        const filter = rscDomainFilter(req);
+        const factors = defaultRiskScoreConfigStore.list(req.tenant!.tenant_id, filter);
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, ...summarizeWeights(factors, filter) }, ctx));
+      },
+    );
+
+    app.post(
+      '/v1/config/risk-score/factors',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+          const body = rscPeel(req) as unknown as import('./risk_score_config').ScoreFactorCreateInput;
+          const created = defaultRiskScoreConfigStore.create(req.tenant!.tenant_id, body, rscActor(req), Date.now());
+          rscAudit(req, 'risk_score.factor.created', created.factor_id, { code: created.code, domain: created.domain, weight_pct: created.weight_pct });
+          return res.status(201).json(wrapResponse(created, ctx));
+        } catch (e) {
+          return rscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.patch(
+      '/v1/config/risk-score/factors/:factor_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+          const patch = rscPeel(req) as unknown as import('./risk_score_config').ScoreFactorUpdateInput;
+          const updated = defaultRiskScoreConfigStore.update(req.tenant!.tenant_id, req.params.factor_id, patch, Date.now());
+          rscAudit(req, 'risk_score.factor.updated', updated.factor_id, { code: updated.code, weight_pct: updated.weight_pct, enabled: updated.enabled });
+          return res.json(wrapResponse(updated, ctx));
+        } catch (e) {
+          return rscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.delete(
+      '/v1/config/risk-score/factors/:factor_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+          defaultRiskScoreConfigStore.remove(req.tenant!.tenant_id, req.params.factor_id);
+          rscAudit(req, 'risk_score.factor.removed', req.params.factor_id, {});
+          return res.status(204).end();
+        } catch (e) {
+          return rscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.post(
+      '/v1/config/risk-score/reorder',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+          const body = rscPeel(req) as { domain?: unknown; ordered_ids?: unknown };
+          const factors = defaultRiskScoreConfigStore.reorder(
+            req.tenant!.tenant_id,
+            body.domain as RscMod['ALL_SCORE_FACTOR_DOMAINS'][number],
+            (body.ordered_ids as string[]) ?? [],
+            Date.now(),
+          );
+          rscAudit(req, 'risk_score.reordered', String(body.domain ?? ''), { count: factors.length });
+          return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, domain: body.domain, factors }, ctx));
+        } catch (e) {
+          return rscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.post(
+      '/v1/config/risk-score/normalize',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultRiskScoreConfigStore, summarizeWeights } = require('./risk_score_config') as RscMod;
+          const body = rscPeel(req) as { domain?: unknown };
+          const domain = body.domain as RscMod['ALL_SCORE_FACTOR_DOMAINS'][number];
+          const factors = defaultRiskScoreConfigStore.normalize(req.tenant!.tenant_id, domain, Date.now());
+          rscAudit(req, 'risk_score.normalized', String(domain ?? ''), { count: factors.length });
+          return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, domain, factors, summary: summarizeWeights(factors, domain) }, ctx));
+        } catch (e) {
+          return rscErr(e, ctx, res);
+        }
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #7 — Collections Risk / Recovery desk (§2.1.7)
   //   Distinct from the collection-adapter service (auto case routing) —
   //   this is the read/operate surface for the collections work-queue.
