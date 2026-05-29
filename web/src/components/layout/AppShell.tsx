@@ -17,6 +17,7 @@ import { ModeToggle } from '@/components/layout/ModeToggle';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { useDomain } from '@/lib/useOnboardingContext';
 import { Button } from '@/components/ui';
+import { CommandPalette } from './CommandPalette';
 import { NAV_GROUPS, NAV_HOME, visibleItems, type NavGroup, type NavLeaf } from './navConfig';
 
 // Backward-compat alias retained for callers that imported the old shape.
@@ -124,6 +125,19 @@ export function AppShell() {
     if (idle.warning) stayBtnRef.current?.focus();
   }, [idle.warning]);
 
+  // ⌘K / Ctrl-K opens the command palette (Esc closes it from within).
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Avatar initials for the sidebar footer — first letter of each
   // dot-separated username segment (alice.admin → "AA"), capped at 2.
   const initials =
@@ -229,9 +243,10 @@ export function AppShell() {
             <span className="module-label text-xs text-aurora-ink-sub">{t('nav.risk_operations')}</span>
             <button
               type="button"
+              onClick={() => setPaletteOpen(true)}
               className="hidden md:flex items-center gap-2 rounded-full border border-aurora-line bg-white/60 px-3 py-1.5 text-[12px] text-aurora-ink-sub hover:border-aurora-indigo/40 hover:text-aurora-indigo transition-colors"
-              aria-label="Search"
-              title="Search (coming soon)"
+              aria-label="Open command palette"
+              data-testid="open-command-palette"
             >
               <Search size={13} strokeWidth={2} />
               <span>Search…</span>
@@ -256,6 +271,14 @@ export function AppShell() {
         </main>
       </div>
       <ChatWidget />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        roles={user?.roles ?? []}
+        domain={domain}
+        isSuperAdmin={isSuperAdmin}
+      />
 
       {idle.warning && (
         <div
