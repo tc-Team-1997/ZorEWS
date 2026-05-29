@@ -12264,6 +12264,186 @@ const __mswFraudHandlers = [
 handlers.push(...__mswFraudHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// §2.1.7 — Collections Risk / Recovery desk handlers (deterministic
+// synthetic book + in-memory PTP + contact-log overlays).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswCollDpdBucket = 'dpd_1_30' | 'dpd_31_60' | 'dpd_61_90' | 'dpd_90_plus';
+type MswCollStage =
+  | 'soft_reminder'
+  | 'hard_reminder'
+  | 'field_visit'
+  | 'legal_notice'
+  | 'settlement_offer';
+type MswCollPtp = 'none' | 'active' | 'kept' | 'broken';
+
+interface MswCollAccount {
+  account_id: string;
+  customer_id: string;
+  customer_name: string;
+  sector: string;
+  dpd: number;
+  dpd_bucket: MswCollDpdBucket;
+  outstanding_kes: number;
+  overdue_kes: number;
+  recovery_stage: MswCollStage;
+  recovery_probability: number;
+  expected_recovery_kes: number;
+  ptp_status: MswCollPtp;
+  ptp_amount_kes: number | null;
+  ptp_date: string | null;
+  assigned_collector: string;
+  last_contact_at: string | null;
+  contact_attempts_30d: number;
+}
+
+const __mswCollSeed: MswCollAccount[] = [
+  { account_id: 'acc-bd-700000', customer_id: 'c-200000', customer_name: 'Rajesh Kumar', sector: 'Real_Estate', dpd: 212, dpd_bucket: 'dpd_90_plus', outstanding_kes: 64_500_000, overdue_kes: 52_300_000, recovery_stage: 'legal_notice', recovery_probability: 0.14, expected_recovery_kes: 7_322_000, ptp_status: 'broken', ptp_amount_kes: 18_000_000, ptp_date: '2026-05-12', assigned_collector: 'nina.legal', last_contact_at: '2026-05-26T09:00:00.000Z', contact_attempts_30d: 6 },
+  { account_id: 'acc-bd-700001', customer_id: 'c-200001', customer_name: 'Priya Sharma', sector: 'Hospitality', dpd: 134, dpd_bucket: 'dpd_90_plus', outstanding_kes: 41_200_000, overdue_kes: 33_900_000, recovery_stage: 'settlement_offer', recovery_probability: 0.22, expected_recovery_kes: 7_458_000, ptp_status: 'active', ptp_amount_kes: 12_000_000, ptp_date: '2026-06-08', assigned_collector: 'sara.recovery', last_contact_at: '2026-05-27T11:30:00.000Z', contact_attempts_30d: 4 },
+  { account_id: 'acc-bd-700002', customer_id: 'c-200002', customer_name: 'Mohan Singh', sector: 'Manufacturing', dpd: 74, dpd_bucket: 'dpd_61_90', outstanding_kes: 28_700_000, overdue_kes: 15_400_000, recovery_stage: 'field_visit', recovery_probability: 0.41, expected_recovery_kes: 6_314_000, ptp_status: 'none', ptp_amount_kes: null, ptp_date: null, assigned_collector: 'amit.field', last_contact_at: '2026-05-24T14:00:00.000Z', contact_attempts_30d: 3 },
+  { account_id: 'acc-bd-700003', customer_id: 'c-200003', customer_name: 'Meera Nair', sector: 'Retail_Trade', dpd: 48, dpd_bucket: 'dpd_31_60', outstanding_kes: 9_300_000, overdue_kes: 4_100_000, recovery_stage: 'hard_reminder', recovery_probability: 0.62, expected_recovery_kes: 2_542_000, ptp_status: 'kept', ptp_amount_kes: 2_000_000, ptp_date: '2026-05-15', assigned_collector: 'ravi.collector', last_contact_at: '2026-05-25T10:00:00.000Z', contact_attempts_30d: 2 },
+  { account_id: 'acc-bd-700004', customer_id: 'c-200004', customer_name: 'Vikram Patel', sector: 'Logistics', dpd: 19, dpd_bucket: 'dpd_1_30', outstanding_kes: 6_800_000, overdue_kes: 1_900_000, recovery_stage: 'soft_reminder', recovery_probability: 0.81, expected_recovery_kes: 1_539_000, ptp_status: 'active', ptp_amount_kes: 1_500_000, ptp_date: '2026-06-02', assigned_collector: 'ravi.collector', last_contact_at: '2026-05-27T08:00:00.000Z', contact_attempts_30d: 1 },
+  { account_id: 'acc-bd-700005', customer_id: 'c-200005', customer_name: 'Kavya Reddy', sector: 'Agro_Processing', dpd: 9, dpd_bucket: 'dpd_1_30', outstanding_kes: 4_200_000, overdue_kes: 800_000, recovery_stage: 'soft_reminder', recovery_probability: 0.88, expected_recovery_kes: 704_000, ptp_status: 'none', ptp_amount_kes: null, ptp_date: null, assigned_collector: 'ravi.collector', last_contact_at: null, contact_attempts_30d: 0 },
+  { account_id: 'acc-bd-700006', customer_id: 'c-200006', customer_name: 'Arjun Iyer', sector: 'Textiles', dpd: 88, dpd_bucket: 'dpd_61_90', outstanding_kes: 22_100_000, overdue_kes: 12_900_000, recovery_stage: 'legal_notice', recovery_probability: 0.33, expected_recovery_kes: 4_257_000, ptp_status: 'none', ptp_amount_kes: null, ptp_date: null, assigned_collector: 'nina.legal', last_contact_at: '2026-05-23T16:00:00.000Z', contact_attempts_30d: 5 },
+];
+
+const __mswCollPtpOverlay = new Map<string, Array<{ recorded_at: string; recorded_by: string; amount_kes: number; promised_date: string; status: MswCollPtp; notes: string | null }>>();
+const __mswCollContactOverlay = new Map<string, Array<{ contacted_at: string; contacted_by: string; channel: string; outcome: string; notes: string | null }>>();
+
+export function __resetMswCollections() {
+  __mswCollPtpOverlay.clear();
+  __mswCollContactOverlay.clear();
+}
+
+const __mswCollFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json(
+    { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } },
+    { status },
+  );
+
+const __mswCollHandlers = [
+  http.get('/v1/banking/collections/summary', () => {
+    const byBucket: Record<MswCollDpdBucket, { count: number; overdue_kes: number }> = {
+      dpd_1_30: { count: 0, overdue_kes: 0 },
+      dpd_31_60: { count: 0, overdue_kes: 0 },
+      dpd_61_90: { count: 0, overdue_kes: 0 },
+      dpd_90_plus: { count: 0, overdue_kes: 0 },
+    };
+    const byStage: Record<MswCollStage, number> = { soft_reminder: 0, hard_reminder: 0, field_visit: 0, legal_notice: 0, settlement_offer: 0 };
+    let overdue = 0, expected = 0, ptpActive = 0, ptpKept = 0, ptpBroken = 0, highRisk = 0;
+    for (const a of __mswCollSeed) {
+      byBucket[a.dpd_bucket].count++;
+      byBucket[a.dpd_bucket].overdue_kes += a.overdue_kes;
+      byStage[a.recovery_stage]++;
+      overdue += a.overdue_kes;
+      expected += a.expected_recovery_kes;
+      if (a.ptp_status === 'active') ptpActive++;
+      if (a.ptp_status === 'kept') ptpKept++;
+      if (a.ptp_status === 'broken') ptpBroken++;
+      if (a.dpd_bucket === 'dpd_90_plus' && a.recovery_probability < 0.3) highRisk++;
+    }
+    const resolved = ptpKept + ptpBroken;
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_accounts: __mswCollSeed.length,
+        total_overdue_kes: overdue,
+        total_expected_recovery_kes: expected,
+        recovery_rate_pct: overdue > 0 ? Math.round((expected / overdue) * 1000) / 10 : 0,
+        by_dpd_bucket: byBucket,
+        by_stage: byStage,
+        ptp_active_count: ptpActive,
+        ptp_kept_rate_pct: resolved > 0 ? Math.round((ptpKept / resolved) * 1000) / 10 : 0,
+        high_risk_count: highRisk,
+      }),
+    );
+  }),
+
+  http.get('/v1/banking/collections/queue', ({ request }) => {
+    const u = new URL(request.url);
+    const dpd_bucket = u.searchParams.get('dpd_bucket');
+    const stage = u.searchParams.get('stage');
+    const ptp_status = u.searchParams.get('ptp_status');
+    const collector = u.searchParams.get('collector');
+    let rows = __mswCollSeed.slice();
+    if (dpd_bucket) rows = rows.filter((a) => a.dpd_bucket === dpd_bucket);
+    if (stage) rows = rows.filter((a) => a.recovery_stage === stage);
+    if (ptp_status) rows = rows.filter((a) => a.ptp_status === ptp_status);
+    if (collector) rows = rows.filter((a) => a.assigned_collector === collector);
+    const priority = (a: MswCollAccount) => a.overdue_kes * (1 - a.recovery_probability);
+    rows.sort((a, b) => priority(b) - priority(a) || b.dpd - a.dpd || a.account_id.localeCompare(b.account_id));
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total: rows.length,
+        filters_applied: { dpd_bucket: dpd_bucket ?? null, stage: stage ?? null, ptp_status: ptp_status ?? null, collector: collector ?? null },
+        accounts: rows,
+      }),
+    );
+  }),
+
+  http.post('/v1/banking/collections/:account_id/ptp', async ({ params, request }) => {
+    const id = String(params.account_id);
+    if (!__mswCollSeed.some((a) => a.account_id === id)) return __mswCollFail('EWS_404_unknown_account', 404, `unknown account ${id}`);
+    const b = (await request.json().catch(() => null)) as { amount_kes?: number; promised_date?: string; notes?: string } | null;
+    if (!b || !Number.isFinite(b.amount_kes) || (b.amount_kes ?? 0) <= 0) return __mswCollFail('EWS_400_invalid_amount', 400, 'amount_kes must be positive');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.promised_date ?? ''))) return __mswCollFail('EWS_400_invalid_date', 400, 'promised_date must be YYYY-MM-DD');
+    const entry = { recorded_at: new Date().toISOString(), recorded_by: 'admin', amount_kes: Math.round(b.amount_kes as number), promised_date: String(b.promised_date), status: 'active' as MswCollPtp, notes: b.notes?.trim() || null };
+    if (!__mswCollPtpOverlay.has(id)) __mswCollPtpOverlay.set(id, []);
+    __mswCollPtpOverlay.get(id)!.unshift(entry);
+    return HttpResponse.json(envelope({ account_id: id, ptp: entry }), { status: 201 });
+  }),
+
+  http.post('/v1/banking/collections/:account_id/log-contact', async ({ params, request }) => {
+    const id = String(params.account_id);
+    if (!__mswCollSeed.some((a) => a.account_id === id)) return __mswCollFail('EWS_404_unknown_account', 404, `unknown account ${id}`);
+    const b = (await request.json().catch(() => null)) as { channel?: string; outcome?: string; notes?: string } | null;
+    const channels = ['call', 'sms', 'email', 'field_visit'];
+    if (!b || !channels.includes(String(b.channel))) return __mswCollFail('EWS_400_invalid_channel', 400, `unknown channel ${b?.channel}`);
+    if (!b.outcome || b.outcome.trim().length === 0) return __mswCollFail('EWS_400_invalid_input', 400, 'outcome required');
+    const entry = { contacted_at: new Date().toISOString(), contacted_by: 'admin', channel: String(b.channel), outcome: b.outcome.trim(), notes: b.notes?.trim() || null };
+    if (!__mswCollContactOverlay.has(id)) __mswCollContactOverlay.set(id, []);
+    __mswCollContactOverlay.get(id)!.unshift(entry);
+    return HttpResponse.json(envelope({ account_id: id, contact: entry }), { status: 201 });
+  }),
+
+  http.get('/v1/banking/collections/:account_id', ({ params }) => {
+    const id = String(params.account_id);
+    const base = __mswCollSeed.find((a) => a.account_id === id);
+    if (!base) return __mswCollFail('EWS_404_unknown_account', 404, `unknown account ${id}`);
+    const seededContacts = Array.from({ length: base.contact_attempts_30d }, (_, i) => ({
+      contacted_at: new Date(Date.now() - (i * 3 + 1) * 86_400_000).toISOString(),
+      contacted_by: base.assigned_collector,
+      channel: ['call', 'sms', 'email', 'field_visit'][i % 4],
+      outcome: ['no_answer', 'promised_payment', 'disputed', 'reachable_followup'][i % 4],
+      notes: null as string | null,
+    }));
+    const seededPtp = base.ptp_status !== 'none' && base.ptp_amount_kes != null && base.ptp_date != null
+      ? [{ recorded_at: new Date(Date.now() - 5 * 86_400_000).toISOString(), recorded_by: base.assigned_collector, amount_kes: base.ptp_amount_kes, promised_date: base.ptp_date, status: base.ptp_status, notes: null as string | null }]
+      : [];
+    const ptp_history = [...(__mswCollPtpOverlay.get(id) ?? []), ...seededPtp].sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
+    const contact_history = [...(__mswCollContactOverlay.get(id) ?? []), ...seededContacts].sort((a, b) => new Date(b.contacted_at).getTime() - new Date(a.contacted_at).getTime());
+    return HttpResponse.json(
+      envelope({
+        ...base,
+        ptp_history,
+        contact_history,
+        recovery_factors: [
+          { factor: `DPD ${base.dpd} days (${base.dpd_bucket.replace(/_/g, ' ')})`, weight: Math.round((base.dpd / 360) * 100) / 100, direction: 'negative' },
+          { factor: base.ptp_status === 'kept' ? 'PTP kept previously' : base.ptp_status === 'broken' ? 'PTP broken' : 'No active PTP', weight: base.ptp_status === 'kept' ? 0.35 : base.ptp_status === 'broken' ? 0.4 : 0.1, direction: base.ptp_status === 'kept' ? 'positive' : 'negative' },
+          { factor: `${base.contact_attempts_30d} contact attempts (30d)`, weight: Math.min(0.3, base.contact_attempts_30d * 0.04), direction: base.contact_attempts_30d >= 3 ? 'positive' : 'negative' },
+          { factor: `Sector: ${base.sector.replace(/_/g, ' ')}`, weight: 0.15, direction: base.sector === 'Real_Estate' || base.sector === 'Hospitality' ? 'negative' : 'positive' },
+        ],
+      }),
+    );
+  }),
+];
+
+handlers.push(...__mswCollHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

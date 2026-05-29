@@ -49,6 +49,7 @@ import { TestingHubPage } from '@/modules/admin/TestingHubPage';
 import { NpaPredictionPage } from '@/modules/banking/NpaPredictionPage';
 import { SmaClassificationPage } from '@/modules/banking/SmaClassificationPage';
 import { SectorWatchPage } from '@/modules/banking/SectorWatchPage';
+import { CollectionsRiskPage } from '@/modules/banking/CollectionsRiskPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
@@ -213,6 +214,7 @@ export function App() {
               <Route path="account-behaviour" element={<AccountBehaviourPage />} />
               <Route path="financial-ratios" element={<FinancialRatiosPage />} />
               <Route path="fraud-signals" element={<FraudSignalsPage />} />
+              <Route path="collections-risk" element={<CollectionsRiskPage />} />
             </Route>
             {/* Insurance modules — domain-guarded: a Banking user who
                 URL-hops here is bounced to their own dashboard. Super-admin

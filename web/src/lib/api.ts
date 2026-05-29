@@ -1879,6 +1879,52 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // §2.1.7 — Collections Risk / Recovery desk
+  collectionsSummary: () =>
+    http.get<EnvelopeBody<CollectionsSummaryReport>>('/v1/banking/collections/summary').then((r) => r.data),
+  collectionsQueue: (filters?: {
+    dpd_bucket?: string;
+    stage?: string;
+    ptp_status?: string;
+    collector?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.dpd_bucket) params.set('dpd_bucket', filters.dpd_bucket);
+    if (filters?.stage) params.set('stage', filters.stage);
+    if (filters?.ptp_status) params.set('ptp_status', filters.ptp_status);
+    if (filters?.collector) params.set('collector', filters.collector);
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<CollectionsQueueReport>>(`/v1/banking/collections/queue${qs ? `?${qs}` : ''}`)
+      .then((r) => r.data);
+  },
+  collectionAccount: (account_id: string) =>
+    http
+      .get<EnvelopeBody<CollectionAccountDetailReport>>(
+        `/v1/banking/collections/${encodeURIComponent(account_id)}`,
+      )
+      .then((r) => r.data),
+  collectionsRecordPtp: (
+    account_id: string,
+    input: { amount_kes: number; promised_date: string; notes?: string },
+  ) =>
+    http
+      .post<EnvelopeBody<{ account_id: string; ptp: CollectionPtpEntry }>>(
+        `/v1/banking/collections/${encodeURIComponent(account_id)}/ptp`,
+        input,
+      )
+      .then((r) => r.data),
+  collectionsLogContact: (
+    account_id: string,
+    input: { channel: string; outcome: string; notes?: string },
+  ) =>
+    http
+      .post<EnvelopeBody<{ account_id: string; contact: CollectionContactEntry }>>(
+        `/v1/banking/collections/${encodeURIComponent(account_id)}/log-contact`,
+        input,
+      )
+      .then((r) => r.data),
+
   // G3 — Dashboard portfolio-insights widgets (Monday Playbook H2)
   ingestionHealth: () =>
     http.get<EnvelopeBody<IngestionHealthReport>>('/v1/ingestion/health').then((r) => r.data),
@@ -4750,6 +4796,88 @@ export interface SectorDeepDiveReport {
 export interface SectorWatchlistResponse {
   tenant_id: string;
   watchlist: string[];
+}
+
+// ── §2.1.7 Collections Risk shapes (mirror BFF banking_collections.ts) ──
+
+export type CollectionsDpdBucket = 'dpd_1_30' | 'dpd_31_60' | 'dpd_61_90' | 'dpd_90_plus';
+export type CollectionsRecoveryStage =
+  | 'soft_reminder'
+  | 'hard_reminder'
+  | 'field_visit'
+  | 'legal_notice'
+  | 'settlement_offer';
+export type CollectionsPtpStatus = 'none' | 'active' | 'kept' | 'broken';
+export type CollectionsContactChannel = 'call' | 'sms' | 'email' | 'field_visit';
+
+export interface CollectionAccount {
+  account_id: string;
+  customer_id: string;
+  customer_name: string;
+  sector: string;
+  dpd: number;
+  dpd_bucket: CollectionsDpdBucket;
+  outstanding_kes: number;
+  overdue_kes: number;
+  recovery_stage: CollectionsRecoveryStage;
+  recovery_probability: number;
+  expected_recovery_kes: number;
+  ptp_status: CollectionsPtpStatus;
+  ptp_amount_kes: number | null;
+  ptp_date: string | null;
+  assigned_collector: string;
+  last_contact_at: string | null;
+  contact_attempts_30d: number;
+}
+
+export interface CollectionPtpEntry {
+  recorded_at: string;
+  recorded_by: string;
+  amount_kes: number;
+  promised_date: string;
+  status: CollectionsPtpStatus;
+  notes: string | null;
+}
+
+export interface CollectionContactEntry {
+  contacted_at: string;
+  contacted_by: string;
+  channel: CollectionsContactChannel;
+  outcome: string;
+  notes: string | null;
+}
+
+export interface CollectionsSummaryReport {
+  tenant_id: string;
+  generated_at: string;
+  total_accounts: number;
+  total_overdue_kes: number;
+  total_expected_recovery_kes: number;
+  recovery_rate_pct: number;
+  by_dpd_bucket: Record<CollectionsDpdBucket, { count: number; overdue_kes: number }>;
+  by_stage: Record<CollectionsRecoveryStage, number>;
+  ptp_active_count: number;
+  ptp_kept_rate_pct: number;
+  high_risk_count: number;
+}
+
+export interface CollectionsQueueReport {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  filters_applied: {
+    dpd_bucket: CollectionsDpdBucket | null;
+    stage: CollectionsRecoveryStage | null;
+    ptp_status: CollectionsPtpStatus | null;
+    collector: string | null;
+  };
+  accounts: CollectionAccount[];
+}
+
+export interface CollectionAccountDetailReport extends CollectionAccount {
+  ptp_history: CollectionPtpEntry[];
+  contact_history: CollectionContactEntry[];
+  recovery_factors: { factor: string; weight: number; direction: 'positive' | 'negative' }[];
 }
 
 // ── T3.3 correlation response shapes (mirror BFF aml_alert_correlation.ts) ──

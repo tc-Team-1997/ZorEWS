@@ -63,6 +63,7 @@ import {
   BookOpen,
   Umbrella,
   TrendingDown,
+  HandCoins,
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -139,6 +140,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/banking/npa-prediction', i18nKey: 'npa_prediction',     icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/fraud-signals',          i18nKey: 'fraud_signals',      icon: ShieldAlert,  featured: true },
       { to: '/banking/sectors',        i18nKey: 'sector_watch',       icon: BarChart3,    requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/collections-risk',       i18nKey: 'collections_risk',   icon: HandCoins,    requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer'], featured: true },
       // Customers list — supporting drill-through anchor for Bank-EWS workflows
       { to: '/customers',              i18nKey: 'customers',          icon: Users },
     ],

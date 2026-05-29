@@ -35657,6 +35657,162 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   // ──────────────────────────────────────────────────────────────────
+  // Module #7 — Collections Risk / Recovery desk (§2.1.7)
+  //   Distinct from the collection-adapter service (auto case routing) —
+  //   this is the read/operate surface for the collections work-queue.
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/collections/summary',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildCollectionsSummary } =
+          require('./banking_collections') as typeof import('./banking_collections');
+        return res.json(wrapResponse(buildCollectionsSummary(req.tenant!.tenant_id, now()), ctx));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'collections_summary_failed';
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/collections/queue',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildCollectionsQueue } =
+          require('./banking_collections') as typeof import('./banking_collections');
+        type CF = import('./banking_collections').CollectionsQueueFilters;
+        const filters: CF = {};
+        if (req.query.dpd_bucket) filters.dpd_bucket = req.query.dpd_bucket as CF['dpd_bucket'];
+        if (req.query.stage) filters.stage = req.query.stage as CF['stage'];
+        if (req.query.ptp_status) filters.ptp_status = req.query.ptp_status as CF['ptp_status'];
+        if (req.query.collector) filters.collector = String(req.query.collector);
+        return res.json(wrapResponse(buildCollectionsQueue(req.tenant!.tenant_id, filters, now()), ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews =
+          code === 'invalid_dpd_bucket'
+            ? 'EWS_400_invalid_dpd_bucket'
+            : code === 'invalid_stage'
+              ? 'EWS_400_invalid_stage'
+              : code === 'invalid_ptp_status'
+                ? 'EWS_400_invalid_ptp_status'
+                : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'collections_queue_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // POST mutations registered BEFORE the bare /:account_id GET so the
+  // literal `/ptp` + `/log-contact` segments aren't captured as an
+  // account id by the param route.
+  app.post(
+    '/v1/banking/collections/:account_id/ptp',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { recordPtp } =
+          require('./banking_collections') as typeof import('./banking_collections');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const b = (inner ?? {}) as { amount_kes?: number; promised_date?: string; notes?: string };
+        const actor = (req.header('x-apex-user') ?? 'admin').trim() || 'admin';
+        const entry = recordPtp(
+          req.tenant!.tenant_id,
+          req.params.account_id,
+          {
+            amount_kes: Number(b.amount_kes),
+            promised_date: String(b.promised_date ?? ''),
+            notes: b.notes,
+            recorded_by: actor,
+          },
+          now(),
+        );
+        return res.status(201).json(wrapResponse({ account_id: req.params.account_id, ptp: entry }, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_account' ? 404 : 400;
+        const ews = code === 'unknown_account' ? 'EWS_404_unknown_account' : `EWS_400_${code ?? 'invalid_input'}`;
+        const msg = e instanceof Error ? e.message : 'record_ptp_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.post(
+    '/v1/banking/collections/:account_id/log-contact',
+    requireTenantMw,
+    requireRole('cases:log_action'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { logContact } =
+          require('./banking_collections') as typeof import('./banking_collections');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner =
+          raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+            ? (raw as { body: unknown }).body
+            : raw;
+        const b = (inner ?? {}) as { channel?: string; outcome?: string; notes?: string };
+        const actor = (req.header('x-apex-user') ?? 'admin').trim() || 'admin';
+        const entry = logContact(
+          req.tenant!.tenant_id,
+          req.params.account_id,
+          {
+            channel: b.channel as import('./banking_collections').ContactChannel,
+            outcome: String(b.outcome ?? ''),
+            notes: b.notes,
+            contacted_by: actor,
+          },
+          now(),
+        );
+        return res.status(201).json(wrapResponse({ account_id: req.params.account_id, contact: entry }, ctx));
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_account' ? 404 : 400;
+        const ews = code === 'unknown_account' ? 'EWS_404_unknown_account' : `EWS_400_${code ?? 'invalid_input'}`;
+        const msg = e instanceof Error ? e.message : 'log_contact_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/banking/collections/:account_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildCollectionAccountDetail } =
+          require('./banking_collections') as typeof import('./banking_collections');
+        return res.json(
+          wrapResponse(buildCollectionAccountDetail(req.tenant!.tenant_id, req.params.account_id, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const httpStatus = code === 'unknown_account' ? 404 : 400;
+        const ews = code === 'unknown_account' ? 'EWS_404_unknown_account' : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'collection_detail_failed';
+        return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #5 — NPA Prediction wrap (§2.1.5)
   // ──────────────────────────────────────────────────────────────────
 
