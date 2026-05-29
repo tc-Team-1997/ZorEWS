@@ -7,7 +7,7 @@ import { ShieldCheck } from 'lucide-react';
 import { useAuth, type Role, type SignupResult } from '@/store/auth';
 import { HttpError } from '@/lib/http';
 import { Button, Input, PasswordStrength } from '@/components/ui';
-import { CarouselPanel } from './CarouselPanel';
+import { AuroraIntelPanel } from './AuroraIntelPanel';
 
 const ROLES: { value: Role; label: string; description: string }[] = [
   { value: 'risk_analyst', label: 'Risk analyst', description: 'Triage alerts, manage rules' },
@@ -89,12 +89,12 @@ export function SignupPage() {
   });
 
   return (
-    <div className="min-h-screen flex bg-white">
-      <div className="hidden lg:block lg:w-1/2">
-        <CarouselPanel />
+    <div className="min-h-screen flex aurora-canvas">
+      <div className="hidden lg:block lg:w-[52%]">
+        <AuroraIntelPanel />
       </div>
 
-      <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-6 relative bg-white overflow-hidden">
+      <div className="w-full lg:w-[48%] flex items-center justify-center px-6 py-6 relative overflow-hidden">
         <div
           className="absolute top-0 left-0 right-0 h-[46%] pointer-events-none opacity-60"
           style={{

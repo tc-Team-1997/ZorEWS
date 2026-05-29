@@ -76,9 +76,9 @@ export function FirstLoginWizardPage() {
   });
 
   return (
-    <div className="min-h-screen bg-page flex items-center justify-center px-6 py-10">
+    <div className="min-h-screen aurora-canvas flex items-center justify-center px-6 py-10">
       <div
-        className="w-full max-w-[440px] bg-white rounded-xl shadow-md border border-divider p-8"
+        className="glass-card aurora-rise w-full max-w-[440px] p-8"
         data-testid="first-login-wizard"
       >
         <div className="flex items-center gap-2.5 mb-5">
