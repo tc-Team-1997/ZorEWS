@@ -9,11 +9,11 @@
 // this screen is the human-readable lens onto the authorisation contract.
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Check, Minus, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Check, CheckCircle2, Minus, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { api, type AccessMatrixRowShape, type RbacRoleShape } from '@/lib/api';
+import { api, type AccessCheckShape, type AccessMatrixRowShape, type RbacRoleShape } from '@/lib/api';
 
 const ROLE_LABEL: Record<RbacRoleShape, string> = {
   admin: 'Admin',
@@ -76,6 +76,8 @@ export function AccessControlConfigPage() {
         The matrix is version-controlled in <code className="text-ink">infra/rbac/matrix.json</code> and enforced by a CI gate.
         This screen is read-only — edits land via a reviewed change to that file, not at runtime.
       </div>
+
+      <AccessCheckPanel roles={roles} />
 
       <Panel
         title={
@@ -203,5 +205,83 @@ function RoleResourceSection({
         </tr>
       ))}
     </>
+  );
+}
+
+// Runtime "can this role do X?" check — hits the same fail-closed `can()` the
+// HTTP guards use. Lets ops verify a (role, operation) pair without scanning
+// the grid. The matrix is read-only, but this proves it's the live contract.
+function AccessCheckPanel({ roles }: { roles: RbacRoleShape[] }) {
+  const [role, setRole] = useState<RbacRoleShape | ''>('');
+  const [operation, setOperation] = useState('');
+  const [result, setResult] = useState<AccessCheckShape | null>(null);
+
+  const checkMut = useMutation({
+    mutationFn: () => api.accessControlCheck(role, operation.trim()),
+    onSuccess: (r) => setResult(r),
+  });
+
+  const armed = role !== '' && operation.trim() !== '';
+
+  return (
+    <Panel
+      title={
+        <span className="flex items-center gap-2">
+          <ShieldCheck size={16} /> Test access
+        </span>
+      }
+    >
+      <div className="flex flex-wrap items-end gap-3" data-testid="acc-check-form">
+        <label className="flex flex-col text-xs text-muted">
+          Role
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as RbacRoleShape | '')}
+            data-testid="acc-check-role"
+            className="mt-1 rounded border border-divider px-2 py-1 text-sm text-ink"
+          >
+            <option value="">Select role…</option>
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col text-xs text-muted">
+          Operation
+          <input
+            type="text"
+            value={operation}
+            onChange={(e) => setOperation(e.target.value)}
+            placeholder="e.g. audit:read"
+            data-testid="acc-check-operation"
+            className="mt-1 w-56 rounded border border-divider px-2 py-1 text-sm font-mono"
+          />
+        </label>
+        <Button variant="primary" onClick={() => checkMut.mutate()} disabled={!armed || checkMut.isPending} data-testid="acc-check-run">
+          {checkMut.isPending ? 'Checking…' : 'Check'}
+        </Button>
+      </div>
+
+      {result && (
+        <div
+          className={`mt-4 flex flex-wrap items-center gap-3 rounded border p-3 text-sm ${
+            result.allowed ? 'border-success/40 bg-success/10 text-success' : 'border-danger/40 bg-danger/10 text-danger'
+          }`}
+          data-testid="acc-check-result"
+        >
+          {result.allowed ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+          <span data-testid="acc-check-verdict" className="font-medium">
+            {result.allowed ? 'Allowed' : 'Denied'}
+          </span>
+          <code className="text-xs text-ink">{result.role}</code>
+          <span className="text-muted">→</span>
+          <code className="text-xs text-ink">{result.operation}</code>
+          {!result.role_known && <Badge tone="warning">unknown role</Badge>}
+          {!result.operation_known && <Badge tone="warning">unknown operation</Badge>}
+        </div>
+      )}
+    </Panel>
   );
 }

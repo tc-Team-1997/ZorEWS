@@ -8,6 +8,7 @@ import {
   buildAccessControlOverview,
   buildRoleAccess,
   buildAccessMatrix,
+  checkAccess,
   resourceOf,
   actionOf,
   AccessControlError,
@@ -178,5 +179,71 @@ describe('access_control_view — routes', () => {
       .get('/v1/config/access-control')
       .set({ ...H, 'X-Tenant-ID': 'BIL' });
     expect(a.body.body).toEqual(b.body.body);
+  });
+});
+
+describe('access_control_view — checkAccess (can role do X?)', () => {
+  it('allows a granted (role, operation) pair', () => {
+    // audit:read is granted to admin + supervisor per the matrix
+    const r = checkAccess('admin', 'audit:read');
+    expect(r.allowed).toBe(true);
+    expect(r.role_known).toBe(true);
+    expect(r.operation_known).toBe(true);
+    expect(r.resource).toBe('audit');
+    expect(r.action).toBe('read');
+  });
+
+  it('denies a role NOT granted the operation', () => {
+    const r = checkAccess('field_officer', 'audit:read');
+    expect(r.allowed).toBe(false);
+    expect(r.role_known).toBe(true);
+    expect(r.operation_known).toBe(true);
+  });
+
+  it('fail-closed on unknown role', () => {
+    const r = checkAccess('superuser', 'audit:read');
+    expect(r.allowed).toBe(false);
+    expect(r.role_known).toBe(false);
+    expect(r.operation_known).toBe(true);
+  });
+
+  it('fail-closed on unknown operation', () => {
+    const r = checkAccess('admin', 'nonsense:op');
+    expect(r.allowed).toBe(false);
+    expect(r.role_known).toBe(true);
+    expect(r.operation_known).toBe(false);
+  });
+
+  it('route: GET /check returns the verdict (admin)', async () => {
+    const res = await request(app('admin'))
+      .get('/v1/config/access-control/check?role=supervisor&operation=audit:read')
+      .set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.body.allowed).toBe(true);
+    expect(res.body.body.role).toBe('supervisor');
+  });
+
+  it('route: GET /check denies + flags unknown role', async () => {
+    const res = await request(app('admin'))
+      .get('/v1/config/access-control/check?role=ghost&operation=alerts:list')
+      .set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.body.allowed).toBe(false);
+    expect(res.body.body.role_known).toBe(false);
+  });
+
+  it('route: GET /check 400s when role or operation missing', async () => {
+    const r1 = await request(app('admin')).get('/v1/config/access-control/check?role=admin').set(H);
+    expect(r1.status).toBe(400);
+    expect(r1.body.error.code).toBe('EWS_400_invalid_input');
+    const r2 = await request(app('admin')).get('/v1/config/access-control/check?operation=audit:read').set(H);
+    expect(r2.status).toBe(400);
+  });
+
+  it('route: GET /check 403s a non-privileged role', async () => {
+    const res = await request(app('field_officer'))
+      .get('/v1/config/access-control/check?role=admin&operation=audit:read')
+      .set(H);
+    expect(res.status).toBe(403);
   });
 });

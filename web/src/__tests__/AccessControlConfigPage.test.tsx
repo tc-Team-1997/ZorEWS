@@ -76,4 +76,36 @@ describe('AccessControlConfigPage', () => {
     const filterAll = screen.getByTestId('acc-filter-all');
     expect(within(filterAll).queryByText(/All roles/)).toBeTruthy();
   });
+
+  it('Test access — a granted pair reads Allowed', async () => {
+    asAdmin();
+    renderWithProviders(<AccessControlConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('acc-matrix-table')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('acc-check-role'), { target: { value: 'supervisor' } });
+    fireEvent.change(screen.getByTestId('acc-check-operation'), { target: { value: 'audit:read' } });
+    fireEvent.click(screen.getByTestId('acc-check-run'));
+    await waitFor(() => expect(screen.getByTestId('acc-check-result')).toBeInTheDocument());
+    expect(screen.getByTestId('acc-check-verdict').textContent).toBe('Allowed');
+  });
+
+  it('Test access — a non-granted pair reads Denied', async () => {
+    asAdmin();
+    renderWithProviders(<AccessControlConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('acc-matrix-table')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('acc-check-role'), { target: { value: 'field_officer' } });
+    fireEvent.change(screen.getByTestId('acc-check-operation'), { target: { value: 'audit:read' } });
+    fireEvent.click(screen.getByTestId('acc-check-run'));
+    await waitFor(() => expect(screen.getByTestId('acc-check-verdict').textContent).toBe('Denied'));
+  });
+
+  it('Test access — unknown operation flags + denies', async () => {
+    asAdmin();
+    renderWithProviders(<AccessControlConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('acc-matrix-table')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('acc-check-role'), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByTestId('acc-check-operation'), { target: { value: 'nonsense:op' } });
+    fireEvent.click(screen.getByTestId('acc-check-run'));
+    await waitFor(() => expect(screen.getByTestId('acc-check-verdict').textContent).toBe('Denied'));
+    expect(within(screen.getByTestId('acc-check-result')).getByText(/unknown operation/)).toBeInTheDocument();
+  });
 });

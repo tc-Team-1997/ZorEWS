@@ -14309,6 +14309,23 @@ const __mswAccessControlHandlers = [
     });
     return HttpResponse.json(envelope({ version: '1.0.0', roles: __MSW_ACC_ROLES, total_operations: rows.length, rows }));
   }),
+  http.get('/v1/config/access-control/check', ({ request }) => {
+    const u = new URL(request.url);
+    const role = (u.searchParams.get('role') ?? '').trim();
+    const operation = (u.searchParams.get('operation') ?? '').trim();
+    if (role === '' || operation === '') {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_input', message: 'role and operation required', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    const role_known = __MSW_ACC_ROLES.includes(role as MswRbacRole);
+    const operation_known = Object.prototype.hasOwnProperty.call(__MSW_ACC_OPS, operation);
+    const allowed = operation_known && __MSW_ACC_OPS[operation].includes(role as MswRbacRole);
+    return HttpResponse.json(
+      envelope({ role, operation, resource: __mswAccResourceOf(operation), action: __mswAccActionOf(operation), allowed, role_known, operation_known }),
+    );
+  }),
   http.get('/v1/config/access-control/roles/:role', ({ params }) => {
     const role = params.role as MswRbacRole;
     if (!__MSW_ACC_ROLES.includes(role)) {

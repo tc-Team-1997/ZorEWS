@@ -37326,6 +37326,25 @@ export function makeApp(deps: AppDeps = {}) {
       },
     );
 
+    // Runtime "can this role do X?" check — fail-closed, same as the HTTP guards.
+    app.get(
+      '/v1/config/access-control/check',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const role = typeof req.query.role === 'string' ? req.query.role.trim() : '';
+        const operation = typeof req.query.operation === 'string' ? req.query.operation.trim() : '';
+        if (role === '' || operation === '') {
+          return res.status(400).json(
+            wrapError({ code: 'EWS_400_invalid_input', message: 'role and operation query params are required', severity: 'MEDIUM' }, ctx),
+          );
+        }
+        const { checkAccess } = require('./access_control_view') as AccMod;
+        return res.json(wrapResponse(checkAccess(role, operation), ctx));
+      },
+    );
+
     app.get(
       '/v1/config/access-control/roles/:role',
       requireTenantMw,

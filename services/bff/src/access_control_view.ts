@@ -11,6 +11,7 @@
 // auditable; this screen is the human-readable lens onto it.
 
 import {
+  can,
   loadMatrix,
   operationsFor,
   type Matrix,
@@ -135,6 +136,35 @@ export function buildRoleAccess(role: string): RoleAccessShape {
     total_operations: ops.length,
     total_resources: resources.length,
     resources,
+  };
+}
+
+export interface AccessCheckShape {
+  role: string;
+  operation: string;
+  resource: string;
+  action: string;
+  allowed: boolean; // can(role, operation) — fail-closed on unknown role/op
+  role_known: boolean; // role ∈ matrix.roles
+  operation_known: boolean; // operation ∈ matrix.operations
+}
+
+// Runtime "can this role do X?" check — the same fail-closed `can()` the HTTP
+// guards use, surfaced for the SPA so operators can verify a (role, operation)
+// pair without reading the whole grid. Unknown role OR operation → allowed=false
+// (with the *_known flags telling the operator why).
+export function checkAccess(role: string, operation: string): AccessCheckShape {
+  const m = loadMatrix();
+  const role_known = (m.roles as readonly string[]).includes(role);
+  const operation_known = Object.prototype.hasOwnProperty.call(m.operations, operation);
+  return {
+    role,
+    operation,
+    resource: resourceOf(operation),
+    action: actionOf(operation),
+    allowed: can(role, operation),
+    role_known,
+    operation_known,
   };
 }
 

@@ -2914,6 +2914,12 @@ export const api = {
     http.get<EnvelopeBody<AccessMatrixShape>>('/v1/config/access-control/matrix').then((r) => r.data),
   accessControlRole: (role: string) =>
     http.get<EnvelopeBody<RoleAccessShape>>(`/v1/config/access-control/roles/${encodeURIComponent(role)}`).then((r) => r.data),
+  accessControlCheck: (role: string, operation: string) =>
+    http
+      .get<EnvelopeBody<AccessCheckShape>>(
+        `/v1/config/access-control/check?role=${encodeURIComponent(role)}&operation=${encodeURIComponent(operation)}`,
+      )
+      .then((r) => r.data),
 
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
@@ -7136,4 +7142,13 @@ export interface AccessMatrixShape {
   roles: RbacRoleShape[];
   total_operations: number;
   rows: AccessMatrixRowShape[];
+}
+export interface AccessCheckShape {
+  role: string;
+  operation: string;
+  resource: string;
+  action: string;
+  allowed: boolean;
+  role_known: boolean;
+  operation_known: boolean;
 }
