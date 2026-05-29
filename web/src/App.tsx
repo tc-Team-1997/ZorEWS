@@ -46,6 +46,7 @@ import { DriftMonitoringPage } from '@/modules/ai/DriftMonitoringPage';
 import { AiInsightsPage } from '@/modules/ai/AiInsightsPage';
 import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RiskScoreConfigPage } from '@/modules/admin/RiskScoreConfigPage';
+import { AlertClassificationConfigPage } from '@/modules/admin/AlertClassificationConfigPage';
 import { RulesEnginePage } from '@/modules/rules/RulesEnginePage';
 import { ThresholdsLimitsPage } from '@/modules/admin/ThresholdsLimitsPage';
 import { WorkflowsPage } from '@/modules/admin/WorkflowsPage';
@@ -195,6 +196,7 @@ export function App() {
             <Route path="ai/insights" element={<AiInsightsPage />} />
             <Route path="admin/master-setup" element={<MasterSetupPage />} />
             <Route path="admin/risk-score-config" element={<RiskScoreConfigPage />} />
+            <Route path="admin/alert-classification" element={<AlertClassificationConfigPage />} />
             <Route path="rules/engine" element={<RulesEnginePage />} />
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />
             <Route path="admin/workflows" element={<WorkflowsPage />} />

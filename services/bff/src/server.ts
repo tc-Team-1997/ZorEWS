@@ -36806,6 +36806,134 @@ export function makeApp(deps: AppDeps = {}) {
   }
 
   // ──────────────────────────────────────────────────────────────────
+  // Master Setup — Alert Classification Setup (MASTER SETUP spec screen #12)
+  //   Operator-editable RAG score bands. Two boundaries derive a contiguous
+  //   green/amber/red partition (no gaps possible). audit:read (admin).
+  //   Distinct from /v1/alerts/classification/spec (fixed severity→colour).
+  // ──────────────────────────────────────────────────────────────────
+  {
+    type AccMod = typeof import('./alert_classification_config');
+    const accErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+      const code = (e as { code?: string }).code;
+      const httpStatus = code === 'invalid_band' ? 400 : 400;
+      const ews = code ? `EWS_${httpStatus}_${code}` : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'alert_classification_config_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    };
+    const accActor = (req: Request): string =>
+      (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'admin';
+    const accPeel = (req: Request): Record<string, unknown> => {
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      return (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+    };
+    const accAudit = (req: Request, action: string, metadata: Record<string, unknown>) => {
+      try {
+        const actor = accActor(req);
+        const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          { actor_username: actor, actor_role: role, action, resource_type: 'config', resource_id: 'alert_classification', outcome: 'success', severity: 'info', metadata },
+          now(),
+        );
+      } catch {
+        /* swallow */
+      }
+    };
+
+    app.get(
+      '/v1/config/alert-classification',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccMod;
+        return res.json(wrapResponse(defaultAlertClassificationConfigStore.get(req.tenant!.tenant_id), ctx));
+      },
+    );
+
+    app.put(
+      '/v1/config/alert-classification/boundaries',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccMod;
+          const body = accPeel(req) as { amber_min?: unknown; red_min?: unknown };
+          const updated = defaultAlertClassificationConfigStore.setBoundaries(
+            req.tenant!.tenant_id,
+            body.amber_min,
+            body.red_min,
+            accActor(req),
+            Date.now(),
+          );
+          accAudit(req, 'alert_classification.boundaries.updated', { amber_min: updated.amber_min, red_min: updated.red_min });
+          return res.json(wrapResponse(updated, ctx));
+        } catch (e) {
+          return accErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.patch(
+      '/v1/config/alert-classification/bands/:band',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccMod;
+          const body = accPeel(req) as { action_required?: unknown };
+          const updated = defaultAlertClassificationConfigStore.setAction(
+            req.tenant!.tenant_id,
+            req.params.band,
+            body.action_required,
+            accActor(req),
+            Date.now(),
+          );
+          accAudit(req, 'alert_classification.band.updated', { band: req.params.band });
+          return res.json(wrapResponse(updated, ctx));
+        } catch (e) {
+          return accErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.post(
+      '/v1/config/alert-classification/classify',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultAlertClassificationConfigStore, classifyScore } = require('./alert_classification_config') as AccMod;
+          const body = accPeel(req) as { score?: unknown };
+          if (typeof body.score !== 'number' || !Number.isFinite(body.score)) {
+            return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: 'score must be a finite number', severity: 'MEDIUM' }, ctx));
+          }
+          const config = defaultAlertClassificationConfigStore.get(req.tenant!.tenant_id);
+          return res.json(wrapResponse(classifyScore(config, body.score), ctx));
+        } catch (e) {
+          return accErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.post(
+      '/v1/config/alert-classification/reset',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccMod;
+        const updated = defaultAlertClassificationConfigStore.reset(req.tenant!.tenant_id, accActor(req), Date.now());
+        accAudit(req, 'alert_classification.reset', { amber_min: updated.amber_min, red_min: updated.red_min });
+        return res.json(wrapResponse(updated, ctx));
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #7 — Collections Risk / Recovery desk (§2.1.7)
   //   Distinct from the collection-adapter service (auto case routing) —
   //   this is the read/operate surface for the collections work-queue.

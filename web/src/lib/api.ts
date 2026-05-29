@@ -2838,6 +2838,27 @@ export const api = {
       .post<EnvelopeBody<RiskScoreNormalizeResultShape>>('/v1/config/risk-score/normalize', { domain })
       .then((r) => r.data),
 
+  // ── Master Setup · Alert Classification Setup (RAG score bands) ───────
+  alertClassificationConfig: () =>
+    http.get<EnvelopeBody<AlertClassificationConfigShape>>('/v1/config/alert-classification').then((r) => r.data),
+  alertClassificationSetBoundaries: (amber_min: number, red_min: number) =>
+    http
+      .put<EnvelopeBody<AlertClassificationConfigShape>>('/v1/config/alert-classification/boundaries', { amber_min, red_min })
+      .then((r) => r.data),
+  alertClassificationSetAction: (band: RagBandShape, action_required: string) =>
+    http
+      .patch<EnvelopeBody<AlertClassificationConfigShape>>(
+        `/v1/config/alert-classification/bands/${band}`,
+        { action_required },
+      )
+      .then((r) => r.data),
+  alertClassificationClassify: (score: number) =>
+    http
+      .post<EnvelopeBody<ScoreClassificationShape>>('/v1/config/alert-classification/classify', { score })
+      .then((r) => r.data),
+  alertClassificationReset: () =>
+    http.post<EnvelopeBody<AlertClassificationConfigShape>>('/v1/config/alert-classification/reset', {}).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6835,4 +6856,33 @@ export interface RiskScoreNormalizeResultShape {
   domain: ScoreFactorDomainShape;
   factors: ScoreFactorShape[];
   summary: Omit<RiskScoreWeightSummaryShape, 'tenant_id'>;
+}
+
+// ── Master Setup · Alert Classification Setup (RAG score bands) ─────────
+export type RagBandShape = 'green' | 'amber' | 'red';
+export interface RagClassificationBandShape {
+  band: RagBandShape;
+  label: string;
+  color_hex: string;
+  severity_rank: number;
+  min_score: number;
+  max_score: number | null;
+  action_required: string;
+  range_label: string;
+}
+export interface AlertClassificationConfigShape {
+  tenant_id: string;
+  score_floor: number;
+  amber_min: number;
+  red_min: number;
+  bands: RagClassificationBandShape[];
+  updated_at: string;
+  updated_by: string;
+}
+export interface ScoreClassificationShape {
+  score: number;
+  band: RagBandShape;
+  label: string;
+  color_hex: string;
+  action_required: string;
 }

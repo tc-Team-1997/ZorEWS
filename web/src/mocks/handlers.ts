@@ -13689,6 +13689,124 @@ const __mswRiskScoreHandlers = [
 handlers.push(...__mswRiskScoreHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Master Setup — Alert Classification Setup handlers (RAG score bands)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_ACC_BANDS = ['green', 'amber', 'red'];
+const __MSW_ACC_DEFAULTS = { amber_min: 60, red_min: 100 };
+const __MSW_ACC_DEFAULT_ACTIONS: Record<string, string> = {
+  green: 'No action — monitor',
+  amber: 'Review within SLA',
+  red: 'Immediate action — escalate',
+};
+const __mswAccColor: Record<string, string> = { green: '#16a34a', amber: '#d97706', red: '#dc2626' };
+const __mswAccRank: Record<string, number> = { green: 0, amber: 1, red: 2 };
+const __mswAccLabel: Record<string, string> = { green: 'Green', amber: 'Amber', red: 'Red' };
+let __mswAccState: { amber_min: number; red_min: number; actions: Record<string, string>; updated_at: string; updated_by: string } | null = null;
+export function __resetMswAlertClassification() {
+  __mswAccState = null;
+}
+function __mswAccSeed() {
+  if (!__mswAccState) {
+    __mswAccState = {
+      amber_min: __MSW_ACC_DEFAULTS.amber_min,
+      red_min: __MSW_ACC_DEFAULTS.red_min,
+      actions: { ...__MSW_ACC_DEFAULT_ACTIONS },
+      updated_at: new Date(0).toISOString(),
+      updated_by: 'system',
+    };
+  }
+  return __mswAccState;
+}
+const __mswAccRangeLabel = (band: string, min: number, max: number | null) =>
+  band === 'green' ? `< ${max}` : band === 'red' ? `≥ ${min}` : `${min}–${max}`;
+function __mswAccConfig() {
+  const s = __mswAccSeed();
+  const spec: [string, number, number | null][] = [
+    ['green', 0, s.amber_min],
+    ['amber', s.amber_min, s.red_min],
+    ['red', s.red_min, null],
+  ];
+  return {
+    tenant_id: 'BANK_DEMO',
+    score_floor: 0,
+    amber_min: s.amber_min,
+    red_min: s.red_min,
+    bands: spec.map(([band, min, max]) => ({
+      band,
+      label: __mswAccLabel[band],
+      color_hex: __mswAccColor[band],
+      severity_rank: __mswAccRank[band],
+      min_score: min,
+      max_score: max,
+      action_required: s.actions[band],
+      range_label: __mswAccRangeLabel(band, min, max),
+    })),
+    updated_at: s.updated_at,
+    updated_by: s.updated_by,
+  };
+}
+const __mswAccFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json(
+    { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } },
+    { status },
+  );
+const __mswAccPeel = (b: any) => (b && typeof b === 'object' && b.body && typeof b.body === 'object' ? b.body : b);
+
+const __mswAlertClassificationHandlers = [
+  http.get('/v1/config/alert-classification', () => HttpResponse.json(envelope(__mswAccConfig()))),
+  http.put('/v1/config/alert-classification/boundaries', async ({ request }) => {
+    const b = __mswAccPeel(await request.json().catch(() => null));
+    const amber = Number(b?.amber_min);
+    const red = Number(b?.red_min);
+    if (!Number.isFinite(amber) || !Number.isFinite(red)) return __mswAccFail('EWS_400_invalid_input', 400, 'boundaries must be numbers');
+    if (amber <= 0) return __mswAccFail('EWS_400_invalid_boundaries', 400, 'amber_min must be > 0');
+    if (red <= amber) return __mswAccFail('EWS_400_invalid_boundaries', 400, 'red_min must be > amber_min');
+    if (red > 1000) return __mswAccFail('EWS_400_invalid_boundaries', 400, 'red_min must be ≤ 1000');
+    const s = __mswAccSeed();
+    s.amber_min = Math.round(amber * 100) / 100;
+    s.red_min = Math.round(red * 100) / 100;
+    s.updated_at = new Date().toISOString();
+    s.updated_by = 'alice.admin';
+    return HttpResponse.json(envelope(__mswAccConfig()));
+  }),
+  http.patch('/v1/config/alert-classification/bands/:band', async ({ params, request }) => {
+    const band = String(params.band);
+    if (!__MSW_ACC_BANDS.includes(band)) return __mswAccFail('EWS_400_invalid_band', 400, 'unknown band');
+    const b = __mswAccPeel(await request.json().catch(() => null));
+    const action = String(b?.action_required ?? '').trim();
+    if (!action) return __mswAccFail('EWS_400_invalid_input', 400, 'action_required is required');
+    if (action.length > 200) return __mswAccFail('EWS_400_invalid_input', 400, 'action_required exceeds 200 chars');
+    const s = __mswAccSeed();
+    s.actions[band] = action;
+    s.updated_at = new Date().toISOString();
+    s.updated_by = 'alice.admin';
+    return HttpResponse.json(envelope(__mswAccConfig()));
+  }),
+  http.post('/v1/config/alert-classification/classify', async ({ request }) => {
+    const b = __mswAccPeel(await request.json().catch(() => null));
+    const score = Number(b?.score);
+    if (!Number.isFinite(score)) return __mswAccFail('EWS_400_invalid_input', 400, 'score must be a finite number');
+    const s = __mswAccSeed();
+    const band = score >= s.red_min ? 'red' : score >= s.amber_min ? 'amber' : 'green';
+    return HttpResponse.json(
+      envelope({ score, band, label: __mswAccLabel[band], color_hex: __mswAccColor[band], action_required: s.actions[band] }),
+    );
+  }),
+  http.post('/v1/config/alert-classification/reset', () => {
+    __mswAccState = {
+      amber_min: __MSW_ACC_DEFAULTS.amber_min,
+      red_min: __MSW_ACC_DEFAULTS.red_min,
+      actions: { ...__MSW_ACC_DEFAULT_ACTIONS },
+      updated_at: new Date().toISOString(),
+      updated_by: 'alice.admin',
+    };
+    return HttpResponse.json(envelope(__mswAccConfig()));
+  }),
+];
+
+handlers.push(...__mswAlertClassificationHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────
