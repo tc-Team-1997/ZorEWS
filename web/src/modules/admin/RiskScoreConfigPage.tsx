@@ -18,6 +18,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Gauge,
   Plus,
   RefreshCw,
   Scale,
@@ -31,6 +32,7 @@ import {
   api,
   type ScoreFactorDomainShape,
   type ScoreFactorShape,
+  type ScorecardEvaluationShape,
 } from '@/lib/api';
 
 const DOMAINS: { id: ScoreFactorDomainShape; label: string }[] = [
@@ -226,6 +228,17 @@ export function RiskScoreConfigPage() {
         )}
       </Panel>
 
+      {/* Runtime: test the configured scorecard end-to-end (#11 weights + #12 bands) */}
+      {domain === 'both' ? (
+        <Panel title="Test scorecard">
+          <p className="rounded border border-dashed border-divider p-4 text-center text-sm text-muted" data-testid="rsc-eval-both-note">
+            Scorecard evaluation runs per vertical — pick <strong>Banking</strong> or <strong>Insurance</strong> to test.
+          </p>
+        </Panel>
+      ) : (
+        <ScorecardTestPanel domain={domain} factors={factors.filter((f) => f.enabled)} />
+      )}
+
       {showCreate && (
         <CreateFactorModal
           domain={domain}
@@ -237,6 +250,128 @@ export function RiskScoreConfigPage() {
         />
       )}
     </div>
+  );
+}
+
+// Runtime panel: enter a 0–100 signal per enabled factor, evaluate the composite
+// against the tenant's configured RAG bands, see the band + per-factor contribution.
+// This is the "config drives runtime" surface — it consumes both #11 + #12.
+function ScorecardTestPanel({ domain, factors }: { domain: 'banking' | 'insurance'; factors: ScoreFactorShape[] }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<ScorecardEvaluationShape | null>(null);
+
+  const evalMut = useMutation({
+    mutationFn: () => {
+      const fv: Record<string, number> = {};
+      for (const f of factors) {
+        const n = Number(values[f.code]);
+        if (Number.isFinite(n)) fv[f.code] = n;
+      }
+      return api.riskScoreEvaluate(domain, fv);
+    },
+    onSuccess: (r) => setResult(r),
+  });
+
+  const bandTone = (band: string): 'success' | 'warning' | 'danger' =>
+    band === 'red' ? 'danger' : band === 'amber' ? 'warning' : 'success';
+
+  if (factors.length === 0) {
+    return (
+      <Panel title="Test scorecard">
+        <p className="rounded border border-dashed border-divider p-4 text-center text-sm text-muted" data-testid="rsc-eval-empty">
+          No enabled factors to score in this domain.
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel
+      title={
+        <span className="flex items-center gap-2">
+          <Gauge size={16} /> Test scorecard
+        </span>
+      }
+      action={
+        <Button variant="primary" onClick={() => evalMut.mutate()} disabled={evalMut.isPending} data-testid="rsc-eval-run">
+          {evalMut.isPending ? 'Evaluating…' : 'Evaluate'}
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="rsc-eval-inputs">
+        {factors.map((f) => (
+          <label key={f.factor_id} className="flex items-center justify-between gap-3 rounded border border-divider/60 px-3 py-2">
+            <span className="text-sm">
+              <span className="font-medium">{f.name}</span>{' '}
+              <code className="text-xs text-muted">{f.code}</code>{' '}
+              <span className="text-xs text-muted">({f.weight_pct}%)</span>
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              placeholder="0–100"
+              value={values[f.code] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.code]: e.target.value }))}
+              className="w-24 rounded border border-divider px-2 py-1 text-sm font-mono"
+              data-testid={`rsc-eval-input-${f.code}`}
+            />
+          </label>
+        ))}
+      </div>
+
+      {result && (
+        <div className="mt-4 space-y-3" data-testid="rsc-eval-result">
+          <div className="flex flex-wrap items-center gap-4 rounded border border-divider/60 bg-divider/5 p-4">
+            <div>
+              <div className="text-xs uppercase text-muted">Composite score</div>
+              <div className="text-2xl font-semibold" data-testid="rsc-eval-composite">{result.composite_score}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted">RAG band</div>
+              <span data-testid="rsc-eval-band">
+                <Badge tone={bandTone(result.classification.band)}>{result.classification.label}</Badge>
+              </span>
+            </div>
+            <div className="flex-1 min-w-[12rem]">
+              <div className="text-xs uppercase text-muted">Recommended action</div>
+              <div className="text-sm font-medium" data-testid="rsc-eval-action">{result.classification.action_required}</div>
+            </div>
+          </div>
+
+          {(result.missing_value_count > 0 || result.unknown_value_codes.length > 0 || !result.balanced) && (
+            <div className="rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning" data-testid="rsc-eval-warnings">
+              <AlertTriangle size={12} className="inline mr-1" />
+              {!result.balanced && <span>Weights total {result.total_weight_pct}% (not 100). </span>}
+              {result.missing_value_count > 0 && <span>{result.missing_value_count} factor(s) defaulted to 0. </span>}
+              {result.unknown_value_codes.length > 0 && <span>Ignored unknown: {result.unknown_value_codes.join(', ')}.</span>}
+            </div>
+          )}
+
+          <table className="w-full text-sm" data-testid="rsc-eval-breakdown">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-divider/40">
+                <th className="py-1">Factor</th>
+                <th className="w-24">Weight</th>
+                <th className="w-24">Signal</th>
+                <th className="w-28">Contribution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.factors.map((c) => (
+                <tr key={c.factor_id} className="border-b border-divider/40" data-testid={`rsc-eval-row-${c.code}`}>
+                  <td className="py-1.5">{c.name}</td>
+                  <td className="font-mono">{c.weight_pct}%</td>
+                  <td className="font-mono">{c.signal_value}</td>
+                  <td className="font-mono font-medium">{c.contribution}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 

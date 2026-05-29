@@ -2837,6 +2837,12 @@ export const api = {
     http
       .post<EnvelopeBody<RiskScoreNormalizeResultShape>>('/v1/config/risk-score/normalize', { domain })
       .then((r) => r.data),
+  // Runtime: evaluate a composite scorecard against the configured factor
+  // weights + RAG bands. domain is 'banking' | 'insurance'.
+  riskScoreEvaluate: (domain: 'banking' | 'insurance', factor_values: Record<string, number>) =>
+    http
+      .post<EnvelopeBody<ScorecardEvaluationShape>>('/v1/config/risk-score/evaluate', { domain, factor_values })
+      .then((r) => r.data),
 
   // ── Master Setup · Alert Classification Setup (RAG score bands) ───────
   alertClassificationConfig: () =>
@@ -6901,6 +6907,34 @@ export interface RiskScoreNormalizeResultShape {
   domain: ScoreFactorDomainShape;
   factors: ScoreFactorShape[];
   summary: Omit<RiskScoreWeightSummaryShape, 'tenant_id'>;
+}
+// Runtime composite scorecard evaluation (consumes #11 weights + #12 RAG bands)
+export interface FactorContributionShape {
+  factor_id: string;
+  code: string;
+  name: string;
+  weight_pct: number;
+  signal_value: number;
+  value_provided: boolean;
+  contribution: number;
+}
+export interface ScorecardEvaluationShape {
+  tenant_id: string;
+  domain: 'banking' | 'insurance';
+  composite_score: number;
+  total_weight_pct: number;
+  balanced: boolean;
+  classification: {
+    score: number;
+    band: RagBandShape;
+    label: string;
+    color_hex: string;
+    action_required: string;
+  };
+  factors: FactorContributionShape[];
+  unknown_value_codes: string[];
+  missing_value_count: number;
+  evaluated_at: string;
 }
 
 // ── Master Setup · Alert Classification Setup (RAG score bands) ─────────

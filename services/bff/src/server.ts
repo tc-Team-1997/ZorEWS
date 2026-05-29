@@ -36803,6 +36803,43 @@ export function makeApp(deps: AppDeps = {}) {
         }
       },
     );
+
+    // Composite scorecard evaluator — the runtime that CONSUMES the configured
+    // factor weights (#11) + the configured RAG bands (#12). Scoring action, so
+    // gated at analyst level (customers:read_risk_profile) NOT admin audit:read.
+    {
+      type ScoreMod = typeof import('./scorecard_evaluator');
+      type AccCfgMod = typeof import('./alert_classification_config');
+      app.post(
+        '/v1/config/risk-score/evaluate',
+        requireTenantMw,
+        requireRole('customers:read_risk_profile'),
+        (req: Request, res: Response) => {
+          const ctx = extractCtx(req, now);
+          try {
+            const { defaultRiskScoreConfigStore } = require('./risk_score_config') as RscMod;
+            const { defaultAlertClassificationConfigStore } = require('./alert_classification_config') as AccCfgMod;
+            const { evaluateScorecard, normalizeFactorValues, ScorecardEvalError } = require('./scorecard_evaluator') as ScoreMod;
+            const tenant = req.tenant!.tenant_id;
+            const body = rscPeel(req) as { domain?: unknown; factor_values?: unknown };
+            const domainRaw = body.domain;
+            if (domainRaw !== 'banking' && domainRaw !== 'insurance') {
+              throw new ScorecardEvalError('invalid_input', "domain must be 'banking' or 'insurance'");
+            }
+            const factorValues = normalizeFactorValues(body.factor_values);
+            const enabled = defaultRiskScoreConfigStore.list(tenant, domainRaw).filter((f) => f.enabled);
+            const classification = defaultAlertClassificationConfigStore.get(tenant);
+            const result = evaluateScorecard(tenant, domainRaw, enabled, factorValues, classification, now().getTime());
+            return res.json(wrapResponse(result, ctx));
+          } catch (e) {
+            const code = (e as { code?: string }).code;
+            const ews = code ? `EWS_400_${code}` : 'EWS_400_invalid_input';
+            const msg = e instanceof Error ? e.message : 'scorecard_eval_failed';
+            return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+          }
+        },
+      );
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────

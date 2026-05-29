@@ -107,3 +107,58 @@ describe('RiskScoreConfigPage', () => {
     expect(screen.queryByTestId('rsc-delete-OVERDUE')).not.toBeInTheDocument();
   });
 });
+
+describe('RiskScoreConfigPage — scorecard evaluator (config → runtime)', () => {
+  it('renders a signal input per enabled banking factor', async () => {
+    asAdmin();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-inputs')).toBeInTheDocument());
+    expect(screen.getByTestId('rsc-eval-input-OVERDUE')).toBeInTheDocument();
+    expect(screen.getByTestId('rsc-eval-input-BUREAU_SCORE')).toBeInTheDocument();
+  });
+
+  it('evaluating maxed signals yields a red composite via the configured bands', async () => {
+    asAdmin();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-inputs')).toBeInTheDocument());
+    for (const code of ['OVERDUE', 'EMI_BOUNCE', 'TXN_BEHAVIOUR', 'BUREAU_SCORE']) {
+      fireEvent.change(screen.getByTestId(`rsc-eval-input-${code}`), { target: { value: '100' } });
+    }
+    fireEvent.click(screen.getByTestId('rsc-eval-run'));
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-result')).toBeInTheDocument());
+    // weights sum to 100, all signals 100 → composite 100 → red (red_min default 100)
+    expect(screen.getByTestId('rsc-eval-composite').textContent).toBe('100');
+    expect(within(screen.getByTestId('rsc-eval-band')).getByText('Red')).toBeInTheDocument();
+    expect(screen.getByTestId('rsc-eval-row-OVERDUE')).toBeInTheDocument();
+  });
+
+  it('low signals stay green', async () => {
+    asAdmin();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-inputs')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('rsc-eval-input-OVERDUE'), { target: { value: '20' } });
+    fireEvent.click(screen.getByTestId('rsc-eval-run'));
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-result')).toBeInTheDocument());
+    // only OVERDUE (30%) at 20 → composite 6 → green; 3 factors defaulted to 0
+    expect(screen.getByTestId('rsc-eval-composite').textContent).toBe('6');
+    expect(within(screen.getByTestId('rsc-eval-band')).getByText('Green')).toBeInTheDocument();
+    expect(screen.getByTestId('rsc-eval-warnings').textContent).toMatch(/defaulted to 0/);
+  });
+
+  it('viewer (risk_analyst) can run the scorecard — it is a scoring action', async () => {
+    asViewer();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-run')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('rsc-eval-run'));
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-result')).toBeInTheDocument());
+  });
+
+  it('the Both domain shows a per-vertical note instead of the evaluator', async () => {
+    asAdmin();
+    renderWithProviders(<RiskScoreConfigPage />);
+    await waitFor(() => expect(screen.getByTestId('rsc-table')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('rsc-domain-both'));
+    await waitFor(() => expect(screen.getByTestId('rsc-eval-both-note')).toBeInTheDocument());
+    expect(screen.queryByTestId('rsc-eval-run')).not.toBeInTheDocument();
+  });
+});

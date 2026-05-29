@@ -13807,6 +13807,70 @@ const __mswAlertClassificationHandlers = [
 handlers.push(...__mswAlertClassificationHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Runtime — composite scorecard evaluate (consumes risk-score #11 + RAG #12).
+// Reads both the risk-score factor store + the alert-classification state.
+// ──────────────────────────────────────────────────────────────────────
+const __mswScorecardEvalHandlers = [
+  http.post('/v1/config/risk-score/evaluate', async ({ request }) => {
+    const b = __mswRscPeel(await request.json().catch(() => null)) as { domain?: string; factor_values?: Record<string, unknown> } | null;
+    const domain = b?.domain;
+    if (domain !== 'banking' && domain !== 'insurance') {
+      return __mswRscFail('EWS_400_invalid_input', 400, "domain must be 'banking' or 'insurance'");
+    }
+    const raw = b?.factor_values ?? {};
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      return __mswRscFail('EWS_400_invalid_input', 400, 'factor_values must be an object');
+    }
+    const fv: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        return __mswRscFail('EWS_400_invalid_input', 400, `factor_values['${k}'] must be a finite number`);
+      }
+      fv[k.trim().toUpperCase()] = v;
+    }
+    const enabled = __mswRscList(domain).filter((f) => f.enabled);
+    const codes = new Set(enabled.map((f) => f.code));
+    const unknown_value_codes = Object.keys(fv).filter((c) => !codes.has(c)).sort();
+    let missing = 0;
+    const clamp = (n: number) => (n < 0 ? 0 : n > 100 ? 100 : n);
+    const factors = enabled.map((f) => {
+      const provided = Object.prototype.hasOwnProperty.call(fv, f.code);
+      if (!provided) missing++;
+      const signal_value = provided ? clamp(fv[f.code]) : 0;
+      return {
+        factor_id: f.factor_id,
+        code: f.code,
+        name: f.name,
+        weight_pct: f.weight_pct,
+        signal_value,
+        value_provided: provided,
+        contribution: __mswRscRound2((f.weight_pct / 100) * signal_value),
+      };
+    });
+    const composite_score = __mswRscRound2(factors.reduce((s, f) => s + f.contribution, 0));
+    const total_weight_pct = __mswRscRound2(enabled.reduce((s, f) => s + f.weight_pct, 0));
+    const cfg = __mswAccConfig();
+    const band = composite_score >= cfg.red_min ? 'red' : composite_score >= cfg.amber_min ? 'amber' : 'green';
+    const row = cfg.bands.find((bd) => bd.band === band)!;
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        domain,
+        composite_score,
+        total_weight_pct,
+        balanced: Math.abs(total_weight_pct - 100) < 0.01,
+        classification: { score: composite_score, band, label: row.label, color_hex: row.color_hex, action_required: row.action_required },
+        factors,
+        unknown_value_codes,
+        missing_value_count: missing,
+        evaluated_at: new Date().toISOString(),
+      }),
+    );
+  }),
+];
+handlers.push(...__mswScorecardEvalHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // Master Setup — Case Management Setup handlers (case-type master)
 // ──────────────────────────────────────────────────────────────────────
 const __MSW_CTY_PRIORITIES = ['P1', 'P2', 'P3', 'P4'];
