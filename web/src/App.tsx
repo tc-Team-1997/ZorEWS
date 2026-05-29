@@ -43,6 +43,7 @@ import { ModelRegistryPage } from '@/modules/ai/ModelRegistryPage';
 import { ExplainabilityPage } from '@/modules/ai/ExplainabilityPage';
 import { ExperimentTrackingPage } from '@/modules/ai/ExperimentTrackingPage';
 import { DriftMonitoringPage } from '@/modules/ai/DriftMonitoringPage';
+import { AiInsightsPage } from '@/modules/ai/AiInsightsPage';
 import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RulesEnginePage } from '@/modules/rules/RulesEnginePage';
 import { ThresholdsLimitsPage } from '@/modules/admin/ThresholdsLimitsPage';
@@ -190,6 +191,7 @@ export function App() {
             <Route path="ai/explainability" element={<ExplainabilityPage />} />
             <Route path="ai/experiments" element={<ExperimentTrackingPage />} />
             <Route path="ai/drift" element={<DriftMonitoringPage />} />
+            <Route path="ai/insights" element={<AiInsightsPage />} />
             <Route path="admin/master-setup" element={<MasterSetupPage />} />
             <Route path="rules/engine" element={<RulesEnginePage />} />
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />

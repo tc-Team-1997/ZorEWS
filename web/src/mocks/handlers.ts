@@ -13234,6 +13234,72 @@ const __mswDriftHandlers = [
 handlers.push(...__mswDriftHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// T7 Module 9 — AI Insight Panels handlers (deterministic synth)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_INSIGHT_DEFS: { insight_id: string; title: string; description: string; category: string; domain: string; model_ref: string; prefix: string; label: (s: number) => string; reasons: string[] }[] = [
+  { insight_id: 'top_risky_borrowers', title: 'Top risky borrowers', description: 'Customers with the highest model-estimated PD this cycle.', category: 'risk', domain: 'banking', model_ref: 'pd_xgb_v3', prefix: 'CUST', label: (s) => `PD ${s.toFixed(2)}`, reasons: ['DPD breach + utilisation spike', 'bureau score drop > 40pts', 'repeated min-payments', 'income volatility flag', 'cross-product exposure rising'] },
+  { insight_id: 'fraud_anomaly_highlights', title: 'Fraud anomaly highlights', description: 'Transactions flagged anomalous in the last window.', category: 'fraud', domain: 'banking', model_ref: 'fraud_lgbm_v1', prefix: 'TXN', label: (s) => `anomaly ${s.toFixed(2)}`, reasons: ['geo-velocity impossible travel', 'device fingerprint change', 'sudden withdrawal spike', 'salary credit disappeared', 'channel switch anomaly'] },
+  { insight_id: 'lapse_prediction_insights', title: 'Lapse prediction insights', description: 'Policies most likely to lapse in the next 30 days.', category: 'retention', domain: 'insurance', model_ref: 'lapse_xgb_v1', prefix: 'POL', label: (s) => `lapse ${Math.round(s * 100)}%`, reasons: ['premium overdue > 15d', 'grace period entered', 'agent left the book', 'first-year policy', 'auto-debit bounce'] },
+  { insight_id: 'persistency_risk', title: 'Persistency risk (agents)', description: 'Agent books with weakening 13-month persistency.', category: 'retention', domain: 'insurance', model_ref: 'persistency_signal', prefix: 'AGT', label: (s) => `risk ${s.toFixed(2)}`, reasons: ['persistency below branch median', 'cancellation cluster', 'mis-selling complaint', 'payout-ratio drift', 'new-business quality dip'] },
+  { insight_id: 'claim_fraud_highlights', title: 'Claim fraud highlights', description: 'Claims scored most suspicious for SIU triage.', category: 'fraud', domain: 'insurance', model_ref: 'claim_anomaly', prefix: 'CLM', label: (s) => `anomaly ${s.toFixed(2)}`, reasons: ['waiting-period breach', 'repeat reason < 180d', 'amount deviation > 30%', 'flagged hospital', 'rapid policy-to-claim'] },
+  { insight_id: 'unusual_trends', title: 'Unusual trends', description: 'Emerging aggregate anomalies across portfolios.', category: 'trend', domain: 'cross', model_ref: 'trend_monitor', prefix: 'SIG', label: (s) => `z ${(s * 4).toFixed(1)}`, reasons: ['NPA inflow accelerating in SME', 'fraud rate up in digital channel', 'lapse spike in unit-linked', 'collections promise-to-pay falling', 'utilisation creeping in retail cards'] },
+];
+export function __resetMswInsights() { /* stateless synth — no-op */ }
+const __mswInsRound = (n: number, dp = 2) => Math.round(n * 10 ** dp) / 10 ** dp;
+const __mswInsSeverity = (s: number) => (s >= 0.85 ? 'critical' : s >= 0.7 ? 'high' : s >= 0.5 ? 'medium' : 'info');
+
+function __mswBuildInsight(tenant: string, def: (typeof __MSW_INSIGHT_DEFS)[number]) {
+  const day = new Date().toISOString().slice(0, 10);
+  const rng = __mswSiuRng(__mswSiuHash(`${tenant}|insight|${def.insight_id}|${day}`));
+  const n = 4 + Math.floor(rng() * 4);
+  const items: any[] = [];
+  for (let i = 0; i < n; i++) {
+    const score = __mswInsRound(Math.min(0.99, 0.45 + rng() * 0.5), 4);
+    const tr = rng();
+    items.push({ entity_id: `${def.prefix}-${tenant === 'BANK_DEMO' ? 'BD' : tenant.slice(0, 3).toUpperCase()}-${100000 + Math.floor(rng() * 900000)}`, entity_label: `${def.prefix} ${100000 + i}`, score, score_label: def.label(score), reason: def.reasons[Math.floor(rng() * def.reasons.length)], trend: tr > 0.6 ? 'up' : tr > 0.25 ? 'flat' : 'down', delta: __mswInsRound((rng() - 0.4) * 0.2, 4) });
+  }
+  items.sort((a, b) => b.score - a.score || a.entity_id.localeCompare(b.entity_id));
+  const top = items[0];
+  return { insight_id: def.insight_id, tenant_id: tenant, title: def.title, description: def.description, category: def.category, domain: def.domain, severity: __mswInsSeverity(top.score), model_ref: def.model_ref, confidence: __mswInsRound(0.7 + rng() * 0.28, 4), headline: `${n} items — top signal ${top.score.toFixed(2)}`, generated_at: new Date().toISOString(), item_count: n, items };
+}
+const __mswInsFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+
+const __mswInsightHandlers = [
+  http.get('/v1/ai/insights/catalog', () =>
+    HttpResponse.json(envelope({ total: __MSW_INSIGHT_DEFS.length, insights: __MSW_INSIGHT_DEFS.map((d) => ({ insight_id: d.insight_id, title: d.title, category: d.category, domain: d.domain, model_ref: d.model_ref })) })),
+  ),
+  http.get('/v1/ai/insights', ({ request }) => {
+    const u = new URL(request.url);
+    const category = u.searchParams.get('category');
+    const domain = u.searchParams.get('domain');
+    const severity = u.searchParams.get('severity');
+    if (severity && !['critical', 'high', 'medium', 'info'].includes(severity)) return __mswInsFail('EWS_400_invalid_input', 400, `unknown severity ${severity}`);
+    if (category && !['risk', 'fraud', 'retention', 'trend'].includes(category)) return __mswInsFail('EWS_400_invalid_input', 400, `unknown category ${category}`);
+    if (domain && !['banking', 'insurance', 'cross'].includes(domain)) return __mswInsFail('EWS_400_invalid_input', 400, `unknown domain ${domain}`);
+    let defs = __MSW_INSIGHT_DEFS;
+    if (category) defs = defs.filter((d) => d.category === category);
+    if (domain) defs = defs.filter((d) => d.domain === domain);
+    let insights = defs.map((d) => __mswBuildInsight('BANK_DEMO', d));
+    if (severity) insights = insights.filter((i) => i.severity === severity);
+    const by_category: Record<string, number> = { risk: 0, fraud: 0, retention: 0, trend: 0 };
+    const by_severity: Record<string, number> = { critical: 0, high: 0, medium: 0, info: 0 };
+    for (const i of insights) { by_category[i.category]++; by_severity[i.severity]++; }
+    const sevRank: Record<string, number> = { critical: 3, high: 2, medium: 1, info: 0 };
+    insights.sort((a, b) => sevRank[b.severity] - sevRank[a.severity] || a.insight_id.localeCompare(b.insight_id));
+    const top = insights[0] ?? null;
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), total: insights.length, by_category, by_severity, top_insight: top ? { insight_id: top.insight_id, title: top.title, severity: top.severity } : null, insights }));
+  }),
+  http.get('/v1/ai/insights/:insight_id', ({ params }) => {
+    const def = __MSW_INSIGHT_DEFS.find((d) => d.insight_id === String(params.insight_id));
+    if (!def) return __mswInsFail('EWS_404_unknown_insight', 404, `unknown insight ${params.insight_id}`);
+    return HttpResponse.json(envelope(__mswBuildInsight('BANK_DEMO', def)));
+  }),
+];
+
+handlers.push(...__mswInsightHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

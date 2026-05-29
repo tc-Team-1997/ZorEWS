@@ -2755,6 +2755,20 @@ export const api = {
   aiDriftHistory: (model_id: string, limit?: number) =>
     http.get<EnvelopeBody<DriftHistoryShape>>(`/v1/ai/drift/${encodeURIComponent(model_id)}/history${limit != null ? `?limit=${limit}` : ''}`).then((r) => r.data),
 
+  // ── AI Workbench · T7 Module 9 — AI Insight Panels ────────────────────
+  aiInsightCatalog: () =>
+    http.get<EnvelopeBody<InsightCatalogShape>>('/v1/ai/insights/catalog').then((r) => r.data),
+  aiInsightFeed: (q: { category?: string; domain?: string; severity?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.category) params.set('category', q.category);
+    if (q.domain) params.set('domain', q.domain);
+    if (q.severity) params.set('severity', q.severity);
+    const qs = params.toString();
+    return http.get<EnvelopeBody<InsightFeedShape>>(`/v1/ai/insights${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  aiInsightGet: (insight_id: string) =>
+    http.get<EnvelopeBody<AiInsightShape>>(`/v1/ai/insights/${encodeURIComponent(insight_id)}`).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6552,4 +6566,47 @@ export interface DriftHistoryShape {
   model_id: string;
   total: number;
   items: DriftSnapshotShape[];
+}
+
+// ── AI Workbench · T7 Module 9 — AI Insight Panels ──────────────────────
+export type InsightCategoryShape = 'risk' | 'fraud' | 'retention' | 'trend';
+export type InsightDomainShape = 'banking' | 'insurance' | 'cross';
+export type InsightSeverityShape = 'critical' | 'high' | 'medium' | 'info';
+
+export interface InsightItemShape {
+  entity_id: string;
+  entity_label: string;
+  score: number;
+  score_label: string;
+  reason: string;
+  trend: 'up' | 'down' | 'flat';
+  delta: number;
+}
+export interface AiInsightShape {
+  insight_id: string;
+  tenant_id: string;
+  title: string;
+  description: string;
+  category: InsightCategoryShape;
+  domain: InsightDomainShape;
+  severity: InsightSeverityShape;
+  model_ref: string;
+  confidence: number;
+  headline: string;
+  generated_at: string;
+  item_count: number;
+  items: InsightItemShape[];
+}
+export interface InsightFeedShape {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  by_category: Record<InsightCategoryShape, number>;
+  by_severity: Record<InsightSeverityShape, number>;
+  top_insight: { insight_id: string; title: string; severity: InsightSeverityShape } | null;
+  insights: AiInsightShape[];
+}
+export interface InsightCatalogShape {
+  total: number;
+  insights: { insight_id: string; title: string; category: InsightCategoryShape; domain: InsightDomainShape; model_ref: string }[];
 }

@@ -842,6 +842,16 @@ import {
   type AiDriftStore,
 } from './ai_drift';
 import {
+  defaultAiInsightStore,
+  listInsightCatalog,
+  isInsightCategory,
+  isInsightDomain,
+  isInsightSeverity,
+  AiInsightError,
+  type AiInsightStore,
+  type InsightFilter,
+} from './ai_insights';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1310,6 +1320,8 @@ export interface AppDeps {
   aiExperimentStore?: AiExperimentStore;
   /** T7 M7 — drift detection store (operational surface over ml/monitoring/drift.py concepts). */
   aiDriftStore?: AiDriftStore;
+  /** T7 M9 — AI insight panels store (reusable cross-domain insight feed). */
+  aiInsightStore?: AiInsightStore;
   /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
@@ -1600,6 +1612,7 @@ export function makeApp(deps: AppDeps = {}) {
   const aiPredictionStore = deps.aiPredictionStore ?? defaultAiPredictionStore;
   const aiExperimentStore = deps.aiExperimentStore ?? defaultAiExperimentStore;
   const aiDriftStore = deps.aiDriftStore ?? defaultAiDriftStore;
+  const aiInsightStore = deps.aiInsightStore ?? defaultAiInsightStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -6636,6 +6649,80 @@ export function makeApp(deps: AppDeps = {}) {
         return res.json(wrapResponse(aiDriftStore.latest(req.tenant!.tenant_id, req.params.model_id ?? '', now()), ctx));
       } catch (e) {
         return driftErr(e, ctx, res);
+      }
+    },
+  );
+
+  // ── AI insight panels (T7 M9) ────────────────────────────────────────
+  //
+  // Unified cross-domain AI-insight feed (top risky borrowers, fraud
+  // highlights, lapse insights, persistency risk, claim-fraud highlights,
+  // unusual trends) under one AiInsight contract so the SPA renders them
+  // through a single reusable <InsightPanel>. Reads gated on
+  // `customers:read_risk_profile`. Literal /catalog before /:insight_id.
+  const insightErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+    if (e instanceof AiInsightError) {
+      const status = e.code === 'unknown_insight' ? 404 : 400;
+      return res.status(status).json(
+        wrapError({ code: `EWS_${status}_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    return res.status(500).json(
+      wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'insight op failed', severity: 'HIGH' }, ctx),
+    );
+  };
+
+  // GET /v1/ai/insights/catalog — platform-static catalog of insight panels.
+  app.get(
+    '/v1/ai/insights/catalog',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(wrapResponse({ total: listInsightCatalog().length, insights: listInsightCatalog() }, ctx));
+    },
+  );
+
+  // GET /v1/ai/insights?category=&domain=&severity= — full feed.
+  app.get(
+    '/v1/ai/insights',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const q = req.query as Record<string, string | undefined>;
+        const filter: InsightFilter = {};
+        if (typeof q.category === 'string') {
+          if (!isInsightCategory(q.category)) throw new AiInsightError('invalid_input', `unknown category ${q.category}`);
+          filter.category = q.category;
+        }
+        if (typeof q.domain === 'string') {
+          if (!isInsightDomain(q.domain)) throw new AiInsightError('invalid_input', `unknown domain ${q.domain}`);
+          filter.domain = q.domain;
+        }
+        if (typeof q.severity === 'string') {
+          if (!isInsightSeverity(q.severity)) throw new AiInsightError('invalid_input', `unknown severity ${q.severity}`);
+          filter.severity = q.severity;
+        }
+        return res.json(wrapResponse(aiInsightStore.feed(req.tenant!.tenant_id, filter, now()), ctx));
+      } catch (e) {
+        return insightErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/insights/:insight_id — single insight with full ranked items.
+  app.get(
+    '/v1/ai/insights/:insight_id',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        return res.json(wrapResponse(aiInsightStore.get(req.tenant!.tenant_id, req.params.insight_id ?? '', now()), ctx));
+      } catch (e) {
+        return insightErr(e, ctx, res);
       }
     },
   );
