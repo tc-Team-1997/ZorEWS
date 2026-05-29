@@ -2664,6 +2664,37 @@ export const api = {
       .post<EnvelopeBody<LapsePredictionShape>>('/v1/insurance/policy-lapse/predict', input)
       .then((r) => r.data),
 
+  // ── Insurance EWS · Module 8 — Claim Investigation (SIU) ──────────────
+  siuQueue: (q: { min_score?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.min_score != null) params.set('min_score', String(q.min_score));
+    if (q.limit != null) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return http.get<EnvelopeBody<SiuQueueShape>>(`/v1/insurance/siu/queue${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  siuList: (q: { status?: string; page?: number; page_size?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.status) params.set('status', q.status);
+    if (q.page != null) params.set('page', String(q.page));
+    if (q.page_size != null) params.set('page_size', String(q.page_size));
+    const qs = params.toString();
+    return http.get<EnvelopeBody<SiuListShape>>(`/v1/insurance/siu/investigations${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  siuGet: (id: string) =>
+    http.get<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}`).then((r) => r.data),
+  siuOpen: (input: { claim_id: string; policy_id?: string; claimant_name?: string; product?: string; claim_amount_kes?: number; anomaly_score?: number; suspicion_reasons?: string[] }) =>
+    http.post<EnvelopeBody<SiuInvestigationShape>>('/v1/insurance/siu/investigations', input).then((r) => r.data),
+  siuSetStatus: (id: string, input: { status: string; decision?: string | null }) =>
+    http.patch<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}/status`, input).then((r) => r.data),
+  siuAddNote: (id: string, body: string) =>
+    http.post<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}/notes`, { body }).then((r) => r.data),
+  siuAddEvidence: (id: string, input: { type: string; title: string; description?: string; attachment_ref?: string }) =>
+    http.post<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}/evidence`, input).then((r) => r.data),
+  siuEscalate: (id: string) =>
+    http.post<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}/escalate`, {}).then((r) => r.data),
+  siuLinkAlert: (id: string, alert_id: string) =>
+    http.post<EnvelopeBody<SiuInvestigationShape>>(`/v1/insurance/siu/investigations/${encodeURIComponent(id)}/link-alert`, { alert_id }).then((r) => r.data),
+
   // ── Insurance EWS · Module 10 — Insurance Heatmaps ────────────────────
   insuranceHeatmapMetrics: () =>
     http.get<EnvelopeBody<HeatmapCatalogShape>>('/v1/insurance/heatmap/metrics').then((r) => r.data),
@@ -3331,6 +3362,77 @@ export interface ClaimAnalysisResultShape {
   recommended_action: string;
   model_version: string;
   scored_at: string;
+}
+
+// ── Insurance EWS · Module 8 types (mirrors services/bff/src/insurance_siu.ts) ──
+export type SiuStatusShape =
+  | 'triage'
+  | 'evidence_gathering'
+  | 'awaiting_response'
+  | 'review'
+  | 'decision'
+  | 'closed';
+export type SiuDecisionShape = 'fraud_confirmed' | 'fraud_unsubstantiated' | 'partial_fraud' | 'data_quality';
+export type SiuEvidenceTypeShape = 'document' | 'photo' | 'statement' | 'system_record' | 'external_report';
+
+export interface SiuQueueRowShape {
+  claim_id: string;
+  policy_id: string;
+  claimant_name: string;
+  product: string;
+  claim_amount_kes: number;
+  anomaly_score: number;
+  suspicion_reasons: string[];
+  filed_at: string;
+  has_open_investigation: boolean;
+}
+export interface SiuQueueShape {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  claims: SiuQueueRowShape[];
+}
+export interface SiuEvidenceShape {
+  evidence_id: string;
+  type: SiuEvidenceTypeShape;
+  title: string;
+  description: string;
+  attachment_ref: string | null;
+  added_at: string;
+  added_by: string;
+}
+export interface SiuNoteShape {
+  note_id: string;
+  ts: string;
+  author: string;
+  body: string;
+}
+export interface SiuInvestigationShape {
+  investigation_id: string;
+  tenant_id: string;
+  claim_id: string;
+  policy_id: string;
+  claimant_name: string;
+  product: string;
+  claim_amount_kes: number;
+  anomaly_score: number;
+  suspicion_reasons: string[];
+  status: SiuStatusShape;
+  decision: SiuDecisionShape | null;
+  escalated: boolean;
+  opened_at: string;
+  opened_by: string;
+  last_updated_at: string;
+  last_updated_by: string;
+  closed_at: string | null;
+  notes: SiuNoteShape[];
+  evidence: SiuEvidenceShape[];
+  linked_alerts: string[];
+}
+export interface SiuListShape {
+  tenant_id: string;
+  total: number;
+  items: SiuInvestigationShape[];
 }
 
 // ── Insurance EWS · Module 10 types (mirrors services/bff/src/insurance_heatmap.ts) ──

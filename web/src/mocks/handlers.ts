@@ -12851,6 +12851,149 @@ const __mswInsuranceHeatmapHandlers = [
 handlers.push(...__mswInsuranceHeatmapHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Insurance EWS Module 8 — Claim Investigation (SIU) workspace (stateful).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswSiuStatus = 'triage' | 'evidence_gathering' | 'awaiting_response' | 'review' | 'decision' | 'closed';
+type MswSiuDecision = 'fraud_confirmed' | 'fraud_unsubstantiated' | 'partial_fraud' | 'data_quality';
+type MswSiuEvType = 'document' | 'photo' | 'statement' | 'system_record' | 'external_report';
+const __MSW_SIU_STATUSES: MswSiuStatus[] = ['triage', 'evidence_gathering', 'awaiting_response', 'review', 'decision', 'closed'];
+const __MSW_SIU_DECISIONS: MswSiuDecision[] = ['fraud_confirmed', 'fraud_unsubstantiated', 'partial_fraud', 'data_quality'];
+const __MSW_SIU_EVTYPES: MswSiuEvType[] = ['document', 'photo', 'statement', 'system_record', 'external_report'];
+const __MSW_SIU_TRANSITIONS: Record<MswSiuStatus, MswSiuStatus[]> = {
+  triage: ['evidence_gathering', 'closed'],
+  evidence_gathering: ['awaiting_response', 'review', 'closed'],
+  awaiting_response: ['evidence_gathering', 'review', 'closed'],
+  review: ['decision', 'evidence_gathering', 'closed'],
+  decision: ['closed', 'review'],
+  closed: ['evidence_gathering'],
+};
+function __mswSiuHash(s: string): number { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+function __mswSiuRng(seed: number): () => number { let a = seed; return () => { a = (a + 0x6d2b79f5) | 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 0x100000000; }; }
+const __MSW_SIU_FIRST = ['Asha', 'Ravi', 'Priya', 'Mohan', 'Vikram', 'Meera', 'Arjun', 'Kavya'];
+const __MSW_SIU_LAST = ['Patel', 'Kumar', 'Sharma', 'Singh', 'Reddy', 'Nair'];
+const __MSW_SIU_PRODUCTS = ['Term Life', 'Endowment', 'ULIP', 'Health Indemnity', 'Critical Illness'];
+const __MSW_SIU_REASONS = ['amount_spike', 'high_frequency', 'early_claim', 'document_mismatch', 'provider_collusion', 'duplicate_claim', 'identity_mismatch'];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const __mswSiuStore = new Map<string, any>(); // investigation_id → inv
+let __mswSiuSeq = 0;
+export function __resetMswSiu() { __mswSiuStore.clear(); __mswSiuSeq = 0; }
+
+function __mswSiuQueue() {
+  const day = new Date().toISOString().slice(0, 10);
+  const openClaims = new Set<string>();
+  for (const inv of __mswSiuStore.values()) if (inv.status !== 'closed') openClaims.add(inv.claim_id);
+  const rows = Array.from({ length: 24 }, (_, i) => {
+    const rng = __mswSiuRng(__mswSiuHash(`BANK_DEMO|siu|${i}|${day}`));
+    const score = Math.round((0.5 + rng() * 0.5) * 100) / 100;
+    const reasons: string[] = [];
+    const nR = 1 + Math.floor(rng() * 3);
+    for (let k = 0; k < nR; k++) { const r = __MSW_SIU_REASONS[Math.floor(rng() * __MSW_SIU_REASONS.length)]; if (!reasons.includes(r)) reasons.push(r); }
+    const filed = new Date(); filed.setUTCDate(filed.getUTCDate() - Math.floor(rng() * 45));
+    const claim_id = `CLM-BD-${800000 + i}`;
+    return { claim_id, policy_id: `POL-BANK_DEMO-${100000 + i}`, claimant_name: `${__MSW_SIU_FIRST[Math.floor(rng() * __MSW_SIU_FIRST.length)]} ${__MSW_SIU_LAST[Math.floor(rng() * __MSW_SIU_LAST.length)]}`, product: __MSW_SIU_PRODUCTS[Math.floor(rng() * __MSW_SIU_PRODUCTS.length)], claim_amount_kes: Math.round(100_000 + rng() * 4_000_000), anomaly_score: score, suspicion_reasons: reasons, filed_at: filed.toISOString(), has_open_investigation: openClaims.has(claim_id) };
+  });
+  rows.sort((a, b) => b.anomaly_score - a.anomaly_score || a.claim_id.localeCompare(b.claim_id));
+  return rows;
+}
+const __mswSiuFail = (code: string, status: number, msg: string) => HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+
+const __mswSiuHandlers = [
+  http.get('/v1/insurance/siu/queue', ({ request }) => {
+    const u = new URL(request.url);
+    const min = u.searchParams.get('min_score');
+    const limitRaw = u.searchParams.get('limit');
+    let rows = __mswSiuQueue();
+    if (min) rows = rows.filter((r) => r.anomaly_score >= Number(min));
+    if (limitRaw) rows = rows.slice(0, Math.max(1, Math.min(24, parseInt(limitRaw, 10))));
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), total: rows.length, claims: rows }));
+  }),
+  http.post('/v1/insurance/siu/investigations', async ({ request }) => {
+    const b = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const claim_id = String(b?.claim_id ?? '');
+    if (!claim_id) return __mswSiuFail('EWS_400_invalid_input', 400, 'claim_id required');
+    for (const inv of __mswSiuStore.values()) if (inv.claim_id === claim_id && inv.status !== 'closed') return __mswSiuFail('EWS_409_investigation_already_open', 409, `claim ${claim_id} already under investigation`);
+    const match = __mswSiuQueue().find((r) => r.claim_id === claim_id);
+    const ts = new Date().toISOString();
+    const inv = {
+      investigation_id: `siu-BANK_DEMO-${ts.slice(0, 10)}-${String(__mswSiuSeq++).padStart(4, '0')}`,
+      tenant_id: 'BANK_DEMO', claim_id, policy_id: (b?.policy_id as string) ?? match?.policy_id ?? 'POL-unknown',
+      claimant_name: (b?.claimant_name as string) ?? match?.claimant_name ?? 'Unknown', product: (b?.product as string) ?? match?.product ?? 'Unknown',
+      claim_amount_kes: (b?.claim_amount_kes as number) ?? match?.claim_amount_kes ?? 0, anomaly_score: (b?.anomaly_score as number) ?? match?.anomaly_score ?? 0,
+      suspicion_reasons: (b?.suspicion_reasons as string[]) ?? match?.suspicion_reasons ?? [], status: 'triage' as MswSiuStatus, decision: null as MswSiuDecision | null,
+      escalated: false, opened_at: ts, opened_by: 'admin', last_updated_at: ts, last_updated_by: 'admin', closed_at: null as string | null, notes: [] as unknown[], evidence: [] as unknown[], linked_alerts: [] as string[],
+    };
+    __mswSiuStore.set(inv.investigation_id, inv);
+    return HttpResponse.json(envelope(inv), { status: 201 });
+  }),
+  http.get('/v1/insurance/siu/investigations', ({ request }) => {
+    const u = new URL(request.url);
+    const status = u.searchParams.get('status') as MswSiuStatus | null;
+    let items = Array.from(__mswSiuStore.values());
+    if (status) items = items.filter((i) => i.status === status);
+    items.sort((a, b) => b.anomaly_score - a.anomaly_score || b.opened_at.localeCompare(a.opened_at));
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', total: items.length, items }));
+  }),
+  http.get('/v1/insurance/siu/investigations/:id', ({ params }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    return HttpResponse.json(envelope(inv));
+  }),
+  http.patch('/v1/insurance/siu/investigations/:id/status', async ({ params, request }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { status?: string; decision?: string | null } | null;
+    const to = String(b?.status ?? '') as MswSiuStatus;
+    if (!__MSW_SIU_STATUSES.includes(to)) return __mswSiuFail('EWS_400_invalid_status', 400, `unknown status ${to}`);
+    if (!(__MSW_SIU_TRANSITIONS[inv.status as MswSiuStatus] ?? []).includes(to)) return __mswSiuFail('EWS_409_invalid_transition', 409, `cannot move ${inv.status} → ${to}`);
+    const decision = b?.decision != null ? (String(b.decision) as MswSiuDecision) : null;
+    if (decision != null && !__MSW_SIU_DECISIONS.includes(decision)) return __mswSiuFail('EWS_400_invalid_decision', 400, `unknown decision ${decision}`);
+    if (to === 'closed' && inv.status === 'decision' && decision == null && inv.decision == null) return __mswSiuFail('EWS_409_decision_required', 409, 'a decision is required to close');
+    if (decision != null) inv.decision = decision;
+    inv.closed_at = to === 'closed' ? new Date().toISOString() : null;
+    inv.status = to; inv.last_updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(inv));
+  }),
+  http.post('/v1/insurance/siu/investigations/:id/notes', async ({ params, request }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { body?: string } | null;
+    if (!b?.body || b.body.trim().length === 0) return __mswSiuFail('EWS_400_invalid_input', 400, 'note body required');
+    inv.notes.push({ note_id: `note-${String(inv.notes.length).padStart(3, '0')}`, ts: new Date().toISOString(), author: 'admin', body: b.body.trim() });
+    inv.last_updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(inv), { status: 201 });
+  }),
+  http.post('/v1/insurance/siu/investigations/:id/evidence', async ({ params, request }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { type?: string; title?: string; description?: string; attachment_ref?: string } | null;
+    if (!b || !__MSW_SIU_EVTYPES.includes(b.type as MswSiuEvType)) return __mswSiuFail('EWS_400_invalid_evidence_type', 400, `unknown evidence type ${b?.type}`);
+    if (!b.title || b.title.trim().length === 0) return __mswSiuFail('EWS_400_invalid_input', 400, 'evidence title required');
+    inv.evidence.push({ evidence_id: `ev-${String(inv.evidence.length).padStart(3, '0')}`, type: b.type, title: b.title.trim(), description: (b.description ?? '').trim(), attachment_ref: b.attachment_ref?.trim() || null, added_at: new Date().toISOString(), added_by: 'admin' });
+    inv.last_updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(inv), { status: 201 });
+  }),
+  http.post('/v1/insurance/siu/investigations/:id/escalate', ({ params }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    inv.escalated = true; inv.last_updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(inv));
+  }),
+  http.post('/v1/insurance/siu/investigations/:id/link-alert', async ({ params, request }) => {
+    const inv = __mswSiuStore.get(String(params.id));
+    if (!inv) return __mswSiuFail('EWS_404_unknown_investigation', 404, `unknown investigation ${params.id}`);
+    const b = (await request.json().catch(() => null)) as { alert_id?: string } | null;
+    if (!b?.alert_id) return __mswSiuFail('EWS_400_invalid_input', 400, 'alert_id required');
+    if (!inv.linked_alerts.includes(b.alert_id.trim())) inv.linked_alerts.push(b.alert_id.trim());
+    inv.last_updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(inv), { status: 201 });
+  }),
+];
+
+handlers.push(...__mswSiuHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

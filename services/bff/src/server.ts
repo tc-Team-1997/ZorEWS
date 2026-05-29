@@ -13226,6 +13226,216 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────
+  // Insurance EWS — Module 8: Claim Investigation Panel (SIU workspace).
+  //   Reads: insurance:fraud:read · Mutations: insurance:siu:manage.
+  // ──────────────────────────────────────────────────────────────────
+
+  // SIU helper: route an SiuError to its HTTP status + EWS code.
+  const siuErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response, fallback: string) => {
+    const code = (e as { code?: string }).code;
+    const status =
+      code === 'unknown_investigation'
+        ? 404
+        : code === 'investigation_already_open' || code === 'invalid_transition' || code === 'decision_required'
+          ? 409
+          : 400;
+    const ews = code ? `EWS_${status}_${code}` : `EWS_400_${fallback}`;
+    const msg = e instanceof Error ? e.message : fallback;
+    return res.status(status).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+  };
+  const siuActor = (req: Request) => (req.header('x-apex-user') ?? 'admin').trim() || 'admin';
+
+  app.get(
+    '/v1/insurance/siu/queue',
+    requireTenantMw,
+    requireRole('insurance:fraud:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const store = defaultSiuStore();
+        const rows = store.listQueue(req.tenant!.tenant_id, now(), {
+          min_score: req.query.min_score !== undefined ? Number(req.query.min_score) : undefined,
+          limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+        });
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, generated_at: now().toISOString(), total: rows.length, claims: rows }, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'siu_queue_failed');
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/siu/investigations',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object) ? (raw as { body: unknown }).body : raw;
+        const b = (inner ?? {}) as Record<string, unknown>;
+        const inv = defaultSiuStore().open(
+          req.tenant!.tenant_id,
+          {
+            claim_id: String(b.claim_id ?? ''),
+            policy_id: b.policy_id ? String(b.policy_id) : undefined,
+            claimant_name: b.claimant_name ? String(b.claimant_name) : undefined,
+            product: b.product ? String(b.product) : undefined,
+            claim_amount_kes: b.claim_amount_kes != null ? Number(b.claim_amount_kes) : undefined,
+            anomaly_score: b.anomaly_score != null ? Number(b.anomaly_score) : undefined,
+            suspicion_reasons: Array.isArray(b.suspicion_reasons) ? (b.suspicion_reasons as import('./insurance_siu').SuspicionReason[]) : undefined,
+            opened_by: siuActor(req),
+          },
+          now(),
+        );
+        return res.status(201).json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'open_failed');
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/siu/investigations',
+    requireTenantMw,
+    requireRole('insurance:fraud:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const out = defaultSiuStore().list(req.tenant!.tenant_id, {
+          status: typeof req.query.status === 'string' ? (req.query.status as import('./insurance_siu').SiuStatus) : undefined,
+          page: req.query.page !== undefined ? Number(req.query.page) : undefined,
+          page_size: req.query.page_size !== undefined ? Number(req.query.page_size) : undefined,
+        });
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, ...out }, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'list_failed');
+      }
+    },
+  );
+
+  app.get(
+    '/v1/insurance/siu/investigations/:investigation_id',
+    requireTenantMw,
+    requireRole('insurance:fraud:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+      const inv = defaultSiuStore().get(req.tenant!.tenant_id, req.params.investigation_id);
+      if (!inv) return res.status(404).json(wrapError({ code: 'EWS_404_unknown_investigation', message: `unknown investigation ${req.params.investigation_id}`, severity: 'MEDIUM' }, ctx));
+      return res.json(wrapResponse(inv, ctx));
+    },
+  );
+
+  app.patch(
+    '/v1/insurance/siu/investigations/:investigation_id/status',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object) ? (raw as { body: unknown }).body : raw;
+        const b = (inner ?? {}) as { status?: string; decision?: string | null };
+        const inv = defaultSiuStore().updateStatus(
+          req.tenant!.tenant_id,
+          req.params.investigation_id,
+          String(b.status ?? '') as import('./insurance_siu').SiuStatus,
+          siuActor(req),
+          now(),
+          b.decision != null ? (String(b.decision) as import('./insurance_siu').SiuDecision) : null,
+        );
+        return res.json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'status_failed');
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/siu/investigations/:investigation_id/notes',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object) ? (raw as { body: unknown }).body : raw;
+        const b = (inner ?? {}) as { body?: string };
+        const inv = defaultSiuStore().addNote(req.tenant!.tenant_id, req.params.investigation_id, String(b.body ?? ''), siuActor(req), now());
+        return res.status(201).json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'note_failed');
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/siu/investigations/:investigation_id/evidence',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object) ? (raw as { body: unknown }).body : raw;
+        const b = (inner ?? {}) as { type?: string; title?: string; description?: string; attachment_ref?: string };
+        const inv = defaultSiuStore().addEvidence(
+          req.tenant!.tenant_id,
+          req.params.investigation_id,
+          { type: String(b.type ?? '') as import('./insurance_siu').EvidenceType, title: String(b.title ?? ''), description: b.description, attachment_ref: b.attachment_ref },
+          siuActor(req),
+          now(),
+        );
+        return res.status(201).json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'evidence_failed');
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/siu/investigations/:investigation_id/escalate',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const inv = defaultSiuStore().escalate(req.tenant!.tenant_id, req.params.investigation_id, siuActor(req), now());
+        return res.json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'escalate_failed');
+      }
+    },
+  );
+
+  app.post(
+    '/v1/insurance/siu/investigations/:investigation_id/link-alert',
+    requireTenantMw,
+    requireRole('insurance:siu:manage'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { defaultSiuStore } = require('./insurance_siu') as typeof import('./insurance_siu');
+        const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+        const inner = raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object) ? (raw as { body: unknown }).body : raw;
+        const b = (inner ?? {}) as { alert_id?: string };
+        const inv = defaultSiuStore().linkAlert(req.tenant!.tenant_id, req.params.investigation_id, String(b.alert_id ?? ''), siuActor(req), now());
+        return res.status(201).json(wrapResponse(inv, ctx));
+      } catch (e) {
+        return siuErr(e, ctx, res, 'link_alert_failed');
+      }
+    },
+  );
+
   // ── Custom dashboard builder (T6 M11.7) ──────────────────────────────
   //
   // Operator-authored layouts on a 12-col grid. Widget catalog is
