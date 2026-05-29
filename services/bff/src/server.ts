@@ -852,6 +852,16 @@ import {
   type InsightFilter,
 } from './ai_insights';
 import {
+  defaultAiPredictionLogStore,
+  isPredictionLogAction,
+  AiPredictionLogError,
+  PREDICTION_LOG_PAGE_SIZE_DEFAULT,
+  PREDICTION_LOG_PAGE_SIZE_MAX,
+  type AiPredictionLogStore,
+  type PredictionLogFilter,
+  type RecordPredictionLogInput,
+} from './ai_prediction_logs';
+import {
   AbTestError,
   runAbTest,
   runAbTestBatch,
@@ -1322,6 +1332,8 @@ export interface AppDeps {
   aiDriftStore?: AiDriftStore;
   /** T7 M9 — AI insight panels store (reusable cross-domain insight feed). */
   aiInsightStore?: AiInsightStore;
+  /** T7 M8 — prediction audit-action log (compliance trail over ai_predictions). */
+  aiPredictionLogStore?: AiPredictionLogStore;
   /**
    * Override for tests — model promotion engine (T6 M7.2). Defaults
    * to the module-level InMemoryPromotionEngine. Tracks promotion
@@ -1613,6 +1625,7 @@ export function makeApp(deps: AppDeps = {}) {
   const aiExperimentStore = deps.aiExperimentStore ?? defaultAiExperimentStore;
   const aiDriftStore = deps.aiDriftStore ?? defaultAiDriftStore;
   const aiInsightStore = deps.aiInsightStore ?? defaultAiInsightStore;
+  const aiPredictionLogStore = deps.aiPredictionLogStore ?? defaultAiPredictionLogStore;
   const modelPerformanceStore =
     deps.modelPerformanceStore ?? new InMemoryModelPerformanceStore(aiModelRegistry);
   const ewsRuleStore = deps.ewsRuleStore ?? defaultEwsRuleStore;
@@ -6403,6 +6416,111 @@ export function makeApp(deps: AppDeps = {}) {
         );
       }
       return res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  // ── Prediction audit logs (T7 M8 — enhances the prediction surface) ──
+  //
+  // Compliance audit-action trail over ai_predictions: every user action
+  // (acknowledge / override / escalate / dismiss / view) + system event
+  // (alert_triggered / feedback_recorded) against a prediction, with actor +
+  // timestamp. The per-prediction trail backs the Explainability page's audit
+  // panel (customers:read_risk_profile); the tenant-wide compliance query is
+  // admin-gated (audit:read). Literal /prediction-logs/summary before the list.
+  const predLogErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+    if (e instanceof AiPredictionLogError) {
+      return res.status(400).json(
+        wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    return res.status(500).json(
+      wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'prediction-log op failed', severity: 'HIGH' }, ctx),
+    );
+  };
+  const predLogActor = (req: Request): string =>
+    (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'analyst';
+
+  // POST /v1/ai/predictions/:prediction_id/log — record an audit action.
+  app.post(
+    '/v1/ai/predictions/:prediction_id/log',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        const body = (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+        if (!isPredictionLogAction(body.action)) throw new AiPredictionLogError('invalid_action', `unknown action ${body.action}`);
+        const input: RecordPredictionLogInput = {
+          prediction_id: req.params.prediction_id ?? '',
+          action: body.action,
+          actor: typeof body.actor === 'string' && body.actor.trim() ? String(body.actor) : predLogActor(req),
+          actor_role: typeof body.actor_role === 'string' ? body.actor_role : (req.header?.('x-apex-role') ?? null),
+          model_id: typeof body.model_id === 'string' ? body.model_id : null,
+          model_version: typeof body.model_version === 'string' ? body.model_version : null,
+          confidence: typeof body.confidence === 'number' ? body.confidence : null,
+          triggered_alert_id: body.triggered_alert_id != null ? String(body.triggered_alert_id) : null,
+          note: body.note != null ? String(body.note) : null,
+          metadata: (body.metadata as Record<string, unknown>) ?? null,
+        };
+        const row = aiPredictionLogStore.record(req.tenant!.tenant_id, input, now());
+        return res.status(201).json(wrapResponse(row, ctx));
+      } catch (e) {
+        return predLogErr(e, ctx, res);
+      }
+    },
+  );
+
+  // GET /v1/ai/predictions/:prediction_id/log — chronological trail for one prediction.
+  app.get(
+    '/v1/ai/predictions/:prediction_id/log',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const items = aiPredictionLogStore.forPrediction(req.tenant!.tenant_id, req.params.prediction_id ?? '');
+      return res.json(wrapResponse({ prediction_id: req.params.prediction_id, total: items.length, items }, ctx));
+    },
+  );
+
+  // GET /v1/ai/prediction-logs/summary — compliance rollup (admin).
+  app.get(
+    '/v1/ai/prediction-logs/summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      return res.json(wrapResponse(aiPredictionLogStore.summary(req.tenant!.tenant_id, now()), ctx));
+    },
+  );
+
+  // GET /v1/ai/prediction-logs?action=&actor=&prediction_id=&since=&until=&page=&page_size= — compliance query (admin).
+  app.get(
+    '/v1/ai/prediction-logs',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const q = req.query as Record<string, string | undefined>;
+        const filter: PredictionLogFilter = {};
+        if (typeof q.prediction_id === 'string') filter.prediction_id = q.prediction_id;
+        if (typeof q.action === 'string') {
+          if (!isPredictionLogAction(q.action)) throw new AiPredictionLogError('invalid_action', `unknown action ${q.action}`);
+          filter.action = q.action;
+        }
+        if (typeof q.actor === 'string') filter.actor = q.actor;
+        if (typeof q.since === 'string') filter.since = q.since;
+        if (typeof q.until === 'string') filter.until = q.until;
+        if (typeof q.page === 'string') filter.page = parseInt(q.page, 10);
+        if (typeof q.page_size === 'string') filter.page_size = parseInt(q.page_size, 10);
+        const out = aiPredictionLogStore.list(req.tenant!.tenant_id, filter);
+        return res.json(
+          wrapResponse({ ...out, page_size_default: PREDICTION_LOG_PAGE_SIZE_DEFAULT, page_size_max: PREDICTION_LOG_PAGE_SIZE_MAX }, ctx),
+        );
+      } catch (e) {
+        return predLogErr(e, ctx, res);
+      }
     },
   );
 

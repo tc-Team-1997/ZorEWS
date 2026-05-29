@@ -13300,6 +13300,81 @@ const __mswInsightHandlers = [
 handlers.push(...__mswInsightHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// T7 Module 8 — Prediction Audit Logs handlers (stateful append-only)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_PREDLOG_ACTIONS = ['created', 'viewed', 'acknowledged', 'overridden', 'escalated', 'dismissed', 'alert_triggered', 'feedback_recorded'];
+const __mswPredLog: any[] = []; // append-only, tenant BANK_DEMO in dev
+let __mswPredLogSeq = 0;
+let __mswPredLogSeeded = false;
+export function __resetMswPredictionLogs() { __mswPredLog.length = 0; __mswPredLogSeq = 0; __mswPredLogSeeded = false; }
+
+function __mswPredLogMintId() {
+  const n = (++__mswPredLogSeq).toString(16).padStart(12, '0');
+  return `aaaaaaaa-bbbb-4ccc-8ddd-${n}`;
+}
+// Seed a short trail for any prediction the Explainability page loads, so the
+// audit panel renders data without the operator having to act first.
+function __mswPredLogSeedFor(pid: string) {
+  if (__mswPredLog.some((e) => e.prediction_id === pid)) return;
+  const base = Date.now() - 3600_000;
+  const mk = (action: string, actor: string, offsetMin: number, extra: Record<string, unknown> = {}) => ({
+    log_id: __mswPredLogMintId(), tenant_id: 'BANK_DEMO', prediction_id: pid, model_id: 'pd_xgb_v3', model_version: 'v3',
+    action, actor, actor_role: actor === 'system' ? null : 'risk_analyst', confidence: 0.84, triggered_alert_id: null,
+    note: null, metadata: null, created_at: new Date(base + offsetMin * 60_000).toISOString(), ...extra,
+  });
+  __mswPredLog.push(mk('created', 'system', 0));
+  __mswPredLog.push(mk('alert_triggered', 'system', 1, { triggered_alert_id: 'a-700001', note: 'PD crossed RED threshold (0.82)' }));
+  __mswPredLog.push(mk('viewed', 'alice.analyst', 5));
+}
+
+const __mswPredLogFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } }, { status });
+
+const __mswPredLogHandlers = [
+  http.get('/v1/ai/predictions/:pid/log', ({ params }) => {
+    const pid = String(params.pid);
+    if (!__mswPredLogSeeded) { __mswPredLogSeedFor(pid); __mswPredLogSeeded = true; }
+    const items = __mswPredLog.filter((e) => e.prediction_id === pid);
+    return HttpResponse.json(envelope({ prediction_id: pid, total: items.length, items }));
+  }),
+  http.post('/v1/ai/predictions/:pid/log', async ({ params, request }) => {
+    const pid = String(params.pid);
+    const b = (await request.json().catch(() => null)) as Record<string, any> | null;
+    if (!b || !__MSW_PREDLOG_ACTIONS.includes(String(b.action))) return __mswPredLogFail('EWS_400_invalid_action', 400, `unknown action ${b?.action}`);
+    const row = {
+      log_id: __mswPredLogMintId(), tenant_id: 'BANK_DEMO', prediction_id: pid, model_id: b.model_id ?? 'pd_xgb_v3', model_version: b.model_version ?? 'v3',
+      action: b.action, actor: b.actor ?? 'alice.analyst', actor_role: 'risk_analyst', confidence: typeof b.confidence === 'number' ? b.confidence : null,
+      triggered_alert_id: b.triggered_alert_id != null ? String(b.triggered_alert_id) : null, note: b.note != null ? String(b.note) : null,
+      metadata: b.metadata ?? null, created_at: new Date().toISOString(),
+    };
+    __mswPredLog.push(row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.get('/v1/ai/prediction-logs/summary', () => {
+    const by_action: Record<string, number> = Object.fromEntries(__MSW_PREDLOG_ACTIONS.map((a) => [a, 0]));
+    const actors = new Set<string>(); const preds = new Set<string>();
+    let most_recent_at: string | null = null;
+    for (const e of __mswPredLog) { by_action[e.action]++; actors.add(e.actor); preds.add(e.prediction_id); if (!most_recent_at || e.created_at > most_recent_at) most_recent_at = e.created_at; }
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', generated_at: new Date().toISOString(), total: __mswPredLog.length, by_action, total_alerts_triggered: by_action.alert_triggered, total_overrides: by_action.overridden, distinct_actors: actors.size, distinct_predictions: preds.size, most_recent_at }));
+  }),
+  http.get('/v1/ai/prediction-logs', ({ request }) => {
+    const u = new URL(request.url);
+    const action = u.searchParams.get('action');
+    const actor = u.searchParams.get('actor');
+    const pid = u.searchParams.get('prediction_id');
+    if (action && !__MSW_PREDLOG_ACTIONS.includes(action)) return __mswPredLogFail('EWS_400_invalid_action', 400, `unknown action ${action}`);
+    let rows = [...__mswPredLog];
+    if (action) rows = rows.filter((e) => e.action === action);
+    if (actor) rows = rows.filter((e) => e.actor === actor);
+    if (pid) rows = rows.filter((e) => e.prediction_id === pid);
+    rows.reverse();
+    return HttpResponse.json(envelope({ items: rows, page: 1, page_size: 50, total: rows.length, page_size_default: 50, page_size_max: 200 }));
+  }),
+];
+
+handlers.push(...__mswPredLogHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@
 
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -42,6 +42,9 @@ import {
   type ExplanationReport,
   type FeatureImportanceReport,
   type TrustSignalReport,
+  type PredictionLogTrailShape,
+  type PredictionLogEntryShape,
+  type PredictionLogActionShape,
 } from '@/lib/api';
 
 const BAND_TONE: Record<string, 'success' | 'warning' | 'danger' | 'blue'> = {
@@ -314,6 +317,8 @@ export function ExplainabilityPage() {
               </table>
             )}
           </Panel>
+
+          <PredictionAuditPanel pid={activePid} />
         </>
       )}
 
@@ -335,6 +340,87 @@ export function ExplainabilityPage() {
         data-testid="ex-back-to-self"
       />
     </div>
+  );
+}
+
+// T7 M8 — prediction audit-action trail (compliance log). Shows every user
+// action + system event against this prediction, and lets an operator record
+// an action (acknowledge / escalate / dismiss / override) inline.
+const AUDIT_ACTION_TONE: Record<PredictionLogActionShape, 'success' | 'warning' | 'danger' | 'blue' | 'neutral'> = {
+  created: 'neutral',
+  viewed: 'neutral',
+  acknowledged: 'success',
+  overridden: 'warning',
+  escalated: 'danger',
+  dismissed: 'neutral',
+  alert_triggered: 'danger',
+  feedback_recorded: 'blue',
+};
+const OPERATOR_ACTIONS: PredictionLogActionShape[] = ['acknowledged', 'escalated', 'dismissed', 'overridden'];
+
+function PredictionAuditPanel({ pid }: { pid: string }) {
+  const qc = useQueryClient();
+  const [action, setAction] = useState<PredictionLogActionShape>('acknowledged');
+  const [note, setNote] = useState('');
+  const trailQ = useQuery<PredictionLogTrailShape, Error>({
+    queryKey: ['ex-audit', pid],
+    queryFn: () => api.aiPredictionLog(pid),
+    enabled: pid.length > 0,
+    retry: false,
+  });
+  const recordMut = useMutation({
+    mutationFn: () => api.aiPredictionLogRecord(pid, { action, note: note.trim() || undefined }),
+    onSuccess: () => {
+      setNote('');
+      qc.invalidateQueries({ queryKey: ['ex-audit', pid] });
+    },
+  });
+
+  return (
+    <Panel title="Prediction audit log" data-testid="ex-audit-card">
+      <p className="mb-3 text-xs text-muted">
+        Compliance trail — every action + system event against this model decision, with actor and timestamp.
+      </p>
+      {trailQ.isLoading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : !trailQ.data || trailQ.data.items.length === 0 ? (
+        <p className="text-sm text-muted" data-testid="ex-audit-empty">No audit entries yet.</p>
+      ) : (
+        <ul className="space-y-2" data-testid="ex-audit-trail">
+          {trailQ.data.items.map((e: PredictionLogEntryShape) => (
+            <li key={e.log_id} className="flex items-start gap-3 border-l-2 border-divider/50 pl-3 text-sm" data-testid={`ex-audit-row-${e.action}`}>
+              <Badge tone={AUDIT_ACTION_TONE[e.action]}>{e.action.replace(/_/g, ' ')}</Badge>
+              <div className="min-w-0 flex-1">
+                <div className="text-ink">
+                  <span className="font-medium">{e.actor}</span>
+                  {e.actor_role && <span className="text-xs text-muted"> · {e.actor_role}</span>}
+                  {e.triggered_alert_id && <span className="ml-2 font-mono text-xs text-danger">→ {e.triggered_alert_id}</span>}
+                </div>
+                {e.note && <div className="text-xs text-muted">{e.note}</div>}
+                <div className="text-[11px] text-muted">{new Date(e.created_at).toLocaleString()}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-divider/40 pt-3">
+        <select
+          value={action}
+          onChange={(e) => setAction(e.target.value as PredictionLogActionShape)}
+          data-testid="ex-audit-action"
+          className="rounded border border-divider bg-surface px-2 py-1.5 text-sm"
+        >
+          {OPERATOR_ACTIONS.map((a) => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
+        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" data-testid="ex-audit-note" />
+        <Button variant="primary" onClick={() => recordMut.mutate()} disabled={recordMut.isPending} data-testid="ex-audit-record">
+          Record action
+        </Button>
+      </div>
+    </Panel>
   );
 }
 

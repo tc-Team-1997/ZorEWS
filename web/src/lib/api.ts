@@ -2769,6 +2769,24 @@ export const api = {
   aiInsightGet: (insight_id: string) =>
     http.get<EnvelopeBody<AiInsightShape>>(`/v1/ai/insights/${encodeURIComponent(insight_id)}`).then((r) => r.data),
 
+  // ── AI Workbench · T7 Module 8 — Prediction Audit Logs ────────────────
+  aiPredictionLog: (prediction_id: string) =>
+    http.get<EnvelopeBody<PredictionLogTrailShape>>(`/v1/ai/predictions/${encodeURIComponent(prediction_id)}/log`).then((r) => r.data),
+  aiPredictionLogRecord: (prediction_id: string, input: { action: string; note?: string; triggered_alert_id?: string; model_id?: string; model_version?: string; confidence?: number }) =>
+    http.post<EnvelopeBody<PredictionLogEntryShape>>(`/v1/ai/predictions/${encodeURIComponent(prediction_id)}/log`, input).then((r) => r.data),
+  aiPredictionLogsQuery: (q: { action?: string; actor?: string; prediction_id?: string; page?: number; page_size?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.action) params.set('action', q.action);
+    if (q.actor) params.set('actor', q.actor);
+    if (q.prediction_id) params.set('prediction_id', q.prediction_id);
+    if (q.page != null) params.set('page', String(q.page));
+    if (q.page_size != null) params.set('page_size', String(q.page_size));
+    const qs = params.toString();
+    return http.get<EnvelopeBody<PredictionLogQueryShape>>(`/v1/ai/prediction-logs${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  aiPredictionLogsSummary: () =>
+    http.get<EnvelopeBody<PredictionLogSummaryShape>>('/v1/ai/prediction-logs/summary').then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6609,4 +6627,49 @@ export interface InsightFeedShape {
 export interface InsightCatalogShape {
   total: number;
   insights: { insight_id: string; title: string; category: InsightCategoryShape; domain: InsightDomainShape; model_ref: string }[];
+}
+
+// ── AI Workbench · T7 Module 8 — Prediction Audit Logs ──────────────────
+export type PredictionLogActionShape =
+  | 'created' | 'viewed' | 'acknowledged' | 'overridden'
+  | 'escalated' | 'dismissed' | 'alert_triggered' | 'feedback_recorded';
+
+export interface PredictionLogEntryShape {
+  log_id: string;
+  tenant_id: string;
+  prediction_id: string;
+  model_id: string | null;
+  model_version: string | null;
+  action: PredictionLogActionShape;
+  actor: string;
+  actor_role: string | null;
+  confidence: number | null;
+  triggered_alert_id: string | null;
+  note: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+export interface PredictionLogTrailShape {
+  prediction_id: string;
+  total: number;
+  items: PredictionLogEntryShape[];
+}
+export interface PredictionLogQueryShape {
+  items: PredictionLogEntryShape[];
+  page: number;
+  page_size: number;
+  total: number;
+  page_size_default: number;
+  page_size_max: number;
+}
+export interface PredictionLogSummaryShape {
+  tenant_id: string;
+  generated_at: string;
+  total: number;
+  by_action: Record<PredictionLogActionShape, number>;
+  total_alerts_triggered: number;
+  total_overrides: number;
+  distinct_actors: number;
+  distinct_predictions: number;
+  most_recent_at: string | null;
 }

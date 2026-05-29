@@ -102,4 +102,31 @@ describe('M4.3 — ExplainabilityPage', () => {
       expect(screen.getByTestId('ex-importance-table')).toBeInTheDocument();
     }, { timeout: 3000 });
   });
+
+  // ── T7 M8 enhancement — prediction audit-action trail ─────────────────
+  it('renders the prediction audit log trail when a prediction loads', async () => {
+    renderPage();
+    fireEvent.change(screen.getByTestId('ex-search-input'), { target: { value: 'pred-fresh-001' } });
+    fireEvent.click(screen.getByTestId('ex-search-btn'));
+    await waitFor(() => expect(screen.getByTestId('ex-audit-card')).toBeInTheDocument(), { timeout: 3000 });
+    // the seeded trail surfaces the system 'created' + 'alert_triggered' events
+    await waitFor(() => expect(screen.getByTestId('ex-audit-trail')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByTestId('ex-audit-row-alert_triggered')).toBeInTheDocument();
+  });
+
+  it('records an operator action and appends it to the trail', async () => {
+    renderPage();
+    fireEvent.change(screen.getByTestId('ex-search-input'), { target: { value: 'pred-fresh-001' } });
+    fireEvent.click(screen.getByTestId('ex-search-btn'));
+    await waitFor(() => expect(screen.getByTestId('ex-audit-trail')).toBeInTheDocument(), { timeout: 3000 });
+
+    fireEvent.change(screen.getByTestId('ex-audit-action'), { target: { value: 'escalated' } });
+    fireEvent.change(screen.getByTestId('ex-audit-note'), { target: { value: 'routing to SIU' } });
+    fireEvent.click(screen.getByTestId('ex-audit-record'));
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('ex-audit-trail')).getByTestId('ex-audit-row-escalated')).toBeInTheDocument();
+    }, { timeout: 3000 });
+    expect(screen.getByText(/routing to SIU/)).toBeInTheDocument();
+  });
 });
