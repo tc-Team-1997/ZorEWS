@@ -12444,6 +12444,125 @@ const __mswCollHandlers = [
 handlers.push(...__mswCollHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// §2.1.9 — Borrower Timeline handler (deterministic per-borrower journey).
+// ──────────────────────────────────────────────────────────────────────
+
+type MswTlType =
+  | 'account_opened' | 'repayment' | 'dpd_change' | 'sma_reclassification'
+  | 'rule_fired' | 'alert_raised' | 'ratio_breach' | 'bureau_update'
+  | 'limit_change' | 'restructuring' | 'case_opened' | 'case_closed';
+type MswTlSev = 'info' | 'warning' | 'critical';
+const __MSW_TL_TYPES: MswTlType[] = ['account_opened', 'repayment', 'dpd_change', 'sma_reclassification', 'rule_fired', 'alert_raised', 'ratio_breach', 'bureau_update', 'limit_change', 'restructuring', 'case_opened', 'case_closed'];
+
+function __mswTlHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h >>> 0;
+}
+function __mswTlRng(seed: number): () => number {
+  let a = seed;
+  return () => { a = (a + 0x6d2b79f5) | 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 0x100000000; };
+}
+const __MSW_TL_FIRST = ['Alice', 'Rajesh', 'Priya', 'Mohan', 'Vikram', 'Meera', 'Arjun', 'Kavya'];
+const __MSW_TL_LAST = ['Patel', 'Kumar', 'Sharma', 'Singh', 'Reddy', 'Nair'];
+const DAY = 86_400_000;
+
+function __mswBuildTimeline(customer_id: string) {
+  const rng = __mswTlRng(__mswTlHash(`BANK_DEMO|${customer_id}|timeline`));
+  const events: Array<{ event_id: string; occurred_at: string; event_type: MswTlType; severity: MswTlSev; title: string; description: string; linked_ref: string | null; metadata: Record<string, string | number> }> = [];
+  let seq = 0;
+  const now = Date.now();
+  const mk = (daysAgo: number, et: MswTlType, sev: MswTlSev, title: string, description: string, metadata: Record<string, string | number> = {}, linked_ref: string | null = null) => {
+    events.push({ event_id: `tl-${customer_id}-${String(seq).padStart(3, '0')}`, occurred_at: new Date(now - daysAgo * DAY).toISOString(), event_type: et, severity: sev, title, description, linked_ref, metadata });
+    seq++;
+  };
+  mk(540, 'account_opened', 'info', 'Account opened', 'Working-capital facility sanctioned.', { facility_kes: Math.round(5_000_000 + rng() * 40_000_000) });
+  let dpd = 0;
+  for (let m = 17; m >= 0; m--) {
+    const daysAgo = m * 30 + Math.floor(rng() * 6);
+    const stress = m <= 8 ? (8 - m) / 8 : 0;
+    if (rng() < 0.15 + stress * 0.5) {
+      dpd = Math.min(180, dpd + Math.round(10 + stress * 40 + rng() * 20));
+      mk(daysAgo, 'repayment', dpd >= 60 ? 'critical' : 'warning', `Repayment delayed (${dpd} DPD)`, `EMI received late; days-past-due now ${dpd}.`, { dpd, amount_kes: Math.round(200_000 + rng() * 2_000_000) });
+    } else {
+      dpd = Math.max(0, dpd - Math.round(rng() * 15));
+      mk(daysAgo, 'repayment', 'info', 'Repayment on time', 'EMI received on schedule.', { dpd, amount_kes: Math.round(200_000 + rng() * 2_000_000) });
+    }
+    if (m % 3 === 0) {
+      const score = Math.round(820 - stress * 260 + (rng() - 0.5) * 40);
+      mk(daysAgo + 1, 'bureau_update', 'info', 'Bureau score refreshed', `New bureau score ${score}.`, { bureau_score: score });
+    }
+  }
+  const peak = dpd;
+  if (peak >= 30) {
+    mk(60, 'dpd_change', peak >= 90 ? 'critical' : 'warning', `DPD crossed ${peak >= 90 ? 90 : 30}`, `Days-past-due reached ${peak}.`, { dpd: peak });
+    const stage = peak >= 90 ? 'SMA-2' : peak >= 60 ? 'SMA-1' : 'SMA-0';
+    mk(58, 'sma_reclassification', 'warning', `Reclassified ${stage}`, `Account moved to ${stage} per RBI norms.`, { sma_stage: stage, dpd: peak });
+    mk(72, 'ratio_breach', 'warning', 'DSCR breach', 'DSCR fell below covenant threshold.', { ratio: 'DSCR' });
+    mk(45, 'rule_fired', peak >= 90 ? 'critical' : 'warning', 'Rule fired: DPD-cliff-30d', 'Indicator rule triggered.', { rule: 'DPD-cliff-30d' }, 'R-101');
+    mk(40, 'alert_raised', peak >= 90 ? 'critical' : 'warning', 'EWS alert raised', 'Early-warning alert generated for review.', { severity_in: peak >= 90 ? 'CRITICAL' : 'HIGH' }, `a-${Math.floor(700000 + rng() * 9999)}`);
+  }
+  if (peak >= 60) mk(30, 'limit_change', 'warning', 'Credit limit reduced', 'Sanctioned limit cut precautionarily.', { delta_pct: -(10 + Math.floor(rng() * 30)) });
+  if (peak >= 90) {
+    mk(22, 'restructuring', 'warning', 'Restructuring proposed', 'Workout / restructuring under negotiation.', {});
+    mk(14, 'case_opened', 'critical', 'Recovery case opened', 'Collections case opened for active recovery.', {}, `case-${Math.floor(600000 + rng() * 9999)}`);
+  }
+  events.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+  return { events, peak };
+}
+
+const __mswTimelineHandlers = [
+  http.get('/v1/banking/borrowers/:customer_id/timeline', ({ params, request }) => {
+    const customer_id = String(params.customer_id);
+    const u = new URL(request.url);
+    const eventType = u.searchParams.get('event_type');
+    const since = u.searchParams.get('since');
+    const limitRaw = u.searchParams.get('limit');
+    if (eventType && !__MSW_TL_TYPES.includes(eventType as MswTlType)) {
+      return HttpResponse.json({ header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code: 'EWS_400_invalid_event_type', message: `unknown event_type ${eventType}`, severity: 'MEDIUM' } }, { status: 400 });
+    }
+    const rng = __mswTlRng(__mswTlHash(`BANK_DEMO|${customer_id}|name`));
+    const customer_name = `${__MSW_TL_FIRST[Math.floor(rng() * __MSW_TL_FIRST.length)]} ${__MSW_TL_LAST[Math.floor(rng() * __MSW_TL_LAST.length)]}`;
+    const { events, peak } = __mswBuildTimeline(customer_id);
+    const by_type = Object.fromEntries(__MSW_TL_TYPES.map((t) => [t, 0])) as Record<MswTlType, number>;
+    const by_severity: Record<MswTlSev, number> = { info: 0, warning: 0, critical: 0 };
+    for (const e of events) { by_type[e.event_type]++; by_severity[e.severity]++; }
+    const band = peak >= 90 ? 'critical' : peak >= 60 ? 'high' : peak >= 30 ? 'medium' : 'low';
+    const recentCut = Date.now() - 90 * DAY, priorCut = Date.now() - 180 * DAY;
+    const w: Record<MswTlSev, number> = { info: -1, warning: 2, critical: 4 };
+    let recent = 0, prior = 0;
+    for (const e of events) { const t = new Date(e.occurred_at).getTime(); if (t >= recentCut) recent += w[e.severity]; else if (t >= priorCut) prior += w[e.severity]; }
+    const trajectory = recent > prior + 2 ? 'deteriorating' : recent < prior - 2 ? 'improving' : 'stable';
+    let view = events.slice();
+    if (eventType) view = view.filter((e) => e.event_type === eventType);
+    if (since) { const s = new Date(since).getTime(); if (Number.isFinite(s)) view = view.filter((e) => new Date(e.occurred_at).getTime() >= s); }
+    const limit = limitRaw && Number.isFinite(parseInt(limitRaw, 10)) ? Math.max(1, Math.min(500, parseInt(limitRaw, 10))) : 100;
+    const rendered = view.slice(0, limit);
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        customer_id,
+        customer_name,
+        generated_at: new Date().toISOString(),
+        current_risk_band: band,
+        trajectory,
+        peak_dpd: peak,
+        total_events: events.length,
+        returned_count: rendered.length,
+        by_type,
+        by_severity,
+        first_event_at: events.length ? events[events.length - 1].occurred_at : null,
+        last_event_at: events.length ? events[0].occurred_at : null,
+        filters_applied: { event_type: eventType ?? null, since: since ?? null, limit },
+        events: rendered,
+      }),
+    );
+  }),
+];
+
+handlers.push(...__mswTimelineHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

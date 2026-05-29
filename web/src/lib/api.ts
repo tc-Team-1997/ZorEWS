@@ -1925,6 +1925,23 @@ export const api = {
       )
       .then((r) => r.data),
 
+  // §2.1.9 — Borrower Timeline (per-borrower risk-event stream)
+  borrowerTimeline: (
+    customer_id: string,
+    filters?: { event_type?: string; since?: string; limit?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.event_type) params.set('event_type', filters.event_type);
+    if (filters?.since) params.set('since', filters.since);
+    if (filters?.limit != null) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<BorrowerTimelineReport>>(
+        `/v1/banking/borrowers/${encodeURIComponent(customer_id)}/timeline${qs ? `?${qs}` : ''}`,
+      )
+      .then((r) => r.data);
+  },
+
   // G3 — Dashboard portfolio-insights widgets (Monday Playbook H2)
   ingestionHealth: () =>
     http.get<EnvelopeBody<IngestionHealthReport>>('/v1/ingestion/health').then((r) => r.data),
@@ -4878,6 +4895,54 @@ export interface CollectionAccountDetailReport extends CollectionAccount {
   ptp_history: CollectionPtpEntry[];
   contact_history: CollectionContactEntry[];
   recovery_factors: { factor: string; weight: number; direction: 'positive' | 'negative' }[];
+}
+
+// ── §2.1.9 Borrower Timeline shapes (mirror BFF banking_borrower_timeline.ts) ──
+
+export type TimelineEventType =
+  | 'account_opened'
+  | 'repayment'
+  | 'dpd_change'
+  | 'sma_reclassification'
+  | 'rule_fired'
+  | 'alert_raised'
+  | 'ratio_breach'
+  | 'bureau_update'
+  | 'limit_change'
+  | 'restructuring'
+  | 'case_opened'
+  | 'case_closed';
+export type TimelineSeverity = 'info' | 'warning' | 'critical';
+export type BorrowerRiskBand = 'low' | 'medium' | 'high' | 'critical';
+export type BorrowerTrajectory = 'improving' | 'stable' | 'deteriorating';
+
+export interface TimelineEvent {
+  event_id: string;
+  occurred_at: string;
+  event_type: TimelineEventType;
+  severity: TimelineSeverity;
+  title: string;
+  description: string;
+  linked_ref: string | null;
+  metadata: Record<string, string | number>;
+}
+
+export interface BorrowerTimelineReport {
+  tenant_id: string;
+  customer_id: string;
+  customer_name: string;
+  generated_at: string;
+  current_risk_band: BorrowerRiskBand;
+  trajectory: BorrowerTrajectory;
+  peak_dpd: number;
+  total_events: number;
+  returned_count: number;
+  by_type: Record<TimelineEventType, number>;
+  by_severity: Record<TimelineSeverity, number>;
+  first_event_at: string | null;
+  last_event_at: string | null;
+  filters_applied: { event_type: TimelineEventType | null; since: string | null; limit: number };
+  events: TimelineEvent[];
 }
 
 // ── T3.3 correlation response shapes (mirror BFF aml_alert_correlation.ts) ──

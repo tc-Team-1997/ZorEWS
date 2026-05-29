@@ -35813,6 +35813,46 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
   // ──────────────────────────────────────────────────────────────────
+  // Module #9 — Borrower Timeline (§2.1.9) — per-borrower risk-event stream.
+  //   Distinct from the CMS case timelines (single-case state ladder) — this
+  //   is the borrower's whole risk journey across products.
+  // ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    '/v1/banking/borrowers/:customer_id/timeline',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      try {
+        const { buildBorrowerTimeline } =
+          require('./banking_borrower_timeline') as typeof import('./banking_borrower_timeline');
+        type TF = import('./banking_borrower_timeline').TimelineFilters;
+        const filters: TF = {};
+        if (req.query.event_type) filters.event_type = req.query.event_type as TF['event_type'];
+        if (req.query.since) filters.since = String(req.query.since);
+        if (req.query.limit) {
+          const n = parseInt(String(req.query.limit), 10);
+          if (Number.isFinite(n)) filters.limit = n;
+        }
+        return res.json(
+          wrapResponse(buildBorrowerTimeline(req.tenant!.tenant_id, req.params.customer_id, filters, now()), ctx),
+        );
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        const ews =
+          code === 'invalid_event_type'
+            ? 'EWS_400_invalid_event_type'
+            : code === 'invalid_since'
+              ? 'EWS_400_invalid_since'
+              : 'EWS_400_invalid_input';
+        const msg = e instanceof Error ? e.message : 'borrower_timeline_failed';
+        return res.status(400).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #5 — NPA Prediction wrap (§2.1.5)
   // ──────────────────────────────────────────────────────────────────
 
