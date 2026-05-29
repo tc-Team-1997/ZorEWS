@@ -13954,6 +13954,159 @@ const __mswCaseTypeHandlers = [
 handlers.push(...__mswCaseTypeHandlers);
 
 // ──────────────────────────────────────────────────────────────────────
+// Configuration — Job & Scheduler Config handlers (consolidated registry)
+// ──────────────────────────────────────────────────────────────────────
+const __MSW_JSC_FREQUENCIES = ['realtime', 'every_5min', 'every_15min', 'hourly', 'every_6h', 'daily', 'weekly', 'monthly'];
+const __MSW_JSC_FREQ_MIN: Record<string, number> = {
+  realtime: 1, every_5min: 5, every_15min: 15, hourly: 60, every_6h: 360, daily: 1440, weekly: 10080, monthly: 43200,
+};
+const __mswJscStore = new Map<string, any>();
+let __mswJscSeeded = false;
+let __mswJscRunCounter = 0;
+export function __resetMswJobScheduler() {
+  __mswJscStore.clear();
+  __mswJscSeeded = false;
+  __mswJscRunCounter = 0;
+}
+const __mswJscNextRun = (freq: string) => new Date(Date.now() + __MSW_JSC_FREQ_MIN[freq] * 60_000).toISOString();
+function __mswJscSeed() {
+  if (__mswJscSeeded) return;
+  __mswJscSeeded = true;
+  const seed = [
+    ['CBS_INGESTION', 'CBS Ingestion DAG', 'ingestion', 'pipeline-svc', 'hourly', 'success'],
+    ['BUREAU_SYNC', 'Bureau Sync DAG', 'ingestion', 'pipeline-svc', 'weekly', 'success'],
+    ['FEATURE_BUILD', 'Feature Build DAG', 'data_quality', 'pipeline-svc', 'daily', 'success'],
+    ['FEATURE_STORE_BACKFILL', 'Feature Store Backfill DAG', 'ml', 'pipeline-svc', 'daily', 'never_run'],
+    ['PD_RETRAINING', 'PD Retraining Scheduler', 'ml', 'ai-copilot-svc', 'every_6h', 'success'],
+    ['DRIFT_MONITOR', 'Drift Monitor', 'ml', 'ai-copilot-svc', 'daily', 'partial'],
+    ['REPORT_SCHEDULES', 'Report Scheduler Tick', 'reporting', 'bff', 'every_15min', 'success'],
+    ['ESCALATION_WORKER', 'Escalation Worker Tick', 'workflow', 'regulatory-svc', 'every_5min', 'success'],
+    ['DQ_EXECUTIONS', 'Data Quality Run', 'data_quality', 'pipeline-svc', 'every_6h', 'failure'],
+    ['AUDIT_RETENTION', 'Audit Retention Sweep', 'system', 'audit-svc', 'daily', 'success'],
+    ['STREAMING_INGEST', 'Streaming Indicator Ingest', 'ingestion', 'regulatory-svc', 'realtime', 'running'],
+  ] as const;
+  seed.forEach(([key, name, category, owner, freq, status]) => {
+    const id = `job-BANK_DEMO-${key}`;
+    const neverRun = status === 'never_run';
+    __mswJscStore.set(id, {
+      job_id: id,
+      tenant_id: 'BANK_DEMO',
+      name,
+      category,
+      description: `${name} — ${owner}`,
+      owner_service: owner,
+      frequency: freq,
+      enabled: true,
+      last_run_status: status,
+      last_run_at: neverRun ? null : new Date(Date.now() - 2 * 3_600_000).toISOString(),
+      last_run_duration_ms: neverRun ? null : 1500,
+      consecutive_failures: status === 'failure' ? 2 : 0,
+      next_run_at: __mswJscNextRun(freq),
+      updated_at: new Date(Date.now()).toISOString(),
+    });
+  });
+}
+const __mswJscList = (category: string) => {
+  __mswJscSeed();
+  return Array.from(__mswJscStore.values())
+    .filter((j) => category === 'all' || j.category === category)
+    .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+};
+const __mswJscFail = (code: string, status: number, msg: string) =>
+  HttpResponse.json(
+    { header: { status: 'FAILURE', requestId: 'r-mock', timestamp: new Date().toISOString() }, error: { code, message: msg, severity: 'MEDIUM' } },
+    { status },
+  );
+const __mswJscPeel = (b: any) => (b && typeof b === 'object' && b.body && typeof b.body === 'object' ? b.body : b);
+
+const __mswJobSchedulerHandlers = [
+  http.get('/v1/config/jobs/summary', () => {
+    const rows = __mswJscList('all');
+    const by_category: Record<string, number> = { ingestion: 0, reporting: 0, ml: 0, workflow: 0, data_quality: 0, system: 0 };
+    const by_status: Record<string, number> = { success: 0, failure: 0, partial: 0, running: 0, never_run: 0 };
+    const attention_required: { job_id: string; name: string; reason: string }[] = [];
+    let enabled = 0;
+    let overdue = 0;
+    rows.forEach((j) => {
+      by_category[j.category]++;
+      by_status[j.last_run_status]++;
+      if (j.enabled) enabled++;
+      const isOverdue = j.enabled && j.next_run_at && Date.parse(j.next_run_at) < Date.now();
+      if (isOverdue) overdue++;
+      if (j.last_run_status === 'failure') attention_required.push({ job_id: j.job_id, name: j.name, reason: `last run failed (${j.consecutive_failures} consecutive)` });
+      else if (isOverdue) attention_required.push({ job_id: j.job_id, name: j.name, reason: 'overdue — next run is in the past' });
+    });
+    return HttpResponse.json(
+      envelope({
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_jobs: rows.length,
+        enabled_count: enabled,
+        disabled_count: rows.length - enabled,
+        by_category,
+        by_status,
+        failing_count: by_status.failure,
+        overdue_count: overdue,
+        attention_required,
+      }),
+    );
+  }),
+  http.get('/v1/config/jobs', ({ request }) => {
+    const u = new URL(request.url);
+    const category = u.searchParams.get('category') ?? 'all';
+    const status = u.searchParams.get('status');
+    const enabledOnly = u.searchParams.get('enabled') === 'true';
+    let rows = __mswJscList(category);
+    if (status) rows = rows.filter((j) => j.last_run_status === status);
+    if (enabledOnly) rows = rows.filter((j) => j.enabled);
+    return HttpResponse.json(envelope({ tenant_id: 'BANK_DEMO', total: rows.length, jobs: rows }));
+  }),
+  http.get('/v1/config/jobs/:id', ({ params }) => {
+    __mswJscSeed();
+    const row = __mswJscStore.get(String(params.id));
+    if (!row) return __mswJscFail('EWS_404_unknown_job', 404, 'unknown job');
+    return HttpResponse.json(envelope(row));
+  }),
+  http.patch('/v1/config/jobs/:id', async ({ params, request }) => {
+    __mswJscSeed();
+    const row = __mswJscStore.get(String(params.id));
+    if (!row) return __mswJscFail('EWS_404_unknown_job', 404, 'unknown job');
+    const b = __mswJscPeel(await request.json().catch(() => null));
+    if (b?.frequency !== undefined) {
+      if (!__MSW_JSC_FREQUENCIES.includes(b.frequency)) return __mswJscFail('EWS_400_invalid_frequency', 400, 'bad frequency');
+      row.frequency = b.frequency;
+      if (row.enabled) row.next_run_at = __mswJscNextRun(b.frequency);
+    }
+    if (b?.enabled !== undefined) {
+      row.enabled = !!b.enabled;
+      row.next_run_at = row.enabled ? __mswJscNextRun(row.frequency) : null;
+    }
+    row.updated_at = new Date().toISOString();
+    return HttpResponse.json(envelope(row));
+  }),
+  http.post('/v1/config/jobs/:id/run', ({ params }) => {
+    __mswJscSeed();
+    const row = __mswJscStore.get(String(params.id));
+    if (!row) return __mswJscFail('EWS_404_unknown_job', 404, 'unknown job');
+    if (!row.enabled) return __mswJscFail('EWS_400_invalid_input', 400, 'cannot run a disabled job');
+    __mswJscRunCounter++;
+    const roll = (__mswJscRunCounter * 0.37) % 1;
+    const status = roll < 0.88 ? 'success' : roll < 0.95 ? 'partial' : 'failure';
+    const ran_at = new Date().toISOString();
+    const duration_ms = 200 + Math.floor(roll * 9800);
+    row.last_run_status = status;
+    row.last_run_at = ran_at;
+    row.last_run_duration_ms = duration_ms;
+    row.consecutive_failures = status === 'failure' ? row.consecutive_failures + 1 : 0;
+    row.next_run_at = __mswJscNextRun(row.frequency);
+    row.updated_at = ran_at;
+    return HttpResponse.json(envelope({ job_id: row.job_id, status, ran_at, duration_ms, triggered_by: 'alice.admin' }), { status: 202 });
+  }),
+];
+
+handlers.push(...__mswJobSchedulerHandlers);
+
+// ──────────────────────────────────────────────────────────────────────
 // M5.4 — Workflows handlers (additive — appended AFTER pushlist
 // declarations so they are picked up at module load)
 // ──────────────────────────────────────────────────────────────────────

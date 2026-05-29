@@ -37068,6 +37068,126 @@ export function makeApp(deps: AppDeps = {}) {
   }
 
   // ──────────────────────────────────────────────────────────────────
+  // Configuration — Job & Scheduler Config (MASTER SETUP spec screen #19)
+  //   Consolidated registry of every scheduled platform job (ingestion /
+  //   reporting / ml / workflow / data_quality / system). audit:read (admin).
+  // ──────────────────────────────────────────────────────────────────
+  {
+    type JscMod = typeof import('./job_scheduler_config');
+    const jscErr = (e: unknown, ctx: ReturnType<typeof extractCtx>, res: Response) => {
+      const code = (e as { code?: string }).code;
+      const httpStatus = code === 'unknown_job' ? 404 : 400;
+      const ews = code ? `EWS_${httpStatus}_${code}` : 'EWS_400_invalid_input';
+      const msg = e instanceof Error ? e.message : 'job_scheduler_config_failed';
+      return res.status(httpStatus).json(wrapError({ code: ews, message: msg, severity: 'MEDIUM' }, ctx));
+    };
+    const jscActor = (req: Request): string =>
+      (typeof req.header === 'function' ? req.header('x-apex-user') : undefined) || 'admin';
+    const jscPeel = (req: Request): Record<string, unknown> => {
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      return (raw.body && typeof raw.body === 'object' ? raw.body : raw) as Record<string, unknown>;
+    };
+    const jscAudit = (req: Request, action: string, resource_id: string, metadata: Record<string, unknown>) => {
+      try {
+        const actor = jscActor(req);
+        const role = (req.header('x-apex-role') ?? 'admin').trim() || 'admin';
+        auditTrailStore.record(
+          req.tenant!.tenant_id,
+          { actor_username: actor, actor_role: role, action, resource_type: 'config', resource_id, outcome: 'success', severity: 'info', metadata },
+          now(),
+        );
+      } catch {
+        /* swallow */
+      }
+    };
+
+    app.get(
+      '/v1/config/jobs',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+        const category = (req.query.category as JscMod['ALL_JOB_CATEGORIES'][number] | undefined) || 'all';
+        const status = (req.query.status as JscMod['ALL_JOB_RUN_STATUSES'][number] | undefined) || 'all';
+        const enabledOnly = req.query.enabled === 'true';
+        const jobs = defaultJobSchedulerStore.list(req.tenant!.tenant_id, now().getTime(), category, status, enabledOnly);
+        return res.json(wrapResponse({ tenant_id: req.tenant!.tenant_id, total: jobs.length, jobs }, ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/jobs/summary',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+        return res.json(wrapResponse(defaultJobSchedulerStore.summary(req.tenant!.tenant_id, now().getTime()), ctx));
+      },
+    );
+
+    app.get(
+      '/v1/config/jobs/:job_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+        const job = defaultJobSchedulerStore.get(req.tenant!.tenant_id, req.params.job_id, now().getTime());
+        if (!job) {
+          return res.status(404).json(wrapError({ code: 'EWS_404_unknown_job', message: `unknown job '${req.params.job_id}'`, severity: 'MEDIUM' }, ctx));
+        }
+        return res.json(wrapResponse(job, ctx));
+      },
+    );
+
+    app.patch(
+      '/v1/config/jobs/:job_id',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+          const body = jscPeel(req) as { enabled?: unknown; frequency?: unknown };
+          let job = defaultJobSchedulerStore.get(req.tenant!.tenant_id, req.params.job_id, now().getTime());
+          if (!job) {
+            return res.status(404).json(wrapError({ code: 'EWS_404_unknown_job', message: `unknown job '${req.params.job_id}'`, severity: 'MEDIUM' }, ctx));
+          }
+          if (body.frequency !== undefined) {
+            job = defaultJobSchedulerStore.setFrequency(req.tenant!.tenant_id, req.params.job_id, body.frequency, now().getTime());
+          }
+          if (body.enabled !== undefined) {
+            job = defaultJobSchedulerStore.setEnabled(req.tenant!.tenant_id, req.params.job_id, body.enabled as boolean, now().getTime());
+          }
+          jscAudit(req, 'job.updated', req.params.job_id, { enabled: job.enabled, frequency: job.frequency });
+          return res.json(wrapResponse(job, ctx));
+        } catch (e) {
+          return jscErr(e, ctx, res);
+        }
+      },
+    );
+
+    app.post(
+      '/v1/config/jobs/:job_id/run',
+      requireTenantMw,
+      requireRole('audit:read'),
+      (req: Request, res: Response) => {
+        const ctx = extractCtx(req, now);
+        try {
+          const { defaultJobSchedulerStore } = require('./job_scheduler_config') as JscMod;
+          const result = defaultJobSchedulerStore.runNow(req.tenant!.tenant_id, req.params.job_id, jscActor(req), now().getTime());
+          jscAudit(req, 'job.run', req.params.job_id, { status: result.status, duration_ms: result.duration_ms });
+          return res.status(202).json(wrapResponse(result, ctx));
+        } catch (e) {
+          return jscErr(e, ctx, res);
+        }
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
   // Module #7 — Collections Risk / Recovery desk (§2.1.7)
   //   Distinct from the collection-adapter service (auto case routing) —
   //   this is the read/operate surface for the collections work-queue.

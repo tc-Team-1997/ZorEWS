@@ -48,6 +48,7 @@ import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RiskScoreConfigPage } from '@/modules/admin/RiskScoreConfigPage';
 import { AlertClassificationConfigPage } from '@/modules/admin/AlertClassificationConfigPage';
 import { CaseTypeSetupPage } from '@/modules/admin/CaseTypeSetupPage';
+import { JobSchedulerConfigPage } from '@/modules/admin/JobSchedulerConfigPage';
 import { RulesEnginePage } from '@/modules/rules/RulesEnginePage';
 import { ThresholdsLimitsPage } from '@/modules/admin/ThresholdsLimitsPage';
 import { WorkflowsPage } from '@/modules/admin/WorkflowsPage';
@@ -199,6 +200,7 @@ export function App() {
             <Route path="admin/risk-score-config" element={<RiskScoreConfigPage />} />
             <Route path="admin/alert-classification" element={<AlertClassificationConfigPage />} />
             <Route path="admin/case-types" element={<CaseTypeSetupPage />} />
+            <Route path="admin/job-scheduler" element={<JobSchedulerConfigPage />} />
             <Route path="rules/engine" element={<RulesEnginePage />} />
             <Route path="admin/thresholds-limits" element={<ThresholdsLimitsPage />} />
             <Route path="admin/workflows" element={<WorkflowsPage />} />

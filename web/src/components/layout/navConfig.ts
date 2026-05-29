@@ -229,6 +229,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/admin/risk-score-config',    i18nKey: 'risk_score_config',    icon: Scale,               requireRole: ['admin'], featured: true },
       { to: '/admin/alert-classification', i18nKey: 'alert_classification', icon: ShieldAlert,         requireRole: ['admin'], featured: true },
       { to: '/admin/case-types',           i18nKey: 'case_type_setup',      icon: Briefcase,           requireRole: ['admin'], featured: true },
+      { to: '/admin/job-scheduler',        i18nKey: 'job_scheduler',        icon: PlayCircle,          requireRole: ['admin'], featured: true },
       { to: '/rules/engine',               i18nKey: 'rules_engine',         icon: Cog,                 requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/admin/thresholds-limits',    i18nKey: 'thresholds_limits',    icon: Gauge,               requireRole: ['admin'], featured: true },
       { to: '/admin/workflows',            i18nKey: 'workflows',            icon: Workflow,            requireRole: ['admin'], featured: true },

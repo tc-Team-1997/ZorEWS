@@ -2878,6 +2878,24 @@ export const api = {
   caseTypeDelete: (case_type_id: string) =>
     http.delete(`/v1/config/case-types/${encodeURIComponent(case_type_id)}`).then(() => undefined),
 
+  // ── Configuration · Job & Scheduler Config (consolidated job registry) ─
+  scheduledJobs: (q: { category?: JobCategoryShape; status?: JobRunStatusShape; enabled?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (q.category) params.set('category', q.category);
+    if (q.status) params.set('status', q.status);
+    if (q.enabled) params.set('enabled', 'true');
+    const qs = params.toString();
+    return http.get<EnvelopeBody<ScheduledJobListShape>>(`/v1/config/jobs${qs ? '?' + qs : ''}`).then((r) => r.data);
+  },
+  scheduledJobSummary: () =>
+    http.get<EnvelopeBody<JobSchedulerSummaryShape>>('/v1/config/jobs/summary').then((r) => r.data),
+  scheduledJobGet: (job_id: string) =>
+    http.get<EnvelopeBody<ScheduledJobShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}`).then((r) => r.data),
+  scheduledJobUpdate: (job_id: string, patch: { enabled?: boolean; frequency?: JobFrequencyShape }) =>
+    http.patch<EnvelopeBody<ScheduledJobShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}`, patch).then((r) => r.data),
+  scheduledJobRun: (job_id: string) =>
+    http.post<EnvelopeBody<JobRunResultShape>>(`/v1/config/jobs/${encodeURIComponent(job_id)}/run`, {}).then((r) => r.data),
+
   // ── Insurance EWS · Module 2 — Claims Anomaly ─────────────────────────
   insuranceClaimsAnomalyDashboard: () =>
     http
@@ -6953,4 +6971,57 @@ export interface CaseTypeUpdateInputShape {
   sla_hours?: number;
   assigned_team?: string;
   enabled?: boolean;
+}
+
+// ── Configuration · Job & Scheduler Config ──────────────────────────────
+export type JobCategoryShape = 'ingestion' | 'reporting' | 'ml' | 'workflow' | 'data_quality' | 'system';
+export type JobFrequencyShape =
+  | 'realtime'
+  | 'every_5min'
+  | 'every_15min'
+  | 'hourly'
+  | 'every_6h'
+  | 'daily'
+  | 'weekly'
+  | 'monthly';
+export type JobRunStatusShape = 'success' | 'failure' | 'partial' | 'running' | 'never_run';
+export interface ScheduledJobShape {
+  job_id: string;
+  tenant_id: string;
+  name: string;
+  category: JobCategoryShape;
+  description: string;
+  owner_service: string;
+  frequency: JobFrequencyShape;
+  enabled: boolean;
+  last_run_status: JobRunStatusShape;
+  last_run_at: string | null;
+  last_run_duration_ms: number | null;
+  consecutive_failures: number;
+  next_run_at: string | null;
+  updated_at: string;
+}
+export interface ScheduledJobListShape {
+  tenant_id: string;
+  total: number;
+  jobs: ScheduledJobShape[];
+}
+export interface JobSchedulerSummaryShape {
+  tenant_id: string;
+  generated_at: string;
+  total_jobs: number;
+  enabled_count: number;
+  disabled_count: number;
+  by_category: Record<JobCategoryShape, number>;
+  by_status: Record<JobRunStatusShape, number>;
+  failing_count: number;
+  overdue_count: number;
+  attention_required: { job_id: string; name: string; reason: string }[];
+}
+export interface JobRunResultShape {
+  job_id: string;
+  status: JobRunStatusShape;
+  ran_at: string;
+  duration_ms: number;
+  triggered_by: string;
 }

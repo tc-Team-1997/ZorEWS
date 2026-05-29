@@ -18,6 +18,7 @@ import {
   __resetMswRiskScore,
   __resetMswAlertClassification,
   __resetMswCaseTypes,
+  __resetMswJobScheduler,
 } from '@/mocks/handlers';
 import { useAuth } from '@/store/auth';
 // Side-effect import: initializes i18next with EN + HI bundles. Pulled in
@@ -67,6 +68,7 @@ afterEach(() => {
   __resetMswRiskScore();
   __resetMswAlertClassification();
   __resetMswCaseTypes();
+  __resetMswJobScheduler();
   useAuth.setState({ status: 'idle', user: null, token: null });
 });
 afterAll(() => server.close());
