@@ -28,8 +28,9 @@ describe('AppShell', () => {
     // M5.2 added a "Rules Engine" sibling alongside the existing "Rules"
     // nav entry — disambiguate by exact-prefix match on "Rules" alone.
     expect(screen.getByRole('link', { name: /^rules$/i })).toBeInTheDocument();
-    // Legacy "Cases" nav was retired — Case Management is the sole entry now.
-    expect(screen.getByRole('link', { name: /case management/i })).toBeInTheDocument();
+    // Legacy "Cases" nav was retired — Case Management is the operational entry.
+    // Exact match: "Case Management Setup" (admin #13) also matches a loose regex.
+    expect(screen.getByRole('link', { name: /^case management$/i })).toBeInTheDocument();
     // Disambiguated from /admin/case-scenarios admin entry (M14.21)
     expect(screen.getByRole('link', { name: /^scenario/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
