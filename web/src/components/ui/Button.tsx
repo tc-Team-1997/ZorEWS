@@ -14,13 +14,19 @@ const base =
   'inline-flex items-center justify-center gap-2 rounded-input font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 // Aurora premium button variants — consistent 4-variant system per spec
-// (Primary / Secondary / Ghost / Danger), aurora-indigo accent, soft shadows,
-// indigo focus ring. JSX class names (NOT @apply in CSS) so the aurora-* JIT
-// race that bit P0d cannot recur here.
+// (Primary / Secondary / Ghost / Danger). Uses Tailwind BUILT-IN palette
+// classes (indigo-500/violet-600/indigo-50/slate-*) instead of the nested
+// `aurora-*` theme group — the built-ins generate EXACT same hex values
+// (indigo-500 = #6366F1 = aurora.indigo, violet-600 = #7C3AED = aurora.violet,
+// indigo-50 = #EEF2FF = aurora.tint, slate-900 = #0F172A = aurora.ink,
+// slate-700 = #334155 = aurora.ink-sub) but are GUARANTEED to be in any
+// Tailwind output even if the JIT cache or vite dev pipeline ever races
+// the nested-aurora utilities (which is what made the primary button render
+// invisible on the user's localhost — fix for that visible-on-2026-05-30 bug).
 const variants: Record<Variant, string> = {
-  primary:   'bg-aurora-indigo text-white shadow-sm hover:bg-aurora-violet focus:outline-none focus:ring-2 focus:ring-aurora-indigo/40 focus:ring-offset-1',
-  secondary: 'bg-aurora-tint text-aurora-indigo border border-aurora-line hover:bg-[#DCE4FF] focus:outline-none focus:ring-2 focus:ring-aurora-indigo/30',
-  ghost:     'bg-white border border-aurora-line text-aurora-ink-sub hover:bg-aurora-tint/60 hover:text-aurora-ink focus:outline-none focus:ring-2 focus:ring-aurora-indigo/30',
+  primary:   'bg-indigo-500 text-white shadow-sm hover:bg-violet-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:ring-offset-1',
+  secondary: 'bg-indigo-50 text-indigo-600 border border-slate-200 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/30',
+  ghost:     'bg-white border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30',
   danger:    'bg-danger text-white shadow-sm hover:bg-[#c73b3a] focus:outline-none focus:ring-2 focus:ring-danger/40',
 };
 

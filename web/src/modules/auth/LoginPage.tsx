@@ -198,8 +198,20 @@ export function LoginPage() {
         <AuroraIntelPanel />
       </div>
 
-      <div className="w-full lg:w-[48%] flex items-center justify-center px-6 py-8">
-        <GlassCard rise className="w-full max-w-[400px] p-7 sm:p-9">
+      <div className="w-full lg:w-[48%] flex items-center justify-center px-6 py-8 relative overflow-hidden">
+        {/* Ambient aurora blobs — decorative depth so the right column reads
+            premium instead of flat white. lg+ only so jsdom never renders. */}
+        <div
+          aria-hidden="true"
+          className="hidden lg:block absolute -right-32 top-1/2 -translate-y-1/2 h-[28rem] w-[28rem] rounded-full opacity-60 pointer-events-none blur-2xl"
+          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.28), transparent 65%)' }}
+        />
+        <div
+          aria-hidden="true"
+          className="hidden lg:block absolute -left-20 -bottom-20 h-[22rem] w-[22rem] rounded-full opacity-50 pointer-events-none blur-2xl"
+          style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.22), transparent 65%)' }}
+        />
+        <GlassCard rise className="relative w-full max-w-[400px] p-7 sm:p-9">
           <div className="flex items-center gap-2.5 mb-6">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow">
               <ShieldCheck size={18} className="text-white" strokeWidth={2} />
@@ -353,13 +365,6 @@ export function LoginPage() {
             </Link>
           </p>
 
-          <div className="mt-4 pt-4 border-t border-aurora-line">
-            <p className="text-center text-[11px] text-muted">
-              {t('login.demo_accounts_label')} · <span className="font-mono">alice.admin</span>{' '}
-              · <span className="font-mono">ravi.risk</span>{' '}
-              · <span className="font-mono">fiona.field</span> · {t('login.demo_passwords_in_seed')}
-            </p>
-          </div>
         </GlassCard>
       </div>
     </div>
