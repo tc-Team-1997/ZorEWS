@@ -1056,6 +1056,10 @@ export interface AppDeps {
    * which mirrors data/schema/049_rbac_permission_matrix.sql.
    */
   permissionMatrixStore?: import('./rbac/permission_matrix').IPermissionMatrixStore;
+  /** Tenant Governance (051) — branch registry. Defaults to module singleton seeded from buildDefaultBranchSeed. */
+  branchStore?: import('./governance/branch_store').IBranchStore;
+  /** Tenant Governance (051) — compliance rule registry. Defaults to module singleton seeded from buildDefaultComplianceSeed. */
+  complianceRuleStore?: import('./governance/compliance_store').IComplianceRuleStore;
   /** Override for tests — defaults to the cached synthetic portfolio. */
   portfolio?: Account[];
   /** Override for tests — pings the integration-mocks service when omitted. */
@@ -35908,6 +35912,212 @@ export function makeApp(deps: AppDeps = {}) {
         ctx,
       ),
     );
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Tenant Governance (051 overlay) — branch registry + compliance rules
+  //   + /v1/governance/me introspection (country/tenant/branch).
+  // ──────────────────────────────────────────────────────────────────
+  /** GET /v1/governance/me — caller's resolved governance context. */
+  app.get('/v1/governance/me', requireTenantMw, (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const userBranch = (req.header('x-apex-user-branch') as string | undefined)?.trim() || null;
+    const role = (req.header('x-apex-role') as string | undefined) ?? '';
+    const tenant = req.tenant;
+    res.json(
+      wrapResponse(
+        {
+          country_code: (tenant as { country_code?: string | null } | undefined)?.country_code ?? null,
+          tenant_id: tenant?.tenant_id ?? null,
+          tenant_name: tenant?.name ?? null,
+          tenant_vertical: tenant?.vertical ?? null,
+          parent_organization: (tenant as { parent_organization?: string | null } | undefined)?.parent_organization ?? null,
+          branch_id: userBranch,
+          role,
+        },
+        ctx,
+      ),
+    );
+  });
+
+  /** GET /v1/governance/branches?tenant_id=&country_code=&active_only=true */
+  app.get('/v1/governance/branches', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultBranchStore } = require('./governance/branch_store') as typeof import('./governance/branch_store');
+    const store = deps.branchStore ?? defaultBranchStore();
+    const items = store.list({
+      tenant_id: (req.query.tenant_id as string | undefined) || undefined,
+      country_code: (req.query.country_code as string | undefined) || undefined,
+      active_only: req.query.active_only === 'true',
+    });
+    res.json(wrapResponse({ total: items.length, branches: items }, ctx));
+  });
+
+  /** GET /v1/governance/branches/:branch_id */
+  app.get('/v1/governance/branches/:branch_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultBranchStore } = require('./governance/branch_store') as typeof import('./governance/branch_store');
+    const store = deps.branchStore ?? defaultBranchStore();
+    const b = store.get(req.params.branch_id);
+    if (!b) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_branch', message: 'branch not found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(wrapResponse(b, ctx));
+  });
+
+  /** POST /v1/governance/branches */
+  app.post('/v1/governance/branches', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const gov = require('./governance/branch_store') as typeof import('./governance/branch_store');
+    const store = deps.branchStore ?? gov.defaultBranchStore();
+    try {
+      const b = store.create(req.body, now());
+      res.status(201).json(wrapResponse(b, ctx));
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { GovernanceError } = require('./governance/types') as typeof import('./governance/types');
+      const status = e instanceof GovernanceError && e.code === 'duplicate_branch_code' ? 409 : 400;
+      const code = e instanceof GovernanceError ? `EWS_${status}_${e.code}` : 'EWS_400_invalid_input';
+      const message = e instanceof Error ? e.message : 'invalid_input';
+      res.status(status).json(wrapError({ code, message, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  /** PATCH /v1/governance/branches/:branch_id */
+  app.patch('/v1/governance/branches/:branch_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const gov = require('./governance/branch_store') as typeof import('./governance/branch_store');
+    const store = deps.branchStore ?? gov.defaultBranchStore();
+    try {
+      const b = store.update(req.params.branch_id, req.body, now());
+      res.json(wrapResponse(b, ctx));
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { GovernanceError } = require('./governance/types') as typeof import('./governance/types');
+      const status =
+        e instanceof GovernanceError && e.code === 'unknown_branch'
+          ? 404
+          : e instanceof GovernanceError && e.code === 'duplicate_branch_code'
+            ? 409
+            : 400;
+      const code = e instanceof GovernanceError ? `EWS_${status}_${e.code}` : 'EWS_400_invalid_input';
+      const message = e instanceof Error ? e.message : 'invalid_input';
+      res.status(status).json(wrapError({ code, message, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  /** DELETE /v1/governance/branches/:branch_id */
+  app.delete('/v1/governance/branches/:branch_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultBranchStore } = require('./governance/branch_store') as typeof import('./governance/branch_store');
+    const store = deps.branchStore ?? defaultBranchStore();
+    const ok = store.delete(req.params.branch_id);
+    if (!ok) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_branch', message: 'branch not found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.status(204).end();
+  });
+
+  /** GET /v1/governance/compliance-rules?country_code=&regulator=&domain=&active_only=true */
+  app.get('/v1/governance/compliance-rules', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultComplianceRuleStore } = require('./governance/compliance_store') as typeof import('./governance/compliance_store');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isGovernanceDomain } = require('./governance/types') as typeof import('./governance/types');
+    const store = deps.complianceRuleStore ?? defaultComplianceRuleStore();
+    const domainRaw = (req.query.domain as string | undefined) || undefined;
+    if (domainRaw && !isGovernanceDomain(domainRaw)) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400_invalid_domain', message: `unknown domain ${domainRaw}`, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    const items = store.list({
+      country_code: (req.query.country_code as string | undefined) || undefined,
+      regulator: (req.query.regulator as string | undefined) || undefined,
+      // Already guarded by isGovernanceDomain above; the type guard return
+      // statement leaves TS without the narrowing so we re-assert here.
+      domain: domainRaw as import('./governance/types').GovernanceDomain | undefined,
+      active_only: req.query.active_only === 'true',
+    });
+    res.json(wrapResponse({ total: items.length, rules: items }, ctx));
+  });
+
+  /** GET /v1/governance/compliance-rules/:rule_id */
+  app.get('/v1/governance/compliance-rules/:rule_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultComplianceRuleStore } = require('./governance/compliance_store') as typeof import('./governance/compliance_store');
+    const store = deps.complianceRuleStore ?? defaultComplianceRuleStore();
+    const r = store.get(req.params.rule_id);
+    if (!r) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_compliance_rule', message: 'rule not found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.json(wrapResponse(r, ctx));
+  });
+
+  /** POST /v1/governance/compliance-rules */
+  app.post('/v1/governance/compliance-rules', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const cs = require('./governance/compliance_store') as typeof import('./governance/compliance_store');
+    const store = deps.complianceRuleStore ?? cs.defaultComplianceRuleStore();
+    try {
+      const r = store.create(req.body, now());
+      res.status(201).json(wrapResponse(r, ctx));
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { GovernanceError } = require('./governance/types') as typeof import('./governance/types');
+      const status = e instanceof GovernanceError && e.code === 'duplicate_compliance_rule' ? 409 : 400;
+      const code = e instanceof GovernanceError ? `EWS_${status}_${e.code}` : 'EWS_400_invalid_input';
+      const message = e instanceof Error ? e.message : 'invalid_input';
+      res.status(status).json(wrapError({ code, message, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  /** PATCH /v1/governance/compliance-rules/:rule_id */
+  app.patch('/v1/governance/compliance-rules/:rule_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const cs = require('./governance/compliance_store') as typeof import('./governance/compliance_store');
+    const store = deps.complianceRuleStore ?? cs.defaultComplianceRuleStore();
+    try {
+      const r = store.update(req.params.rule_id, req.body, now());
+      res.json(wrapResponse(r, ctx));
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { GovernanceError } = require('./governance/types') as typeof import('./governance/types');
+      const status = e instanceof GovernanceError && e.code === 'unknown_compliance_rule' ? 404 : 400;
+      const code = e instanceof GovernanceError ? `EWS_${status}_${e.code}` : 'EWS_400_invalid_input';
+      const message = e instanceof Error ? e.message : 'invalid_input';
+      res.status(status).json(wrapError({ code, message, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  /** DELETE /v1/governance/compliance-rules/:rule_id */
+  app.delete('/v1/governance/compliance-rules/:rule_id', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { defaultComplianceRuleStore } = require('./governance/compliance_store') as typeof import('./governance/compliance_store');
+    const store = deps.complianceRuleStore ?? defaultComplianceRuleStore();
+    const ok = store.delete(req.params.rule_id);
+    if (!ok) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_compliance_rule', message: 'rule not found', severity: 'LOW' }, ctx),
+      );
+    }
+    res.status(204).end();
   });
 
   /** POST /v1/rbac/check — server-side permission check.
