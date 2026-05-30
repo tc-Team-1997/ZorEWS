@@ -60,6 +60,8 @@ import {
   Library,
   Cog,
   Workflow,
+  Wand2,
+  GitCompare,
   Beaker,
   BookOpen,
   Umbrella,
@@ -238,14 +240,21 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/admin/case-types',           i18nKey: 'case_type_setup',      icon: Briefcase,           requireRole: ['admin'], featured: true },
       { to: '/admin/job-scheduler',        i18nKey: 'job_scheduler',        icon: PlayCircle,          requireRole: ['admin'], featured: true },
       { to: '/admin/access-control',       i18nKey: 'access_control',       icon: Key,                 requireRole: ['admin'], featured: true },
-      { to: '/rules/engine',               i18nKey: 'rules_engine',         icon: Cog,                 requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // ── Unified Rule Center (additive) ───────────────────────────
+      // Single entry-point that consolidates the 4 previously-
+      // scattered rule surfaces (rules_engine / rules / ews_rules /
+      // rule_reports). The legacy URLs still resolve to the same
+      // pages — see web/src/App.tsx — so bookmarks + tests keep
+      // working. Sidebar exposes only the /rule-center/* hierarchy.
+      { to: '/rule-center',                i18nKey: 'rule_center',                  icon: Cog,           requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/rule-center/builder',        i18nKey: 'rule_center_builder',          icon: Wand2,         requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/rule-center/library',        i18nKey: 'rule_center_library',          icon: Library,       requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/rule-center/testing',        i18nKey: 'rule_center_testing',          icon: FlaskConical,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/rule-center/reports',        i18nKey: 'rule_center_reports',          icon: FileBarChart,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/rule-center/history',        i18nKey: 'rule_center_history',          icon: History,       requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/rule-center/comparison',     i18nKey: 'rule_center_comparison',       icon: GitCompare,    requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       { to: '/admin/thresholds-limits',    i18nKey: 'thresholds_limits',    icon: Gauge,               requireRole: ['admin'], featured: true },
       { to: '/admin/workflows',            i18nKey: 'workflows',            icon: Workflow,            requireRole: ['admin'], featured: true },
-      // Rules surfaces — Rules library + EWS DSL builder live here too
-      { to: '/rules',                      i18nKey: 'rules',                icon: SlidersHorizontal },
-      { to: '/rules/ews',                  i18nKey: 'ews_rules',            icon: SlidersHorizontal },
-      // Phase 9 T10 — fleet-wide rule engine report
-      { to: '/rules/reports',              i18nKey: 'rule_reports',         icon: FileBarChart,        requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       // Integration plumbing
       { to: '/admin/integrations',         i18nKey: 'integrations',         icon: Plug,                requireRole: ['admin', 'supervisor'] },
       { to: '/admin/webhooks',             i18nKey: 'webhooks',             icon: Webhook,             requireRole: ['admin'] },

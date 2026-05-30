@@ -26,6 +26,7 @@ import { RuleReportsPage } from '@/modules/rules/RuleReportsPage';
 import { EwsRuleBuilderPage } from '@/modules/rules/EwsRuleBuilderPage';
 import { EwsRuleWizardPage } from '@/modules/rules/EwsRuleWizardPage';
 import { EwsRuleDiffPage } from '@/modules/rules/EwsRuleDiffPage';
+import { RuleCenterPage } from '@/modules/rules/RuleCenterPage';
 import { CmsCaseListPage } from '@/modules/cms/CmsCaseListPage';
 import { CmsCaseKanbanPage } from '@/modules/cms/CmsCaseKanbanPage';
 import { CmsCaseDetailPage } from '@/modules/cms/CmsCaseDetailPage';
@@ -186,6 +187,18 @@ export function App() {
             <Route path="rules/ews" element={<EwsRuleBuilderPage />} />
             <Route path="rules/ews/wizard" element={<EwsRuleWizardPage />} />
             <Route path="rules/ews/:rule_id/diff" element={<EwsRuleDiffPage />} />
+            {/* ── Unified Rule Center (additive) ──────────────────────
+                Single landing + 6 sub-routes that RENDER the same
+                components mounted above at the legacy paths. Both old
+                and new URLs work; sidebar exposes only /rule-center/*. */}
+            <Route path="rule-center" element={<RuleCenterPage />} />
+            <Route path="rule-center/builder" element={<EwsRuleWizardPage />} />
+            <Route path="rule-center/library" element={<RulesEnginePage />} />
+            <Route path="rule-center/testing" element={<RulesEnginePage />} />
+            <Route path="rule-center/reports" element={<RuleReportsPage />} />
+            <Route path="rule-center/history" element={<EwsRuleBuilderPage />} />
+            <Route path="rule-center/comparison" element={<EwsRuleBuilderPage />} />
+            <Route path="rule-center/comparison/:rule_id" element={<EwsRuleDiffPage />} />
             <Route path="cms/cases" element={<CmsCaseListPage />} />
             <Route path="cms/cases/kanban" element={<CmsCaseKanbanPage />} />
             <Route path="cms/workflow" element={<CaseWorkflowPage />} />
