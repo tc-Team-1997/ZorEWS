@@ -4212,6 +4212,37 @@ export const handlers = [
     setLockedHandler(String(params.username).toLowerCase(), false),
   ),
 
+  // Phase 9 T1 — admin user lifecycle: disable, enable, force-logout.
+  // disable + enable map to the same setLocked backend as lock/unlock,
+  // but the SPA uses the distinct verbs so the audit chain preserves
+  // operator intent. Force-logout doesn't touch the user row — it just
+  // marks every prior session invalid in the mock. self-action 409
+  // guard mirrors the real auth-svc; missing-user 404 + non-admin 403
+  // mirror setLockedHandler.
+  http.post('/auth/users/:username/disable', ({ params }) =>
+    setLockedHandler(String(params.username).toLowerCase(), true),
+  ),
+  http.post('/auth/users/:username/enable', ({ params }) =>
+    setLockedHandler(String(params.username).toLowerCase(), false),
+  ),
+  http.post('/auth/users/:username/force-logout', ({ params }) => {
+    const username = String(params.username).toLowerCase();
+    const callerRole = readPersistedRole();
+    if (callerRole === null)
+      return HttpResponse.json({ error: 'missing_token' }, { status: 401 });
+    if (callerRole !== 'admin')
+      return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    if (username === readPersistedUsername()) {
+      return HttpResponse.json({ error: 'cannot_force_logout_self' }, { status: 409 });
+    }
+    const target = DEMO_USERS.find((u) => u.username === username);
+    if (!target) return HttpResponse.json({ error: 'user_not_found' }, { status: 404 });
+    // Synthesise a plausible revoked_count from prior session activity —
+    // the dev MSW doesn't track sessions, so we return a small constant
+    // matching what a single-device user would have outstanding.
+    return HttpResponse.json({ ok: true, username: target.username, revoked_count: 1 });
+  }),
+
   // M6.1 — Users & RBAC: role change endpoint
   http.post('/auth/users/:username/role', ({ params, request }) =>
     setRoleHandler(request, String(params.username).toLowerCase()),

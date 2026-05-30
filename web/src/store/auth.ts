@@ -137,6 +137,20 @@ interface AuthState {
   adminCreateUser: (input: SignupInput) => Promise<SignupResult>;
   adminDeleteUser: (username: string) => Promise<void>;
   adminSetLocked: (username: string, locked: boolean) => Promise<void>;
+  /** Phase 9 T1 — admin disables a user. Backed by the same setLocked
+   *  primitive as adminSetLocked, but emits the DISTINCT user_disabled
+   *  audit event so compliance can tell "admin suspended this account"
+   *  from "system locked after N failed logins". Optional reason is
+   *  captured in the audit metadata. */
+  adminDisableUser: (username: string, reason?: string) => Promise<{ locked: boolean }>;
+  /** Phase 9 T1 — admin re-enables a previously disabled user. Audit
+   *  type user_enabled. No self-guard (re-enabling yourself is harmless). */
+  adminEnableUser: (username: string) => Promise<{ locked: boolean }>;
+  /** Phase 9 T1 — admin force-logs-out every session for a user (e.g.
+   *  on suspected credential exposure). Does NOT disable the account —
+   *  the user can log in again immediately with valid credentials.
+   *  Returns the count of sessions revoked. */
+  adminForceLogout: (username: string, reason?: string) => Promise<{ revoked_count: number }>;
   /** M6.1 — Users & RBAC: admin changes a user's role. Returns the
    *  updated row. Combined with /auth/me's live-read, the change
    *  surfaces on the user's next request without forcing a logout. */
@@ -349,6 +363,33 @@ export const useAuth = create<AuthState>((set) => ({
   adminSetLocked: async (username, locked) => {
     const action = locked ? 'lock' : 'unlock';
     await http.post(`/auth/users/${encodeURIComponent(username)}/${action}`);
+  },
+
+  adminDisableUser: async (username, reason) => {
+    const { data } = await http.post<{ ok: boolean; username: string; locked: boolean }>(
+      `/auth/users/${encodeURIComponent(username)}/disable`,
+      reason ? { reason } : {},
+    );
+    return { locked: data.locked };
+  },
+
+  adminEnableUser: async (username) => {
+    const { data } = await http.post<{ ok: boolean; username: string; locked: boolean }>(
+      `/auth/users/${encodeURIComponent(username)}/enable`,
+    );
+    return { locked: data.locked };
+  },
+
+  adminForceLogout: async (username, reason) => {
+    const { data } = await http.post<{
+      ok: boolean;
+      username: string;
+      revoked_count: number;
+    }>(
+      `/auth/users/${encodeURIComponent(username)}/force-logout`,
+      reason ? { reason } : {},
+    );
+    return { revoked_count: data.revoked_count };
   },
 
   adminSetRole: async (username, role) => {

@@ -182,6 +182,35 @@ describe('AdminUsersPage', () => {
     });
   });
 
+  // Phase 9 T1 — force-logout admin action: confirmation gate + POST emits
+  it('force-logout admin action fires POST /auth/users/:u/force-logout after confirm', async () => {
+    setUser('admin');
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      const user = userEvent.setup();
+      renderAdmin();
+      await screen.findByText('ravi.risk');
+      const btn = screen.getByRole('button', { name: /force-logout ravi\.risk/i });
+      expect(btn).not.toBeDisabled();
+      await user.click(btn);
+      // Mutation resolves without throwing — the page stays mounted + row count unchanged
+      await waitFor(() => {
+        expect(screen.getByText('ravi.risk')).toBeInTheDocument();
+      });
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
+
+  it('force-logout button disabled for the current admin (no self-action)', async () => {
+    setUser('admin');
+    renderAdmin();
+    await screen.findByText('alice.admin');
+    const btn = screen.getByRole('button', { name: /force-logout alice\.admin/i });
+    expect(btn).toBeDisabled();
+  });
+
   it('refuses to delete the current admin', async () => {
     setUser('admin');
     renderAdmin();

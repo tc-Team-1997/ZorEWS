@@ -21,6 +21,9 @@ export type AuthEventType =
   | "user_deleted"
   | "user_locked"
   | "user_unlocked"
+  | "user_disabled"
+  | "user_enabled"
+  | "user_force_logout"
   | "user_role_changed"
   | "register_success";
 

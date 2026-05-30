@@ -893,6 +893,88 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   }
 
   /**
+   * Phase 9 T1 — admin user-lifecycle actions (force-logout / disable / enable).
+   * POST /auth/users/:username/force-logout
+   * POST /auth/users/:username/disable   (body: { reason? })
+   * POST /auth/users/:username/enable
+   * Authorization: Bearer <admin>
+   *
+   * `disable` + `enable` reuse the underlying setLocked() primitive — the user
+   * store has no separate `active` flag, so disabled and locked share one
+   * backend column. The DISTINCT audit event types (`user_disabled` vs
+   * `user_locked`) preserve operator intent in the M15.1 audit chain so
+   * compliance can distinguish "admin intentionally suspended this account"
+   * from "system locked after N failed logins".
+   *
+   * `force-logout` is the only action that doesn't touch the user row — it
+   * just revokes every session the user holds. The next request from any of
+   * their devices gets 401 + must re-authenticate. Useful when an admin
+   * suspects a session was hijacked but doesn't want to disable the account.
+   *
+   * Refuses to disable / force-logout yourself (same self-action guard as
+   * lock + role-change). Enable has no self-guard — re-enabling yourself
+   * is harmless. 404 unknown user; 403 non-admin.
+   */
+  for (const action of ["force-logout", "disable", "enable"] as const) {
+    app.post<{ Params: { username: string }; Body: { reason?: string } }>(
+      `/auth/users/:username/${action}`,
+      async (req, reply) => {
+        const { signer, users, sessions, audit } = await getState();
+        const auth = req.headers.authorization;
+        if (!auth?.startsWith("Bearer ")) {
+          return reply.code(401).send({ error: "missing_token" });
+        }
+        let callerSub: string | undefined;
+        let callerRole: unknown;
+        try {
+          const { payload } = await verifyToken(signer, auth.slice(7));
+          if (payload.typ === "refresh") return reply.code(401).send({ error: "invalid_token" });
+          callerSub = typeof payload.sub === "string" ? payload.sub : undefined;
+          callerRole = payload.role;
+        } catch {
+          return reply.code(401).send({ error: "invalid_token" });
+        }
+        if (callerRole !== "admin") {
+          return reply.code(403).send({ error: "forbidden", message: "admin role required" });
+        }
+        const target = users.findByUsername(req.params.username.toLowerCase());
+        if (!target) return reply.code(404).send({ error: "user_not_found" });
+        if ((action === "disable" || action === "force-logout") && target.id === callerSub) {
+          return reply.code(409).send({
+            error: `cannot_${action.replace("-", "_")}_self`,
+            message: `you cannot ${action} your own account`,
+          });
+        }
+        const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+        const actor = callerSub ? users.findById(callerSub) : undefined;
+        if (action === "force-logout") {
+          const revoked = sessions.revokeAllForUser(target.id);
+          audit.append({
+            type: "user_force_logout",
+            target_username: target.username,
+            actor_username: actor?.username ?? null,
+            actor_role: "admin",
+            ip: callerIp(req),
+            metadata: { revoked_count: revoked, reason: reason || undefined },
+          });
+          return reply.send({ ok: true, username: target.username, revoked_count: revoked });
+        }
+        // disable / enable map to setLocked with distinct audit types
+        users.setLocked(target, action === "disable");
+        audit.append({
+          type: action === "disable" ? "user_disabled" : "user_enabled",
+          target_username: target.username,
+          actor_username: actor?.username ?? null,
+          actor_role: "admin",
+          ip: callerIp(req),
+          metadata: reason ? { reason } : {},
+        });
+        return reply.send({ ok: true, username: target.username, locked: target.locked });
+      },
+    );
+  }
+
+  /**
    * POST /auth/users/:username/role
    * Authorization: Bearer <admin>
    * Body: { role: Role }

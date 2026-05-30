@@ -6,6 +6,7 @@ import {
   KeyRound,
   Lock,
   LockOpen,
+  LogOut,
   Plus,
   Trash2,
   UserPlus,
@@ -99,6 +100,11 @@ function humanizeError(err: unknown, fallback: string): string {
       return "You can't delete your own account.";
     if (err.status === 409 && body?.error === 'cannot_lock_self')
       return "You can't lock your own account.";
+    // Phase 9 T1 — sibling self-action guards
+    if (err.status === 409 && body?.error === 'cannot_disable_self')
+      return "You can't disable your own account.";
+    if (err.status === 409 && body?.error === 'cannot_force_logout_self')
+      return "You can't force-logout your own account.";
     if (err.status === 409 && body?.error === 'username_taken')
       return body.message ?? 'That username is already taken.';
     if (err.status === 409 && body?.error === 'email_taken')
@@ -116,6 +122,8 @@ export function AdminUsersPage() {
   const navigate = useNavigate();
   const adminDeleteUser = useAuth((s) => s.adminDeleteUser);
   const adminSetLocked = useAuth((s) => s.adminSetLocked);
+  // Phase 9 T1 — force-logout admin action (sibling to lock/unlock)
+  const adminForceLogout = useAuth((s) => s.adminForceLogout);
   // M6.1 — Users & RBAC: role change endpoint
   const adminSetRole = useAuth((s) => s.adminSetRole);
   const qc = useQueryClient();
@@ -185,6 +193,31 @@ export function AdminUsersPage() {
     },
     onError: (err) => setRowError(humanizeError(err, 'Lock toggle failed.')),
   });
+
+  // Phase 9 T1 — force-logout: revoke every session for the user. Distinct
+  // from lock/unlock — the user can re-authenticate immediately, but their
+  // current Bearer tokens are dead. Useful when an admin suspects a session
+  // was hijacked but doesn't want to disable the account.
+  const forceLogoutMutation = useMutation({
+    mutationFn: (username: string) => adminForceLogout(username),
+    onSuccess: () => {
+      setRowError(null);
+      qc.invalidateQueries({ queryKey: ['admin.users'] });
+    },
+    onError: (err) => setRowError(humanizeError(err, 'Force-logout failed.')),
+  });
+
+  function onForceLogout(username: string) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Force-logout ${username}? Every active session will be invalidated. The user can sign in again with valid credentials.`,
+      )
+    ) {
+      return;
+    }
+    forceLogoutMutation.mutate(username);
+  }
 
   // M6.1 — Users & RBAC: change a user's role inline. The acceptance
   // contract is that the change takes effect on the target user's
@@ -357,7 +390,7 @@ export function AdminUsersPage() {
     {
       key: 'actions',
       header: '',
-      width: 280,
+      width: 320,
       render: (u) => (
         <div className="flex items-center justify-end gap-1">
           <Button
@@ -378,6 +411,16 @@ export function AdminUsersPage() {
             title={u.locked ? 'Unlock account' : 'Lock account'}
           >
             {u.locked ? <LockOpen size={13} /> : <Lock size={13} />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onForceLogout(u.username)}
+            disabled={isSelf(u) || forceLogoutMutation.isPending}
+            aria-label={`Force-logout ${u.username}`}
+            title="Force-logout every session"
+          >
+            <LogOut size={13} />
           </Button>
           <Button
             variant="ghost"
