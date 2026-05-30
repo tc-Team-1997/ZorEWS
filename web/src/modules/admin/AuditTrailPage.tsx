@@ -39,7 +39,11 @@ import {
   type AuditRetentionStrategy,
   type AuditRetentionPolicyCreateInput,
 } from '@/lib/api';
-import { downloadAuditEventsCsv } from '@/lib/auditExport';
+import {
+  downloadAuditEventsCsv,
+  downloadAuditEventsPdf,
+  downloadAuditEventsXlsx,
+} from '@/lib/auditExport';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
@@ -114,19 +118,52 @@ export function AuditTrailPage() {
         title="Audit Trail"
         subtitle="Immutable cryptographic ledger — SHA-256 hash-chained for tamper evidence (RBI Cyber Resilience §4.3)."
         actions={
-          <Button
-            variant="ghost"
-            onClick={() => downloadAuditEventsCsv(events.data?.items ?? [])}
-            disabled={!events.data?.items?.length}
-            data-testid="audit-export-csv"
-            title={
-              events.data?.items?.length
-                ? `Export ${events.data.items.length} filtered event(s) as CSV`
-                : 'No events to export'
-            }
-          >
-            <Download size={14} strokeWidth={2} /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2" data-testid="audit-export-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAuditEventsCsv(events.data?.items ?? [])}
+              disabled={!events.data?.items?.length}
+              data-testid="audit-export-csv"
+              title={
+                events.data?.items?.length
+                  ? `Export ${events.data.items.length} filtered event(s) as CSV`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAuditEventsPdf(events.data?.items ?? [])}
+              disabled={!events.data?.items?.length}
+              data-testid="audit-export-pdf"
+              title={
+                events.data?.items?.length
+                  ? `Export ${events.data.items.length} filtered event(s) as PDF`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> PDF
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void downloadAuditEventsXlsx(events.data?.items ?? []);
+              }}
+              disabled={!events.data?.items?.length}
+              data-testid="audit-export-xlsx"
+              title={
+                events.data?.items?.length
+                  ? `Export ${events.data.items.length} filtered event(s) as Excel`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> Excel
+            </Button>
+          </div>
         }
       />
 
