@@ -35877,6 +35877,39 @@ export function makeApp(deps: AppDeps = {}) {
     res.json(wrapResponse(store.resolveForRoles(roles), ctx));
   });
 
+  // ──────────────────────────────────────────────────────────────────
+  // Domain Based Access Control (DBAC) — introspection route.
+  // SPA's useEffectiveDomain() hook reads this to render the sidebar
+  // off the BFF-resolved domain (instead of guessing from store).
+  // ──────────────────────────────────────────────────────────────────
+  /** GET /v1/dbac/me — caller's effective domain + the inputs that produced it. */
+  app.get('/v1/dbac/me', requireTenantMw, (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { resolveEffectiveDomain, isDbacDomain } = require('./dbac/domain_resolver') as typeof import('./dbac/domain_resolver');
+    const role = (req.header('x-apex-role') as string | undefined) ?? '';
+    const userPinRaw = (req.header('x-apex-user-domain') as string | undefined)?.trim();
+    const userPin = isDbacDomain(userPinRaw) ? userPinRaw : null;
+    const tenantVertical = req.tenant?.vertical ?? null;
+    const effective_domain = resolveEffectiveDomain(
+      { domain: userPin ?? undefined, role },
+      { vertical: tenantVertical as 'banking' | 'insurance' | 'both' | null },
+    );
+    res.json(
+      wrapResponse(
+        {
+          effective_domain,
+          inputs: {
+            user_domain: userPin,
+            tenant_vertical: tenantVertical,
+            role,
+          },
+        },
+        ctx,
+      ),
+    );
+  });
+
   /** POST /v1/rbac/check — server-side permission check.
    *  Body: `{ role?, module, action }`. role defaults to caller's. */
   app.post('/v1/rbac/check', requireTenantMw, (req: Request, res: Response) => {

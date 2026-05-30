@@ -1052,6 +1052,11 @@ export const api = {
       .post<EnvelopeBody<RbacCheckResponse>>('/v1/rbac/check', { module, action, role })
       .then((r) => r.data),
 
+  /** DBAC: resolve caller's effective domain (user pin > tenant vertical > null).
+   *  Super-admins get 'both'. Drives the SPA's useEffectiveDomain() hook. */
+  dbacMe: () =>
+    http.get<EnvelopeBody<DbacMeResponse>>('/v1/dbac/me').then((r) => r.data),
+
   /** Phase 9 T10 — fleet-wide rule engine report (envelope-wrapped). */
   ruleEngineReport: () =>
     http
@@ -6366,6 +6371,19 @@ export interface RbacCheckResponse {
   module: string;
   action: RbacAction;
   granted: boolean;
+}
+
+// ── Domain Based Access Control (DBAC, 050 overlay) ────────────────
+
+export type DbacEffectiveDomain = 'banking' | 'insurance' | 'both' | null;
+
+export interface DbacMeResponse {
+  effective_domain: DbacEffectiveDomain;
+  inputs: {
+    user_domain: 'banking' | 'insurance' | null;
+    tenant_vertical: 'banking' | 'insurance' | null;
+    role: string;
+  };
 }
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────

@@ -15951,4 +15951,31 @@ handlers.push(
     );
     return HttpResponse.json(envelope({ role, module: module_id, action, granted }));
   }),
+
+  // ──────────────────────────────────────────────────────────────────
+  // Domain Based Access Control (DBAC, 050 overlay) — MSW.
+  // Resolves the caller's effective domain off the request headers.
+  // Mirrors services/bff/src/dbac/domain_resolver.ts precedence:
+  //   super_admin/admin → 'both' → user pin → tenant vertical → null.
+  // ──────────────────────────────────────────────────────────────────
+  http.get('/v1/dbac/me', ({ request }) => {
+    const role = request.headers.get('x-apex-role') ?? '';
+    const userPinRaw = request.headers.get('x-apex-user-domain')?.trim() ?? '';
+    const userPin: 'banking' | 'insurance' | null =
+      userPinRaw === 'banking' || userPinRaw === 'insurance' ? userPinRaw : null;
+    const tenantId = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    // Mirror the seed tenant verticals: BANK_DEMO → banking; BIL → insurance.
+    const tenantVertical: 'banking' | 'insurance' | null =
+      tenantId === 'BIL' ? 'insurance' : tenantId === 'BANK_DEMO' ? 'banking' : null;
+    let effective: 'banking' | 'insurance' | 'both' | null;
+    if (role === 'admin' || role === 'super_admin') effective = 'both';
+    else if (userPin) effective = userPin;
+    else effective = tenantVertical;
+    return HttpResponse.json(
+      envelope({
+        effective_domain: effective,
+        inputs: { user_domain: userPin, tenant_vertical: tenantVertical, role },
+      }),
+    );
+  }),
 );
