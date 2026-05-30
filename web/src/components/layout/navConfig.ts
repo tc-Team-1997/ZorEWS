@@ -64,6 +64,7 @@ import {
   GitCompare,
   KeyRound,
   FileBadge,
+  ListChecks,
   Undo2,
   Download,
   Archive,
@@ -213,14 +214,26 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     i18nKey: 'cat_ai_workbench',
     icon: Bot,
     items: [
-      { to: '/ai/workbench',       i18nKey: 'ai_workbench',     icon: Bot,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/ai/registry',        i18nKey: 'model_registry',   icon: Boxes,      requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/ai/explainability',  i18nKey: 'explainability',   icon: Microscope, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
-      { to: '/ai/experiments',     i18nKey: 'experiment_tracking', icon: FlaskConical, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/ai/drift',           i18nKey: 'drift_detection',  icon: Activity,   requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/ai/insights',        i18nKey: 'ai_insights',      icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/ai/workbench',                 i18nKey: 'ai_workbench',     icon: Bot,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Explainability moved under AI Workbench (brief: "Move Explainability under
+      // AI Workbench"). Legacy /ai/explainability still resolves (App.tsx untouched).
+      { to: '/ai/workbench/explainability',  i18nKey: 'explainability',   icon: Microscope, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
+      { to: '/ai/registry',                  i18nKey: 'model_registry',   icon: Boxes,      requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/ai/experiments',               i18nKey: 'experiment_tracking', icon: FlaskConical, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/ai/drift',                     i18nKey: 'drift_detection',  icon: Activity,   requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/ai/insights',                  i18nKey: 'ai_insights',      icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst', 'collection_officer', 'field_officer'], featured: true },
       // Feature store underpins every model — surface here as the supporting tool
-      { to: '/admin/feature-store', i18nKey: 'feature_store',   icon: Database,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/admin/feature-store',          i18nKey: 'feature_store',    icon: Database,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      // ── Enterprise AI Governance Layer (additive) ──────────────
+      // Composes M7.x model registry + performance + drift +
+      // promotions + M15.1 audit into a single MRM-tier governance
+      // tree. Every legacy /ai/* URL still works.
+      { to: '/ai/governance',                i18nKey: 'ai_governance',                icon: ShieldCheck,  requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      { to: '/ai/governance/monitoring',     i18nKey: 'ai_governance_monitoring',     icon: Gauge,        requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/ai/governance/prediction-audit', i18nKey: 'ai_governance_prediction_audit', icon: ListChecks, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/ai/governance/performance',    i18nKey: 'ai_governance_performance',    icon: TrendingUp,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/ai/governance/drift',          i18nKey: 'ai_governance_drift',          icon: Activity,     requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/ai/governance/reports',        i18nKey: 'ai_governance_reports',        icon: FileBadge,    requireRole: ['admin', 'supervisor', 'risk_analyst'] },
     ],
   },
 

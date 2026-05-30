@@ -46,6 +46,13 @@ import { ExplainabilityPage } from '@/modules/ai/ExplainabilityPage';
 import { ExperimentTrackingPage } from '@/modules/ai/ExperimentTrackingPage';
 import { DriftMonitoringPage } from '@/modules/ai/DriftMonitoringPage';
 import { AiInsightsPage } from '@/modules/ai/AiInsightsPage';
+// Enterprise AI Governance Layer (additive — legacy /ai/* URLs still resolve).
+import { AiGovernanceCenterPage } from '@/modules/ai/governance/AiGovernanceCenterPage';
+import { AiModelMonitoringPage } from '@/modules/ai/governance/AiModelMonitoringPage';
+import { AiPredictionAuditPage } from '@/modules/ai/governance/AiPredictionAuditPage';
+import { AiPerformanceTrackingPage } from '@/modules/ai/governance/AiPerformanceTrackingPage';
+import { AiDriftDashboardPage } from '@/modules/ai/governance/AiDriftDashboardPage';
+import { AiGovernanceReportsPage } from '@/modules/ai/governance/AiGovernanceReportsPage';
 import { MasterSetupPage } from '@/modules/admin/MasterSetupPage';
 import { RiskScoreConfigPage } from '@/modules/admin/RiskScoreConfigPage';
 import { AlertClassificationConfigPage } from '@/modules/admin/AlertClassificationConfigPage';
@@ -218,8 +225,16 @@ export function App() {
             <Route path="admin/streaming-latency" element={<StreamingLatencyPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="ai/workbench" element={<AiWorkbenchPage />} />
+            <Route path="ai/workbench/explainability" element={<ExplainabilityPage />} />
             <Route path="ai/registry" element={<ModelRegistryPage />} />
             <Route path="ai/explainability" element={<ExplainabilityPage />} />
+            {/* Enterprise AI Governance Layer (additive — legacy /ai/* routes above still work). */}
+            <Route path="ai/governance" element={<AiGovernanceCenterPage />} />
+            <Route path="ai/governance/monitoring" element={<AiModelMonitoringPage />} />
+            <Route path="ai/governance/prediction-audit" element={<AiPredictionAuditPage />} />
+            <Route path="ai/governance/performance" element={<AiPerformanceTrackingPage />} />
+            <Route path="ai/governance/drift" element={<AiDriftDashboardPage />} />
+            <Route path="ai/governance/reports" element={<AiGovernanceReportsPage />} />
             <Route path="ai/experiments" element={<ExperimentTrackingPage />} />
             <Route path="ai/drift" element={<DriftMonitoringPage />} />
             <Route path="ai/insights" element={<AiInsightsPage />} />

@@ -2211,6 +2211,31 @@ export const api = {
       .get<EnvelopeBody<AiModelListPage>>(`/v1/ai/models${type ? `?type=${encodeURIComponent(type)}` : ''}`)
       .then((r) => r.data),
 
+  // M6.x — prediction audit log list (BFF GET /v1/ai/predictions).
+  // Newest-first, tenant-scoped, paginated. Backs the Prediction Audit
+  // Logs page under the AI Governance Center.
+  aiPredictions: (params: {
+    customer_id?: string;
+    model_id?: string;
+    model_version?: string;
+    prediction_type?: string;
+    since?: string;
+    until?: string;
+    page?: number;
+    page_size?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+    }
+    const q = qs.toString();
+    return http
+      .get<EnvelopeBody<{ items: PredictionRow[]; page: number; page_size: number; total: number }>>(
+        `/v1/ai/predictions${q ? `?${q}` : ''}`,
+      )
+      .then((r) => r.data);
+  },
+
   // M4.2 — Model Registry CRUD. Status changes go through the gate +
   // maker-checker flow (aiPromotionRequest...), not these endpoints.
   aiModelCreate: (body: {
