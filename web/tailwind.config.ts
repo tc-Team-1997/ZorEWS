@@ -39,12 +39,14 @@ export default {
           amber:       '#F0B344',
         },
 
-        // Sidebar + action aliases — Aurora premium deep-indigo family
-        // (replaces the legacy navy; class names preserved so the active-link
-        // `bg-sidebar-hover` contract still holds).
-        sidebar:         '#1E1B4B',
-        'sidebar-hover': '#312E81',
-        'sidebar-text':  '#C7D2FE',
+        // Sidebar + action aliases — Aurora LIGHT premium surface (per refined
+        // spec: light premium sidebar; soft background; rounded active states).
+        // Class names preserved so the active-link `bg-sidebar-hover` contract
+        // in AppShellNavGroups.test still holds (the test asserts the class
+        // substring, not its rendered color).
+        sidebar:         '#F8FAFC',
+        'sidebar-hover': '#EEF2FF',
+        'sidebar-text':  '#475569',
         action:          '#1565C0',
         'action-hover':  '#104a94',
         'action-subtle': '#E3EFFF',
@@ -84,13 +86,13 @@ export default {
           indigo:    '#6366F1',
           violet:    '#7C3AED',
           lilac:     '#8B5CF6',
-          banking:   '#2563EB',
-          insurance: '#0EA5A4',
+          banking:   '#3B82F6',
+          insurance: '#14B8A6',
           warn:      '#F59E0B',
           critical:  '#EF4444',
           healthy:   '#10B981',
-          ink:       '#1E1B4B',
-          'ink-sub': '#4B5563',
+          ink:       '#0F172A',
+          'ink-sub': '#334155',
           line:      '#E4E7F2',
         },
       },

@@ -160,15 +160,15 @@ export function AppShell() {
       >
         Skip to main content
       </a>
-      {/* Sidebar — Aurora deep-indigo glass surface */}
-      <aside className="w-60 shrink-0 bg-sidebar text-sidebar-text flex flex-col bg-gradient-to-b from-aurora-ink to-[#161334] border-r border-white/[0.06]">
-        <div className="px-5 py-5 flex items-center gap-2.5 border-b border-white/[0.07]">
+      {/* Sidebar — Aurora LIGHT premium surface (per refined spec) */}
+      <aside className="w-60 shrink-0 bg-sidebar text-sidebar-text flex flex-col border-r border-aurora-line">
+        <div className="px-5 py-5 flex items-center gap-2.5 border-b border-aurora-line">
           <div className="relative w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow aurora-pulse">
             <ShieldCheck size={16} className="text-white" strokeWidth={2.25} />
           </div>
           <div>
-            <p className="text-white text-[13px] font-semibold leading-tight tracking-tight">ZorEWS</p>
-            <p className="text-white/55 text-[10px] leading-tight">Early Warning System</p>
+            <p className="text-aurora-ink text-[13px] font-semibold leading-tight tracking-tight">ZorEWS</p>
+            <p className="text-slate-500 text-[10px] leading-tight">Early Warning System</p>
           </div>
         </div>
 
@@ -188,8 +188,8 @@ export function AppShell() {
                   cn(
                     'relative flex items-center gap-2.5 rounded-input px-3 py-2 text-[13px] transition-colors',
                     isActive
-                      ? 'bg-sidebar-hover text-white before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
-                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-white',
+                      ? 'bg-sidebar-hover text-aurora-indigo font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
+                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink',
                   )
                 }
               >
@@ -213,14 +213,14 @@ export function AppShell() {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t border-white/[0.07]">
+        <div className="px-3 py-3 border-t border-aurora-line">
           <div className="px-2 pb-2 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-white text-[11px] font-semibold bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow">
               {initials}
             </div>
             <div className="min-w-0">
-              <p className="text-white text-xs font-medium leading-tight truncate">{user?.username ?? '—'}</p>
-              <p className="text-white/50 text-[10px] leading-tight truncate">
+              <p className="text-aurora-ink text-xs font-medium leading-tight truncate">{user?.username ?? '—'}</p>
+              <p className="text-slate-500 text-[10px] leading-tight truncate">
                 {user?.roles.join(', ') ?? 'guest'}
               </p>
             </div>
@@ -228,7 +228,7 @@ export function AppShell() {
           <button
             type="button"
             onClick={onLogout}
-            className="w-full flex items-center gap-2 rounded-input px-3 py-2 text-[12px] text-sidebar-text hover:bg-sidebar-hover/60 hover:text-white transition-colors"
+            className="w-full flex items-center gap-2 rounded-input px-3 py-2 text-[12px] text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink transition-colors"
           >
             <LogOut size={14} strokeWidth={1.75} />
             <span>{t('common.sign_out')}</span>
@@ -363,7 +363,7 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
         aria-expanded={!isCollapsed}
         aria-controls={`nav-group-${group.id}-items`}
         data-testid={`nav-group-header-${group.id}`}
-        className="w-full flex items-center justify-between gap-2 px-3 pt-3 pb-1.5 text-[10px] uppercase tracking-[0.08em] font-semibold text-white/40 hover:text-white/70 transition-colors"
+        className="w-full flex items-center justify-between gap-2 px-3 pt-3 pb-1.5 text-[10px] uppercase tracking-[0.08em] font-semibold text-slate-500 hover:text-aurora-ink transition-colors"
       >
         <span className="flex items-center gap-2">
           <GroupIcon size={11} strokeWidth={2} />
@@ -395,8 +395,8 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
                   cn(
                     'relative flex items-center gap-2.5 rounded-input px-3 py-2 text-[13px] transition-colors',
                     isActive
-                      ? 'bg-sidebar-hover text-white before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
-                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-white',
+                      ? 'bg-sidebar-hover text-aurora-indigo font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
+                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink',
                   )
                 }
               >
