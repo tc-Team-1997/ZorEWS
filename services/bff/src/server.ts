@@ -509,6 +509,9 @@ import {
 import type { RuleProduct, RuleState as RuleV2State } from './rules/types';
 import { wrapError, wrapResponse, readRequestId, extractCtx, EnterpriseError, type ErrorSeverity } from './envelope';
 import { requireTenant, defaultTenantLookup, TenantConflict, type TenantLookup } from './tenant';
+// Enterprise Permission Matrix (049_rbac_permission_matrix.sql overlay)
+// is consumed via lazy `require('./rbac/permission_matrix')` inside the
+// RBAC route block — same lazy-load pattern used elsewhere in this file.
 import {
   runReadinessChecks,
   type ReadinessTenantLookup,
@@ -1047,6 +1050,12 @@ export interface AppDeps {
   evaluator?: Evaluator;
   riskProfile?: RiskProfileSource;
   caseAction?: CaseActionSink;
+  /**
+   * Override for tests — Enterprise Permission Matrix store (049 / Phase 9).
+   * Defaults to the module-level singleton seeded from buildDefaultMatrixSeed
+   * which mirrors data/schema/049_rbac_permission_matrix.sql.
+   */
+  permissionMatrixStore?: import('./rbac/permission_matrix').IPermissionMatrixStore;
   /** Override for tests — defaults to the cached synthetic portfolio. */
   portfolio?: Account[];
   /** Override for tests — pings the integration-mocks service when omitted. */
@@ -35750,6 +35759,150 @@ export function makeApp(deps: AppDeps = {}) {
       res.status(204).end();
     },
   );
+
+  // ── Enterprise Permission Matrix — overlay on top of requireRole ──
+  //
+  // The 8 routes below back the SPA matrix editor + the runtime
+  // permission resolver. They live alongside (NOT replacing) the
+  // legacy operation-string RBAC the rest of /v1/* still enforces.
+  //
+  // Source-of-truth schema: data/schema/049_rbac_permission_matrix.sql
+  // Resolver:               services/bff/src/rbac/permission_matrix.ts
+  // Middleware:             services/bff/src/rbac/permission_middleware.ts
+  //
+  // Tenant gate (requireTenantMw) preserved. Audit:read used as the
+  // legacy gate while the matrix bootstraps its own gating (permission_matrix
+  // module). Future direction: route below uses requireModulePermission
+  // self-referentially once a few releases of telemetry confirm the matrix
+  // is in steady state.
+
+  const _rbac_pm = require('./rbac/permission_matrix') as typeof import('./rbac/permission_matrix');
+
+  /** GET /v1/rbac/actions — closed 7-value action enum. */
+  app.get('/v1/rbac/actions', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse({ total: _rbac_pm.PERMISSION_ACTION_CATALOG.length, actions: _rbac_pm.PERMISSION_ACTION_CATALOG }, ctx));
+  });
+
+  /** GET /v1/rbac/modules — module catalog. */
+  app.get('/v1/rbac/modules', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse({ total: _rbac_pm.PERMISSION_MODULE_CATALOG.length, modules: _rbac_pm.PERMISSION_MODULE_CATALOG }, ctx));
+  });
+
+  /** GET /v1/rbac/roles — 10-role enterprise catalog. */
+  app.get('/v1/rbac/roles', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    res.json(wrapResponse({ total: _rbac_pm.ENTERPRISE_ROLE_IDS.length, roles: _rbac_pm.ENTERPRISE_ROLE_IDS }, ctx));
+  });
+
+  /** GET /v1/rbac/matrix — full role × module × action snapshot. */
+  app.get('/v1/rbac/matrix', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const store = deps.permissionMatrixStore ?? _rbac_pm.defaultPermissionMatrixStore();
+    res.json(wrapResponse(store.snapshot(now()), ctx));
+  });
+
+  /** GET /v1/rbac/matrix/:role — single role's grid (module → action → granted). */
+  app.get('/v1/rbac/matrix/:role', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const role = req.params.role;
+    if (!(_rbac_pm.ENTERPRISE_ROLE_IDS as readonly string[]).includes(role)) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_role', message: `unknown role ${role}`, severity: 'LOW' }, ctx),
+      );
+    }
+    const store = deps.permissionMatrixStore ?? _rbac_pm.defaultPermissionMatrixStore();
+    res.json(wrapResponse(store.gridForRole(role), ctx));
+  });
+
+  /** PUT /v1/rbac/matrix/:role — replace a role's grants (bulk).
+   *  Body: `{ grants: { [module_id]: { [action]: boolean } } }`.
+   *  Touches only the cells in the payload — omitted cells are left alone.
+   *  configure-action on permission_matrix module is the natural future gate;
+   *  for now we route through audit:read to stay backward-compatible while
+   *  the SPA editor lands. */
+  app.put('/v1/rbac/matrix/:role', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const role = req.params.role;
+    if (!(_rbac_pm.ENTERPRISE_ROLE_IDS as readonly string[]).includes(role)) {
+      return res.status(404).json(
+        wrapError({ code: 'EWS_404_unknown_role', message: `unknown role ${role}`, severity: 'LOW' }, ctx),
+      );
+    }
+    const body = req.body as { grants?: Record<string, Record<string, boolean>> };
+    if (!body || typeof body.grants !== 'object' || body.grants === null) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400_invalid_grants', message: 'grants object required', severity: 'MEDIUM' }, ctx),
+      );
+    }
+    const actor = (req.header('x-apex-user') as string | undefined) ?? 'admin';
+    const actorRole = (req.header('x-apex-role') as string | undefined) ?? 'admin';
+    const store = deps.permissionMatrixStore ?? _rbac_pm.defaultPermissionMatrixStore();
+    try {
+      const touched = store.setRoleGrants(role, body.grants, actor, now());
+      // Best-effort audit fan-out via existing trail store; matches M13.2 pattern.
+      if (deps.auditTrailStore) {
+        try {
+          deps.auditTrailStore.record(req.tenant!.tenant_id, {
+            actor_username: actor,
+            actor_role: actorRole,
+            action: 'rbac.matrix.update',
+            resource_type: 'config',
+            resource_id: `rbac:${role}`,
+            outcome: 'success',
+            severity: 'info',
+            metadata: { role, cells_touched: touched.length },
+          }, now());
+        } catch {
+          /* best-effort */
+        }
+      }
+      res.json(wrapResponse({ role, cells_touched: touched.length, grid: store.gridForRole(role) }, ctx));
+    } catch (e) {
+      const code = e instanceof _rbac_pm.PermissionMatrixError ? `EWS_400_${e.code}` : 'EWS_400_invalid_grants';
+      const message = e instanceof Error ? e.message : 'invalid_grants';
+      return res.status(400).json(wrapError({ code, message, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  /** GET /v1/rbac/me/permissions — caller's resolved permission grid.
+   *  Reads role from x-apex-role header (test convention) or req.user.role
+   *  (JWT auth). Drives the SPA's useCan() hook + UI gating. */
+  app.get('/v1/rbac/me/permissions', requireTenantMw, (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const role = (req.header('x-apex-role') as string | undefined) ?? '';
+    const roles = role ? [role] : [];
+    const store = deps.permissionMatrixStore ?? _rbac_pm.defaultPermissionMatrixStore();
+    res.json(wrapResponse(store.resolveForRoles(roles), ctx));
+  });
+
+  /** POST /v1/rbac/check — server-side permission check.
+   *  Body: `{ role?, module, action }`. role defaults to caller's. */
+  app.post('/v1/rbac/check', requireTenantMw, (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const body = req.body as { role?: string; module?: string; action?: string };
+    const role = body?.role ?? (req.header('x-apex-role') as string | undefined) ?? '';
+    const module_id = body?.module;
+    const action = body?.action;
+    if (!role || !module_id || !action) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400_invalid_input', message: 'role + module + action required', severity: 'MEDIUM' }, ctx),
+      );
+    }
+    if (!_rbac_pm.isPermissionAction(action)) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400_unknown_action', message: `unknown action ${action}`, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    if (!_rbac_pm.isPermissionModuleId(module_id)) {
+      return res.status(400).json(
+        wrapError({ code: 'EWS_400_unknown_module', message: `unknown module ${module_id}`, severity: 'MEDIUM' }, ctx),
+      );
+    }
+    const store = deps.permissionMatrixStore ?? _rbac_pm.defaultPermissionMatrixStore();
+    res.json(wrapResponse({ role, module: module_id, action, granted: store.isGranted(role, module_id, action) }, ctx));
+  });
 
   /** GET /v1/recovery — list deleted records (tenant-scoped, admin-only). */
   app.get('/v1/recovery', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
