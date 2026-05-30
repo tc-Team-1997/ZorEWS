@@ -6131,7 +6131,14 @@ export const USER_BRANCH_MAP: Record<string, { branch: string; department: strin
 export type AdminAuditEntityType =
   | 'user_access_override'
   | 'report_export'
-  | 'ews_rule_version';
+  | 'ews_rule_version'
+  /** Phase 9 T1-full — admin user-lifecycle actions sourced from auth-svc:
+   *  user_force_logout, user_disabled, user_enabled, user_locked, user_unlocked,
+   *  user_created, user_deleted, user_role_changed, admin_password_reset.
+   *  These come from app_iam.audit_events (auth-svc) and are merged into
+   *  the AdminActivityPage timeline alongside the app_admin.admin_audit_log
+   *  sources above. */
+  | 'admin_user_action';
 
 export type AdminAuditAction =
   | 'create'
@@ -6142,7 +6149,16 @@ export type AdminAuditAction =
   | 'expire'
   | 'export'
   | 'view'
-  | 'revert';
+  | 'revert'
+  /** Phase 9 T1-full — auth-svc-sourced action types */
+  | 'force_logout'
+  | 'disable'
+  | 'enable'
+  | 'lock'
+  | 'unlock'
+  | 'delete'
+  | 'role_change'
+  | 'password_reset';
 
 export interface AdminAuditLogRow {
   audit_id: string;

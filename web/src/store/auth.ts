@@ -134,6 +134,12 @@ export type AuthEventType =
   | 'user_deleted'
   | 'user_locked'
   | 'user_unlocked'
+  /** Phase 9 T1-partial — admin lifecycle actions */
+  | 'user_disabled'
+  | 'user_enabled'
+  | 'user_force_logout'
+  /** M6.1 — admin changes a user's role */
+  | 'user_role_changed'
   | 'register_success';
 
 export interface AuthAuditEvent {

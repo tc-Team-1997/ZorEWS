@@ -91,6 +91,68 @@ describe('AdminActivityPage — entity_type filter', () => {
   });
 });
 
+describe('AdminActivityPage — Phase 9 T1-full admin_user_action source', () => {
+  it('All-sources view merges auth-svc admin events into the timeline', async () => {
+    authAsAdmin();
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId('activity-table')).toBeInTheDocument());
+    // The 4 MSW seed admin actions (user_disabled, user_force_logout,
+    // user_enabled, user_role_changed) should ALL render rows with the
+    // new admin_user_action entity type when no filter is applied.
+    await waitFor(() => {
+      const table = screen.getByTestId('activity-table');
+      const adminActionRows = table.querySelectorAll('[data-entity-type="admin_user_action"]');
+      expect(adminActionRows.length).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  it('stat counter reflects the merged admin_user_action count', async () => {
+    authAsAdmin();
+    renderAt();
+    await waitFor(() => {
+      const stat = screen.getByTestId('stat-admin-user-action');
+      expect(Number(stat.textContent)).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  it('switching to admin_user_action filter shows only auth-svc rows (no UAO/exports)', async () => {
+    authAsAdmin();
+    const user = userEvent.setup();
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId('activity-table')).toBeInTheDocument());
+    await user.selectOptions(screen.getByTestId('filter-entity-type'), 'admin_user_action');
+    await waitFor(() => {
+      const table = screen.getByTestId('activity-table');
+      expect(
+        table.querySelectorAll('[data-entity-type="user_access_override"]').length,
+      ).toBe(0);
+      expect(table.querySelectorAll('[data-entity-type="report_export"]').length).toBe(0);
+      expect(table.querySelectorAll('[data-entity-type="ews_rule_version"]').length).toBe(0);
+      expect(
+        table.querySelectorAll('[data-entity-type="admin_user_action"]').length,
+      ).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  it('admin_user_action rows render the target_username + action badge', async () => {
+    authAsAdmin();
+    const user = userEvent.setup();
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId('activity-table')).toBeInTheDocument());
+    await user.selectOptions(screen.getByTestId('filter-entity-type'), 'admin_user_action');
+    await waitFor(() => {
+      const table = screen.getByTestId('activity-table');
+      // The 4 MSW seed targets should be visible (eve.eve, mallory.brute,
+      // ravi.risk) as entity_id text.
+      expect(table.textContent).toMatch(/eve\.eve/);
+      expect(table.textContent).toMatch(/mallory\.brute/);
+      // And the action vocabulary should map to the new badges.
+      expect(table.textContent).toMatch(/force_logout/);
+      expect(table.textContent).toMatch(/role_change/);
+    });
+  });
+});
+
 describe('AdminActivityPage — deep links', () => {
   it('rule-revert row links to the diff viewer with reverted_to_semver as ?from', async () => {
     authAsAdmin();

@@ -21,13 +21,68 @@ import {
   type AdminAuditEntityType,
   type AdminAuditLogRow,
 } from '@/lib/api';
+import { useAuth, type AuthAuditEvent, type AuthEventType } from '@/store/auth';
 
 const ENTITY_FILTERS: { value: '' | AdminAuditEntityType; label: string }[] = [
   { value: '', label: 'All sources' },
   { value: 'user_access_override', label: 'User access overrides' },
   { value: 'report_export', label: 'Report exports' },
   { value: 'ews_rule_version', label: 'EWS rule reverts' },
+  // Phase 9 T1-full — auth-svc audit-event source
+  { value: 'admin_user_action', label: 'Admin user actions' },
 ];
+
+/** Phase 9 T1-full — map an auth-svc AuthEventType onto our AdminAuditAction
+ *  vocabulary. Returns null when the event isn't an admin action (login,
+ *  password-reset-request, etc. — those live on /admin/audit-log, NOT here). */
+function authEventToAdminAction(t: AuthEventType): AdminAuditAction | null {
+  switch (t) {
+    case 'user_force_logout':
+      return 'force_logout';
+    case 'user_disabled':
+      return 'disable';
+    case 'user_enabled':
+      return 'enable';
+    case 'user_locked':
+      return 'lock';
+    case 'user_unlocked':
+      return 'unlock';
+    case 'user_created':
+      return 'create';
+    case 'user_deleted':
+      return 'delete';
+    case 'user_role_changed':
+      return 'role_change';
+    case 'admin_password_reset':
+      return 'password_reset';
+    default:
+      return null;
+  }
+}
+
+/** Phase 9 T1-full — adapt an AuthAuditEvent into the AdminAuditLogRow shape
+ *  so the existing table renders it without per-source branching. Returns
+ *  null when the event isn't an admin action. */
+function adaptAuthEvent(ev: AuthAuditEvent): AdminAuditLogRow | null {
+  const action = authEventToAdminAction(ev.type);
+  if (!action) return null;
+  return {
+    audit_id: ev.id,
+    tenant_id: (ev.metadata.tenant_id as string) ?? 'BANK_DEMO',
+    entity_type: 'admin_user_action',
+    entity_id: ev.target_username ?? '—',
+    action,
+    actor_id: ev.actor_username ?? 'system',
+    actor_role: ev.actor_role ?? 'admin',
+    before_state: null,
+    after_state: { ...ev.metadata, event_type: ev.type, target_username: ev.target_username },
+    reason: (ev.metadata.reason as string | undefined) ?? null,
+    request_id: null,
+    ip_address: ev.ip,
+    user_agent: null,
+    created_at: ev.ts,
+  };
+}
 
 const ACTION_TONE: Record<AdminAuditAction, 'success' | 'warning' | 'danger' | 'neutral'> = {
   create: 'success',
@@ -39,12 +94,22 @@ const ACTION_TONE: Record<AdminAuditAction, 'success' | 'warning' | 'danger' | '
   export: 'neutral',
   view: 'neutral',
   revert: 'warning',
+  // Phase 9 T1-full — admin-action tones
+  force_logout: 'danger',
+  disable: 'danger',
+  enable: 'success',
+  lock: 'warning',
+  unlock: 'success',
+  delete: 'danger',
+  role_change: 'warning',
+  password_reset: 'neutral',
 };
 
 const ENTITY_LABEL: Record<AdminAuditEntityType, string> = {
   user_access_override: 'Override',
   report_export: 'Report',
   ews_rule_version: 'Rule',
+  admin_user_action: 'User action',
 };
 
 function fmtTs(iso: string): string {
@@ -89,17 +154,53 @@ export function AdminActivityPage() {
   const [actorQuery, setActorQuery] = useState('');
   const trimmedActor = actorQuery.trim();
 
+  // Existing source — app_admin.admin_audit_log (UAO + report exports +
+  // EWS rule reverts). Skip when the entityFilter pins to admin_user_action.
   const q = useQuery({
     queryKey: ['admin-activity', entityFilter, trimmedActor],
     queryFn: () =>
       api.uaoAuditLog({
-        entity_type: entityFilter || undefined,
+        entity_type:
+          entityFilter && entityFilter !== 'admin_user_action' ? entityFilter : undefined,
         actor_id: trimmedActor || undefined,
         page_size: 200,
       }),
+    enabled: entityFilter !== 'admin_user_action',
   });
 
-  const items = q.data?.items ?? [];
+  // Phase 9 T1-full — auth-svc audit-event source. Fetched when filter is
+  // 'admin_user_action' OR '' (the unified-timeline view).
+  const adminAuditLog = useAuth((s) => s.adminAuditLog);
+  const authQ = useQuery({
+    queryKey: ['admin-activity-auth', trimmedActor],
+    queryFn: () => adminAuditLog({ limit: 200 }),
+    enabled: entityFilter === '' || entityFilter === 'admin_user_action',
+  });
+
+  const items = useMemo(() => {
+    const uaoItems = q.data?.items ?? [];
+    const authItemsRaw = authQ.data ?? [];
+    // Adapt auth events to AdminAuditLogRow + drop non-admin actions.
+    const authItems = authItemsRaw
+      .map(adaptAuthEvent)
+      .filter((r): r is AdminAuditLogRow => r !== null)
+      .filter((r) => (trimmedActor ? r.actor_id === trimmedActor : true));
+    // Filter to the requested source.
+    let merged: AdminAuditLogRow[];
+    if (entityFilter === 'admin_user_action') {
+      merged = authItems;
+    } else if (entityFilter === '') {
+      merged = [...uaoItems, ...authItems];
+    } else {
+      merged = uaoItems;
+    }
+    // Sort newest-first by created_at; cap at 200 to match the existing
+    // capped contract.
+    return merged
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .slice(0, 200);
+  }, [q.data, authQ.data, entityFilter, trimmedActor]);
+
   const stats = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of items) counts[r.entity_type] = (counts[r.entity_type] ?? 0) + 1;
@@ -215,7 +316,10 @@ export function AdminActivityPage() {
               Showing <span className="font-mono">{items.length}</span> rows · UAO{' '}
               <span className="font-mono">{stats.user_access_override ?? 0}</span> · exports{' '}
               <span className="font-mono">{stats.report_export ?? 0}</span> · reverts{' '}
-              <span className="font-mono">{stats.ews_rule_version ?? 0}</span>
+              <span className="font-mono">{stats.ews_rule_version ?? 0}</span> · user actions{' '}
+              <span className="font-mono" data-testid="stat-admin-user-action">
+                {stats.admin_user_action ?? 0}
+              </span>
             </p>
           </div>
         </div>
@@ -309,6 +413,20 @@ function EntityLink({ row }: { row: AdminAuditLogRow }) {
   }
   if (row.entity_type === 'user_access_override') {
     return <Link to="/admin/user-access-override" className="text-blue-600 hover:underline">{row.entity_id.slice(0, 12)}…</Link>;
+  }
+  // Phase 9 T1-full — for admin user actions the entity_id is the
+  // target_username; deep-link to /admin/sessions filtered to that user
+  // (force-logout / disable / lock all touch sessions) for context.
+  if (row.entity_type === 'admin_user_action') {
+    return (
+      <Link
+        to="/admin/users"
+        className="text-blue-600 hover:underline"
+        title="Open Users admin"
+      >
+        {row.entity_id}
+      </Link>
+    );
   }
   return <span>{row.entity_id.slice(0, 12)}…</span>;
 }

@@ -4492,6 +4492,12 @@ export const handlers = [
         ['admin_password_reset', 'carl.collect', 'admin'],
         ['user_unlocked', 'mallory.brute', null],
         ['login_success', 'sue.super', 'supervisor'],
+        // Phase 9 T1-partial + T1-full — admin lifecycle actions so the
+        // AdminActivityPage unified timeline has rows to render in dev.
+        ['user_disabled', 'eve.eve', 'admin'],
+        ['user_force_logout', 'mallory.brute', 'admin'],
+        ['user_enabled', 'eve.eve', 'admin'],
+        ['user_role_changed', 'ravi.risk', 'admin'],
       ];
       for (let i = 0; i < types.length; i++) {
         const [t, target_username, actor_role] = types[i]!;
