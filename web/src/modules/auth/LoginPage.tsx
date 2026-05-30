@@ -225,8 +225,7 @@ export function LoginPage() {
           <span className="aurora-chip mb-3">
             <Sparkles size={12} /> Secure access
           </span>
-          <h2 className="text-[22px] font-semibold text-aurora-ink mb-1 tracking-tight">{t('login.heading')}</h2>
-          <p className="text-[13px] text-aurora-ink-sub mb-5">{t('login.subtitle')}</p>
+          <h2 className="text-[22px] font-semibold text-aurora-ink mb-5 tracking-tight">{t('login.heading')}</h2>
 
           {idleSignOut && (
             <div

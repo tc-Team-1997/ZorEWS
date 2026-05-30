@@ -10,13 +10,14 @@ import { useAuth } from '@/store/auth';
 import { getOrganization } from '@/lib/organizations';
 
 describe('LoginPage', () => {
-  it('renders the premium sign-in form (demo accounts hint removed per refined spec)', () => {
+  it('renders the premium sign-in form (demo accounts hint + subtitle removed per refined spec)', () => {
     renderWithProviders(<LoginPage />);
     expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
-    expect(screen.getByText(/Risk operations for authorised staff only/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
-    // Demo accounts hint deliberately removed (user spec 2026-05-30) — keep
-    // negative assertion so it doesn't quietly come back via re-merge.
+    // The following copy was deliberately removed per the user's refined spec
+    // (2026-05-30) — keep negative assertions so they can't quietly come back
+    // via re-merge.
+    expect(screen.queryByText(/Risk operations for authorised staff only/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/alice\.admin/)).not.toBeInTheDocument();
     expect(screen.queryByText(/ravi\.risk/)).not.toBeInTheDocument();
     expect(screen.queryByText(/fiona\.field/)).not.toBeInTheDocument();
