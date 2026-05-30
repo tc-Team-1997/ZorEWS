@@ -690,6 +690,61 @@ export interface BacktestResult {
   monthly_volume: { month: string; count: number }[];
 }
 
+// ── Phase 9 T10 — Rule Engine fleet report (mirrors services/bff/src/rule_engine_report.ts) ──
+
+export type RuleFamily = 'Financial' | 'Behavioural' | 'Transaction' | 'Credit' | 'Fraud';
+// RuleSeverity + RulePerformanceStatus declared earlier in this file (lines
+// 592 + 652) — re-using them keeps a single source of truth across the
+// rule report types.
+
+export interface RuleEngineReportRow {
+  rule_id: string;
+  name: string;
+  family: RuleFamily;
+  state: RuleV2State;
+  severity: RuleSeverity;
+  version: string;
+  applicable_products: RuleProduct[];
+  total_alerts_12mo: number;
+  triggers_month: number;
+  triggers_today: number;
+  triggers_week: number;
+  precision_pct: number;
+  coverage_pct: number;
+  false_positive_rate: number;
+  officer_useful_pct: number;
+  avg_days_to_default: number;
+  status: RulePerformanceStatus;
+  last_modified_at: string;
+}
+
+export interface FleetMonthlyVolumePoint {
+  month: string;
+  total_alerts: number;
+  by_family: Record<RuleFamily, number>;
+}
+
+export interface RuleEngineReport {
+  tenant_id: string;
+  generated_at: string;
+  total_rules: number;
+  total_active_rules: number;
+  by_state: Record<RuleV2State, number>;
+  by_family: Record<RuleFamily, number>;
+  by_severity: Record<RuleSeverity, number>;
+  by_performance_status: Record<RulePerformanceStatus, number>;
+  total_alerts_12mo: number;
+  triggers_month_total: number;
+  mean_precision_pct: number | null;
+  mean_coverage_pct: number | null;
+  mean_false_positive_rate: number | null;
+  monthly_volume: FleetMonthlyVolumePoint[];
+  rows: RuleEngineReportRow[];
+  top_firing: RuleEngineReportRow[];
+  underperforming: RuleEngineReportRow[];
+  silent_rules: RuleEngineReportRow[];
+}
+
 // ── SLA enforcement ─────────────────────────────────────────────────────
 
 export type SlaStatus = 'on_track' | 'approaching' | 'breached' | 'closed';
@@ -921,6 +976,12 @@ export const api = {
 
   ruleBacktest: (id: string) =>
     http.post<BacktestResult>(`/v1/rules/${id}/backtest`).then((r) => r.data),
+
+  /** Phase 9 T10 — fleet-wide rule engine report (envelope-wrapped). */
+  ruleEngineReport: () =>
+    http
+      .get<EnvelopeBody<RuleEngineReport>>('/v1/rules/reports/engine-summary')
+      .then((r) => r.data),
 
   downloadReport: async (
     type: ReportType,

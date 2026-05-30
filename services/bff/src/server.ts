@@ -289,6 +289,7 @@ import {
 import { WebhookDispatcher } from './webhooks/dispatcher';
 import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
+import { buildRuleEngineReport } from './rule_engine_report';
 import {
   getTemplate as getRuleTemplate,
   isRuleTemplateCategory,
@@ -35383,6 +35384,31 @@ export function makeApp(deps: AppDeps = {}) {
     }));
     res.json(wrapResponse({ items: enriched, total: enriched.length }, ctx));
   });
+
+  /** Phase 9 T10 — GET /v1/rules/reports/engine-summary
+   *
+   *  Fleet-wide rule engine report: cohort counts (by state/family/severity),
+   *  trailing 12-month fleet volume with per-family breakdown, mean precision /
+   *  coverage / FP across ACTIVE rules only, plus 3 ranked subsets the SPA
+   *  drills into (top_firing / underperforming / silent_rules).
+   *
+   *  Mounted BEFORE `/v1/rules/:id` so the literal `/reports/engine-summary`
+   *  segment isn't captured by the param wildcard.
+   */
+  app.get(
+    '/v1/rules/reports/engine-summary',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenantId = req.tenant!.tenant_id;
+      // Pull the full rule list (no filter — the aggregator needs every state
+      // for the cohort counts; active-only filtering happens inside).
+      const rules = ruleStore.list();
+      const report = buildRuleEngineReport(tenantId, rules, now());
+      res.json(wrapResponse(report, ctx));
+    },
+  );
 
   /** GET /v1/rules/:id — full rule envelope with audit trail. */
   app.get('/v1/rules/:id', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {

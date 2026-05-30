@@ -5077,6 +5077,142 @@ export const handlers = [
     return HttpResponse.json({ items, total: items.length });
   }),
 
+  // Phase 9 T10 — synth fleet-wide rule engine report. Built from rulesV2Seed
+  // by joining each envelope's rule + performance into the RuleEngineReportRow
+  // shape + computing cohort tallies + a deterministic monthly volume series
+  // from a fixed seed-per-rule. Mounted BEFORE /v1/rules/:id so the literal
+  // /reports/engine-summary segment isn't captured by the param wildcard.
+  http.get('/v1/rules/reports/engine-summary', () => {
+    const envelopes = rulesV2Seed();
+    const byState: Record<string, number> = {
+      draft: 0,
+      pending_review: 0,
+      approved: 0,
+      active: 0,
+      rejected: 0,
+      deprecated: 0,
+    };
+    const byFamily: Record<string, number> = {
+      Financial: 0,
+      Behavioural: 0,
+      Transaction: 0,
+      Credit: 0,
+      Fraud: 0,
+    };
+    const bySeverity: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+    const byPerf: Record<string, number> = {
+      performing: 0,
+      underperforming: 0,
+      deprecated: 0,
+      no_data: 0,
+    };
+    const rows = envelopes.map((e, idx) => {
+      const r = e.rule;
+      const perf = e.performance;
+      byState[r.state] = (byState[r.state] ?? 0) + 1;
+      byFamily[r.family] = (byFamily[r.family] ?? 0) + 1;
+      bySeverity[r.outcome.severity] = (bySeverity[r.outcome.severity] ?? 0) + 1;
+      byPerf[perf.status] = (byPerf[perf.status] ?? 0) + 1;
+      const total12 = Math.round(perf.triggers_month * 11.5 + (idx % 7) * 4);
+      return {
+        rule_id: r.id,
+        name: r.name,
+        family: r.family,
+        state: r.state,
+        severity: r.outcome.severity,
+        version: r.version,
+        applicable_products: r.applicable_products,
+        total_alerts_12mo: total12,
+        triggers_month: perf.triggers_month,
+        triggers_today: perf.triggers_today,
+        triggers_week: perf.triggers_week,
+        precision_pct: 100 - perf.false_positive_rate,
+        coverage_pct: Math.min(95, Math.round((total12 / 220) * 1000) / 10),
+        false_positive_rate: perf.false_positive_rate,
+        officer_useful_pct: perf.officer_useful_pct,
+        avg_days_to_default: perf.avg_days_to_default,
+        status: perf.status,
+        last_modified_at: r.updated_at,
+      };
+    });
+    const active = rows.filter((r) => r.state === 'active');
+    rows.sort((a, b) =>
+      b.total_alerts_12mo !== a.total_alerts_12mo
+        ? b.total_alerts_12mo - a.total_alerts_12mo
+        : a.rule_id < b.rule_id ? -1 : 1,
+    );
+    const total_alerts_12mo = active.reduce((acc, r) => acc + r.total_alerts_12mo, 0);
+    const triggers_month_total = active.reduce((acc, r) => acc + r.triggers_month, 0);
+    const monthly_volume: Array<{
+      month: string;
+      total_alerts: number;
+      by_family: Record<string, number>;
+    }> = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now);
+      d.setUTCMonth(d.getUTCMonth() - i);
+      const m = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      const fams: Record<string, number> = {
+        Financial: 0,
+        Behavioural: 0,
+        Transaction: 0,
+        Credit: 0,
+        Fraud: 0,
+      };
+      let total = 0;
+      for (const r of active) {
+        const v = Math.max(0, Math.round((r.total_alerts_12mo / 12) * (0.75 + ((i + 1) % 4) * 0.15)));
+        fams[r.family] = (fams[r.family] ?? 0) + v;
+        total += v;
+      }
+      monthly_volume.push({ month: m, total_alerts: total, by_family: fams });
+    }
+    const mean = (acc: number, len: number) => (len === 0 ? null : Math.round((acc / len) * 10) / 10);
+    return HttpResponse.json({
+      header: {
+        status: 200,
+        code: 'EWS_200',
+        message: 'ok',
+        requestId: `req-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+      body: {
+        tenant_id: 'BANK_DEMO',
+        generated_at: new Date().toISOString(),
+        total_rules: rows.length,
+        total_active_rules: active.length,
+        by_state: byState,
+        by_family: byFamily,
+        by_severity: bySeverity,
+        by_performance_status: byPerf,
+        total_alerts_12mo,
+        triggers_month_total,
+        mean_precision_pct: mean(
+          active.reduce((a, r) => a + r.precision_pct, 0),
+          active.length,
+        ),
+        mean_coverage_pct: mean(
+          active.reduce((a, r) => a + r.coverage_pct, 0),
+          active.length,
+        ),
+        mean_false_positive_rate: mean(
+          active.reduce((a, r) => a + r.false_positive_rate, 0),
+          active.length,
+        ),
+        monthly_volume,
+        rows,
+        top_firing: rows.slice(0, 10),
+        underperforming: rows
+          .filter((r) => r.state === 'active' && r.status === 'underperforming')
+          .sort((a, b) => b.false_positive_rate - a.false_positive_rate),
+        silent_rules: rows
+          .filter((r) => r.state === 'active' && r.total_alerts_12mo === 0)
+          .sort((a, b) => (a.rule_id < b.rule_id ? -1 : 1)),
+      },
+    });
+  }),
+
   http.get('/v1/rules/:id', ({ params }) => {
     const r = rulesV2Seed().find((x) => x.rule.id === params.id);
     if (!r) return HttpResponse.json({ error: 'rule_not_found' }, { status: 404 });

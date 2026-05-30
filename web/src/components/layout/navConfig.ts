@@ -237,6 +237,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // Rules surfaces — Rules library + EWS DSL builder live here too
       { to: '/rules',                      i18nKey: 'rules',                icon: SlidersHorizontal },
       { to: '/rules/ews',                  i18nKey: 'ews_rules',            icon: SlidersHorizontal },
+      // Phase 9 T10 — fleet-wide rule engine report
+      { to: '/rules/reports',              i18nKey: 'rule_reports',         icon: FileBarChart,        requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       // Integration plumbing
       { to: '/admin/integrations',         i18nKey: 'integrations',         icon: Plug,                requireRole: ['admin', 'supervisor'] },
       { to: '/admin/webhooks',             i18nKey: 'webhooks',             icon: Webhook,             requireRole: ['admin'] },

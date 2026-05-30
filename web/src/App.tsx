@@ -22,6 +22,7 @@ import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
 import { RuleConfigPage } from '@/modules/rules/RuleConfigPage';
+import { RuleReportsPage } from '@/modules/rules/RuleReportsPage';
 import { EwsRuleBuilderPage } from '@/modules/rules/EwsRuleBuilderPage';
 import { EwsRuleWizardPage } from '@/modules/rules/EwsRuleWizardPage';
 import { EwsRuleDiffPage } from '@/modules/rules/EwsRuleDiffPage';
@@ -175,6 +176,7 @@ export function App() {
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
             <Route path="rules" element={<RuleConfigPage />} />
+            <Route path="rules/reports" element={<RuleReportsPage />} />
             <Route path="rules/ews" element={<EwsRuleBuilderPage />} />
             <Route path="rules/ews/wizard" element={<EwsRuleWizardPage />} />
             <Route path="rules/ews/:rule_id/diff" element={<EwsRuleDiffPage />} />
