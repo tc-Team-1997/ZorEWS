@@ -1023,6 +1023,35 @@ export const api = {
       )
       .then(() => undefined),
 
+  // ─── Enterprise Permission Matrix (049 overlay) ───
+  // Layers on top of existing role gates without replacing them.
+  // Drives the /admin/permission-matrix editor + the useCan() hook.
+  rbacListModules: () =>
+    http.get<EnvelopeBody<RbacModulesResponse>>('/v1/rbac/modules').then((r) => r.data),
+  rbacListActions: () =>
+    http.get<EnvelopeBody<RbacActionsResponse>>('/v1/rbac/actions').then((r) => r.data),
+  rbacListRoles: () =>
+    http.get<EnvelopeBody<RbacRolesResponse>>('/v1/rbac/roles').then((r) => r.data),
+  rbacGetMatrix: () =>
+    http.get<EnvelopeBody<RbacMatrixSnapshot>>('/v1/rbac/matrix').then((r) => r.data),
+  rbacGetRoleGrid: (role: string) =>
+    http
+      .get<EnvelopeBody<RbacRoleGrid>>(`/v1/rbac/matrix/${encodeURIComponent(role)}`)
+      .then((r) => r.data),
+  rbacPutRoleGrid: (role: string, grants: RbacGrantsBody) =>
+    http
+      .put<EnvelopeBody<RbacRoleGridPutResponse>>(
+        `/v1/rbac/matrix/${encodeURIComponent(role)}`,
+        { grants },
+      )
+      .then((r) => r.data),
+  rbacMePermissions: () =>
+    http.get<EnvelopeBody<RbacRoleGrid>>('/v1/rbac/me/permissions').then((r) => r.data),
+  rbacCheck: (module: string, action: RbacAction, role?: string) =>
+    http
+      .post<EnvelopeBody<RbacCheckResponse>>('/v1/rbac/check', { module, action, role })
+      .then((r) => r.data),
+
   /** Phase 9 T10 — fleet-wide rule engine report (envelope-wrapped). */
   ruleEngineReport: () =>
     http
@@ -6265,6 +6294,78 @@ export interface MasterEntityListResponse {
   fields: Phase9MasterField[];
   rows: Phase9MasterRow[];
   total: number;
+}
+
+// ── Enterprise Permission Matrix (049 overlay) ──────────────────────
+
+export const RBAC_ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'configure'] as const;
+export type RbacAction = (typeof RBAC_ACTIONS)[number];
+
+export type RbacModuleCategory =
+  | 'dashboard' | 'banking' | 'insurance' | 'workflow'
+  | 'reporting' | 'ai' | 'admin' | 'data';
+
+export interface RbacActionDef {
+  id: RbacAction;
+  label: string;
+  description: string;
+  sort_order: number;
+}
+
+export interface RbacModuleDef {
+  id: string;
+  label: string;
+  description: string;
+  category: RbacModuleCategory;
+  domain: 'banking' | 'insurance' | 'both';
+  sort_order: number;
+  active: boolean;
+}
+
+export interface RbacActionsResponse {
+  total: number;
+  actions: RbacActionDef[];
+}
+
+export interface RbacModulesResponse {
+  total: number;
+  modules: RbacModuleDef[];
+}
+
+export interface RbacRolesResponse {
+  total: number;
+  roles: string[];
+}
+
+export type RbacGrantsGrid = Record<string, Record<RbacAction, boolean>>;
+
+export interface RbacRoleGrid {
+  role_id: string;
+  permissions: RbacGrantsGrid;
+}
+
+export interface RbacMatrixSnapshot {
+  generated_at: string;
+  total_roles: number;
+  total_modules: number;
+  total_actions: number;
+  /** Sparse — only granted=true entries present. */
+  matrix: Record<string, Record<string, Record<RbacAction, boolean>>>;
+}
+
+export type RbacGrantsBody = Record<string, Partial<Record<RbacAction, boolean>>>;
+
+export interface RbacRoleGridPutResponse {
+  role: string;
+  cells_touched: number;
+  grid: RbacRoleGrid;
+}
+
+export interface RbacCheckResponse {
+  role: string;
+  module: string;
+  action: RbacAction;
+  granted: boolean;
 }
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────

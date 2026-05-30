@@ -15606,6 +15606,86 @@ const __mswMasterEntities: MswMasterEntity[] = [
   },
 ];
 
+// ──────────────────────────────────────────────────────────────────
+// Enterprise Permission Matrix (049 overlay) — MSW seed fixtures.
+// Trimmed catalog (5 modules × 5 actions × 4 roles) — enough for the
+// SPA matrix editor smoke test in dev mode.
+// ──────────────────────────────────────────────────────────────────
+const __mswRbacActions = [
+  { id: 'view', label: 'View', description: 'Read or list records in the module', sort_order: 1 },
+  { id: 'create', label: 'Create', description: 'Create new records within the module', sort_order: 2 },
+  { id: 'edit', label: 'Edit', description: 'Modify existing records', sort_order: 3 },
+  { id: 'delete', label: 'Delete', description: 'Soft-delete or hard-delete records', sort_order: 4 },
+  { id: 'approve', label: 'Approve', description: 'Approve maker-checker workflows', sort_order: 5 },
+  { id: 'export', label: 'Export', description: 'Export records to CSV / PDF / Excel', sort_order: 6 },
+  { id: 'configure', label: 'Configure', description: 'Edit module configuration + thresholds', sort_order: 7 },
+] as const;
+
+const __mswRbacModules = [
+  { id: 'dashboard', label: 'Dashboard', description: 'Enterprise + per-role landing dashboards', category: 'dashboard', domain: 'both', sort_order: 1, active: true },
+  { id: 'borrower_watch', label: 'Borrower Watch', description: 'Per-borrower watchlist + drill-through', category: 'banking', domain: 'banking', sort_order: 10, active: true },
+  { id: 'claims_anomaly', label: 'Claims Anomaly', description: 'Claim-fraud detection', category: 'insurance', domain: 'insurance', sort_order: 20, active: true },
+  { id: 'rules_engine', label: 'Rules Engine', description: 'Rule authoring + simulation', category: 'ai', domain: 'both', sort_order: 40, active: true },
+  { id: 'users', label: 'Users & RBAC', description: 'User lifecycle', category: 'admin', domain: 'both', sort_order: 60, active: true },
+  { id: 'audit_trail', label: 'Audit Trail', description: 'Hash-chained audit events', category: 'admin', domain: 'both', sort_order: 62, active: true },
+] as const;
+
+const __mswRbacRoles = [
+  'super_admin', 'country_admin', 'bank_admin', 'insurance_admin', 'risk_analyst',
+  'fraud_analyst', 'credit_officer', 'operations_user', 'auditor', 'read_only_user',
+];
+
+const __mswRbacGrants: Array<{ role_id: string; module_id: string; action_id: string }> = [
+  // super_admin → everything
+  ...__mswRbacModules.flatMap((m) =>
+    __mswRbacActions.map((a) => ({ role_id: 'super_admin', module_id: m.id, action_id: a.id })),
+  ),
+  // risk_analyst → view + edit on banking + dashboard
+  { role_id: 'risk_analyst', module_id: 'dashboard', action_id: 'view' },
+  { role_id: 'risk_analyst', module_id: 'borrower_watch', action_id: 'view' },
+  { role_id: 'risk_analyst', module_id: 'borrower_watch', action_id: 'edit' },
+  { role_id: 'risk_analyst', module_id: 'rules_engine', action_id: 'view' },
+  // auditor → view + export on audit-relevant
+  { role_id: 'auditor', module_id: 'dashboard', action_id: 'view' },
+  { role_id: 'auditor', module_id: 'audit_trail', action_id: 'view' },
+  { role_id: 'auditor', module_id: 'audit_trail', action_id: 'export' },
+  // read_only_user → strict view
+  { role_id: 'read_only_user', module_id: 'dashboard', action_id: 'view' },
+  { role_id: 'read_only_user', module_id: 'borrower_watch', action_id: 'view' },
+];
+
+function __mswRbacGridFor(role: string): Record<string, Record<string, boolean>> {
+  const out: Record<string, Record<string, boolean>> = {};
+  for (const m of __mswRbacModules) {
+    out[m.id] = {};
+    for (const a of __mswRbacActions) out[m.id][a.id] = false;
+  }
+  for (const e of __mswRbacGrants) {
+    if (e.role_id !== role) continue;
+    out[e.module_id] ??= {};
+    out[e.module_id][e.action_id] = true;
+  }
+  return out;
+}
+
+export function __resetMswRbacMatrix(): void {
+  __mswRbacGrants.length = 0;
+  __mswRbacGrants.push(
+    ...__mswRbacModules.flatMap((m) =>
+      __mswRbacActions.map((a) => ({ role_id: 'super_admin', module_id: m.id, action_id: a.id })),
+    ),
+    { role_id: 'risk_analyst', module_id: 'dashboard', action_id: 'view' },
+    { role_id: 'risk_analyst', module_id: 'borrower_watch', action_id: 'view' },
+    { role_id: 'risk_analyst', module_id: 'borrower_watch', action_id: 'edit' },
+    { role_id: 'risk_analyst', module_id: 'rules_engine', action_id: 'view' },
+    { role_id: 'auditor', module_id: 'dashboard', action_id: 'view' },
+    { role_id: 'auditor', module_id: 'audit_trail', action_id: 'view' },
+    { role_id: 'auditor', module_id: 'audit_trail', action_id: 'export' },
+    { role_id: 'read_only_user', module_id: 'dashboard', action_id: 'view' },
+    { role_id: 'read_only_user', module_id: 'borrower_watch', action_id: 'view' },
+  );
+}
+
 function mswMasterSeedRow(entity: string, idx: number, fields: Record<string, unknown>): MswMasterRow {
   // Platform-static entities (rows shared across every tenant) write
   // their seed under PLATFORM; tenant-scoped entities land in
@@ -15754,5 +15834,121 @@ handlers.push(
     }
     entity.rows.splice(idx, 1);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ──────────────────────────────────────────────────────────────────
+  // Enterprise Permission Matrix (049 overlay) — MSW dev-mode mocks.
+  // Mirrors the BFF routes at /v1/rbac/* with a smaller in-memory grid.
+  // ──────────────────────────────────────────────────────────────────
+  http.get('/v1/rbac/actions', () =>
+    HttpResponse.json(
+      envelope({
+        total: __mswRbacActions.length,
+        actions: __mswRbacActions,
+      }),
+    ),
+  ),
+
+  http.get('/v1/rbac/modules', () =>
+    HttpResponse.json(
+      envelope({
+        total: __mswRbacModules.length,
+        modules: __mswRbacModules,
+      }),
+    ),
+  ),
+
+  http.get('/v1/rbac/roles', () =>
+    HttpResponse.json(
+      envelope({
+        total: __mswRbacRoles.length,
+        roles: __mswRbacRoles,
+      }),
+    ),
+  ),
+
+  http.get('/v1/rbac/matrix', () => {
+    const matrix: Record<string, Record<string, Record<string, boolean>>> = {};
+    for (const e of __mswRbacGrants) {
+      matrix[e.role_id] ??= {};
+      matrix[e.role_id][e.module_id] ??= {};
+      matrix[e.role_id][e.module_id][e.action_id] = true;
+    }
+    return HttpResponse.json(
+      envelope({
+        generated_at: new Date().toISOString(),
+        total_roles: __mswRbacRoles.length,
+        total_modules: __mswRbacModules.length,
+        total_actions: __mswRbacActions.length,
+        matrix,
+      }),
+    );
+  }),
+
+  http.get('/v1/rbac/matrix/:role', ({ params }) => {
+    const role = params.role as string;
+    if (!__mswRbacRoles.includes(role)) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_role', `unknown role ${role}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope({ role_id: role, permissions: __mswRbacGridFor(role) }));
+  }),
+
+  http.put('/v1/rbac/matrix/:role', async ({ params, request }) => {
+    const role = params.role as string;
+    if (!__mswRbacRoles.includes(role)) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_role', `unknown role ${role}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const body = (await request.json()) as { grants?: Record<string, Record<string, boolean>> };
+    if (!body || typeof body.grants !== 'object' || body.grants === null) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_grants', 'grants object required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    let touched = 0;
+    for (const [module_id, actions] of Object.entries(body.grants)) {
+      for (const [action_id, granted] of Object.entries(actions ?? {})) {
+        // Remove existing entry then re-add when granted=true.
+        const idx = __mswRbacGrants.findIndex(
+          (e) => e.role_id === role && e.module_id === module_id && e.action_id === action_id,
+        );
+        if (idx !== -1) __mswRbacGrants.splice(idx, 1);
+        if (granted === true) {
+          __mswRbacGrants.push({ role_id: role, module_id, action_id });
+        }
+        touched++;
+      }
+    }
+    return HttpResponse.json(
+      envelope({ role, cells_touched: touched, grid: { role_id: role, permissions: __mswRbacGridFor(role) } }),
+    );
+  }),
+
+  http.get('/v1/rbac/me/permissions', ({ request }) => {
+    const role = request.headers.get('x-apex-role') ?? '';
+    return HttpResponse.json(envelope({ role_id: role, permissions: __mswRbacGridFor(role) }));
+  }),
+
+  http.post('/v1/rbac/check', async ({ request }) => {
+    const body = (await request.json()) as { role?: string; module?: string; action?: string };
+    const role = body?.role ?? request.headers.get('x-apex-role') ?? '';
+    const module_id = body?.module ?? '';
+    const action = body?.action ?? '';
+    if (!role || !module_id || !action) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'role + module + action required', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const granted = __mswRbacGrants.some(
+      (e) => e.role_id === role && e.module_id === module_id && e.action_id === action,
+    );
+    return HttpResponse.json(envelope({ role, module: module_id, action, granted }));
   }),
 );

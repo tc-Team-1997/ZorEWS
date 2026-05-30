@@ -228,6 +228,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/admin/master-setup',         i18nKey: 'master_setup',         icon: Library,             requireRole: ['admin'], featured: true },
       // Phase 9 T11 — reusable master entity CRUD framework
       { to: '/admin/masters',              i18nKey: 'master_data',          icon: Library,             requireRole: ['admin'] },
+      // Enterprise Permission Matrix (049 overlay) — role × module × action editor
+      { to: '/admin/permission-matrix',    i18nKey: 'permission_matrix',    icon: ShieldCheck,         requireRole: ['admin'] },
       { to: '/admin/risk-score-config',    i18nKey: 'risk_score_config',    icon: Scale,               requireRole: ['admin'], featured: true },
       { to: '/admin/alert-classification', i18nKey: 'alert_classification', icon: ShieldAlert,         requireRole: ['admin'], featured: true },
       { to: '/admin/case-types',           i18nKey: 'case_type_setup',      icon: Briefcase,           requireRole: ['admin'], featured: true },
