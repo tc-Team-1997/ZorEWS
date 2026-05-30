@@ -309,6 +309,11 @@ export interface CustomDashboardStore {
     now: Date,
   ): CustomDashboard;
   delete(tenant_id: string, dashboard_id: string): boolean;
+  /** Phase 9 T3: re-insert a previously-archived dashboard. Returns false
+   *  iff a dashboard with the same dashboard_id already exists for this
+   *  tenant (true conflict — the recovery adapter maps to 409). Called
+   *  by the recovery adapter; not exposed via a CRUD route. */
+  restore(payload: CustomDashboard): boolean;
 }
 
 function clone(d: CustomDashboard): CustomDashboard {
@@ -414,6 +419,17 @@ export class InMemoryCustomDashboardStore implements CustomDashboardStore {
     const idx = arr.findIndex((d) => d.dashboard_id === dashboard_id);
     if (idx < 0) return false;
     arr.splice(idx, 1);
+    return true;
+  }
+
+  /** Phase 9 T3 — recovery adapter entry point. Mirrors the same shape
+   *  as InMemoryWebhookSubscriptionStore.restore / InMemoryScenarioStore
+   *  .restore (boolean-return semantics: true on success, false on
+   *  dashboard_id collision). */
+  restore(payload: CustomDashboard): boolean {
+    const arr = this.bucket(payload.tenant_id);
+    if (arr.some((d) => d.dashboard_id === payload.dashboard_id)) return false;
+    arr.push(clone(payload));
     return true;
   }
 }

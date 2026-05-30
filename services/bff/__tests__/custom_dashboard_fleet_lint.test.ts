@@ -53,6 +53,11 @@ class FakeStore implements CustomDashboardStore {
   delete(): boolean {
     return false;
   }
+  restore(): boolean {
+    // Phase 9 T3 — fleet-lint tests don't exercise restore; satisfy the
+    // CustomDashboardStore interface with a no-op false return.
+    return false;
+  }
 }
 
 // Helpers — minimal widget shapes that exercise specific M11.10 issues.

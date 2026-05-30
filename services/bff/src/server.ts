@@ -1783,6 +1783,26 @@ export function makeApp(deps: AppDeps = {}) {
   } catch {
     /* already registered */
   }
+  try {
+    // Phase 9 T3: custom_dashboard adopter. BFF-local — same in-process
+    // pattern as webhook_subscription + saved_scenario. Soft-delete is
+    // triggered by DELETE /v1/dashboards/custom/:dashboard_id (archives
+    // the full payload + writes the recovery audit event; the live store
+    // delete is the side-effect AFTER the archive completes). Restore
+    // re-inserts the full payload; dashboard_id collision → 409 conflict.
+    registerRecoveryAdapter({
+      entity_type: 'custom_dashboard',
+      display_name: 'Custom dashboard',
+      module: 'bff',
+      original_table: 'app_bff.custom_dashboards',
+      restore: async (record) => {
+        const ok = customDashboardStore.restore(record.payload as never);
+        if (!ok) throw new RestoreConflictError('custom_dashboard', record.original_id);
+      },
+    });
+  } catch {
+    /* already registered */
+  }
   // Phase 2d: cross-service restore adapters. Each entity_type
   // archived by a non-BFF service needs an adapter here that
   // HTTP-calls the source service's restore endpoint. Registered
@@ -14632,16 +14652,22 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** DELETE /v1/dashboards/custom/:dashboard_id — remove. */
+  /** DELETE /v1/dashboards/custom/:dashboard_id — soft-delete via
+   *  Phase 9 T3 recovery framework: snapshot → archive into
+   *  app_recovery.deleted_records (with audit fan-out) → delete from
+   *  the live store. If the row is gone before we look it up, return
+   *  the same 404 as before. If archive fails, log + continue (never
+   *  block the user's delete on a side-effect). */
   app.delete(
     '/v1/dashboards/custom/:dashboard_id',
     requireTenantMw,
     requireRole('audit:read'),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
       const id = req.params.dashboard_id ?? '';
-      const ok = customDashboardStore.delete(req.tenant!.tenant_id, id);
-      if (!ok) {
+      const tenant_id = req.tenant!.tenant_id;
+      const existing = customDashboardStore.get(tenant_id, id);
+      if (!existing) {
         return res.status(404).json(
           wrapError(
             { code: 'EWS_404_unknown_dashboard', message: `dashboard ${id} not found`, severity: 'LOW' },
@@ -14649,6 +14675,36 @@ export function makeApp(deps: AppDeps = {}) {
           ),
         );
       }
+      try {
+        const recovery_id = await recoveryStore.archive({
+          tenant_id,
+          module: 'bff',
+          entity_type: 'custom_dashboard',
+          original_id: id,
+          original_table: 'app_bff.custom_dashboards',
+          payload: existing as unknown as Record<string, unknown>,
+          deleted_by:
+            ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+          source_action: 'user_initiated',
+        });
+        const archived = await recoveryStore.get(tenant_id, recovery_id);
+        if (archived) {
+          recordRecoveryAudit(
+            {
+              auditTrailStore,
+              tenant_id,
+              actor_username:
+                ((req.headers['x-apex-user'] as string | undefined) ?? '').trim() || 'admin',
+              actor_role: getRole(req) ?? 'admin',
+              now: now(),
+            },
+            archived,
+          );
+        }
+      } catch (err) {
+        console.error('[recovery] archive failed for custom_dashboard', id, err);
+      }
+      customDashboardStore.delete(tenant_id, id);
       return res.status(204).send();
     },
   );
