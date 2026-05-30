@@ -105,3 +105,49 @@ describe('AdminUserCreatePage — RBAC capability preview', () => {
     expect(screen.getByText('risk_analyst')).toBeInTheDocument();
   });
 });
+
+describe('AdminUserCreatePage — Phase 9 T8 extra-fields sections', () => {
+  beforeEach(() => {
+    authenticateAs(['admin']);
+    renderWithProviders(<AdminUserCreatePage />);
+  });
+
+  test('renders 3 new optional sections (Extended profile / Contact / Address)', () => {
+    expect(screen.getByText(/6\. Extended profile/i)).toBeInTheDocument();
+    expect(screen.getByText(/7\. Contact details/i)).toBeInTheDocument();
+    expect(screen.getByText(/8\. Postal address/i)).toBeInTheDocument();
+  });
+
+  test('Extended profile section exposes DOB / gender / joining_date / reporting_manager / secondary_skills inputs', () => {
+    expect(screen.getByTestId('user-dob')).toBeInTheDocument();
+    expect(screen.getByTestId('user-gender')).toBeInTheDocument();
+    expect(screen.getByTestId('user-joining-date')).toBeInTheDocument();
+    expect(screen.getByTestId('user-reporting-manager')).toBeInTheDocument();
+    expect(screen.getByTestId('user-secondary-skills')).toBeInTheDocument();
+  });
+
+  test('Contact details section exposes alternate_email / secondary_mobile / emergency fields', () => {
+    expect(screen.getByTestId('user-alternate-email')).toBeInTheDocument();
+    expect(screen.getByTestId('user-secondary-mobile')).toBeInTheDocument();
+    expect(screen.getByTestId('user-emergency-contact-name')).toBeInTheDocument();
+    expect(screen.getByTestId('user-emergency-contact-phone')).toBeInTheDocument();
+  });
+
+  test('Postal address section exposes line1 / line2 / postal_code inputs', () => {
+    expect(screen.getByTestId('user-address-line1')).toBeInTheDocument();
+    expect(screen.getByTestId('user-address-line2')).toBeInTheDocument();
+    expect(screen.getByTestId('user-postal-code')).toBeInTheDocument();
+  });
+
+  test('Gender select offers the 4 canonical options + an empty default', () => {
+    const select = screen.getByTestId('user-gender') as HTMLSelectElement;
+    const options = within(select).queryAllByRole('option').map((o) => (o as HTMLOptionElement).value);
+    expect(options).toEqual(['', 'male', 'female', 'other', 'prefer_not_to_say']);
+  });
+
+  test('DOB field accepts a typed value (input state mutation)', () => {
+    const dob = screen.getByTestId('user-dob') as HTMLInputElement;
+    fireEvent.change(dob, { target: { value: '1990-05-15' } });
+    expect(dob.value).toBe('1990-05-15');
+  });
+});

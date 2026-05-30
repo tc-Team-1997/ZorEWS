@@ -728,11 +728,17 @@ export function registerAuthRoutes(app: FastifyInstance): void {
        *  in the app. Default true: admin-shared default password forces
        *  the first-login wizard. */
       skip_first_login?: boolean;
+      /** Phase 9 T8 — extended admin-collected profile / contact / address
+       *  data. Every section is optional + soft-validated; format errors
+       *  surface as role_invalid (cheapest existing error code; production
+       *  would mint per-section codes). */
+      extras?: import("../users.js").UserProfileExtras;
     };
   }>("/auth/users", async (req, reply) => {
     const { signer, users, audit } = await getState();
     if (!(await requireAdmin(req, reply, signer))) return;
-    const { username, email, password, display_name, role, skip_first_login } = req.body ?? {};
+    const { username, email, password, display_name, role, skip_first_login, extras } =
+      req.body ?? {};
     if (!username || !email || !password || !display_name || !role) {
       return reply
         .code(400)
@@ -749,6 +755,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         // Tests that exercise admin-create flows pre-existing this feature
         // can opt out via skip_first_login: true.
         must_change_password: skip_first_login !== true,
+        ...(extras ? { extras } : {}),
       });
       audit.append({
         type: "user_created",

@@ -24,12 +24,46 @@ export interface AuthUser {
 
 export type AuthStatus = 'idle' | 'authenticating' | 'authenticated' | 'error';
 
+/** Phase 9 T8 — extended admin-collected profile / contact / address
+ *  sections. All optional + soft-validated at the auth-svc end. Mirrors
+ *  services/auth-svc/src/users.ts → UserProfileExtras. */
+export type UserGender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
+export type EmploymentType = 'Permanent' | 'Contract' | 'Intern' | 'Consultant';
+
+export interface UserProfileExtras {
+  profile?: {
+    date_of_birth?: string;
+    gender?: UserGender;
+    joining_date?: string;
+    employment_type?: EmploymentType;
+    reporting_manager?: string;
+    secondary_skills?: string;
+  };
+  contact?: {
+    alternate_email?: string;
+    secondary_mobile?: string;
+    emergency_contact_name?: string;
+    emergency_contact_phone?: string;
+  };
+  address?: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postal_code?: string;
+  };
+}
+
 export interface SignupInput {
   username: string;
   email: string;
   password: string;
   display_name: string;
   role: Role;
+  /** Phase 9 T8 — optional. Only the admin-create flow populates this;
+   *  self-signup keeps the existing minimal shape. */
+  extras?: UserProfileExtras;
 }
 
 export interface SignupResult {

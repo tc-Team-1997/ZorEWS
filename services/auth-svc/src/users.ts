@@ -46,6 +46,49 @@ export interface User {
   /** ISO timestamp of when the user accepted the prototype's T&C, or null
    *  if they haven't yet. Captured during the first-login wizard. */
   terms_accepted_at: string | null;
+  /** Phase 9 T8 — admin-collected extended profile / contact / address
+   *  fields. All optional + opaque to existing consumers (auth + RBAC
+   *  flows ignore them). Production swaps to per-section pg tables. */
+  extras?: UserProfileExtras;
+}
+
+/** Phase 9 T8 — extended profile data captured at admin user-create time. */
+export type Gender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
+
+export interface ProfileSection {
+  /** ISO date (YYYY-MM-DD). */
+  date_of_birth?: string;
+  gender?: Gender;
+  /** ISO date — formal employment start. */
+  joining_date?: string;
+  employment_type?: 'Permanent' | 'Contract' | 'Intern' | 'Consultant';
+  /** username of the user this person reports to (free-text — not FK-checked
+   *  in the prototype; production validates against the user store). */
+  reporting_manager?: string;
+  /** Comma-separated tags — kept opaque so the SPA can render however. */
+  secondary_skills?: string;
+}
+
+export interface ContactSection {
+  alternate_email?: string;
+  secondary_mobile?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+}
+
+export interface AddressSection {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postal_code?: string;
+}
+
+export interface UserProfileExtras {
+  profile?: ProfileSection;
+  contact?: ContactSection;
+  address?: AddressSection;
 }
 
 export interface RegisterInput {
@@ -59,6 +102,10 @@ export interface RegisterInput {
   must_change_password?: boolean;
   /** Tenant the new user belongs to. Defaults to 'BANK_DEMO'. */
   tenant_id?: string;
+  /** Phase 9 T8 — extended admin-collected profile / contact / address
+   *  data. Validated softly: format-checked but every field optional
+   *  so existing /auth/register callers don't have to supply anything. */
+  extras?: UserProfileExtras;
 }
 
 export interface RegisterResult {
@@ -92,6 +139,108 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Prototype password policy: ≥8 chars, mixed case, plus a digit or symbol.
 // Production would centralise this in a security-baseline module.
+// Phase 9 T8 — soft validator for the extra profile sections. Each field is
+// optional; the validator strips empty strings, normalises booleans, and
+// throws on shape errors (DOB format / gender enum / bad email shape).
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const VALID_GENDERS: ReadonlyArray<Gender> = [
+  'male',
+  'female',
+  'other',
+  'prefer_not_to_say',
+];
+const VALID_EMPLOYMENT_TYPES = ['Permanent', 'Contract', 'Intern', 'Consultant'] as const;
+
+function trimStr(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  return s.length === 0 ? undefined : s;
+}
+
+function validateExtras(input: UserProfileExtras): UserProfileExtras {
+  const out: UserProfileExtras = {};
+
+  if (input.profile) {
+    const p: ProfileSection = {};
+    const dob = trimStr(input.profile.date_of_birth);
+    if (dob !== undefined) {
+      if (!ISO_DATE_RE.test(dob)) {
+        throw new RegisterFailure('role_invalid', 'date_of_birth must be YYYY-MM-DD');
+      }
+      p.date_of_birth = dob;
+    }
+    const g = trimStr(input.profile.gender) as Gender | undefined;
+    if (g !== undefined) {
+      if (!VALID_GENDERS.includes(g)) {
+        throw new RegisterFailure(
+          'role_invalid',
+          `gender must be one of ${VALID_GENDERS.join(', ')}`,
+        );
+      }
+      p.gender = g;
+    }
+    const jd = trimStr(input.profile.joining_date);
+    if (jd !== undefined) {
+      if (!ISO_DATE_RE.test(jd)) {
+        throw new RegisterFailure('role_invalid', 'joining_date must be YYYY-MM-DD');
+      }
+      p.joining_date = jd;
+    }
+    const et = trimStr(input.profile.employment_type);
+    if (et !== undefined) {
+      if (!VALID_EMPLOYMENT_TYPES.includes(et as (typeof VALID_EMPLOYMENT_TYPES)[number])) {
+        throw new RegisterFailure(
+          'role_invalid',
+          `employment_type must be one of ${VALID_EMPLOYMENT_TYPES.join(', ')}`,
+        );
+      }
+      p.employment_type = et as ProfileSection['employment_type'];
+    }
+    const rm = trimStr(input.profile.reporting_manager);
+    if (rm !== undefined) p.reporting_manager = rm;
+    const ss = trimStr(input.profile.secondary_skills);
+    if (ss !== undefined) p.secondary_skills = ss;
+    if (Object.keys(p).length > 0) out.profile = p;
+  }
+
+  if (input.contact) {
+    const c: ContactSection = {};
+    const altE = trimStr(input.contact.alternate_email);
+    if (altE !== undefined) {
+      if (!EMAIL_RE.test(altE)) {
+        throw new RegisterFailure('email_invalid', 'alternate_email must be a valid email');
+      }
+      c.alternate_email = altE.toLowerCase();
+    }
+    const m2 = trimStr(input.contact.secondary_mobile);
+    if (m2 !== undefined) c.secondary_mobile = m2;
+    const en = trimStr(input.contact.emergency_contact_name);
+    if (en !== undefined) c.emergency_contact_name = en;
+    const ep = trimStr(input.contact.emergency_contact_phone);
+    if (ep !== undefined) c.emergency_contact_phone = ep;
+    if (Object.keys(c).length > 0) out.contact = c;
+  }
+
+  if (input.address) {
+    const a: AddressSection = {};
+    const l1 = trimStr(input.address.line1);
+    if (l1 !== undefined) a.line1 = l1;
+    const l2 = trimStr(input.address.line2);
+    if (l2 !== undefined) a.line2 = l2;
+    const city = trimStr(input.address.city);
+    if (city !== undefined) a.city = city;
+    const state = trimStr(input.address.state);
+    if (state !== undefined) a.state = state;
+    const country = trimStr(input.address.country);
+    if (country !== undefined) a.country = country;
+    const pc = trimStr(input.address.postal_code);
+    if (pc !== undefined) a.postal_code = pc;
+    if (Object.keys(a).length > 0) out.address = a;
+  }
+
+  return out;
+}
+
 function passwordTooWeak(pw: string): boolean {
   if (pw.length < 8) return true;
   if (!/[a-z]/.test(pw)) return true;
@@ -494,6 +643,16 @@ export class UserStore {
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const mustChange = input.must_change_password === true;
+    // Phase 9 T8 — soft-validate extras before persisting. Format errors
+    // surface as role_invalid (cheapest existing code); production would
+    // mint a new error_kind for each section. validateExtras returns
+    // undefined when every section collapses to empty (whitespace-only
+    // input) so an empty `extras` arg doesn't pollute the result.
+    const validatedExtras = input.extras ? validateExtras(input.extras) : undefined;
+    const extras =
+      validatedExtras && Object.keys(validatedExtras).length > 0
+        ? validatedExtras
+        : undefined;
     const user: User = {
       id: `u-${randomUUID().slice(0, 8)}`,
       username,
@@ -511,6 +670,7 @@ export class UserStore {
       // tracks alongside must_change_password.
       must_change_password: mustChange,
       terms_accepted_at: mustChange ? null : new Date().toISOString(),
+      ...(extras ? { extras } : {}),
     };
     this.byUsername.set(username, user);
 
@@ -521,12 +681,14 @@ export class UserStore {
         email: user.email,
         role: user.role,
         display_name: user.display_name,
+        tenant_id: user.tenant_id,
         locked: user.locked,
         failed_login_count: user.failed_login_count,
         lockout_until_ms: user.lockout_until_ms,
         password_history: [],
         must_change_password: user.must_change_password,
         terms_accepted_at: user.terms_accepted_at,
+        ...(user.extras ? { extras: user.extras } : {}),
       },
     };
   }

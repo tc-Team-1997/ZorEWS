@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { useAuth } from '@/store/auth';
+import { useAuth, type UserProfileExtras } from '@/store/auth';
 import {
   AlertCircle,
   ArrowLeft,
@@ -74,6 +74,22 @@ interface FormState {
   domain: 'banking' | 'insurance' | '';
   language: string;
   timezone: string;
+  // Phase 9 T8 — extended profile (all optional)
+  date_of_birth: string;
+  gender: '' | 'male' | 'female' | 'other' | 'prefer_not_to_say';
+  joining_date: string;
+  reporting_manager: string;
+  secondary_skills: string;
+  // Phase 9 T8 — contact details (all optional)
+  alternate_email: string;
+  secondary_mobile: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  // Phase 9 T8 — postal address (line1/line2/postal_code; city/state/country
+  // already in the location section so we don't duplicate)
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
 }
 
 const EMPTY: FormState = {
@@ -92,6 +108,19 @@ const EMPTY: FormState = {
   domain: '',
   language: 'en',
   timezone: '',
+  // T8 extras — all optional, default empty
+  date_of_birth: '',
+  gender: '',
+  joining_date: '',
+  reporting_manager: '',
+  secondary_skills: '',
+  alternate_email: '',
+  secondary_mobile: '',
+  emergency_contact_name: '',
+  emergency_contact_phone: '',
+  address_line1: '',
+  address_line2: '',
+  postal_code: '',
 };
 
 export function AdminUserCreatePage() {
@@ -184,12 +213,44 @@ export function AdminUserCreatePage() {
       // Derive a username from email (auth-svc requires a username).
       const username = form.email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '.');
       const tempPassword = `Welcome!${Math.floor(Math.random() * 9000 + 1000)}#`;
+      // Phase 9 T8 — assemble the optional extras envelope. Empty strings
+      // are stripped at the auth-svc validator, so sending them as-is is safe.
+      const profile: NonNullable<UserProfileExtras['profile']> = {};
+      if (form.date_of_birth) profile.date_of_birth = form.date_of_birth;
+      if (form.gender) profile.gender = form.gender;
+      if (form.joining_date) profile.joining_date = form.joining_date;
+      if (form.user_type) {
+        profile.employment_type = form.user_type as 'Permanent' | 'Contract' | 'Intern' | 'Consultant';
+      }
+      if (form.reporting_manager) profile.reporting_manager = form.reporting_manager;
+      if (form.secondary_skills) profile.secondary_skills = form.secondary_skills;
+
+      const contact: NonNullable<UserProfileExtras['contact']> = {};
+      if (form.alternate_email) contact.alternate_email = form.alternate_email;
+      if (form.secondary_mobile) contact.secondary_mobile = form.secondary_mobile;
+      if (form.emergency_contact_name) contact.emergency_contact_name = form.emergency_contact_name;
+      if (form.emergency_contact_phone) contact.emergency_contact_phone = form.emergency_contact_phone;
+
+      const address: NonNullable<UserProfileExtras['address']> = {};
+      if (form.address_line1) address.line1 = form.address_line1;
+      if (form.address_line2) address.line2 = form.address_line2;
+      if (form.city) address.city = form.city;
+      if (form.state) address.state = form.state;
+      if (form.country) address.country = form.country;
+      if (form.postal_code) address.postal_code = form.postal_code;
+
+      const extras: UserProfileExtras = {};
+      if (Object.keys(profile).length > 0) extras.profile = profile;
+      if (Object.keys(contact).length > 0) extras.contact = contact;
+      if (Object.keys(address).length > 0) extras.address = address;
+
       await adminCreateUser({
         username,
         email: form.email.toLowerCase(),
         password: tempPassword,
         display_name: form.full_name,
         role: enterpriseRole.backend_role,
+        ...(Object.keys(extras).length > 0 ? { extras } : {}),
       });
       setSuccessUsername(username);
     } catch (caught) {
@@ -447,6 +508,165 @@ export function AdminUserCreatePage() {
               ]}
               testId="user-timezone"
             />
+          </FormSection>
+
+          {/* Phase 9 T8 — Extended profile (all optional) */}
+          <FormSection
+            icon={<IdCard size={14} />}
+            title="6. Extended profile"
+            subtitle="Optional personal + employment details for the HR record"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">Date of birth</span>
+                <Input
+                  type="date"
+                  value={form.date_of_birth}
+                  onChange={(e) => set('date_of_birth', e.target.value)}
+                  data-testid="user-dob"
+                />
+              </label>
+              <SelectField
+                label="Gender"
+                value={form.gender}
+                onChange={(v) => set('gender', v as FormState['gender'])}
+                testId="user-gender"
+                options={[
+                  { value: '', label: '— select —' },
+                  { value: 'male', label: 'Male' },
+                  { value: 'female', label: 'Female' },
+                  { value: 'other', label: 'Other' },
+                  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+                ]}
+              />
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">Joining date</span>
+                <Input
+                  type="date"
+                  value={form.joining_date}
+                  onChange={(e) => set('joining_date', e.target.value)}
+                  data-testid="user-joining-date"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">
+                  Reporting manager (username)
+                </span>
+                <Input
+                  type="text"
+                  value={form.reporting_manager}
+                  onChange={(e) => set('reporting_manager', e.target.value)}
+                  placeholder="e.g. alice.admin"
+                  data-testid="user-reporting-manager"
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="block text-[11px] font-medium text-ink mb-1">
+                  Secondary skills (comma-separated)
+                </span>
+                <Input
+                  type="text"
+                  value={form.secondary_skills}
+                  onChange={(e) => set('secondary_skills', e.target.value)}
+                  placeholder="AML, KYC, Risk-Modelling"
+                  data-testid="user-secondary-skills"
+                />
+              </label>
+            </div>
+          </FormSection>
+
+          {/* Phase 9 T8 — Contact details (all optional) */}
+          <FormSection
+            icon={<Phone size={14} />}
+            title="7. Contact details"
+            subtitle="Optional alternate contacts + emergency reachout"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">Alternate email</span>
+                <Input
+                  type="email"
+                  value={form.alternate_email}
+                  onChange={(e) => set('alternate_email', e.target.value)}
+                  placeholder="personal@example.com"
+                  data-testid="user-alternate-email"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">Secondary mobile</span>
+                <Input
+                  type="tel"
+                  value={form.secondary_mobile}
+                  onChange={(e) => set('secondary_mobile', e.target.value)}
+                  placeholder="+91-9876543210"
+                  data-testid="user-secondary-mobile"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">
+                  Emergency contact name
+                </span>
+                <Input
+                  type="text"
+                  value={form.emergency_contact_name}
+                  onChange={(e) => set('emergency_contact_name', e.target.value)}
+                  data-testid="user-emergency-contact-name"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">
+                  Emergency contact phone
+                </span>
+                <Input
+                  type="tel"
+                  value={form.emergency_contact_phone}
+                  onChange={(e) => set('emergency_contact_phone', e.target.value)}
+                  data-testid="user-emergency-contact-phone"
+                />
+              </label>
+            </div>
+          </FormSection>
+
+          {/* Phase 9 T8 — Postal address (city/state/country are in section 2 +
+              3 — this section only adds the street + postal code so the form
+              doesn't duplicate per-section). */}
+          <FormSection
+            icon={<MapPin size={14} />}
+            title="8. Postal address"
+            subtitle="Optional residential / mailing address — country + state already captured above"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block md:col-span-2">
+                <span className="block text-[11px] font-medium text-ink mb-1">Address line 1</span>
+                <Input
+                  type="text"
+                  value={form.address_line1}
+                  onChange={(e) => set('address_line1', e.target.value)}
+                  placeholder="123 Risk Lane"
+                  data-testid="user-address-line1"
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="block text-[11px] font-medium text-ink mb-1">Address line 2</span>
+                <Input
+                  type="text"
+                  value={form.address_line2}
+                  onChange={(e) => set('address_line2', e.target.value)}
+                  placeholder="Apt / suite / building"
+                  data-testid="user-address-line2"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-ink mb-1">Postal code</span>
+                <Input
+                  type="text"
+                  value={form.postal_code}
+                  onChange={(e) => set('postal_code', e.target.value)}
+                  placeholder="400001"
+                  data-testid="user-postal-code"
+                />
+              </label>
+            </div>
           </FormSection>
 
           {error && (

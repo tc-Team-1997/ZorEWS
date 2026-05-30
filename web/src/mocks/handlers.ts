@@ -1823,6 +1823,8 @@ async function registerLikeHandler(request: Request, _by: 'self' | 'admin') {
     password?: string;
     display_name?: string;
     role?: string;
+    // Phase 9 T8 — optional extras envelope
+    extras?: Record<string, Record<string, unknown> | undefined>;
   };
   const username = body.username?.trim().toLowerCase();
   const email = body.email?.trim().toLowerCase();
@@ -1891,9 +1893,21 @@ async function registerLikeHandler(request: Request, _by: 'self' | 'admin') {
     locked: false,
   });
 
+  // Phase 9 T8 — echo the extras envelope when provided. The MSW handler
+  // doesn't run the auth-svc validator, but it does mirror the response
+  // shape so tests can assert that extras round-trip through the form.
   return HttpResponse.json(
     {
-      user: { id, username, email, role: body.role, display_name },
+      user: {
+        id,
+        username,
+        email,
+        role: body.role,
+        display_name,
+        ...(body.extras && Object.keys(body.extras).length > 0
+          ? { extras: body.extras }
+          : {}),
+      },
     },
     { status: 201 },
   );
