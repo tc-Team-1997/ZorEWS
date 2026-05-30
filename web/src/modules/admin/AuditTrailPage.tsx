@@ -39,6 +39,7 @@ import {
   type AuditRetentionStrategy,
   type AuditRetentionPolicyCreateInput,
 } from '@/lib/api';
+import { downloadAuditEventsCsv } from '@/lib/auditExport';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
@@ -112,6 +113,21 @@ export function AuditTrailPage() {
       <PageHeader
         title="Audit Trail"
         subtitle="Immutable cryptographic ledger — SHA-256 hash-chained for tamper evidence (RBI Cyber Resilience §4.3)."
+        actions={
+          <Button
+            variant="ghost"
+            onClick={() => downloadAuditEventsCsv(events.data?.items ?? [])}
+            disabled={!events.data?.items?.length}
+            data-testid="audit-export-csv"
+            title={
+              events.data?.items?.length
+                ? `Export ${events.data.items.length} filtered event(s) as CSV`
+                : 'No events to export'
+            }
+          >
+            <Download size={14} strokeWidth={2} /> Export CSV
+          </Button>
+        }
       />
 
       {/* Stats + integrity */}

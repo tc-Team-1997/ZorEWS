@@ -1,3 +1,19 @@
+// web/src/modules/profile/LoginActivityPage.tsx
+//
+// Phase 9 T1 — "My Activity" surface.
+//
+// Per-user auth-svc event log (login_success / login_failure / lockout /
+// 2fa_*). Sourced from `useAuth().audit_events` for the CURRENT signed-in
+// user only. Mounted at /profile/activity, accessible to every signed-in
+// user (no role gate).
+//
+// NOT to be confused with /admin/activity (AdminActivityPage) — that is
+// the multi-source admin trail across ALL users (user_access_override /
+// report_export / ews_rule_version reverts), admin+supervisor RBAC only.
+// The two pages have different data sources, different audiences, and
+// different RBAC. The Phase 9 audit (2026-05-30) explicitly kept both —
+// see docs/phase9-platform-consolidation.md §T1 for the rationale.
+
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, KeyRound, RefreshCw, ShieldOff } from 'lucide-react';
