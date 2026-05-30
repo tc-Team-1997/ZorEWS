@@ -15668,6 +15668,89 @@ function __mswRbacGridFor(role: string): Record<string, Record<string, boolean>>
   return out;
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Tenant Governance (051 overlay) — MSW seed fixtures.
+// ──────────────────────────────────────────────────────────────────
+interface MswBranch {
+  branch_id: string;
+  tenant_id: string;
+  country_code: string;
+  code: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  manager_user: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MswComplianceRule {
+  rule_id: string;
+  country_code: string;
+  regulator: string;
+  domain: 'banking' | 'insurance' | 'both';
+  rule_code: string;
+  title: string;
+  description: string;
+  requirement_kind: 'reporting' | 'capital' | 'kyc' | 'sanctions' | 'governance' | 'data_residency' | 'audit';
+  severity: 'mandatory' | 'recommended' | 'advisory';
+  effective_from: string | null;
+  effective_until: string | null;
+  source_url: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+const __mswGovTs = new Date().toISOString();
+
+const __mswBranches: MswBranch[] = [
+  { branch_id: 'br-hdfc-mumbai-fort',   tenant_id: 'HDFC_BANK',     country_code: 'IN', code: 'HDFC001', name: 'HDFC Bank Fort Branch',     city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-hdfc-delhi-cp',      tenant_id: 'HDFC_BANK',     country_code: 'IN', code: 'HDFC002', name: 'HDFC Bank Connaught Place', city: 'Delhi',    state: 'Delhi',       address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-icici-mumbai-bkc',   tenant_id: 'ICICI_BANK',    country_code: 'IN', code: 'ICIC001', name: 'ICICI Bank BKC',            city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-sbi-mumbai-main',    tenant_id: 'SBI',           country_code: 'IN', code: 'SBI001',  name: 'State Bank of India Main',  city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-hdfcergo-mumbai-hq', tenant_id: 'HDFC_ERGO',     country_code: 'IN', code: 'HERGO01', name: 'HDFC ERGO Mumbai HQ',       city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-icicilom-mumbai-hq', tenant_id: 'ICICI_LOMBARD', country_code: 'IN', code: 'ILOM001', name: 'ICICI Lombard Mumbai HQ',   city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-bank-demo-main',     tenant_id: 'BANK_DEMO',     country_code: 'IN', code: 'DEMO001', name: 'APEX Demo Bank — Main',     city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  { branch_id: 'br-bil-thimphu',        tenant_id: 'BIL',           country_code: 'BT', code: 'BIL001',  name: 'BIL Thimphu Head Office',   city: 'Thimphu',  state: 'Thimphu',     address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+];
+
+const __mswComplianceRules: MswComplianceRule[] = [
+  { rule_id: 'cr-rbi-md-npa',   country_code: 'IN', regulator: 'RBI',   domain: 'banking',   rule_code: 'RBI-MD-NPA-2024',   title: 'IRACP — Income Recognition + Asset Classification', description: 'Loans classified as NPA when DPD ≥ 90; SMA-0/1/2 tiers per DPD bracket. Quarterly reporting to RBI.', requirement_kind: 'reporting',     severity: 'mandatory', effective_from: '2024-04-01', effective_until: null, source_url: 'https://www.rbi.org.in/', active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  { rule_id: 'cr-rbi-pmla',     country_code: 'IN', regulator: 'RBI',   domain: 'banking',   rule_code: 'RBI-PMLA-2002',     title: 'PMLA — Anti Money Laundering',                       description: 'KYC + Sanctions screening + STR/CTR reporting to FIU-IND.',                                          requirement_kind: 'kyc',           severity: 'mandatory', effective_from: '2002-07-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  { rule_id: 'cr-irdai-cg',     country_code: 'IN', regulator: 'IRDAI', domain: 'insurance', rule_code: 'IRDAI-CG-2016',     title: 'Corporate Governance Guidelines',                    description: 'Board composition + risk committees + investment committee + audit committee.',                       requirement_kind: 'governance',    severity: 'mandatory', effective_from: '2016-05-18', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  { rule_id: 'cr-irdai-claims', country_code: 'IN', regulator: 'IRDAI', domain: 'insurance', rule_code: 'IRDAI-CLM-2024',    title: 'Claim Settlement Turnaround Time',                   description: 'Acknowledge claim within 24h; settle within 30 days of last document received.',                     requirement_kind: 'reporting',     severity: 'mandatory', effective_from: '2024-04-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  { rule_id: 'cr-rma-bt-cap',   country_code: 'BT', regulator: 'RMA',   domain: 'banking',   rule_code: 'RMA-CAP-2022',      title: 'Capital Adequacy Framework',                         description: 'Minimum CRAR 12.5% for Bhutan-registered banks.',                                                    requirement_kind: 'capital',       severity: 'mandatory', effective_from: '2022-01-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  { rule_id: 'cr-rbi-data-res', country_code: 'IN', regulator: 'RBI',   domain: 'both',      rule_code: 'RBI-DATA-RES-2018', title: 'Data Localisation for Payment Systems',              description: 'Payment-system data must reside in India.',                                                          requirement_kind: 'data_residency', severity: 'mandatory', effective_from: '2018-10-15', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+];
+
+export function __resetMswGovernance(): void {
+  __mswBranches.length = 0;
+  __mswBranches.push(
+    { branch_id: 'br-hdfc-mumbai-fort',   tenant_id: 'HDFC_BANK',     country_code: 'IN', code: 'HDFC001', name: 'HDFC Bank Fort Branch',     city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-hdfc-delhi-cp',      tenant_id: 'HDFC_BANK',     country_code: 'IN', code: 'HDFC002', name: 'HDFC Bank Connaught Place', city: 'Delhi',    state: 'Delhi',       address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-icici-mumbai-bkc',   tenant_id: 'ICICI_BANK',    country_code: 'IN', code: 'ICIC001', name: 'ICICI Bank BKC',            city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-sbi-mumbai-main',    tenant_id: 'SBI',           country_code: 'IN', code: 'SBI001',  name: 'State Bank of India Main',  city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-hdfcergo-mumbai-hq', tenant_id: 'HDFC_ERGO',     country_code: 'IN', code: 'HERGO01', name: 'HDFC ERGO Mumbai HQ',       city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-icicilom-mumbai-hq', tenant_id: 'ICICI_LOMBARD', country_code: 'IN', code: 'ILOM001', name: 'ICICI Lombard Mumbai HQ',   city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-bank-demo-main',     tenant_id: 'BANK_DEMO',     country_code: 'IN', code: 'DEMO001', name: 'APEX Demo Bank — Main',     city: 'Mumbai',   state: 'Maharashtra', address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+    { branch_id: 'br-bil-thimphu',        tenant_id: 'BIL',           country_code: 'BT', code: 'BIL001',  name: 'BIL Thimphu Head Office',   city: 'Thimphu',  state: 'Thimphu',     address: null, phone: null, email: null, manager_user: null, active: true,  created_at: __mswGovTs, updated_at: __mswGovTs },
+  );
+  __mswComplianceRules.length = 0;
+  __mswComplianceRules.push(
+    { rule_id: 'cr-rbi-md-npa',   country_code: 'IN', regulator: 'RBI',   domain: 'banking',   rule_code: 'RBI-MD-NPA-2024',   title: 'IRACP — Income Recognition + Asset Classification', description: 'Loans classified as NPA when DPD ≥ 90; SMA-0/1/2 tiers per DPD bracket. Quarterly reporting to RBI.', requirement_kind: 'reporting',     severity: 'mandatory', effective_from: '2024-04-01', effective_until: null, source_url: 'https://www.rbi.org.in/', active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+    { rule_id: 'cr-rbi-pmla',     country_code: 'IN', regulator: 'RBI',   domain: 'banking',   rule_code: 'RBI-PMLA-2002',     title: 'PMLA — Anti Money Laundering',                       description: 'KYC + Sanctions screening + STR/CTR reporting to FIU-IND.',                                          requirement_kind: 'kyc',           severity: 'mandatory', effective_from: '2002-07-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+    { rule_id: 'cr-irdai-cg',     country_code: 'IN', regulator: 'IRDAI', domain: 'insurance', rule_code: 'IRDAI-CG-2016',     title: 'Corporate Governance Guidelines',                    description: 'Board composition + risk committees + investment committee + audit committee.',                       requirement_kind: 'governance',    severity: 'mandatory', effective_from: '2016-05-18', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+    { rule_id: 'cr-irdai-claims', country_code: 'IN', regulator: 'IRDAI', domain: 'insurance', rule_code: 'IRDAI-CLM-2024',    title: 'Claim Settlement Turnaround Time',                   description: 'Acknowledge claim within 24h; settle within 30 days of last document received.',                     requirement_kind: 'reporting',     severity: 'mandatory', effective_from: '2024-04-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+    { rule_id: 'cr-rma-bt-cap',   country_code: 'BT', regulator: 'RMA',   domain: 'banking',   rule_code: 'RMA-CAP-2022',      title: 'Capital Adequacy Framework',                         description: 'Minimum CRAR 12.5% for Bhutan-registered banks.',                                                    requirement_kind: 'capital',       severity: 'mandatory', effective_from: '2022-01-01', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+    { rule_id: 'cr-rbi-data-res', country_code: 'IN', regulator: 'RBI',   domain: 'both',      rule_code: 'RBI-DATA-RES-2018', title: 'Data Localisation for Payment Systems',              description: 'Payment-system data must reside in India.',                                                          requirement_kind: 'data_residency', severity: 'mandatory', effective_from: '2018-10-15', effective_until: null, source_url: null, active: true, created_at: __mswGovTs, updated_at: __mswGovTs },
+  );
+}
+
 export function __resetMswRbacMatrix(): void {
   __mswRbacGrants.length = 0;
   __mswRbacGrants.push(
@@ -15958,6 +16041,199 @@ handlers.push(
   // Mirrors services/bff/src/dbac/domain_resolver.ts precedence:
   //   super_admin/admin → 'both' → user pin → tenant vertical → null.
   // ──────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────
+  // Tenant Governance (051 overlay) — branches + compliance rules.
+  // ──────────────────────────────────────────────────────────────────
+  http.get('/v1/governance/me', ({ request }) => {
+    const role = request.headers.get('x-apex-role') ?? '';
+    const tenant_id = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const branch_id = request.headers.get('x-apex-user-branch') ?? null;
+    const map: Record<string, { name: string; vertical: 'banking' | 'insurance'; country: string; parent: string | null }> = {
+      BANK_DEMO:     { name: 'APEX Bank (demo)',             vertical: 'banking',   country: 'IN', parent: null },
+      BIL:           { name: 'Bhutan Insurance Limited',     vertical: 'insurance', country: 'BT', parent: null },
+      HDFC_BANK:     { name: 'HDFC Bank Limited',            vertical: 'banking',   country: 'IN', parent: 'HDFC Group' },
+      ICICI_BANK:    { name: 'ICICI Bank Limited',           vertical: 'banking',   country: 'IN', parent: 'ICICI Group' },
+      SBI:           { name: 'State Bank of India',          vertical: 'banking',   country: 'IN', parent: 'SBI Group' },
+      HDFC_ERGO:     { name: 'HDFC ERGO General Insurance',  vertical: 'insurance', country: 'IN', parent: 'HDFC Group' },
+      ICICI_LOMBARD: { name: 'ICICI Lombard General Insurance', vertical: 'insurance', country: 'IN', parent: 'ICICI Group' },
+    };
+    const t = map[tenant_id] ?? { name: tenant_id, vertical: 'banking', country: 'IN', parent: null };
+    return HttpResponse.json(
+      envelope({
+        country_code: t.country,
+        tenant_id,
+        tenant_name: t.name,
+        tenant_vertical: t.vertical,
+        parent_organization: t.parent,
+        branch_id,
+        role,
+      }),
+    );
+  }),
+
+  http.get('/v1/governance/branches', ({ request }) => {
+    const url = new URL(request.url);
+    let rows = __mswBranches.slice();
+    const tenant_id = url.searchParams.get('tenant_id');
+    const country_code = url.searchParams.get('country_code');
+    const active_only = url.searchParams.get('active_only') === 'true';
+    if (tenant_id) rows = rows.filter((r) => r.tenant_id === tenant_id);
+    if (country_code) rows = rows.filter((r) => r.country_code === country_code);
+    if (active_only) rows = rows.filter((r) => r.active);
+    rows.sort((a, b) =>
+      a.tenant_id !== b.tenant_id
+        ? a.tenant_id.localeCompare(b.tenant_id)
+        : a.code.localeCompare(b.code),
+    );
+    return HttpResponse.json(envelope({ total: rows.length, branches: rows }));
+  }),
+
+  http.get('/v1/governance/branches/:branch_id', ({ params }) => {
+    const r = __mswBranches.find((b) => b.branch_id === params.branch_id);
+    if (!r) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_branch', 'branch not found', 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/governance/branches', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body || !body.tenant_id || !body.country_code || !body.code || !body.name) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'missing fields', 'MEDIUM'), { status: 400 });
+    }
+    if (__mswBranches.find((b) => b.tenant_id === body.tenant_id && b.code === body.code)) {
+      return HttpResponse.json(
+        envelopeError('EWS_409_duplicate_branch_code', 'duplicate branch code for tenant', 'MEDIUM'),
+        { status: 409 },
+      );
+    }
+    const now = new Date().toISOString();
+    const branch = {
+      branch_id: `br-msw-${Date.now()}`,
+      tenant_id: String(body.tenant_id),
+      country_code: String(body.country_code),
+      code: String(body.code),
+      name: String(body.name),
+      city: (body.city as string | null) ?? null,
+      state: (body.state as string | null) ?? null,
+      address: (body.address as string | null) ?? null,
+      phone: (body.phone as string | null) ?? null,
+      email: (body.email as string | null) ?? null,
+      manager_user: (body.manager_user as string | null) ?? null,
+      active: body.active === false ? false : true,
+      created_at: now,
+      updated_at: now,
+    };
+    __mswBranches.push(branch);
+    return HttpResponse.json(envelope(branch, 'EWS_201', 'Created'), { status: 201 });
+  }),
+
+  http.patch('/v1/governance/branches/:branch_id', async ({ params, request }) => {
+    const idx = __mswBranches.findIndex((b) => b.branch_id === params.branch_id);
+    if (idx === -1) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_branch', 'branch not found', 'LOW'), { status: 404 });
+    }
+    const patch = (await request.json()) as Record<string, unknown>;
+    const merged = { ...__mswBranches[idx] };
+    for (const k of ['code', 'name', 'city', 'state', 'address', 'phone', 'email', 'manager_user', 'active'] as const) {
+      if (patch[k] !== undefined) (merged as Record<string, unknown>)[k] = patch[k];
+    }
+    merged.updated_at = new Date().toISOString();
+    __mswBranches[idx] = merged;
+    return HttpResponse.json(envelope(merged));
+  }),
+
+  http.delete('/v1/governance/branches/:branch_id', ({ params }) => {
+    const idx = __mswBranches.findIndex((b) => b.branch_id === params.branch_id);
+    if (idx === -1) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_branch', 'branch not found', 'LOW'), { status: 404 });
+    }
+    __mswBranches.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get('/v1/governance/compliance-rules', ({ request }) => {
+    const url = new URL(request.url);
+    let rows = __mswComplianceRules.slice();
+    const country_code = url.searchParams.get('country_code');
+    const regulator = url.searchParams.get('regulator');
+    const domain = url.searchParams.get('domain');
+    const active_only = url.searchParams.get('active_only') === 'true';
+    if (domain && !['banking', 'insurance', 'both'].includes(domain)) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_domain', `unknown domain ${domain}`, 'MEDIUM'), { status: 400 });
+    }
+    if (country_code) rows = rows.filter((r) => r.country_code === country_code);
+    if (regulator) rows = rows.filter((r) => r.regulator === regulator);
+    if (domain) rows = rows.filter((r) => r.domain === domain);
+    if (active_only) rows = rows.filter((r) => r.active);
+    return HttpResponse.json(envelope({ total: rows.length, rules: rows }));
+  }),
+
+  http.get('/v1/governance/compliance-rules/:rule_id', ({ params }) => {
+    const r = __mswComplianceRules.find((x) => x.rule_id === params.rule_id);
+    if (!r) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_compliance_rule', 'rule not found', 'LOW'), { status: 404 });
+    }
+    return HttpResponse.json(envelope(r));
+  }),
+
+  http.post('/v1/governance/compliance-rules', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body || !body.country_code || !body.regulator || !body.rule_code || !body.title || !body.description || !body.domain || !body.requirement_kind) {
+      return HttpResponse.json(envelopeError('EWS_400_invalid_input', 'missing fields', 'MEDIUM'), { status: 400 });
+    }
+    if (__mswComplianceRules.find((r) => r.country_code === body.country_code && r.regulator === body.regulator && r.rule_code === body.rule_code)) {
+      return HttpResponse.json(envelopeError('EWS_409_duplicate_compliance_rule', 'duplicate (country, regulator, rule_code)', 'MEDIUM'), { status: 409 });
+    }
+    const now = new Date().toISOString();
+    const rule = {
+      rule_id: `cr-msw-${Date.now()}`,
+      country_code: String(body.country_code),
+      regulator: String(body.regulator),
+      domain: body.domain as 'banking' | 'insurance' | 'both',
+      rule_code: String(body.rule_code),
+      title: String(body.title),
+      description: String(body.description),
+      requirement_kind: body.requirement_kind as 'reporting' | 'capital' | 'kyc' | 'sanctions' | 'governance' | 'data_residency' | 'audit',
+      severity: (body.severity as 'mandatory' | 'recommended' | 'advisory') ?? 'mandatory',
+      effective_from: (body.effective_from as string | null) ?? null,
+      effective_until: (body.effective_until as string | null) ?? null,
+      source_url: (body.source_url as string | null) ?? null,
+      active: body.active === false ? false : true,
+      created_at: now,
+      updated_at: now,
+    };
+    __mswComplianceRules.push(rule);
+    return HttpResponse.json(envelope(rule, 'EWS_201', 'Created'), { status: 201 });
+  }),
+
+  http.patch('/v1/governance/compliance-rules/:rule_id', async ({ params, request }) => {
+    const idx = __mswComplianceRules.findIndex((r) => r.rule_id === params.rule_id);
+    if (idx === -1) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_compliance_rule', 'rule not found', 'LOW'), { status: 404 });
+    }
+    const patch = (await request.json()) as Record<string, unknown>;
+    const merged = { ...__mswComplianceRules[idx] };
+    for (const k of ['title', 'description', 'requirement_kind', 'severity', 'effective_from', 'effective_until', 'source_url', 'active'] as const) {
+      if (patch[k] !== undefined) (merged as Record<string, unknown>)[k] = patch[k];
+    }
+    merged.updated_at = new Date().toISOString();
+    __mswComplianceRules[idx] = merged;
+    return HttpResponse.json(envelope(merged));
+  }),
+
+  http.delete('/v1/governance/compliance-rules/:rule_id', ({ params }) => {
+    const idx = __mswComplianceRules.findIndex((r) => r.rule_id === params.rule_id);
+    if (idx === -1) {
+      return HttpResponse.json(envelopeError('EWS_404_unknown_compliance_rule', 'rule not found', 'LOW'), { status: 404 });
+    }
+    __mswComplianceRules.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.get('/v1/dbac/me', ({ request }) => {
     const role = request.headers.get('x-apex-role') ?? '';
     const userPinRaw = request.headers.get('x-apex-user-domain')?.trim() ?? '';

@@ -230,6 +230,9 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/admin/masters',              i18nKey: 'master_data',          icon: Library,             requireRole: ['admin'] },
       // Enterprise Permission Matrix (049 overlay) — role × module × action editor
       { to: '/admin/permission-matrix',    i18nKey: 'permission_matrix',    icon: ShieldCheck,         requireRole: ['admin'] },
+      // Tenant Governance (051 overlay) — branch registry + compliance rules
+      { to: '/admin/governance/branches',           i18nKey: 'branches',           icon: Building2,    requireRole: ['admin'] },
+      { to: '/admin/governance/compliance-rules',   i18nKey: 'compliance_rules',   icon: ScrollText,   requireRole: ['admin'] },
       { to: '/admin/risk-score-config',    i18nKey: 'risk_score_config',    icon: Scale,               requireRole: ['admin'], featured: true },
       { to: '/admin/alert-classification', i18nKey: 'alert_classification', icon: ShieldAlert,         requireRole: ['admin'], featured: true },
       { to: '/admin/case-types',           i18nKey: 'case_type_setup',      icon: Briefcase,           requireRole: ['admin'], featured: true },

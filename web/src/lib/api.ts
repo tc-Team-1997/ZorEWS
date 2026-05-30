@@ -1057,6 +1057,70 @@ export const api = {
   dbacMe: () =>
     http.get<EnvelopeBody<DbacMeResponse>>('/v1/dbac/me').then((r) => r.data),
 
+  // ─── Tenant Governance (051 overlay) ───
+  // Layers on top of existing tenant + DBAC. Drives /admin/governance/* pages.
+  governanceMe: () =>
+    http.get<EnvelopeBody<GovernanceMeResponse>>('/v1/governance/me').then((r) => r.data),
+  governanceListBranches: (filter?: { tenant_id?: string; country_code?: string; active_only?: boolean }) => {
+    const params = new URLSearchParams();
+    if (filter?.tenant_id) params.set('tenant_id', filter.tenant_id);
+    if (filter?.country_code) params.set('country_code', filter.country_code);
+    if (filter?.active_only) params.set('active_only', 'true');
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<{ total: number; branches: GovernanceBranch[] }>>(
+        `/v1/governance/branches${qs ? `?${qs}` : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  governanceGetBranch: (branch_id: string) =>
+    http
+      .get<EnvelopeBody<GovernanceBranch>>(`/v1/governance/branches/${encodeURIComponent(branch_id)}`)
+      .then((r) => r.data),
+  governanceCreateBranch: (input: GovernanceBranchInput) =>
+    http.post<EnvelopeBody<GovernanceBranch>>('/v1/governance/branches', input).then((r) => r.data),
+  governancePatchBranch: (branch_id: string, patch: GovernanceBranchPatch) =>
+    http
+      .patch<EnvelopeBody<GovernanceBranch>>(
+        `/v1/governance/branches/${encodeURIComponent(branch_id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+  governanceDeleteBranch: (branch_id: string) =>
+    http
+      .delete<void>(`/v1/governance/branches/${encodeURIComponent(branch_id)}`)
+      .then(() => undefined),
+  governanceListRules: (filter?: { country_code?: string; regulator?: string; domain?: GovernanceDomain; active_only?: boolean }) => {
+    const params = new URLSearchParams();
+    if (filter?.country_code) params.set('country_code', filter.country_code);
+    if (filter?.regulator) params.set('regulator', filter.regulator);
+    if (filter?.domain) params.set('domain', filter.domain);
+    if (filter?.active_only) params.set('active_only', 'true');
+    const qs = params.toString();
+    return http
+      .get<EnvelopeBody<{ total: number; rules: ComplianceRule[] }>>(
+        `/v1/governance/compliance-rules${qs ? `?${qs}` : ''}`,
+      )
+      .then((r) => r.data);
+  },
+  governanceGetRule: (rule_id: string) =>
+    http
+      .get<EnvelopeBody<ComplianceRule>>(`/v1/governance/compliance-rules/${encodeURIComponent(rule_id)}`)
+      .then((r) => r.data),
+  governanceCreateRule: (input: ComplianceRuleInput) =>
+    http.post<EnvelopeBody<ComplianceRule>>('/v1/governance/compliance-rules', input).then((r) => r.data),
+  governancePatchRule: (rule_id: string, patch: ComplianceRulePatch) =>
+    http
+      .patch<EnvelopeBody<ComplianceRule>>(
+        `/v1/governance/compliance-rules/${encodeURIComponent(rule_id)}`,
+        patch,
+      )
+      .then((r) => r.data),
+  governanceDeleteRule: (rule_id: string) =>
+    http
+      .delete<void>(`/v1/governance/compliance-rules/${encodeURIComponent(rule_id)}`)
+      .then(() => undefined),
+
   /** Phase 9 T10 — fleet-wide rule engine report (envelope-wrapped). */
   ruleEngineReport: () =>
     http
@@ -6384,6 +6448,117 @@ export interface DbacMeResponse {
     tenant_vertical: 'banking' | 'insurance' | null;
     role: string;
   };
+}
+
+// ── Tenant Governance (051 overlay) ────────────────────────────────
+
+export type GovernanceDomain = 'banking' | 'insurance' | 'both';
+export type ComplianceSeverity = 'mandatory' | 'recommended' | 'advisory';
+export type ComplianceRequirementKind =
+  | 'reporting' | 'capital' | 'kyc' | 'sanctions'
+  | 'governance' | 'data_residency' | 'audit';
+
+export const GOVERNANCE_DOMAINS = ['banking', 'insurance', 'both'] as const;
+export const COMPLIANCE_SEVERITIES = ['mandatory', 'recommended', 'advisory'] as const;
+export const COMPLIANCE_REQUIREMENT_KINDS = [
+  'reporting', 'capital', 'kyc', 'sanctions', 'governance', 'data_residency', 'audit',
+] as const;
+
+export interface GovernanceMeResponse {
+  country_code: string | null;
+  tenant_id: string | null;
+  tenant_name: string | null;
+  tenant_vertical: 'banking' | 'insurance' | null;
+  parent_organization: string | null;
+  branch_id: string | null;
+  role: string;
+}
+
+export interface GovernanceBranch {
+  branch_id: string;
+  tenant_id: string;
+  country_code: string;
+  code: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  manager_user: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GovernanceBranchInput {
+  tenant_id: string;
+  country_code: string;
+  code: string;
+  name: string;
+  city?: string | null;
+  state?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  manager_user?: string | null;
+  active?: boolean;
+}
+
+export interface GovernanceBranchPatch {
+  code?: string;
+  name?: string;
+  city?: string | null;
+  state?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  manager_user?: string | null;
+  active?: boolean;
+}
+
+export interface ComplianceRule {
+  rule_id: string;
+  country_code: string;
+  regulator: string;
+  domain: GovernanceDomain;
+  rule_code: string;
+  title: string;
+  description: string;
+  requirement_kind: ComplianceRequirementKind;
+  severity: ComplianceSeverity;
+  effective_from: string | null;
+  effective_until: string | null;
+  source_url: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceRuleInput {
+  country_code: string;
+  regulator: string;
+  domain: GovernanceDomain;
+  rule_code: string;
+  title: string;
+  description: string;
+  requirement_kind: ComplianceRequirementKind;
+  severity?: ComplianceSeverity;
+  effective_from?: string | null;
+  effective_until?: string | null;
+  source_url?: string | null;
+  active?: boolean;
+}
+
+export interface ComplianceRulePatch {
+  title?: string;
+  description?: string;
+  requirement_kind?: ComplianceRequirementKind;
+  severity?: ComplianceSeverity;
+  effective_from?: string | null;
+  effective_until?: string | null;
+  source_url?: string | null;
+  active?: boolean;
 }
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────

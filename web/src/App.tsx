@@ -66,6 +66,8 @@ import { AdminSessionsPage } from '@/modules/admin/AdminSessionsPage';
 import { MasterMenuPage } from '@/modules/admin/masters/MasterMenuPage';
 import { MasterEntityPage } from '@/modules/admin/masters/MasterEntityPage';
 import { PermissionMatrixPage } from '@/modules/admin/rbac/PermissionMatrixPage';
+import { BranchesPage } from '@/modules/admin/governance/BranchesPage';
+import { ComplianceRulesPage } from '@/modules/admin/governance/ComplianceRulesPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
 import { AuditTrailPage } from '@/modules/admin/AuditTrailPage';
@@ -231,6 +233,8 @@ export function App() {
             <Route path="admin/masters" element={<MasterMenuPage />} />
             <Route path="admin/masters/:entity" element={<MasterEntityPage />} />
             <Route path="admin/permission-matrix" element={<PermissionMatrixPage />} />
+            <Route path="admin/governance/branches" element={<BranchesPage />} />
+            <Route path="admin/governance/compliance-rules" element={<ComplianceRulesPage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
             <Route path="admin/audit-trail" element={<AuditTrailPage />} />
