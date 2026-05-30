@@ -7,9 +7,14 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Filter, RefreshCw, Search } from 'lucide-react';
+import { Download, Filter, RefreshCw, Search } from 'lucide-react';
 import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import {
+  downloadAdminActivityCsv,
+  downloadAdminActivityPdf,
+  downloadAdminActivityXlsx,
+} from '@/lib/adminActivityExport';
 import {
   api,
   type AdminAuditAction,
@@ -106,6 +111,54 @@ export function AdminActivityPage() {
       <PageHeader
         title="Admin activity"
         subtitle="Cross-source admin audit log: overrides · report exports · rule reverts"
+        actions={
+          <div className="flex items-center gap-2" data-testid="admin-activity-export-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAdminActivityCsv(items)}
+              disabled={!items.length}
+              data-testid="admin-activity-export-csv"
+              title={
+                items.length
+                  ? `Export ${items.length} filtered entr${items.length === 1 ? 'y' : 'ies'} as CSV`
+                  : 'No entries to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAdminActivityPdf(items)}
+              disabled={!items.length}
+              data-testid="admin-activity-export-pdf"
+              title={
+                items.length
+                  ? `Export ${items.length} filtered entr${items.length === 1 ? 'y' : 'ies'} as PDF`
+                  : 'No entries to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> PDF
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void downloadAdminActivityXlsx(items);
+              }}
+              disabled={!items.length}
+              data-testid="admin-activity-export-xlsx"
+              title={
+                items.length
+                  ? `Export ${items.length} filtered entr${items.length === 1 ? 'y' : 'ies'} as Excel`
+                  : 'No entries to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> Excel
+            </Button>
+          </div>
+        }
       />
 
       <Panel
