@@ -1,9 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { RefreshCw, Search, ShieldAlert } from 'lucide-react';
+import { Download, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth, type AuthAuditEvent, type AuthEventType } from '@/store/auth';
+import {
+  downloadAuthAuditCsv,
+  downloadAuthAuditPdf,
+  downloadAuthAuditXlsx,
+} from '@/lib/authAuditExport';
 
 const EVENT_TYPES: { value: AuthEventType | ''; label: string }[] = [
   { value: '', label: 'All event types' },
@@ -85,6 +90,54 @@ export function AuditLogPage() {
       <PageHeader
         title="Auth audit log"
         subtitle="Every authentication-related event captured server-side · admin + supervisor only"
+        actions={
+          <div className="flex items-center gap-2" data-testid="auth-audit-export-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAuthAuditCsv(events)}
+              disabled={!events.length}
+              data-testid="auth-audit-export-csv"
+              title={
+                events.length
+                  ? `Export ${events.length} filtered event(s) as CSV`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadAuthAuditPdf(events)}
+              disabled={!events.length}
+              data-testid="auth-audit-export-pdf"
+              title={
+                events.length
+                  ? `Export ${events.length} filtered event(s) as PDF`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> PDF
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void downloadAuthAuditXlsx(events);
+              }}
+              disabled={!events.length}
+              data-testid="auth-audit-export-xlsx"
+              title={
+                events.length
+                  ? `Export ${events.length} filtered event(s) as Excel`
+                  : 'No events to export'
+              }
+            >
+              <Download size={13} strokeWidth={2} /> Excel
+            </Button>
+          </div>
+        }
       />
 
       <Panel
