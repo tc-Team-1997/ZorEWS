@@ -977,6 +977,52 @@ export const api = {
   ruleBacktest: (id: string) =>
     http.post<BacktestResult>(`/v1/rules/${id}/backtest`).then((r) => r.data),
 
+  // ── Phase 9 T11 — Master Setup framework (reusable CRUD).
+  //     Prefix `mastersFw` to disambiguate from the legacy `masterList(master_type)`
+  //     method below (different surface). ──────────────────────────────
+
+  mastersFwCatalog: () =>
+    http
+      .get<EnvelopeBody<{ entities: MasterCatalogEntry[]; total: number }>>('/v1/admin/masters')
+      .then((r) => r.data),
+
+  mastersFwListRows: (entity: string) =>
+    http
+      .get<EnvelopeBody<MasterEntityListResponse>>(
+        `/v1/admin/masters/${encodeURIComponent(entity)}`,
+      )
+      .then((r) => r.data),
+
+  mastersFwGetRow: (entity: string, id: string) =>
+    http
+      .get<EnvelopeBody<Phase9MasterRow>>(
+        `/v1/admin/masters/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`,
+      )
+      .then((r) => r.data),
+
+  mastersFwCreateRow: (entity: string, fields: Record<string, unknown>) =>
+    http
+      .post<EnvelopeBody<Phase9MasterRow>>(
+        `/v1/admin/masters/${encodeURIComponent(entity)}`,
+        fields,
+      )
+      .then((r) => r.data),
+
+  mastersFwUpdateRow: (entity: string, id: string, fields: Record<string, unknown>) =>
+    http
+      .patch<EnvelopeBody<Phase9MasterRow>>(
+        `/v1/admin/masters/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`,
+        fields,
+      )
+      .then((r) => r.data),
+
+  mastersFwDeleteRow: (entity: string, id: string) =>
+    http
+      .delete<void>(
+        `/v1/admin/masters/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`,
+      )
+      .then(() => undefined),
+
   /** Phase 9 T10 — fleet-wide rule engine report (envelope-wrapped). */
   ruleEngineReport: () =>
     http
@@ -6175,6 +6221,50 @@ export interface AdminAuditLogRow {
   ip_address: string | null;
   user_agent: string | null;
   created_at: string;
+}
+
+// ── Phase 9 T11 — Master Setup framework (mirror of services/bff/src/masters).
+//     The Phase9Master* prefix avoids name collision with the legacy
+//     `MasterRow` / `MasterField` types declared earlier in this file
+//     (which serve the older /v1/master/:type surface). ──
+
+export type Phase9MasterFieldType = 'string' | 'integer' | 'number' | 'boolean' | 'enum';
+
+export interface Phase9MasterField {
+  name: string;
+  type: Phase9MasterFieldType;
+  required?: boolean;
+  max_length?: number;
+  enum_values?: readonly string[];
+  label?: string;
+}
+
+export interface MasterCatalogEntry {
+  entity: string;
+  label: string;
+  label_plural: string;
+  tenant_scoped: boolean;
+  field_count: number;
+}
+
+export interface Phase9MasterRow {
+  id: string;
+  tenant_id: string;
+  fields: Record<string, unknown>;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface MasterEntityListResponse {
+  entity: string;
+  label: string;
+  label_plural: string;
+  tenant_scoped: boolean;
+  fields: Phase9MasterField[];
+  rows: Phase9MasterRow[];
+  total: number;
 }
 
 // ── Envelope helper + tenant types (T4.24 Phase 12) ──────────────────

@@ -15385,3 +15385,250 @@ const __mswGlossaryHandlers = [
 ];
 
 handlers.push(...__mswGlossaryHandlers);
+
+// ────────────────────────────────────────────────────────────────────
+// Phase 9 T11 — Master Setup framework MSW handlers.
+// Mirrors services/bff/src/masters/registry.ts so the SPA can render the
+// reusable MasterEntityPage end-to-end in dev mode without the BFF up.
+// ────────────────────────────────────────────────────────────────────
+
+interface MswMasterField {
+  name: string;
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'enum';
+  required?: boolean;
+  max_length?: number;
+  enum_values?: readonly string[];
+  label?: string;
+}
+interface MswMasterRow {
+  id: string;
+  tenant_id: string;
+  fields: Record<string, unknown>;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
+}
+interface MswMasterEntity {
+  entity: string;
+  label: string;
+  label_plural: string;
+  tenant_scoped: boolean;
+  fields: MswMasterField[];
+  rows: MswMasterRow[];
+}
+
+const __mswMasterEntities: MswMasterEntity[] = [
+  {
+    entity: 'countries',
+    label: 'Country',
+    label_plural: 'Countries',
+    tenant_scoped: false,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 3, label: 'ISO code' },
+      { name: 'name', type: 'string', required: true, max_length: 80, label: 'Name' },
+      { name: 'region', type: 'enum', enum_values: ['AF', 'AS', 'EU', 'NA', 'OC', 'SA'], label: 'Region' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('countries', 0, { code: 'IN', name: 'India', region: 'AS', active: true }),
+      mswMasterSeedRow('countries', 1, { code: 'BT', name: 'Bhutan', region: 'AS', active: true }),
+      mswMasterSeedRow('countries', 2, { code: 'KE', name: 'Kenya', region: 'AF', active: true }),
+    ],
+  },
+  {
+    entity: 'departments',
+    label: 'Department',
+    label_plural: 'Departments',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 120, label: 'Name' },
+      {
+        name: 'function',
+        type: 'enum',
+        enum_values: ['risk', 'compliance', 'operations', 'it', 'audit', 'business'],
+        label: 'Function',
+      },
+      { name: 'headcount', type: 'integer', label: 'Headcount' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('departments', 0, { code: 'CR', name: 'Credit Risk', function: 'risk', headcount: 24, active: true }),
+      mswMasterSeedRow('departments', 1, { code: 'OPS', name: 'Operations', function: 'operations', headcount: 80, active: true }),
+    ],
+  },
+  {
+    entity: 'risk-categories',
+    label: 'Risk Category',
+    label_plural: 'Risk Categories',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 120, label: 'Name' },
+      {
+        name: 'severity',
+        type: 'enum',
+        enum_values: ['critical', 'high', 'medium', 'low'],
+        label: 'Default severity',
+      },
+      {
+        name: 'domain',
+        type: 'enum',
+        enum_values: ['credit', 'fraud', 'aml', 'operational', 'market', 'liquidity'],
+        label: 'Domain',
+      },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('risk-categories', 0, { code: 'NPA', name: 'NPA / Default risk', severity: 'critical', domain: 'credit', active: true }),
+      mswMasterSeedRow('risk-categories', 1, { code: 'FRD_VEL', name: 'Velocity fraud', severity: 'critical', domain: 'fraud', active: true }),
+    ],
+  },
+];
+
+function mswMasterSeedRow(entity: string, idx: number, fields: Record<string, unknown>): MswMasterRow {
+  const now = new Date().toISOString();
+  return {
+    id: `mst-${entity}-seed-${idx}`,
+    tenant_id: entity === 'countries' ? 'PLATFORM' : 'BANK_DEMO',
+    fields,
+    created_at: now,
+    created_by: 'system:seed',
+    updated_at: now,
+    updated_by: 'system:seed',
+  };
+}
+
+function findMswEntity(slug: string): MswMasterEntity | undefined {
+  return __mswMasterEntities.find((e) => e.entity === slug);
+}
+
+handlers.push(
+  http.get('/v1/admin/masters', () => {
+    return HttpResponse.json(
+      envelope({
+        entities: __mswMasterEntities.map((e) => ({
+          entity: e.entity,
+          label: e.label,
+          label_plural: e.label_plural,
+          tenant_scoped: e.tenant_scoped,
+          field_count: e.fields.length,
+        })),
+        total: __mswMasterEntities.length,
+      }),
+    );
+  }),
+  http.get('/v1/admin/masters/:entity', ({ params }) => {
+    const entity = findMswEntity(String(params.entity));
+    if (!entity) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_entity', `unknown master entity ${params.entity}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(
+      envelope({
+        entity: entity.entity,
+        label: entity.label,
+        label_plural: entity.label_plural,
+        tenant_scoped: entity.tenant_scoped,
+        fields: entity.fields,
+        rows: entity.rows,
+        total: entity.rows.length,
+      }),
+    );
+  }),
+  http.get('/v1/admin/masters/:entity/:id', ({ params }) => {
+    const entity = findMswEntity(String(params.entity));
+    if (!entity) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_entity', `unknown master entity ${params.entity}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const row = entity.rows.find((r) => r.id === params.id);
+    if (!row) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_row', `unknown ${entity.entity} id ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(envelope(row));
+  }),
+  http.post('/v1/admin/masters/:entity', async ({ params, request }) => {
+    const entity = findMswEntity(String(params.entity));
+    if (!entity) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_entity', `unknown master entity ${params.entity}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    for (const f of entity.fields) {
+      if (f.required && (body[f.name] === undefined || body[f.name] === '' || body[f.name] === null)) {
+        return HttpResponse.json(
+          envelopeError('EWS_400_missing_required', `field ${f.name} is required`, 'MEDIUM'),
+          { status: 400 },
+        );
+      }
+    }
+    const now = new Date().toISOString();
+    const id = `mst-${entity.entity}-${Math.random().toString(36).slice(2, 10)}`;
+    const row: MswMasterRow = {
+      id,
+      tenant_id: entity.tenant_scoped ? 'BANK_DEMO' : 'PLATFORM',
+      fields: body,
+      created_at: now,
+      created_by: 'admin',
+      updated_at: now,
+      updated_by: 'admin',
+    };
+    entity.rows.unshift(row);
+    return HttpResponse.json(envelope(row), { status: 201 });
+  }),
+  http.patch('/v1/admin/masters/:entity/:id', async ({ params, request }) => {
+    const entity = findMswEntity(String(params.entity));
+    if (!entity) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_entity', `unknown master entity ${params.entity}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const idx = entity.rows.findIndex((r) => r.id === params.id);
+    if (idx === -1) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_row', `unknown ${entity.entity} id ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const row = entity.rows[idx]!;
+    const updated: MswMasterRow = {
+      ...row,
+      fields: { ...row.fields, ...body },
+      updated_at: new Date().toISOString(),
+      updated_by: 'admin',
+    };
+    entity.rows[idx] = updated;
+    return HttpResponse.json(envelope(updated));
+  }),
+  http.delete('/v1/admin/masters/:entity/:id', ({ params }) => {
+    const entity = findMswEntity(String(params.entity));
+    if (!entity) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_entity', `unknown master entity ${params.entity}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    const idx = entity.rows.findIndex((r) => r.id === params.id);
+    if (idx === -1) {
+      return HttpResponse.json(
+        envelopeError('EWS_404_unknown_row', `unknown ${entity.entity} id ${params.id}`, 'LOW'),
+        { status: 404 },
+      );
+    }
+    entity.rows.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+);

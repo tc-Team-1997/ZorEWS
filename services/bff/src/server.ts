@@ -291,6 +291,11 @@ import type { WebhookEventType } from './webhooks/types';
 import { RuleStore, defaultStore as defaultRuleStore } from './rules/store';
 import { buildRuleEngineReport } from './rule_engine_report';
 import {
+  getMasterStore,
+  listMasterCatalog,
+} from './masters/registry';
+import { MasterStoreError } from './masters/createMasterStore';
+import {
   getTemplate as getRuleTemplate,
   isRuleTemplateCategory,
   isRuleTemplateVertical,
@@ -35550,6 +35555,201 @@ export function makeApp(deps: AppDeps = {}) {
   // adopters (webhook_subscription + saved_scenario); future tickets
   // register more adapters with registerRecoveryAdapter(). See
   // docs/recovery-center.md for the adoption pattern.
+
+  // ── Phase 9 T11 — Master Setup framework (reusable CRUD) ──────────
+  // One route block serves every master entity registered in
+  // masters/registry.ts. Adding a new entity is a 10-line schema
+  // declaration + the routes below auto-mount via the entity slug.
+
+  /** GET /v1/admin/masters — list every registered master entity.
+   *  Drives the SPA's master-menu landing page. */
+  app.get(
+    '/v1/admin/masters',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const catalog = listMasterCatalog();
+      res.json(wrapResponse({ entities: catalog, total: catalog.length }, ctx));
+    },
+  );
+
+  /** GET /v1/admin/masters/:entity — list every row for one entity. */
+  app.get(
+    '/v1/admin/masters/:entity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = getMasterStore(req.params.entity);
+      if (!store) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_entity', message: `unknown master entity ${req.params.entity}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const rows = store.list(req.tenant!.tenant_id);
+      res.json(
+        wrapResponse(
+          {
+            entity: store.schema.entity,
+            label: store.schema.label,
+            label_plural: store.schema.label_plural,
+            tenant_scoped: store.schema.tenant_scoped,
+            fields: store.schema.fields,
+            rows,
+            total: rows.length,
+          },
+          ctx,
+        ),
+      );
+    },
+  );
+
+  /** GET /v1/admin/masters/:entity/:id — single row. */
+  app.get(
+    '/v1/admin/masters/:entity/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = getMasterStore(req.params.entity);
+      if (!store) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_entity', message: `unknown master entity ${req.params.entity}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const row = store.get(req.tenant!.tenant_id, req.params.id);
+      if (!row) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_row', message: `unknown ${req.params.entity} id ${req.params.id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      res.json(wrapResponse(row, ctx));
+    },
+  );
+
+  /** POST /v1/admin/masters/:entity — create a new row. Body is the
+   *  per-entity fields object; tenant_id auto-derived from headers. */
+  app.post(
+    '/v1/admin/masters/:entity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = getMasterStore(req.params.entity);
+      if (!store) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_entity', message: `unknown master entity ${req.params.entity}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const actor =
+        (req.headers['x-apex-user'] as string | undefined) ||
+        (getRole(req) ?? 'admin');
+      const body = (req.body && typeof req.body === 'object'
+        ? req.body
+        : {}) as Record<string, unknown>;
+      try {
+        const row = store.create(req.tenant!.tenant_id, actor, body);
+        res.status(201).json(wrapResponse(row, ctx));
+      } catch (e) {
+        if (e instanceof MasterStoreError) {
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** PATCH /v1/admin/masters/:entity/:id — partial update. */
+  app.patch(
+    '/v1/admin/masters/:entity/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = getMasterStore(req.params.entity);
+      if (!store) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_entity', message: `unknown master entity ${req.params.entity}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const actor =
+        (req.headers['x-apex-user'] as string | undefined) ||
+        (getRole(req) ?? 'admin');
+      const body = (req.body && typeof req.body === 'object'
+        ? req.body
+        : {}) as Record<string, unknown>;
+      try {
+        const row = store.update(req.tenant!.tenant_id, req.params.id, actor, body);
+        res.json(wrapResponse(row, ctx));
+      } catch (e) {
+        if (e instanceof MasterStoreError) {
+          const status = e.code === 'unknown_row' ? 404 : 400;
+          return res.status(status).json(
+            wrapError(
+              {
+                code: status === 404 ? 'EWS_404_unknown_row' : `EWS_400_${e.code}`,
+                message: e.message,
+                severity: status === 404 ? 'LOW' : 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
+  /** DELETE /v1/admin/masters/:entity/:id — hard delete (no recovery
+   *  archive yet — wire to registerRecoveryAdapter in a follow-up). */
+  app.delete(
+    '/v1/admin/masters/:entity/:id',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const store = getMasterStore(req.params.entity);
+      if (!store) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_entity', message: `unknown master entity ${req.params.entity}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const ok = store.delete(req.tenant!.tenant_id, req.params.id);
+      if (!ok) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_row', message: `unknown ${req.params.entity} id ${req.params.id}`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      res.status(204).end();
+    },
+  );
 
   /** GET /v1/recovery — list deleted records (tenant-scoped, admin-only). */
   app.get('/v1/recovery', requireTenantMw, requireRole('recovery:list'), async (req: Request, res: Response) => {
