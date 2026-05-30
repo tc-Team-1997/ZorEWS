@@ -4568,6 +4568,86 @@ export const handlers = [
     return HttpResponse.json({ ok: true, revoked_sid: sid });
   }),
 
+  // Phase 9 T2 — admin fleet session governance. Mirror of the auth-svc
+  // /auth/admin/sessions surface. Reads from the same _mockSessions array
+  // used by /auth/sessions so the SPA sees a consistent fleet.
+  http.get('/auth/admin/sessions', ({ request }) => {
+    const role = readPersistedRole();
+    if (role === null) return HttpResponse.json({ error: 'missing_token' }, { status: 401 });
+    if (role !== 'admin') return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status') ?? 'active';
+    const userIdFilter = url.searchParams.get('user_id');
+    // Seed at least one cross-user session so the page renders in dev.
+    if (_mockSessions.length < 2) {
+      const stamp = Date.now().toString(36);
+      _mockSessions.push(
+        {
+          id: `sid-bob-${stamp}`,
+          user_id: 'u-002',
+          issued_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+          last_seen_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+          ip: '10.0.30.7',
+          user_agent: 'Firefox on Windows',
+          is_current: false,
+        },
+        {
+          id: `sid-carol-${stamp}`,
+          user_id: 'u-003',
+          issued_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+          last_seen_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+          ip: '10.0.30.18',
+          user_agent: 'Safari on iPad',
+          is_current: false,
+        },
+      );
+    }
+    // Synthesise decorated rows. The mock has no real notion of revoked,
+    // so for status=revoked we return an empty array (no revoked rows
+    // exist until the SPA fires a revoke). status=active returns all.
+    if (status === 'revoked') {
+      return HttpResponse.json({ sessions: [], total: 0, filter: { status, limit: 200 } });
+    }
+    const users: Array<{ id: string; username: string; role: string; tenant_id: string }> = [
+      { id: 'u-001', username: 'alice.admin', role: 'admin', tenant_id: 'BANK_DEMO' },
+      { id: 'u-002', username: 'ravi.risk', role: 'risk_analyst', tenant_id: 'BANK_DEMO' },
+      { id: 'u-003', username: 'sara.supervisor', role: 'supervisor', tenant_id: 'BANK_DEMO' },
+    ];
+    const decorated = _mockSessions
+      .filter((s) => (userIdFilter ? s.user_id === userIdFilter : true))
+      .map((s) => {
+        const u = users.find((x) => x.id === s.user_id);
+        return {
+          ...s,
+          username: u?.username ?? null,
+          role: u?.role ?? null,
+          tenant_id: u?.tenant_id ?? null,
+          revoked: false,
+        };
+      });
+    return HttpResponse.json({
+      sessions: decorated,
+      total: decorated.length,
+      filter: { status, limit: 200 },
+    });
+  }),
+
+  http.post('/auth/admin/sessions/:sid/revoke', ({ params }) => {
+    const role = readPersistedRole();
+    if (role === null) return HttpResponse.json({ error: 'missing_token' }, { status: 401 });
+    if (role !== 'admin') return HttpResponse.json({ error: 'forbidden' }, { status: 403 });
+    const sid = String(params.sid);
+    const idx = _mockSessions.findIndex((s) => s.id === sid);
+    if (idx < 0) return HttpResponse.json({ error: 'session_not_found' }, { status: 404 });
+    const target = _mockSessions[idx]!;
+    _mockSessions.splice(idx, 1);
+    return HttpResponse.json({
+      ok: true,
+      revoked_sid: sid,
+      target_user_id: target.user_id,
+    });
+  }),
+
   http.delete('/auth/sessions', ({ request }) => {
     const role = readPersistedRole();
     if (role === null) {

@@ -129,6 +129,24 @@ export class PgSessionStore {
       .sort((a, b) => b.last_seen_at_ms - a.last_seen_at_ms);
   }
 
+  /** Phase 9 T2 — admin governance fleet listing (mirror of SessionStore.listAll). */
+  listAll(filter: { status?: 'active' | 'revoked' | 'all'; user_id?: string } = {}): Session[] {
+    const status = filter.status ?? 'active';
+    return Array.from(this.byId.values())
+      .filter((s) => (filter.user_id ? s.user_id === filter.user_id : true))
+      .filter((s) => {
+        if (status === 'all') return true;
+        if (status === 'active') return !this.revoked.has(s.id);
+        return this.revoked.has(s.id);
+      })
+      .sort((a, b) => b.last_seen_at_ms - a.last_seen_at_ms);
+  }
+
+  /** Phase 9 T2 — admin governance predicate. */
+  isRevokedSession(id: string): boolean {
+    return this.revoked.has(id);
+  }
+
   revoke(id: string): boolean {
     if (!this.byId.has(id) || this.revoked.has(id)) return false;
     this.revoked.add(id);

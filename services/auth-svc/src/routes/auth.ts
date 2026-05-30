@@ -1275,6 +1275,130 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true, revoked_count: n });
   });
 
+  /**
+   * Phase 9 T2 — admin session governance.
+   *
+   * GET /auth/admin/sessions?user_id=&status=active|revoked|all&limit=N
+   * Authorization: Bearer <admin>
+   *
+   * Returns every session across users (vs the self-service GET /auth/sessions
+   * which only returns the caller's own). Each row is decorated with the
+   * username + role from the user store so the SPA can render "alice.admin
+   * (admin) — 4 active sessions" without an N+1 join. Status defaults to
+   * 'active'; pass 'revoked' or 'all' to widen.
+   *
+   * Useful for: security ops investigating credential-exposure incidents,
+   * compliance reviewing "who has been signed in past business hours",
+   * + the day-to-day "stale session sweep" task documented in BAU runbook.
+   */
+  app.get<{
+    Querystring: { user_id?: string; status?: string; limit?: string };
+  }>("/auth/admin/sessions", async (req, reply) => {
+    const { signer, sessions, users } = await getState();
+    const auth = req.headers.authorization;
+    if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });
+    let callerRole: unknown;
+    try {
+      const { payload } = await verifyToken(signer, auth.slice(7));
+      if (payload.typ === "refresh") return reply.code(401).send({ error: "invalid_token" });
+      callerRole = payload.role;
+    } catch {
+      return reply.code(401).send({ error: "invalid_token" });
+    }
+    if (callerRole !== "admin") {
+      return reply.code(403).send({ error: "forbidden", message: "admin role required" });
+    }
+    const status = req.query.status === "revoked" || req.query.status === "all"
+      ? req.query.status
+      : "active";
+    const filter: { status: "active" | "revoked" | "all"; user_id?: string } = { status };
+    if (req.query.user_id) filter.user_id = req.query.user_id;
+    const rows = sessions.listAll(filter);
+    const limit = (() => {
+      const n = req.query.limit ? Number(req.query.limit) : 200;
+      if (!Number.isFinite(n) || n <= 0) return 200;
+      return Math.min(Math.floor(n), 1000);
+    })();
+    const out = rows.slice(0, limit).map((s) => {
+      const u = users.findById(s.user_id);
+      return {
+        id: s.id,
+        user_id: s.user_id,
+        username: u?.username ?? null,
+        role: u?.role ?? null,
+        tenant_id: u?.tenant_id ?? null,
+        issued_at: new Date(s.issued_at_ms).toISOString(),
+        last_seen_at: new Date(s.last_seen_at_ms).toISOString(),
+        ip: s.ip,
+        user_agent: s.user_agent,
+        revoked: sessions.isRevokedSession(s.id),
+      };
+    });
+    return reply.send({
+      sessions: out,
+      total: out.length,
+      filter: { ...filter, limit },
+    });
+  });
+
+  /**
+   * POST /auth/admin/sessions/:sid/revoke
+   * Authorization: Bearer <admin>
+   * Body: { reason? }
+   *
+   * Admin-only force-revoke of any session. Distinct from
+   * DELETE /auth/sessions/:sid (self-service: caller can only kill their
+   * own sessions) and from POST /auth/users/:u/force-logout (kills EVERY
+   * session for a user). Use this when you need to drop ONE specific
+   * session — e.g. a leaked refresh token on one device.
+   *
+   * Records the new user_force_logout audit event with metadata
+   * {revoked_sid, target_user_id, reason} so compliance can trace per-session
+   * actions vs the broader force-logout-all from M1 partial.
+   */
+  app.post<{ Params: { sid: string }; Body: { reason?: string } }>(
+    "/auth/admin/sessions/:sid/revoke",
+    async (req, reply) => {
+      const { signer, sessions, users, audit } = await getState();
+      const auth = req.headers.authorization;
+      if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });
+      let callerSub: string | undefined;
+      let callerRole: unknown;
+      try {
+        const { payload } = await verifyToken(signer, auth.slice(7));
+        if (payload.typ === "refresh") return reply.code(401).send({ error: "invalid_token" });
+        callerSub = typeof payload.sub === "string" ? payload.sub : undefined;
+        callerRole = payload.role;
+      } catch {
+        return reply.code(401).send({ error: "invalid_token" });
+      }
+      if (callerRole !== "admin") {
+        return reply.code(403).send({ error: "forbidden", message: "admin role required" });
+      }
+      const target = sessions.get(req.params.sid);
+      if (!target) return reply.code(404).send({ error: "session_not_found" });
+      const ok = sessions.revoke(target.id);
+      if (!ok) return reply.code(409).send({ error: "already_revoked" });
+      const targetUser = users.findById(target.user_id);
+      const actor = callerSub ? users.findById(callerSub) : undefined;
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      audit.append({
+        type: "user_force_logout",
+        target_username: targetUser?.username ?? null,
+        actor_username: actor?.username ?? null,
+        actor_role: "admin",
+        ip: callerIp(req),
+        metadata: {
+          revoked_sid: target.id,
+          target_user_id: target.user_id,
+          scope: "single_session",
+          reason: reason || undefined,
+        },
+      });
+      return reply.send({ ok: true, revoked_sid: target.id, target_user_id: target.user_id });
+    },
+  );
+
   app.get("/auth/me", async (req, reply) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) return reply.code(401).send({ error: "missing_token" });

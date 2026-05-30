@@ -91,6 +91,28 @@ export class SessionStore {
       .sort((a, b) => b.last_seen_at_ms - a.last_seen_at_ms);
   }
 
+  /** Phase 9 T2 — admin governance: list EVERY session across users.
+   *  filter.status='active' (default) | 'revoked' | 'all'.
+   *  filter.user_id narrows to one user. Sorted newest-first by
+   *  last_seen_at_ms. */
+  listAll(filter: { status?: 'active' | 'revoked' | 'all'; user_id?: string } = {}): Session[] {
+    const status = filter.status ?? 'active';
+    return Array.from(this.byId.values())
+      .filter((s) => (filter.user_id ? s.user_id === filter.user_id : true))
+      .filter((s) => {
+        if (status === 'all') return true;
+        if (status === 'active') return !this.revoked.has(s.id);
+        return this.revoked.has(s.id);
+      })
+      .sort((a, b) => b.last_seen_at_ms - a.last_seen_at_ms);
+  }
+
+  /** Phase 9 T2 — admin governance: predicate so callers can decorate
+   *  list rows with a status flag without exposing the internal Set. */
+  isRevokedSession(id: string): boolean {
+    return this.revoked.has(id);
+  }
+
   /** Revoke a specific session by id. Returns true if it was active.
    *  The record stays in `byId` for one cycle so any in-flight refresh
    *  request still resolves to a clear "session_revoked" rather than

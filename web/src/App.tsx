@@ -62,6 +62,7 @@ import { CollectionsRiskPage } from '@/modules/banking/CollectionsRiskPage';
 import { BorrowerTimelinePage } from '@/modules/banking/BorrowerTimelinePage';
 import { BranchHeatmapPage } from '@/modules/banking/BranchHeatmapPage';
 import { AdminUsersPage } from '@/modules/admin/AdminUsersPage';
+import { AdminSessionsPage } from '@/modules/admin/AdminSessionsPage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
 import { AuditTrailPage } from '@/modules/admin/AuditTrailPage';
@@ -223,6 +224,7 @@ export function App() {
             <Route path="profile/activity" element={<LoginActivityPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/users/new" element={<AdminUserCreatePage />} />
+            <Route path="admin/sessions" element={<AdminSessionsPage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
             <Route path="admin/audit-trail" element={<AuditTrailPage />} />

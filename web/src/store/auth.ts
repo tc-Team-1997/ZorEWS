@@ -71,6 +71,18 @@ export interface SessionRow {
   is_current?: boolean;
 }
 
+/** Phase 9 T2 — admin session governance: row decorated with user metadata
+ *  + revoked flag so the SPA can render "alice.admin (admin) — sid-XXX —
+ *  revoked 2026-05-29" without an N+1 join. */
+export interface AdminSessionRow extends SessionRow {
+  username: string | null;
+  role: string | null;
+  tenant_id: string | null;
+  revoked: boolean;
+}
+
+export type AdminSessionStatus = 'active' | 'revoked' | 'all';
+
 /** Mirror of services/auth-svc/src/audit_log.ts → AuthEventType. */
 export type AuthEventType =
   | 'login_success'
@@ -157,6 +169,16 @@ interface AuthState {
   adminSetRole: (username: string, role: string) => Promise<{ username: string; role: string; previous_role?: string }>;
   /** Fetches active sessions for the current user. */
   listMySessions: () => Promise<{ sessions: SessionRow[]; current_session_id: string | null }>;
+  /** Phase 9 T2 — admin governance: list every session across users with
+   *  optional user_id + status filters. Admin only. */
+  adminListSessions: (filter?: {
+    user_id?: string;
+    status?: AdminSessionStatus;
+    limit?: number;
+  }) => Promise<{ sessions: AdminSessionRow[]; total: number }>;
+  /** Phase 9 T2 — admin force-revoke of one specific session (single sid).
+   *  Distinct from adminForceLogout (revokes EVERY session for a user). */
+  adminRevokeSession: (sid: string, reason?: string) => Promise<{ revoked_sid: string }>;
   /** Revokes one session (must be the caller's). */
   revokeSession: (sid: string) => Promise<void>;
   /** Revokes all sessions for the caller; pass `keepCurrent=true` to preserve
@@ -403,6 +425,26 @@ export const useAuth = create<AuthState>((set) => ({
       { role },
     );
     return { username: data.username, role: data.role, previous_role: data.previous_role };
+  },
+
+  adminListSessions: async (filter) => {
+    const params: Record<string, string> = {};
+    if (filter?.user_id) params.user_id = filter.user_id;
+    if (filter?.status) params.status = filter.status;
+    if (filter?.limit) params.limit = String(filter.limit);
+    const { data } = await http.get<{ sessions: AdminSessionRow[]; total: number }>(
+      '/auth/admin/sessions',
+      { params },
+    );
+    return data;
+  },
+
+  adminRevokeSession: async (sid, reason) => {
+    const { data } = await http.post<{ ok: boolean; revoked_sid: string }>(
+      `/auth/admin/sessions/${encodeURIComponent(sid)}/revoke`,
+      reason ? { reason } : {},
+    );
+    return { revoked_sid: data.revoked_sid };
   },
 
   listMySessions: async () => {

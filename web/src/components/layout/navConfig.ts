@@ -257,6 +257,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: ShieldCheck,
     items: [
       { to: '/admin/users',                i18nKey: 'users',                 icon: UsersRound, requireRole: ['admin'], featured: true },
+      // Phase 9 T2 — admin fleet-wide session governance
+      { to: '/admin/sessions',             i18nKey: 'admin_sessions',        icon: UsersRound, requireRole: ['admin'] },
       { to: '/admin/audit-trail',          i18nKey: 'audit_trail',           icon: Shield,     requireRole: ['admin', 'supervisor'], featured: true },
       { to: '/admin/testing-hub',          i18nKey: 'testing_hub',           icon: Beaker,     requireRole: ['admin'], featured: true },
       { to: '/glossary',                   i18nKey: 'glossary',              icon: BookOpen,   featured: true },
