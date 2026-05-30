@@ -29,16 +29,16 @@ export function DataTable<T extends { id: number | string }>({
   focusRowId?: number | string | null;
 }) {
   return (
-    <div className="overflow-hidden rounded-card border border-divider bg-surface">
+    <div className="overflow-hidden rounded-[14px] border border-aurora-line bg-white shadow-sm">
       <table className="w-full text-sm">
         <thead>
-          <tr className="table-header">
+          <tr className="bg-aurora-canvas border-b border-aurora-line">
             {columns.map((col) => (
               <th
                 key={col.key}
                 style={col.width ? { width: col.width } : undefined}
                 className={cn(
-                  'px-3 py-2 text-[11px] font-semibold text-ink-sub',
+                  'px-3 py-2.5 text-[11px] font-semibold text-aurora-ink-sub uppercase tracking-wide',
                   col.align === 'right' && 'text-right',
                   col.align === 'center' && 'text-center',
                   !col.align && 'text-left',
@@ -57,7 +57,7 @@ export function DataTable<T extends { id: number | string }>({
               </td>
             </tr>
           ) : (
-            data.map((row, i) => {
+            data.map((row) => {
               const isFocus = focusRowId !== undefined && focusRowId !== null && row.id === focusRowId;
               return (
               <tr
@@ -66,9 +66,8 @@ export function DataTable<T extends { id: number | string }>({
                 {...(isFocus ? { 'data-focus-row': 'true' } : {})}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={cn(
-                  'border-t border-divider',
-                  i % 2 === 1 && 'bg-page',
-                  onRowClick && 'cursor-pointer hover:bg-brand-skyLight/60',
+                  'border-t border-aurora-line/60 transition-colors',
+                  onRowClick && 'cursor-pointer hover:bg-aurora-tint/50',
                   isFocus && 'bg-amber-100 ring-1 ring-amber-300',
                 )}
               >

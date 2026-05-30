@@ -48,11 +48,18 @@
   }
 
   /* ── Form controls ─────────────────────────────────────────── */
+  /* Aurora premium input: hairline aurora-line border, indigo-500 (= aurora
+     primary) focus ring, soft inner shadow. NOTE: `@apply` uses Tailwind's
+     built-in `indigo-500` (#6366F1, equivalent to aurora-indigo) NOT the
+     nested `aurora-*` palette — the latter races in vite's PostCSS dev
+     pipeline (see .card hotfix 9cad9b8). Inline border-color avoids the same
+     race for the resting border. */
   .input, .field-input {
-    @apply w-full h-10 px-3 text-sm border border-border rounded-input bg-white text-ink
-           placeholder:text-muted
-           focus:outline-none focus:ring-2 focus:ring-brand-blue/20 focus:border-brand-blue
+    @apply w-full h-10 px-3 text-sm border rounded-input bg-white text-ink
+           placeholder:text-slate-400
+           focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500
            transition-colors;
+    border-color: #E4E7F2;
   }
   .label, .field-label {
     @apply block text-xs font-medium text-ink-sub mb-1.5;

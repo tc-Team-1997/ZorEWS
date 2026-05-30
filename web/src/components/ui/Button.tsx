@@ -13,11 +13,15 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const base =
   'inline-flex items-center justify-center gap-2 rounded-input font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
+// Aurora premium button variants — consistent 4-variant system per spec
+// (Primary / Secondary / Ghost / Danger), aurora-indigo accent, soft shadows,
+// indigo focus ring. JSX class names (NOT @apply in CSS) so the aurora-* JIT
+// race that bit P0d cannot recur here.
 const variants: Record<Variant, string> = {
-  primary:   'bg-brand-blue text-white hover:bg-brand-blueHover focus:outline-none focus:ring-2 focus:ring-brand-blue focus:ring-offset-1',
-  secondary: 'bg-brand-skyLight text-brand-blue hover:bg-[#d0e3fb] focus:outline-none focus:ring-2 focus:ring-brand-blue/40',
-  ghost:     'bg-white border border-border text-ink-sub hover:bg-surface-alt focus:outline-none focus:ring-2 focus:ring-border',
-  danger:    'bg-danger text-white hover:bg-[#c73b3a]',
+  primary:   'bg-aurora-indigo text-white shadow-sm hover:bg-aurora-violet focus:outline-none focus:ring-2 focus:ring-aurora-indigo/40 focus:ring-offset-1',
+  secondary: 'bg-aurora-tint text-aurora-indigo border border-aurora-line hover:bg-[#DCE4FF] focus:outline-none focus:ring-2 focus:ring-aurora-indigo/30',
+  ghost:     'bg-white border border-aurora-line text-aurora-ink-sub hover:bg-aurora-tint/60 hover:text-aurora-ink focus:outline-none focus:ring-2 focus:ring-aurora-indigo/30',
+  danger:    'bg-danger text-white shadow-sm hover:bg-[#c73b3a] focus:outline-none focus:ring-2 focus:ring-danger/40',
 };
 
 const sizes: Record<Size, string> = {
