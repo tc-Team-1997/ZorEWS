@@ -147,11 +147,25 @@ describe('createMasterStore — seed rows', () => {
 // ── Registry ───────────────────────────────────────────────────────────
 
 describe('master registry', () => {
-  test('catalog exposes the 3 representative entities with required metadata', () => {
+  test('catalog exposes every registered entity with required metadata', () => {
     const catalog = listMasterCatalog();
-    expect(catalog.length).toBe(3);
+    // The framework grew past the original 3 — assert each canonical
+    // entity is present rather than locking the count.
+    expect(catalog.length).toBeGreaterThanOrEqual(9);
     const names = catalog.map((c) => c.entity).sort();
-    expect(names).toEqual(['countries', 'departments', 'risk-categories']);
+    for (const expected of [
+      'case-priorities',
+      'case-types',
+      'channels',
+      'countries',
+      'currencies',
+      'departments',
+      'regulatory-frameworks',
+      'risk-categories',
+      'severity-levels',
+    ]) {
+      expect(names).toContain(expected);
+    }
     for (const c of catalog) {
       expect(typeof c.label).toBe('string');
       expect(typeof c.label_plural).toBe('string');
@@ -167,6 +181,24 @@ describe('master registry', () => {
     expect(byEntity['risk-categories']!.tenant_scoped).toBe(true);
   });
 
+  test('Phase-9 expansion entities have correct tenancy + non-empty seeds', () => {
+    const byEntity = Object.fromEntries(listMasterCatalog().map((c) => [c.entity, c]));
+    // Platform-static entities (canonical ISO / regulator lists).
+    expect(byEntity.currencies!.tenant_scoped).toBe(false);
+    expect(byEntity['regulatory-frameworks']!.tenant_scoped).toBe(false);
+    // Per-tenant entities (operator-configurable).
+    expect(byEntity['severity-levels']!.tenant_scoped).toBe(true);
+    expect(byEntity['case-types']!.tenant_scoped).toBe(true);
+    expect(byEntity['case-priorities']!.tenant_scoped).toBe(true);
+    expect(byEntity.channels!.tenant_scoped).toBe(true);
+    // Every entity carries at least one seed row out of the box.
+    for (const entity of ['currencies', 'severity-levels', 'case-types', 'case-priorities', 'regulatory-frameworks', 'channels']) {
+      const store = getMasterStore(entity);
+      expect(store).toBeDefined();
+      expect(store!.list('BANK_DEMO').length).toBeGreaterThan(0);
+    }
+  });
+
   test('getMasterStore returns the store for each entity + undefined for unknown', () => {
     for (const schema of MASTER_SCHEMAS) {
       expect(getMasterStore(schema.entity)).toBeDefined();
@@ -178,12 +210,19 @@ describe('master registry', () => {
 // ── HTTP routes ────────────────────────────────────────────────────────
 
 describe('GET /v1/admin/masters — catalog listing', () => {
-  test('admin → 200 with 3 catalog entries', async () => {
+  test('admin → 200 with the full catalog', async () => {
     const { app } = makeMasterApp('admin');
     const r = await request(app).get('/v1/admin/masters').set(TH_BIL);
     expect(r.status).toBe(200);
-    expect(r.body.body.total).toBe(3);
+    // Lock the framework's row count to ≥ 9 (3 original + 6 Phase-9
+    // expansion) without freezing the exact number — new entities land
+    // additively.
+    expect(r.body.body.total).toBeGreaterThanOrEqual(9);
     expect(Array.isArray(r.body.body.entities)).toBe(true);
+    const ids = r.body.body.entities.map((e: { entity: string }) => e.entity);
+    expect(ids).toContain('countries');
+    expect(ids).toContain('currencies');
+    expect(ids).toContain('case-types');
   });
 
   test('non-admin → 403', async () => {

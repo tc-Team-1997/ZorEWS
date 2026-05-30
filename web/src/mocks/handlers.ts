@@ -15485,13 +15485,137 @@ const __mswMasterEntities: MswMasterEntity[] = [
       mswMasterSeedRow('risk-categories', 1, { code: 'FRD_VEL', name: 'Velocity fraud', severity: 'critical', domain: 'fraud', active: true }),
     ],
   },
+  // ──────────────────────────────────────────────────────────────────
+  // Phase 9 T11 expansion — 6 new entities. Mirrors registry.ts on
+  // the BFF. Slim seed (3-5 rows each) is enough for dev-mode demos.
+  // ──────────────────────────────────────────────────────────────────
+  {
+    entity: 'currencies',
+    label: 'Currency',
+    label_plural: 'Currencies',
+    tenant_scoped: false,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 3, label: 'ISO code' },
+      { name: 'name', type: 'string', required: true, max_length: 80, label: 'Name' },
+      { name: 'symbol', type: 'string', max_length: 8, label: 'Symbol' },
+      { name: 'decimal_places', type: 'integer', label: 'Decimal places' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('currencies', 0, { code: 'INR', name: 'Indian Rupee', symbol: '₹', decimal_places: 2, active: true }),
+      mswMasterSeedRow('currencies', 1, { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', decimal_places: 2, active: true }),
+      mswMasterSeedRow('currencies', 2, { code: 'USD', name: 'United States Dollar', symbol: '$', decimal_places: 2, active: true }),
+    ],
+  },
+  {
+    entity: 'severity-levels',
+    label: 'Severity Level',
+    label_plural: 'Severity Levels',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 80, label: 'Name' },
+      { name: 'colour', type: 'enum', enum_values: ['red', 'orange', 'amber', 'yellow', 'green'], label: 'RAG colour' },
+      { name: 'min_score', type: 'integer', label: 'Min score' },
+      { name: 'max_score', type: 'integer', label: 'Max score' },
+      { name: 'action_required', type: 'boolean', label: 'Action required' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('severity-levels', 0, { code: 'RED', name: 'Red — Immediate action', colour: 'red', min_score: 80, max_score: 100, action_required: true, active: true }),
+      mswMasterSeedRow('severity-levels', 1, { code: 'ORG', name: 'Orange — Escalate', colour: 'orange', min_score: 60, max_score: 79, action_required: true, active: true }),
+      mswMasterSeedRow('severity-levels', 2, { code: 'GRN', name: 'Green — Healthy', colour: 'green', min_score: 0, max_score: 19, action_required: false, active: true }),
+    ],
+  },
+  {
+    entity: 'case-types',
+    label: 'Case Type',
+    label_plural: 'Case Types',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 120, label: 'Name' },
+      { name: 'domain', type: 'enum', enum_values: ['credit', 'fraud', 'aml', 'operational', 'compliance', 'underwriting', 'claims'], label: 'Domain' },
+      { name: 'default_sla_hours', type: 'integer', label: 'Default SLA (hours)' },
+      { name: 'requires_maker_checker', type: 'boolean', label: 'Maker-checker' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('case-types', 0, { code: 'NPA_INV', name: 'NPA investigation', domain: 'credit', default_sla_hours: 24, requires_maker_checker: true, active: true }),
+      mswMasterSeedRow('case-types', 1, { code: 'FRD_INV', name: 'Fraud investigation', domain: 'fraud', default_sla_hours: 4, requires_maker_checker: true, active: true }),
+      mswMasterSeedRow('case-types', 2, { code: 'AML_STR', name: 'AML / STR review', domain: 'aml', default_sla_hours: 48, requires_maker_checker: true, active: true }),
+    ],
+  },
+  {
+    entity: 'case-priorities',
+    label: 'Case Priority',
+    label_plural: 'Case Priorities',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 8, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 80, label: 'Name' },
+      { name: 'sla_hours', type: 'integer', label: 'SLA (hours)' },
+      { name: 'escalate_after_hours', type: 'integer', label: 'Escalate after (hours)' },
+      { name: 'colour', type: 'enum', enum_values: ['red', 'orange', 'amber', 'yellow', 'green'], label: 'RAG colour' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('case-priorities', 0, { code: 'P1', name: 'P1 — Critical', sla_hours: 4, escalate_after_hours: 1, colour: 'red', active: true }),
+      mswMasterSeedRow('case-priorities', 1, { code: 'P2', name: 'P2 — High', sla_hours: 24, escalate_after_hours: 8, colour: 'orange', active: true }),
+      mswMasterSeedRow('case-priorities', 2, { code: 'P3', name: 'P3 — Medium', sla_hours: 72, escalate_after_hours: 24, colour: 'amber', active: true }),
+      mswMasterSeedRow('case-priorities', 3, { code: 'P4', name: 'P4 — Low', sla_hours: 168, escalate_after_hours: 96, colour: 'yellow', active: true }),
+    ],
+  },
+  {
+    entity: 'regulatory-frameworks',
+    label: 'Regulatory Framework',
+    label_plural: 'Regulatory Frameworks',
+    tenant_scoped: false,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 120, label: 'Name' },
+      { name: 'country', type: 'enum', enum_values: ['IN', 'KE', 'BT', 'NP', 'LK', 'AE', 'GB', 'US'], label: 'Country' },
+      { name: 'vertical', type: 'enum', enum_values: ['banking', 'insurance', 'capital_markets', 'payments', 'aml'], label: 'Vertical' },
+      { name: 'classification_scheme', type: 'enum', enum_values: ['SMA', 'STAGE', 'NONE'], label: 'Classification scheme' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('regulatory-frameworks', 0, { code: 'RBI', name: 'Reserve Bank of India', country: 'IN', vertical: 'banking', classification_scheme: 'SMA', active: true }),
+      mswMasterSeedRow('regulatory-frameworks', 1, { code: 'IRDAI', name: 'Insurance Regulatory and Development Authority of India', country: 'IN', vertical: 'insurance', classification_scheme: 'STAGE', active: true }),
+      mswMasterSeedRow('regulatory-frameworks', 2, { code: 'CBK', name: 'Central Bank of Kenya', country: 'KE', vertical: 'banking', classification_scheme: 'SMA', active: true }),
+    ],
+  },
+  {
+    entity: 'channels',
+    label: 'Channel',
+    label_plural: 'Channels',
+    tenant_scoped: true,
+    fields: [
+      { name: 'code', type: 'string', required: true, max_length: 16, label: 'Code' },
+      { name: 'name', type: 'string', required: true, max_length: 120, label: 'Name' },
+      { name: 'kind', type: 'enum', enum_values: ['email', 'sms', 'push', 'in_app', 'webhook', 'phone'], label: 'Kind' },
+      { name: 'rate_limit_per_minute', type: 'integer', label: 'Rate limit (per min)' },
+      { name: 'quiet_hours_enabled', type: 'boolean', label: 'Honour quiet hours' },
+      { name: 'active', type: 'boolean', label: 'Active' },
+    ],
+    rows: [
+      mswMasterSeedRow('channels', 0, { code: 'EMAIL_PRI', name: 'Primary email', kind: 'email', rate_limit_per_minute: 60, quiet_hours_enabled: true, active: true }),
+      mswMasterSeedRow('channels', 1, { code: 'SMS_PRI', name: 'Primary SMS', kind: 'sms', rate_limit_per_minute: 30, quiet_hours_enabled: true, active: true }),
+      mswMasterSeedRow('channels', 2, { code: 'INAPP_BELL', name: 'In-app bell', kind: 'in_app', rate_limit_per_minute: 600, quiet_hours_enabled: false, active: true }),
+    ],
+  },
 ];
 
 function mswMasterSeedRow(entity: string, idx: number, fields: Record<string, unknown>): MswMasterRow {
+  // Platform-static entities (rows shared across every tenant) write
+  // their seed under PLATFORM; tenant-scoped entities land in
+  // BANK_DEMO so the dev demo always renders. Inline set keeps the
+  // module-init order working without hoisting traps.
+  const PLATFORM_STATIC = new Set(['countries', 'currencies', 'regulatory-frameworks']);
   const now = new Date().toISOString();
   return {
     id: `mst-${entity}-seed-${idx}`,
-    tenant_id: entity === 'countries' ? 'PLATFORM' : 'BANK_DEMO',
+    tenant_id: PLATFORM_STATIC.has(entity) ? 'PLATFORM' : 'BANK_DEMO',
     fields,
     created_at: now,
     created_by: 'system:seed',

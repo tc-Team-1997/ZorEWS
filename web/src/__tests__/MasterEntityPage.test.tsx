@@ -117,4 +117,13 @@ describe('MasterEntityPage', () => {
     expect(screen.getByText('Credit Risk')).toBeInTheDocument();
     expect(screen.getByText('Operations')).toBeInTheDocument();
   });
+
+  // Phase 9 T11 expansion — new entities go live with zero SPA changes
+  // because MasterEntityPage drives off the schema. This smoke confirms
+  // the new currencies entity round-trips through MSW.
+  it('admin sees currencies entity (Phase 9 T11 expansion)', async () => {
+    setUser('admin');
+    renderEntity('currencies');
+    await waitFor(() => expect(screen.getByTestId('master-table')).toBeInTheDocument());
+  });
 });
