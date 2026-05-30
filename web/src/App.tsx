@@ -107,6 +107,11 @@ import { EscalationWorkerPage } from '@/modules/admin/escalationWorker/Escalatio
 import { CaseScenariosPage } from '@/modules/admin/caseScenarios/CaseScenariosPage';
 import { RecycleBinPage } from '@/modules/admin/RecycleBinPage';
 import { RecoveryAnalyticsPage } from '@/modules/admin/RecoveryAnalyticsPage';
+// Audit + Recovery unified centers (additive — legacy URLs still resolve).
+import { AuditCenterPage } from '@/modules/admin/audit/AuditCenterPage';
+import { AuditExportPage } from '@/modules/admin/audit/AuditExportPage';
+import { AuditComplianceReportsPage } from '@/modules/admin/audit/AuditComplianceReportsPage';
+import { RecoveryCenterPage } from '@/modules/admin/recovery/RecoveryCenterPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -299,6 +304,19 @@ export function App() {
             <Route path="admin/case-scenarios" element={<CaseScenariosPage />} />
             <Route path="admin/recycle-bin" element={<RecycleBinPage />} />
             <Route path="admin/recovery-analytics" element={<RecoveryAnalyticsPage />} />
+            {/* Unified Audit + Recovery Centers (additive — legacy URLs above still work). */}
+            <Route path="audit-center" element={<AuditCenterPage />} />
+            <Route path="audit-center/trail" element={<AuditTrailPage />} />
+            <Route path="audit-center/login-audit" element={<AdminSessionsPage />} />
+            <Route path="audit-center/activity" element={<AuditLogPage />} />
+            <Route path="audit-center/activity/admin" element={<AdminActivityPage />} />
+            <Route path="audit-center/export" element={<AuditExportPage />} />
+            <Route path="audit-center/compliance" element={<AuditComplianceReportsPage />} />
+            <Route path="recovery-center" element={<RecoveryCenterPage />} />
+            <Route path="recovery-center/deleted" element={<RecycleBinPage />} />
+            <Route path="recovery-center/restore" element={<RecycleBinPage />} />
+            <Route path="recovery-center/permanent-delete" element={<RecycleBinPage />} />
+            <Route path="recovery-center/analytics" element={<RecoveryAnalyticsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

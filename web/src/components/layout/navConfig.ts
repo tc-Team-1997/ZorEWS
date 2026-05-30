@@ -62,6 +62,11 @@ import {
   Workflow,
   Wand2,
   GitCompare,
+  KeyRound,
+  FileBadge,
+  Undo2,
+  Download,
+  Archive,
   Beaker,
   BookOpen,
   Umbrella,
@@ -196,7 +201,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/scenario',                     i18nKey: 'scenario',                icon: FlaskConical },
       { to: '/admin/case-scenarios',         i18nKey: 'case_scenarios',          icon: Zap,            requireRole: ['admin', 'supervisor'] },
       { to: '/admin/notification-dispatches', i18nKey: 'notification_dispatches', icon: Send,           requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/recovery-analytics',     i18nKey: 'recovery_analytics',      icon: BarChart3,      requireRole: ['admin'] },
+      // recovery_analytics moved into the unified Recovery Center (see admin group below).
     ],
   },
 
@@ -273,19 +278,34 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: ShieldCheck,
     items: [
       { to: '/admin/users',                i18nKey: 'users',                 icon: UsersRound, requireRole: ['admin'], featured: true },
-      // Phase 9 T2 — admin fleet-wide session governance
-      { to: '/admin/sessions',             i18nKey: 'admin_sessions',        icon: UsersRound, requireRole: ['admin'] },
-      { to: '/admin/audit-trail',          i18nKey: 'audit_trail',           icon: Shield,     requireRole: ['admin', 'supervisor'], featured: true },
+      // ── Unified Audit Center (additive) ────────────────────────
+      // Single entry-point that consolidates 4 previously-scattered
+      // audit surfaces (audit_trail / audit_log / admin_activity /
+      // admin_sessions) + 2 new landings (export + compliance).
+      // The legacy /admin/audit-* + /admin/activity + /admin/sessions
+      // URLs still resolve — see web/src/App.tsx.
+      { to: '/audit-center',                   i18nKey: 'audit_center',                 icon: Shield,      requireRole: ['admin', 'supervisor'], featured: true },
+      { to: '/audit-center/trail',             i18nKey: 'audit_center_trail',           icon: Shield,      requireRole: ['admin', 'supervisor'] },
+      { to: '/audit-center/login-audit',       i18nKey: 'audit_center_login_audit',     icon: KeyRound,    requireRole: ['admin'] },
+      { to: '/audit-center/activity',          i18nKey: 'audit_center_activity',        icon: ScrollText,  requireRole: ['admin', 'supervisor'] },
+      { to: '/audit-center/export',            i18nKey: 'audit_center_export',          icon: Download,    requireRole: ['admin', 'supervisor'] },
+      { to: '/audit-center/compliance',        i18nKey: 'audit_center_compliance',      icon: FileBadge,   requireRole: ['admin', 'supervisor'] },
       { to: '/admin/testing-hub',          i18nKey: 'testing_hub',           icon: Beaker,     requireRole: ['admin'], featured: true },
       { to: '/glossary',                   i18nKey: 'glossary',              icon: BookOpen,   featured: true },
       // Admin extras
       { to: '/admin/tenants',              i18nKey: 'tenants',               icon: Building2, requireRole: ['admin'] },
       { to: '/admin/service-clients',      i18nKey: 'service_clients',       icon: Key,       requireRole: ['admin'] },
       { to: '/admin/user-access-override', i18nKey: 'user_access_override',  icon: ShieldCheck, requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/audit-log',            i18nKey: 'audit_log',             icon: ScrollText, requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/activity',             i18nKey: 'admin_activity',        icon: ScrollText, requireRole: ['admin', 'supervisor'] },
       { to: '/admin/escalation-worker',    i18nKey: 'escalation_worker',     icon: PlayCircle, requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/recycle-bin',          i18nKey: 'recycle_bin',           icon: Trash2,     requireRole: ['admin'] },
+      // ── Unified Recovery Center (additive) ─────────────────────
+      // Consolidates recycle_bin + recovery_analytics into one tree
+      // with 4 intent-focused sub-sections. /admin/recycle-bin +
+      // /admin/recovery-analytics still resolve to the same pages.
+      { to: '/recovery-center',                i18nKey: 'recovery_center',              icon: Archive,     requireRole: ['admin'], featured: true },
+      { to: '/recovery-center/deleted',        i18nKey: 'recovery_center_deleted',      icon: Trash2,      requireRole: ['admin'] },
+      { to: '/recovery-center/restore',        i18nKey: 'recovery_center_restore',      icon: Undo2,       requireRole: ['admin'] },
+      { to: '/recovery-center/permanent-delete', i18nKey: 'recovery_center_permanent_delete', icon: ShieldAlert, requireRole: ['admin'] },
+      { to: '/recovery-center/analytics',      i18nKey: 'recovery_center_analytics',    icon: BarChart3,   requireRole: ['admin'] },
       { to: '/profile/sessions',           i18nKey: 'my_sessions',           icon: Smartphone },
       { to: '/profile/activity',           i18nKey: 'my_activity',           icon: History },
     ],
