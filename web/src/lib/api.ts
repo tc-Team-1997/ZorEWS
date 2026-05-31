@@ -3253,6 +3253,63 @@ export const api = {
       .get<EnvelopeBody<HighRiskAgentListShape>>(`/v1/insurance/channel-risk/high-risk${qs ? '?' + qs : ''}`)
       .then((r) => r.data);
   },
+
+  // ── Enterprise IAM (additive — wraps services/auth-svc IUserLifecycleStore /
+  //                  IPasswordGovernanceStore / IUserApprovalStore / IUserAuditStore).
+  iamUserStatuses: () =>
+    http.get<{ items: { user_id: string; status: UserLifecycleStatus }[] }>('/auth/users/lifecycle/by-status').then((r) => r.data),
+  iamStatusHistory: (user_id: string) =>
+    http.get<{ items: UserStatusHistoryRow[] }>(`/auth/users/${encodeURIComponent(user_id)}/status-history`).then((r) => r.data),
+  iamBulkUpdateStatus: (body: { user_ids: string[]; new_status: UserLifecycleStatus; reason?: string }) =>
+    http.post<{ updated: number; failed: { user_id: string; error: string }[]; correlation_id: string }>(
+      '/auth/users/lifecycle/bulk-update', body,
+    ).then((r) => r.data),
+  iamAccessReview: (username: string) =>
+    http.get<AccessReviewSummary>(`/auth/users/${encodeURIComponent(username)}/access-review`).then((r) => r.data),
+  iamPasswordPolicy: () =>
+    http.get<PasswordPolicy>('/auth/password-policy/me').then((r) => r.data),
+  iamPasswordPolicyUpdate: (patch: Partial<PasswordPolicy>) =>
+    http.put<PasswordPolicy>('/auth/password-policy/me', patch).then((r) => r.data),
+  iamPasswordExpiring: () =>
+    http.get<{ within_days: number; users: { user_id: string; expires_at: string; days_remaining: number }[] }>(
+      '/auth/users/password-governance/expiring',
+    ).then((r) => r.data),
+  iamApprovalsSummary: () =>
+    http.get<{ tenant_id: string; by_status: Record<UserApprovalStatus, number>; by_action_type: Record<string, number>; oldest_pending_at: string | null }>(
+      '/auth/users/approvals/summary',
+    ).then((r) => r.data),
+  iamApprovalsList: (q: { status?: UserApprovalStatus; action_type?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.status) params.set('status', q.status);
+    if (q.action_type) params.set('action_type', q.action_type);
+    const qs = params.toString();
+    return http.get<{ items: UserApprovalRecord[]; total: number; page: number; page_size: number }>(
+      `/auth/users/approvals${qs ? '?' + qs : ''}`,
+    ).then((r) => r.data);
+  },
+  iamApprovalDecide: (approval_id: string, decision: 'approve' | 'reject', decision_comments?: string) =>
+    http.post<UserApprovalRecord>(
+      `/auth/users/approvals/${encodeURIComponent(approval_id)}/${decision}`,
+      { decision_comments },
+    ).then((r) => r.data),
+  iamAuditHistoryByUser: (username: string, q: { event_type?: UserAuditEventType; actor?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.event_type) params.set('event_type', q.event_type);
+    if (q.actor) params.set('actor', q.actor);
+    const qs = params.toString();
+    return http.get<{ items: UserAuditHistoryRow[]; total: number; page: number; page_size: number }>(
+      `/auth/users/${encodeURIComponent(username)}/audit-history${qs ? '?' + qs : ''}`,
+    ).then((r) => r.data);
+  },
+  iamAuditHistoryByTenant: (q: { event_type?: UserAuditEventType; actor?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.event_type) params.set('event_type', q.event_type);
+    if (q.actor) params.set('actor', q.actor);
+    const qs = params.toString();
+    return http.get<{ items: UserAuditHistoryRow[]; total: number; page: number; page_size: number }>(
+      `/auth/users/audit-history/by-tenant${qs ? '?' + qs : ''}`,
+    ).then((r) => r.data);
+  },
 };
 
 // ── Insurance EWS · Module 6 types (mirrors services/bff/src/insurance_underwriting.ts) ──
@@ -7661,4 +7718,118 @@ export interface AccessCheckShape {
   allowed: boolean;
   role_known: boolean;
   operation_known: boolean;
+}
+
+// ── Enterprise IAM types (mirror services/auth-svc/src/{user_lifecycle,
+//    password_governance,user_approvals,user_audit_history}.ts).
+export type UserLifecycleStatus = 'active' | 'inactive' | 'suspended' | 'locked' | 'pending_approval';
+export const ALL_USER_LIFECYCLE_STATUSES: readonly UserLifecycleStatus[] = [
+  'active', 'inactive', 'suspended', 'locked', 'pending_approval',
+] as const;
+
+export interface UserStatusHistoryRow {
+  history_id: string;
+  user_id: string;
+  tenant_id: string;
+  prev_status: UserLifecycleStatus | null;
+  new_status: UserLifecycleStatus;
+  changed_at: string;
+  changed_by: string;
+  reason: string | null;
+  correlation_id: string | null;
+  created_at: string;
+}
+
+export interface PasswordPolicy {
+  tenant_id: string;
+  min_len: number;
+  require_upper: boolean;
+  require_lower: boolean;
+  require_digit: boolean;
+  require_symbol: boolean;
+  expiry_days: number;
+  history_count: number;
+  lockout_threshold: number;
+  lockout_window_min: number;
+  reminder_days_before_expiry: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export type UserApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired';
+export const ALL_USER_APPROVAL_STATUSES: readonly UserApprovalStatus[] = [
+  'pending', 'approved', 'rejected', 'cancelled', 'expired',
+] as const;
+
+export type UserApprovalActionType =
+  | 'user_create'
+  | 'user_role_change'
+  | 'user_status_change'
+  | 'user_delete'
+  | 'user_access_grant'
+  | 'password_force_reset';
+
+export interface UserApprovalRecord {
+  approval_id: string;
+  user_id: string;
+  tenant_id: string;
+  action_type: UserApprovalActionType;
+  status: UserApprovalStatus;
+  payload: Record<string, unknown>;
+  requested_by: string;
+  requested_at: string;
+  request_comments: string | null;
+  approver: string | null;
+  approval_date: string | null;
+  decision_comments: string | null;
+  expires_at: string | null;
+}
+
+export type UserAuditEventType =
+  | 'user_created'
+  | 'user_updated'
+  | 'password_reset'
+  | 'role_changed'
+  | 'access_changed'
+  | 'status_changed'
+  | 'approval_requested'
+  | 'approval_decided'
+  | 'session_terminated'
+  | 'profile_updated'
+  | 'lifecycle_bulk_update';
+export const ALL_USER_AUDIT_EVENT_TYPES: readonly UserAuditEventType[] = [
+  'user_created', 'user_updated', 'password_reset', 'role_changed',
+  'access_changed', 'status_changed', 'approval_requested', 'approval_decided',
+  'session_terminated', 'profile_updated', 'lifecycle_bulk_update',
+] as const;
+
+export interface UserAuditHistoryRow {
+  audit_id: string;
+  user_id: string;
+  tenant_id: string;
+  event_type: UserAuditEventType;
+  before_state: Record<string, unknown> | null;
+  after_state: Record<string, unknown> | null;
+  actor: string;
+  occurred_at: string;
+  comments: string | null;
+  correlation_id: string | null;
+  ip_address: string | null;
+}
+
+export interface AccessReviewSummary {
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  status: UserLifecycleStatus;
+  country: string | null;
+  domain: string | null;
+  tenant_id: string;
+  branch_id: string | null;
+  department: string | null;
+  roles: string[];
+  last_login_at: string | null;
+  last_logout_at: string | null;
+  active_session_count: number;
+  rbac_modules: { module_id: string; granted_actions: string[] }[];
 }

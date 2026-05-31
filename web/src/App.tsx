@@ -10,6 +10,13 @@ import { OnboardingCountryPage } from '@/modules/onboarding/OnboardingCountryPag
 import { OnboardingDomainPage } from '@/modules/onboarding/OnboardingDomainPage';
 import { OnboardingTenantPage } from '@/modules/onboarding/OnboardingTenantPage';
 import { AdminUserCreatePage } from '@/modules/admin/AdminUserCreatePage';
+// Enterprise IAM Center (additive — legacy /admin/users + /admin/sessions URLs untouched).
+import { IamCenterPage } from '@/modules/admin/iam/IamCenterPage';
+import { UserLifecyclePage } from '@/modules/admin/iam/UserLifecyclePage';
+import { UserApprovalsInboxPage } from '@/modules/admin/iam/UserApprovalsInboxPage';
+import { UserAccessReviewPage } from '@/modules/admin/iam/UserAccessReviewPage';
+import { UserAuditHistoryPage } from '@/modules/admin/iam/UserAuditHistoryPage';
+import { PasswordPolicyPage } from '@/modules/admin/iam/PasswordPolicyPage';
 import { ForgotPasswordPage } from '@/modules/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/modules/auth/ResetPasswordPage';
 import { FirstLoginWizardPage } from '@/modules/auth/FirstLoginWizardPage';
@@ -263,6 +270,15 @@ export function App() {
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/users/new" element={<AdminUserCreatePage />} />
             <Route path="admin/sessions" element={<AdminSessionsPage />} />
+            {/* Enterprise IAM Center (additive — legacy admin/users + admin/sessions still work). */}
+            <Route path="admin/iam" element={<IamCenterPage />} />
+            <Route path="admin/iam/lifecycle" element={<UserLifecyclePage />} />
+            <Route path="admin/iam/approvals" element={<UserApprovalsInboxPage />} />
+            <Route path="admin/iam/access-review" element={<UserAccessReviewPage />} />
+            <Route path="admin/iam/access-review/:username" element={<UserAccessReviewPage />} />
+            <Route path="admin/iam/audit" element={<UserAuditHistoryPage />} />
+            <Route path="admin/iam/audit/:username" element={<UserAuditHistoryPage />} />
+            <Route path="admin/iam/password-policy" element={<PasswordPolicyPage />} />
             <Route path="admin/masters" element={<MasterMenuPage />} />
             <Route path="admin/masters/:entity" element={<MasterEntityPage />} />
             <Route path="admin/permission-matrix" element={<PermissionMatrixPage />} />

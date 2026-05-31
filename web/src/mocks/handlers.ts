@@ -9469,6 +9469,284 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  // ── Enterprise IAM (additive — mirrors services/auth-svc IUserLifecycle /
+  //                   IPasswordGovernance / IUserApproval / IUserAudit stores).
+
+  http.get('/auth/users/lifecycle/by-status', () =>
+    HttpResponse.json({
+      items: [
+        { user_id: 'u-001', status: 'active' },
+        { user_id: 'u-002', status: 'active' },
+        { user_id: 'u-003', status: 'suspended' },
+        { user_id: 'u-004', status: 'pending_approval' },
+        { user_id: 'u-005', status: 'locked' },
+      ],
+    }),
+  ),
+
+  http.get('/auth/users/:user_id/status-history', ({ params }) =>
+    HttpResponse.json({
+      items: [
+        {
+          history_id: `ush_${params.user_id}_2`,
+          user_id: String(params.user_id),
+          tenant_id: 'BANK_DEMO',
+          prev_status: 'active',
+          new_status: 'suspended',
+          changed_at: new Date(Date.now() - 86_400_000).toISOString(),
+          changed_by: 'alice.admin',
+          reason: 'Quarterly access review — temporarily suspended pending re-verification.',
+          correlation_id: null,
+          created_at: new Date(Date.now() - 86_400_000).toISOString(),
+        },
+        {
+          history_id: `ush_${params.user_id}_1`,
+          user_id: String(params.user_id),
+          tenant_id: 'BANK_DEMO',
+          prev_status: null,
+          new_status: 'active',
+          changed_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+          changed_by: 'system',
+          reason: null,
+          correlation_id: null,
+          created_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+        },
+      ],
+    }),
+  ),
+
+  http.post('/auth/users/lifecycle/bulk-update', async ({ request }) => {
+    const body = (await request.json()) as { user_ids?: string[]; new_status?: string };
+    const ids = body?.user_ids ?? [];
+    return HttpResponse.json({
+      updated: ids.length,
+      failed: [],
+      correlation_id: `bulk_${Date.now().toString(36)}`,
+    });
+  }),
+
+  http.get('/auth/users/:username/access-review', ({ params }) =>
+    HttpResponse.json({
+      user_id: `u-${params.username}`,
+      username: String(params.username),
+      display_name: String(params.username),
+      status: 'active',
+      country: 'IN',
+      domain: 'banking',
+      tenant_id: 'BANK_DEMO',
+      branch_id: 'BR-MUM-001',
+      department: 'Risk Operations',
+      roles: ['risk_analyst'],
+      last_login_at: new Date(Date.now() - 3600_000).toISOString(),
+      last_logout_at: new Date(Date.now() - 86_400_000).toISOString(),
+      active_session_count: 1,
+      rbac_modules: [
+        { module_id: 'user_management', granted_actions: ['view'] },
+        { module_id: 'alert_management', granted_actions: ['view', 'edit', 'approve'] },
+        { module_id: 'case_management', granted_actions: ['view', 'create', 'edit'] },
+        { module_id: 'rule_engine', granted_actions: ['view', 'edit'] },
+        { module_id: 'ai_workbench', granted_actions: ['view'] },
+        { module_id: 'audit', granted_actions: ['view', 'export'] },
+      ],
+    }),
+  ),
+
+  http.get('/auth/password-policy/me', () =>
+    HttpResponse.json({
+      tenant_id: 'BANK_DEMO',
+      min_len: 12,
+      require_upper: true,
+      require_lower: true,
+      require_digit: true,
+      require_symbol: true,
+      expiry_days: 90,
+      history_count: 5,
+      lockout_threshold: 5,
+      lockout_window_min: 15,
+      reminder_days_before_expiry: 7,
+      updated_at: '1970-01-01T00:00:00.000Z',
+      updated_by: null,
+    }),
+  ),
+
+  http.put('/auth/password-policy/me', async ({ request }) => {
+    const patch = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      tenant_id: 'BANK_DEMO',
+      min_len: 12,
+      require_upper: true,
+      require_lower: true,
+      require_digit: true,
+      require_symbol: true,
+      expiry_days: 90,
+      history_count: 5,
+      lockout_threshold: 5,
+      lockout_window_min: 15,
+      reminder_days_before_expiry: 7,
+      ...patch,
+      updated_at: new Date().toISOString(),
+      updated_by: 'alice.admin',
+    });
+  }),
+
+  http.get('/auth/users/password-governance/expiring', () =>
+    HttpResponse.json({
+      within_days: 7,
+      users: [
+        { user_id: 'u-003', expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString(), days_remaining: 2 },
+        { user_id: 'u-007', expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(), days_remaining: 5 },
+      ],
+    }),
+  ),
+
+  http.get('/auth/users/approvals/summary', () =>
+    HttpResponse.json({
+      tenant_id: 'BANK_DEMO',
+      by_status: { pending: 2, approved: 12, rejected: 1, cancelled: 0, expired: 0 },
+      by_action_type: {
+        user_create: 1, user_role_change: 1, user_status_change: 0,
+        user_delete: 0, user_access_grant: 0, password_force_reset: 0,
+      },
+      oldest_pending_at: new Date(Date.now() - 4 * 3600_000).toISOString(),
+    }),
+  ),
+
+  http.get('/auth/users/approvals', ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status') ?? 'pending';
+    const allItems = [
+      {
+        approval_id: 'appr_1',
+        user_id: 'u-new-001',
+        tenant_id: 'BANK_DEMO',
+        action_type: 'user_create' as const,
+        status: 'pending' as const,
+        payload: { username: 'new.user', role: 'risk_analyst', tenant_id: 'BANK_DEMO' },
+        requested_by: 'bob.supervisor',
+        requested_at: new Date(Date.now() - 4 * 3600_000).toISOString(),
+        request_comments: 'Onboarding new risk analyst for Mumbai branch.',
+        approver: null,
+        approval_date: null,
+        decision_comments: null,
+        expires_at: null,
+      },
+      {
+        approval_id: 'appr_2',
+        user_id: 'u-002',
+        tenant_id: 'BANK_DEMO',
+        action_type: 'user_role_change' as const,
+        status: 'pending' as const,
+        payload: { from_role: 'risk_analyst', to_role: 'supervisor' },
+        requested_by: 'carol.admin',
+        requested_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+        request_comments: 'Promotion approved by HR.',
+        approver: null,
+        approval_date: null,
+        decision_comments: null,
+        expires_at: null,
+      },
+    ];
+    const filtered = status ? allItems.filter((r) => r.status === status) : allItems;
+    return HttpResponse.json({ items: filtered, total: filtered.length, page: 1, page_size: 50 });
+  }),
+
+  http.post('/auth/users/approvals/:approval_id/approve', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { decision_comments?: string };
+    return HttpResponse.json({
+      approval_id: String(params.approval_id),
+      user_id: 'u-001',
+      tenant_id: 'BANK_DEMO',
+      action_type: 'user_create',
+      status: 'approved',
+      payload: {},
+      requested_by: 'bob.supervisor',
+      requested_at: new Date(Date.now() - 4 * 3600_000).toISOString(),
+      request_comments: null,
+      approver: 'alice.admin',
+      approval_date: new Date().toISOString(),
+      decision_comments: body.decision_comments ?? null,
+      expires_at: null,
+    });
+  }),
+
+  http.post('/auth/users/approvals/:approval_id/reject', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { decision_comments?: string };
+    return HttpResponse.json({
+      approval_id: String(params.approval_id),
+      user_id: 'u-001',
+      tenant_id: 'BANK_DEMO',
+      action_type: 'user_create',
+      status: 'rejected',
+      payload: {},
+      requested_by: 'bob.supervisor',
+      requested_at: new Date(Date.now() - 4 * 3600_000).toISOString(),
+      request_comments: null,
+      approver: 'alice.admin',
+      approval_date: new Date().toISOString(),
+      decision_comments: body.decision_comments ?? null,
+      expires_at: null,
+    });
+  }),
+
+  http.get('/auth/users/:user_id/audit-history', ({ params }) =>
+    HttpResponse.json({
+      items: [
+        {
+          audit_id: 'uah_2',
+          user_id: String(params.user_id),
+          tenant_id: 'BANK_DEMO',
+          event_type: 'role_changed',
+          before_state: { role: 'risk_analyst' },
+          after_state: { role: 'supervisor' },
+          actor: 'alice.admin',
+          occurred_at: new Date(Date.now() - 3600_000).toISOString(),
+          comments: 'Promoted per HR ticket #4127.',
+          correlation_id: null,
+          ip_address: '10.0.0.42',
+        },
+        {
+          audit_id: 'uah_1',
+          user_id: String(params.user_id),
+          tenant_id: 'BANK_DEMO',
+          event_type: 'user_created',
+          before_state: null,
+          after_state: { username: String(params.user_id), role: 'risk_analyst' },
+          actor: 'system',
+          occurred_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+          comments: null,
+          correlation_id: null,
+          ip_address: null,
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 50,
+    }),
+  ),
+
+  http.get('/auth/users/audit-history/by-tenant', () =>
+    HttpResponse.json({
+      items: [
+        {
+          audit_id: 'uah_3',
+          user_id: 'u-001',
+          tenant_id: 'BANK_DEMO',
+          event_type: 'status_changed',
+          before_state: { status: 'active' },
+          after_state: { status: 'suspended' },
+          actor: 'alice.admin',
+          occurred_at: new Date(Date.now() - 1800_000).toISOString(),
+          comments: 'Quarterly review hold.',
+          correlation_id: null,
+          ip_address: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    }),
+  ),
+
 ];
 
 // M6.2 — Audit Trail: in-memory state for evidence packages + retention.

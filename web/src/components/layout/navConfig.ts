@@ -68,6 +68,9 @@ import {
   Undo2,
   Download,
   Archive,
+  UserCog,
+  Eye,
+  Monitor,
   Beaker,
   BookOpen,
   Umbrella,
@@ -291,6 +294,17 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: ShieldCheck,
     items: [
       { to: '/admin/users',                i18nKey: 'users',                 icon: UsersRound, requireRole: ['admin'], featured: true },
+      // ── Enterprise IAM Center (additive) ───────────────────────
+      // Layered IAM tree: 6 sub-sections over the existing User /
+      // Session / RBAC / DBAC / Tenant surface. Legacy /admin/users +
+      // /admin/users/new + /admin/sessions URLs still resolve.
+      { to: '/admin/iam',                       i18nKey: 'iam_center',                    icon: UserCog,     requireRole: ['admin', 'supervisor'], featured: true },
+      { to: '/admin/iam/lifecycle',             i18nKey: 'iam_center_lifecycle',          icon: UserCog,     requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/iam/access-review',         i18nKey: 'iam_center_access_review',      icon: Eye,         requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/iam/approvals',             i18nKey: 'iam_center_approvals',          icon: ShieldCheck, requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/iam/audit',                 i18nKey: 'iam_center_audit',              icon: ScrollText,  requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/iam/password-policy',       i18nKey: 'iam_center_password_policy',    icon: KeyRound,    requireRole: ['admin'] },
+      { to: '/admin/sessions',                  i18nKey: 'iam_center_sessions',           icon: Monitor,     requireRole: ['admin'] },
       // ── Unified Audit Center (additive) ────────────────────────
       // Single entry-point that consolidates 4 previously-scattered
       // audit surfaces (audit_trail / audit_log / admin_activity /
