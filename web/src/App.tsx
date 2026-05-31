@@ -33,6 +33,8 @@ import { ExecutiveCockpitPage } from '@/modules/executive/ExecutiveCockpitPage';
 import { PredictiveRiskCenterPage } from '@/modules/predictive/PredictiveRiskCenterPage';
 // Investigation Center — enterprise investigation + case intelligence overlay (12th IA addition this session).
 import { InvestigationCenterPage } from '@/modules/investigation/InvestigationCenterPage';
+// Regulatory Compliance Center — enterprise regulatory + reporting overlay (13th IA addition this session).
+import { RegulatoryComplianceCenterPage } from '@/modules/regulatory/RegulatoryComplianceCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -234,6 +236,9 @@ export function App() {
             {/* Investigation Center — additive overlay; existing CMS modules /
                 Case Workflow / Causal Analysis / Tracking Timeline untouched. */}
             <Route path="investigation-center" element={<InvestigationCenterPage />} />
+            {/* Regulatory Compliance Center — additive overlay; existing Audit Center
+                / Governance / IAM / Rule Center / Recovery untouched. */}
+            <Route path="regulatory-compliance-center" element={<RegulatoryComplianceCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
