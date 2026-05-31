@@ -70,7 +70,8 @@ import {
   Gavel,
   Cable,
   Sparkles,
-  ClipboardCheck
+  ClipboardCheck,
+  Cpu
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -210,6 +211,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/enterprise-demo-center',       i18nKey: 'enterprise_demo_center',  icon: Sparkles,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Demo Readiness Center — gated inside the page; analyst-level discovery.
       { to: '/demo-readiness-center',        i18nKey: 'demo_readiness_center',   icon: ClipboardCheck,  requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Digital Twin Risk Simulation Center — Phase 17 overlay.
+      { to: '/digital-twin-center',          i18nKey: 'digital_twin_center',     icon: Cpu,             requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },

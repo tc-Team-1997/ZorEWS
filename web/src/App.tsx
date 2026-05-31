@@ -41,6 +41,8 @@ import { DataFabricCenterPage } from '@/modules/dataFabric/DataFabricCenterPage'
 import { EnterpriseDemoCenterPage } from '@/modules/enterpriseDemo/EnterpriseDemoCenterPage';
 // Demo Readiness Center — UAT + release readiness validation (16th IA addition this session).
 import { DemoReadinessCenterPage } from '@/modules/demoReadiness/DemoReadinessCenterPage';
+// Digital Twin Risk Simulation Center — deterministic scenario engine (17th IA overlay).
+import { DigitalTwinCenterPage } from '@/modules/digitalTwin/DigitalTwinCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -257,6 +259,10 @@ export function App() {
                 15 IA centers' deterministic engines to measure UAT + demo +
                 release readiness. */}
             <Route path="demo-readiness-center" element={<DemoReadinessCenterPage />} />
+            {/* Digital Twin Risk Simulation Center — additive overlay (zero
+                changes to prior 16 overlays); deterministic scenario engine,
+                multi-horizon impact analysis, AI recommendations. */}
+            <Route path="digital-twin-center" element={<DigitalTwinCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
