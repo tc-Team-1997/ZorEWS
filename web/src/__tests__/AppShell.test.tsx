@@ -25,9 +25,11 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /alerts/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /customers/i })).toBeInTheDocument();
-    // M5.2 added a "Rules Engine" sibling alongside the existing "Rules"
-    // nav entry — disambiguate by exact-prefix match on "Rules" alone.
-    expect(screen.getByRole('link', { name: /^rules$/i })).toBeInTheDocument();
+    // Navigation Simplification (2026-05-31): the standalone "Rules" sidebar
+    // entry was retired in favour of "Rule Center" — the overlay landing
+    // surfaces every rules sub-route via its card grid. The /rules legacy
+    // URL still resolves directly (App.tsx route untouched).
+    expect(screen.getByRole('link', { name: /^rule center$/i })).toBeInTheDocument();
     // Legacy "Cases" nav was retired — Case Management is the operational entry.
     // Exact match: "Case Management Setup" (admin #13) also matches a loose regex.
     expect(screen.getByRole('link', { name: /^case management$/i })).toBeInTheDocument();

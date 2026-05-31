@@ -32,18 +32,13 @@ import {
   Plug,
   ShieldCheck,
   Shield,
-  Smartphone,
-  ScrollText,
   History,
   Webhook,
   Building2,
   Key,
-  Mail,
-  ArrowUpFromLine,
   Zap,
   Send,
   PlayCircle,
-  Trash2,
   BarChart3,
   Database,
   Gauge,
@@ -60,28 +55,15 @@ import {
   Library,
   Cog,
   Workflow,
-  Wand2,
-  GitCompare,
-  KeyRound,
-  FileBadge,
-  ListChecks,
-  Undo2,
-  Download,
   Archive,
   UserCog,
-  Eye,
-  Monitor,
   Settings2,
-  Globe,
-  Layers,
-  Calendar,
-  AlertTriangle,
   Beaker,
   BookOpen,
   Umbrella,
   TrendingDown,
   HandCoins,
-  Scale,
+  Scale
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -237,11 +219,6 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // promotions + M15.1 audit into a single MRM-tier governance
       // tree. Every legacy /ai/* URL still works.
       { to: '/ai/governance',                i18nKey: 'ai_governance',                icon: ShieldCheck,  requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/ai/governance/monitoring',     i18nKey: 'ai_governance_monitoring',     icon: Gauge,        requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/ai/governance/prediction-audit', i18nKey: 'ai_governance_prediction_audit', icon: ListChecks, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/ai/governance/performance',    i18nKey: 'ai_governance_performance',    icon: TrendingUp,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/ai/governance/drift',          i18nKey: 'ai_governance_drift',          icon: Activity,     requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/ai/governance/reports',        i18nKey: 'ai_governance_reports',        icon: FileBadge,    requireRole: ['admin', 'supervisor', 'risk_analyst'] },
     ],
   },
 
@@ -259,18 +236,9 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // + Tenant + Branch + RBAC + IAM surface. Every legacy URL still
       // resolves — this is purely additive navigation.
       { to: '/admin/governance',                  i18nKey: 'governance_center',                 icon: Settings2,    requireRole: ['admin', 'supervisor'], featured: true },
-      { to: '/admin/governance/organization',     i18nKey: 'governance_center_organization',    icon: Globe,        requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/governance/domains',          i18nKey: 'governance_center_domains',         icon: Layers,       requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/governance/roles',            i18nKey: 'governance_center_roles',           icon: Users,        requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/governance/risk',             i18nKey: 'governance_center_risk',            icon: AlertTriangle, requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/masters/business-calendars',  i18nKey: 'governance_center_calendar',        icon: Calendar,     requireRole: ['admin'] },
       // Phase 9 T11 — reusable master entity CRUD framework
-      { to: '/admin/masters',              i18nKey: 'master_data',          icon: Library,             requireRole: ['admin'] },
       // Enterprise Permission Matrix (049 overlay) — role × module × action editor
-      { to: '/admin/permission-matrix',    i18nKey: 'permission_matrix',    icon: ShieldCheck,         requireRole: ['admin'] },
       // Tenant Governance (051 overlay) — branch registry + compliance rules
-      { to: '/admin/governance/branches',           i18nKey: 'branches',           icon: Building2,    requireRole: ['admin'] },
-      { to: '/admin/governance/compliance-rules',   i18nKey: 'compliance_rules',   icon: ScrollText,   requireRole: ['admin'] },
       { to: '/admin/risk-score-config',    i18nKey: 'risk_score_config',    icon: Scale,               requireRole: ['admin'], featured: true },
       { to: '/admin/alert-classification', i18nKey: 'alert_classification', icon: ShieldAlert,         requireRole: ['admin'], featured: true },
       { to: '/admin/case-types',           i18nKey: 'case_type_setup',      icon: Briefcase,           requireRole: ['admin'], featured: true },
@@ -283,20 +251,11 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // pages — see web/src/App.tsx — so bookmarks + tests keep
       // working. Sidebar exposes only the /rule-center/* hierarchy.
       { to: '/rule-center',                i18nKey: 'rule_center',                  icon: Cog,           requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
-      { to: '/rule-center/builder',        i18nKey: 'rule_center_builder',          icon: Wand2,         requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/rule-center/library',        i18nKey: 'rule_center_library',          icon: Library,       requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/rule-center/testing',        i18nKey: 'rule_center_testing',          icon: FlaskConical,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/rule-center/reports',        i18nKey: 'rule_center_reports',          icon: FileBarChart,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/rule-center/history',        i18nKey: 'rule_center_history',          icon: History,       requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/rule-center/comparison',     i18nKey: 'rule_center_comparison',       icon: GitCompare,    requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       { to: '/admin/thresholds-limits',    i18nKey: 'thresholds_limits',    icon: Gauge,               requireRole: ['admin'], featured: true },
       { to: '/admin/workflows',            i18nKey: 'workflows',            icon: Workflow,            requireRole: ['admin'], featured: true },
       // Integration plumbing
       { to: '/admin/integrations',         i18nKey: 'integrations',         icon: Plug,                requireRole: ['admin', 'supervisor'] },
       { to: '/admin/webhooks',             i18nKey: 'webhooks',             icon: Webhook,             requireRole: ['admin'] },
-      { to: '/admin/sla-config',           i18nKey: 'sla_config',           icon: ScrollText,          requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/notification-templates', i18nKey: 'notification_templates', icon: Mail,            requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/escalation-matrix',    i18nKey: 'escalation_matrix',    icon: ArrowUpFromLine,     requireRole: ['admin', 'supervisor'] },
     ],
   },
 
@@ -319,12 +278,6 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // Session / RBAC / DBAC / Tenant surface. Legacy /admin/users +
       // /admin/users/new + /admin/sessions URLs still resolve.
       { to: '/admin/iam',                       i18nKey: 'iam_center',                    icon: UserCog,     requireRole: ['admin', 'supervisor'], featured: true },
-      { to: '/admin/iam/lifecycle',             i18nKey: 'iam_center_lifecycle',          icon: UserCog,     requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/iam/access-review',         i18nKey: 'iam_center_access_review',      icon: Eye,         requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/iam/approvals',             i18nKey: 'iam_center_approvals',          icon: ShieldCheck, requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/iam/audit',                 i18nKey: 'iam_center_audit',              icon: ScrollText,  requireRole: ['admin', 'supervisor'] },
-      { to: '/admin/iam/password-policy',       i18nKey: 'iam_center_password_policy',    icon: KeyRound,    requireRole: ['admin'] },
-      { to: '/admin/sessions',                  i18nKey: 'iam_center_sessions',           icon: Monitor,     requireRole: ['admin'] },
       // ── Unified Audit Center (additive) ────────────────────────
       // Single entry-point that consolidates 4 previously-scattered
       // audit surfaces (audit_trail / audit_log / admin_activity /
@@ -332,11 +285,6 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // The legacy /admin/audit-* + /admin/activity + /admin/sessions
       // URLs still resolve — see web/src/App.tsx.
       { to: '/audit-center',                   i18nKey: 'audit_center',                 icon: Shield,      requireRole: ['admin', 'supervisor'], featured: true },
-      { to: '/audit-center/trail',             i18nKey: 'audit_center_trail',           icon: Shield,      requireRole: ['admin', 'supervisor'] },
-      { to: '/audit-center/login-audit',       i18nKey: 'audit_center_login_audit',     icon: KeyRound,    requireRole: ['admin'] },
-      { to: '/audit-center/activity',          i18nKey: 'audit_center_activity',        icon: ScrollText,  requireRole: ['admin', 'supervisor'] },
-      { to: '/audit-center/export',            i18nKey: 'audit_center_export',          icon: Download,    requireRole: ['admin', 'supervisor'] },
-      { to: '/audit-center/compliance',        i18nKey: 'audit_center_compliance',      icon: FileBadge,   requireRole: ['admin', 'supervisor'] },
       { to: '/admin/testing-hub',          i18nKey: 'testing_hub',           icon: Beaker,     requireRole: ['admin'], featured: true },
       { to: '/glossary',                   i18nKey: 'glossary',              icon: BookOpen,   featured: true },
       // Admin extras
@@ -349,17 +297,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // with 4 intent-focused sub-sections. /admin/recycle-bin +
       // /admin/recovery-analytics still resolve to the same pages.
       { to: '/recovery-center',                i18nKey: 'recovery_center',              icon: Archive,     requireRole: ['admin'], featured: true },
-      { to: '/recovery-center/deleted',        i18nKey: 'recovery_center_deleted',      icon: Trash2,      requireRole: ['admin'] },
-      { to: '/recovery-center/restore',        i18nKey: 'recovery_center_restore',      icon: Undo2,       requireRole: ['admin'] },
-      { to: '/recovery-center/permanent-delete', i18nKey: 'recovery_center_permanent_delete', icon: ShieldAlert, requireRole: ['admin'] },
-      { to: '/recovery-center/analytics',      i18nKey: 'recovery_center_analytics',    icon: BarChart3,   requireRole: ['admin'] },
       // Enterprise Recovery Management Center — additive overlay (4 net-new pages)
-      { to: '/recovery-center/workflow',       i18nKey: 'recovery_center_workflow',     icon: GitBranch,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/recovery-center/history',        i18nKey: 'recovery_center_history',      icon: History,     requireRole: ['admin', 'supervisor'] },
-      { to: '/recovery-center/search',         i18nKey: 'recovery_center_search',       icon: FileSearch,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
-      { to: '/recovery-center/policies',       i18nKey: 'recovery_center_policies',     icon: Settings2,   requireRole: ['admin'] },
-      { to: '/profile/sessions',           i18nKey: 'my_sessions',           icon: Smartphone },
-      { to: '/profile/activity',           i18nKey: 'my_activity',           icon: History },
     ],
   },
 ];

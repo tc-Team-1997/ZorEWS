@@ -70,13 +70,20 @@ describe('AppShell sidebar — 6-category enterprise structure', () => {
     authenticateAs(['admin']);
     renderShell();
 
+    // Per the Navigation Simplification (2026-05-31), AI explainability moved
+    // under AI Workbench (/ai/workbench/explainability) and overlay-center
+    // sub-routes (rule-center/audit-center/recovery-center/iam/etc.) are
+    // hidden from the sidebar in favour of their overlay landings. The
+    // featured-anchor assertions below were updated to reflect the current
+    // hidden-via-card-grid IA. Every removed route still resolves via its
+    // overlay center landing + URL bar + bookmarks.
     const featuredByGroup: Record<string, string[]> = {
       'data-cleaning': ['/admin/ingestion', '/admin/data-profiling', '/admin/anomalies', '/admin/reconciliation', '/admin/dq-score'],
       'bank-ews': ['/borrower-watch', '/account-behaviour', '/financial-ratios', '/banking/sma', '/banking/npa-prediction', '/fraud-signals', '/banking/sectors'],
       'action-center': ['/alerts', '/cms/cases', '/cms/workflow', '/reports'],
-      'ai-workbench': ['/ai/workbench', '/ai/registry', '/ai/explainability'],
-      'configuration': ['/admin/master-setup', '/rules/engine', '/admin/thresholds-limits', '/admin/workflows'],
-      'admin': ['/admin/users', '/admin/audit-trail', '/admin/testing-hub', '/glossary'],
+      'ai-workbench': ['/ai/workbench', '/ai/registry', '/ai/workbench/explainability'],
+      'configuration': ['/admin/master-setup', '/admin/governance', '/rule-center', '/admin/thresholds-limits', '/admin/workflows'],
+      'admin': ['/admin/users', '/admin/iam', '/admin/security', '/audit-center', '/recovery-center', '/admin/testing-hub', '/glossary'],
     };
 
     for (const [groupId, routes] of Object.entries(featuredByGroup)) {
