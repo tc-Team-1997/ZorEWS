@@ -31,6 +31,8 @@ import { RoleBasedDashboardPage } from '@/modules/dashboard/roleEngine/RoleBased
 import { ExecutiveCockpitPage } from '@/modules/executive/ExecutiveCockpitPage';
 // Predictive Risk Center — additive overlay; transforms ZorEWS from monitoring → predictive intelligence.
 import { PredictiveRiskCenterPage } from '@/modules/predictive/PredictiveRiskCenterPage';
+// Investigation Center — enterprise investigation + case intelligence overlay (12th IA addition this session).
+import { InvestigationCenterPage } from '@/modules/investigation/InvestigationCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -229,6 +231,9 @@ export function App() {
             {/* Predictive Risk Center — predictive intelligence overlay. Existing
                 dashboards / cockpit / role-based dashboard all untouched. */}
             <Route path="predictive-risk-center" element={<PredictiveRiskCenterPage />} />
+            {/* Investigation Center — additive overlay; existing CMS modules /
+                Case Workflow / Causal Analysis / Tracking Timeline untouched. */}
+            <Route path="investigation-center" element={<InvestigationCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
