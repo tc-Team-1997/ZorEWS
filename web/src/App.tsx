@@ -39,6 +39,8 @@ import { RegulatoryComplianceCenterPage } from '@/modules/regulatory/RegulatoryC
 import { DataFabricCenterPage } from '@/modules/dataFabric/DataFabricCenterPage';
 // Enterprise Demo Foundation — realistic banking + insurance demo data (15th IA addition this session).
 import { EnterpriseDemoCenterPage } from '@/modules/enterpriseDemo/EnterpriseDemoCenterPage';
+// Demo Readiness Center — UAT + release readiness validation (16th IA addition this session).
+import { DemoReadinessCenterPage } from '@/modules/demoReadiness/DemoReadinessCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -251,6 +253,10 @@ export function App() {
                 (raw seeds, app_*, mart) remains intact; this page consumes the
                 deterministic enterpriseDemo engines for realistic banking + insurance volume. */}
             <Route path="enterprise-demo-center" element={<EnterpriseDemoCenterPage />} />
+            {/* Demo Readiness Center — additive overlay; consumes the prior
+                15 IA centers' deterministic engines to measure UAT + demo +
+                release readiness. */}
+            <Route path="demo-readiness-center" element={<DemoReadinessCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />

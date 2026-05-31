@@ -69,7 +69,8 @@ import {
   Search,
   Gavel,
   Cable,
-  Sparkles
+  Sparkles,
+  ClipboardCheck
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -207,6 +208,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/data-fabric-center',           i18nKey: 'data_fabric_center',      icon: Cable,           requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Enterprise Demo Foundation — gated inside the page; analyst-level discovery.
       { to: '/enterprise-demo-center',       i18nKey: 'enterprise_demo_center',  icon: Sparkles,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Demo Readiness Center — gated inside the page; analyst-level discovery.
+      { to: '/demo-readiness-center',        i18nKey: 'demo_readiness_center',   icon: ClipboardCheck,  requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },
