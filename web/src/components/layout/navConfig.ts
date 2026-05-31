@@ -309,6 +309,11 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: ShieldCheck,
     items: [
       { to: '/admin/users',                i18nKey: 'users',                 icon: UsersRound, requireRole: ['admin'], featured: true },
+      // ── Security Activity Center (additive) ────────────────────
+      // Layered security-monitoring view over the existing Admin Activity /
+      // Audit Trail / IAM / Sessions surface. Adds risk scoring + dashboard
+      // KPI strip + 11-section index. Every legacy URL still resolves.
+      { to: '/admin/security',                  i18nKey: 'security_center',               icon: ShieldCheck, requireRole: ['admin', 'supervisor'], featured: true },
       // ── Enterprise IAM Center (additive) ───────────────────────
       // Layered IAM tree: 6 sub-sections over the existing User /
       // Session / RBAC / DBAC / Tenant surface. Legacy /admin/users +

@@ -113,6 +113,9 @@ import { PolicyTimelinePage } from '@/modules/insurance/PolicyTimelinePage';
 import { InsuranceHeatmapPage } from '@/modules/insurance/InsuranceHeatmapPage';
 import { ClaimInvestigationPage } from '@/modules/insurance/ClaimInvestigationPage';
 import { AdminActivityPage } from '@/modules/admin/AdminActivityPage';
+// Security Activity Center (additive — admin/activity, audit-center/*, IAM
+// Center, admin/sessions URLs all untouched).
+import { SecurityActivityCenterPage } from '@/modules/admin/security/SecurityActivityCenterPage';
 import { WebhooksPage } from '@/modules/admin/WebhooksPage';
 import { DashboardWidgetsPage } from '@/modules/admin/DashboardWidgetsPage';
 import { AdminTenantsPage } from '@/modules/admin/AdminTenantsPage';
@@ -332,6 +335,8 @@ export function App() {
               <Route path="insurance/heatmaps" element={<InsuranceHeatmapPage />} />
             </Route>
             <Route path="admin/activity" element={<AdminActivityPage />} />
+            {/* Security Activity Center (additive) — wraps admin/activity + audit + IAM + sessions. */}
+            <Route path="admin/security" element={<SecurityActivityCenterPage />} />
             <Route path="admin/webhooks" element={<WebhooksPage />} />
             <Route path="admin/dashboard-widgets" element={<DashboardWidgetsPage />} />
             <Route path="admin/tenants" element={<AdminTenantsPage />} />
