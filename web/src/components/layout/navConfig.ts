@@ -64,7 +64,8 @@ import {
   Umbrella,
   TrendingDown,
   HandCoins,
-  Scale
+  Scale,
+  Radar
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -191,6 +192,9 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // Sidebar entry visible to admin + supervisor so they discover it; the
       // page itself bounces non-executive roles via canAccessExecutiveCockpit.
       { to: '/executive-cockpit',            i18nKey: 'executive_cockpit',       icon: Crown,           requireRole: ['admin', 'supervisor'], featured: true },
+      // Predictive Risk Center — gated inside the page; open to risk + fraud analysts too.
+      // Sidebar visible to admin/supervisor/risk_analyst for discoverability.
+      { to: '/predictive-risk-center',       i18nKey: 'predictive_risk_center',  icon: Radar,           requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },

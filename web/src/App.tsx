@@ -29,6 +29,8 @@ import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 import { RoleBasedDashboardPage } from '@/modules/dashboard/roleEngine/RoleBasedDashboardPage';
 // Executive Risk Cockpit — additive overlay (existing dashboards untouched).
 import { ExecutiveCockpitPage } from '@/modules/executive/ExecutiveCockpitPage';
+// Predictive Risk Center — additive overlay; transforms ZorEWS from monitoring → predictive intelligence.
+import { PredictiveRiskCenterPage } from '@/modules/predictive/PredictiveRiskCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -224,6 +226,9 @@ export function App() {
             {/* Executive Risk Cockpit — additive overlay (existing dashboards
                 untouched). Role-gated inside the page to 7 executive personas. */}
             <Route path="executive-cockpit" element={<ExecutiveCockpitPage />} />
+            {/* Predictive Risk Center — predictive intelligence overlay. Existing
+                dashboards / cockpit / role-based dashboard all untouched. */}
+            <Route path="predictive-risk-center" element={<PredictiveRiskCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
