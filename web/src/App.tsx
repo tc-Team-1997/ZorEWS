@@ -37,6 +37,8 @@ import { InvestigationCenterPage } from '@/modules/investigation/InvestigationCe
 import { RegulatoryComplianceCenterPage } from '@/modules/regulatory/RegulatoryComplianceCenterPage';
 // Data Fabric Center — enterprise data fabric + integration hub (14th IA addition this session).
 import { DataFabricCenterPage } from '@/modules/dataFabric/DataFabricCenterPage';
+// Enterprise Demo Foundation — realistic banking + insurance demo data (15th IA addition this session).
+import { EnterpriseDemoCenterPage } from '@/modules/enterpriseDemo/EnterpriseDemoCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -245,6 +247,10 @@ export function App() {
                 Profiling / Validation / Standardization / Anomaly / Reconciliation /
                 Data Quality Score modules untouched. */}
             <Route path="data-fabric-center" element={<DataFabricCenterPage />} />
+            {/* Enterprise Demo Foundation — additive overlay; existing demo data
+                (raw seeds, app_*, mart) remains intact; this page consumes the
+                deterministic enterpriseDemo engines for realistic banking + insurance volume. */}
+            <Route path="enterprise-demo-center" element={<EnterpriseDemoCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
