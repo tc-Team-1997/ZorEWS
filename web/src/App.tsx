@@ -25,6 +25,8 @@ import { RequireAuth } from '@/components/layout/RequireAuth';
 import { RequireOnboarding } from '@/components/layout/RequireOnboarding';
 import { RequireDomain } from '@/components/layout/RequireDomain';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
+// Role-Based Dashboard Engine — additive overlay (existing / dashboard untouched).
+import { RoleBasedDashboardPage } from '@/modules/dashboard/roleEngine/RoleBasedDashboardPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -213,6 +215,10 @@ export function App() {
                 so both render the right view; these give stable deep-links. */}
             <Route path="banking/dashboard" element={<DashboardPage />} />
             <Route path="insurance/dashboard" element={<DashboardPage />} />
+            {/* Role-Based Dashboard Engine — additive overlay (existing / route
+                untouched). Resolves widgets per (role × domain × country ×
+                tenant × branch) governance. */}
+            <Route path="dashboards/role-based" element={<RoleBasedDashboardPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />

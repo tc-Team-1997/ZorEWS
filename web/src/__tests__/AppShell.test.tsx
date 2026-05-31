@@ -22,7 +22,9 @@ describe('AppShell', () => {
       </Routes>,
     );
 
-    expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
+    // The Role-Based Dashboard Engine adds a "Role Dashboard" sibling
+    // entry — disambiguate with exact-match on "Dashboard" alone.
+    expect(screen.getByRole('link', { name: /^dashboard$/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /alerts/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /customers/i })).toBeInTheDocument();
     // Navigation Simplification (2026-05-31): the standalone "Rules" sidebar

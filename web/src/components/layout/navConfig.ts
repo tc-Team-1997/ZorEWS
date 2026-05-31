@@ -182,6 +182,10 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     i18nKey: 'cat_action_center',
     icon: Bell,
     items: [
+      // Role-Based Dashboard Engine — featured entry (top of Action Center).
+      // Resolves widgets per (role × domain × country × tenant × branch).
+      // Existing "/" Dashboard untouched.
+      { to: '/dashboards/role-based',        i18nKey: 'role_based_dashboard',    icon: LayoutDashboard, featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },
