@@ -135,6 +135,12 @@ import { AuditCenterPage } from '@/modules/admin/audit/AuditCenterPage';
 import { AuditExportPage } from '@/modules/admin/audit/AuditExportPage';
 import { AuditComplianceReportsPage } from '@/modules/admin/audit/AuditComplianceReportsPage';
 import { RecoveryCenterPage } from '@/modules/admin/recovery/RecoveryCenterPage';
+// Enterprise Recovery Management Center — 4 net-new pages layered over the
+// existing recovery-center landing. All legacy URLs preserved.
+import { RecoveryWorkflowQueuePage } from '@/modules/admin/recovery/RecoveryWorkflowQueuePage';
+import { RecoveryHistoryPage } from '@/modules/admin/recovery/RecoveryHistoryPage';
+import { RecoverySearchPage } from '@/modules/admin/recovery/RecoverySearchPage';
+import { RecoveryPoliciesPage } from '@/modules/admin/recovery/RecoveryPoliciesPage';
 import { SessionsPage } from '@/modules/profile/SessionsPage';
 import { LoginActivityPage } from '@/modules/profile/LoginActivityPage';
 import { useAuth } from '@/store/auth';
@@ -367,6 +373,12 @@ export function App() {
             <Route path="recovery-center/restore" element={<RecycleBinPage />} />
             <Route path="recovery-center/permanent-delete" element={<RecycleBinPage />} />
             <Route path="recovery-center/analytics" element={<RecoveryAnalyticsPage />} />
+            {/* Enterprise Recovery Management Center — additive overlay (zero
+                changes to the 4 lines above; legacy URLs untouched). */}
+            <Route path="recovery-center/workflow" element={<RecoveryWorkflowQueuePage />} />
+            <Route path="recovery-center/history" element={<RecoveryHistoryPage />} />
+            <Route path="recovery-center/search" element={<RecoverySearchPage />} />
+            <Route path="recovery-center/policies" element={<RecoveryPoliciesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

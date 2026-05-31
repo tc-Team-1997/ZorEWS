@@ -353,6 +353,11 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/recovery-center/restore',        i18nKey: 'recovery_center_restore',      icon: Undo2,       requireRole: ['admin'] },
       { to: '/recovery-center/permanent-delete', i18nKey: 'recovery_center_permanent_delete', icon: ShieldAlert, requireRole: ['admin'] },
       { to: '/recovery-center/analytics',      i18nKey: 'recovery_center_analytics',    icon: BarChart3,   requireRole: ['admin'] },
+      // Enterprise Recovery Management Center — additive overlay (4 net-new pages)
+      { to: '/recovery-center/workflow',       i18nKey: 'recovery_center_workflow',     icon: GitBranch,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/recovery-center/history',        i18nKey: 'recovery_center_history',      icon: History,     requireRole: ['admin', 'supervisor'] },
+      { to: '/recovery-center/search',         i18nKey: 'recovery_center_search',       icon: FileSearch,  requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/recovery-center/policies',       i18nKey: 'recovery_center_policies',     icon: Settings2,   requireRole: ['admin'] },
       { to: '/profile/sessions',           i18nKey: 'my_sessions',           icon: Smartphone },
       { to: '/profile/activity',           i18nKey: 'my_activity',           icon: History },
     ],
