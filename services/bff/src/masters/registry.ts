@@ -257,6 +257,91 @@ const REGULATORY_FRAMEWORK_SCHEMA: MasterSchema = {
   ],
 };
 
+// ── Governance Center additions (additive — Master Setup remains the
+//    canonical registry; Governance Center wraps it with a layered UX).
+//
+// Regions group branches within a country (e.g. India / North / South /
+// East / West). Tenant-scoped — different tenants may slice regions
+// differently. Field `country_code` joins to the COUNTRY_SCHEMA master
+// (or to app_iam.tenants.country_code for the global view).
+const REGION_SCHEMA: MasterSchema = {
+  entity: 'regions',
+  label: 'Region',
+  label_plural: 'Regions',
+  tenant_scoped: true,
+  fields: [
+    { name: 'code', type: 'string', required: true, max_length: 32, label: 'Code' },
+    { name: 'name', type: 'string', required: true, max_length: 200, label: 'Name' },
+    { name: 'country_code', type: 'string', max_length: 4, label: 'Country ISO code' },
+    { name: 'parent_region', type: 'string', max_length: 200, label: 'Parent region (optional)' },
+    { name: 'active', type: 'boolean', label: 'Active' },
+  ],
+  seed: [
+    { code: 'IN_NORTH', name: 'India · North', country_code: 'IN', parent_region: '', active: true },
+    { code: 'IN_SOUTH', name: 'India · South', country_code: 'IN', parent_region: '', active: true },
+    { code: 'IN_EAST',  name: 'India · East',  country_code: 'IN', parent_region: '', active: true },
+    { code: 'IN_WEST',  name: 'India · West',  country_code: 'IN', parent_region: '', active: true },
+  ],
+};
+
+// Business Calendar — working days + holidays per country/tenant. Drives
+// the SLA + escalation timer business-day math. Tenant-scoped because
+// banks + insurers in the same country often diverge on regional holidays.
+const BUSINESS_CALENDAR_SCHEMA: MasterSchema = {
+  entity: 'business-calendars',
+  label: 'Business Calendar',
+  label_plural: 'Business Calendars',
+  tenant_scoped: true,
+  fields: [
+    { name: 'code', type: 'string', required: true, max_length: 32, label: 'Code' },
+    { name: 'name', type: 'string', required: true, max_length: 200, label: 'Name' },
+    { name: 'country_code', type: 'string', max_length: 4, label: 'Country ISO code' },
+    {
+      name: 'domain',
+      type: 'enum',
+      enum_values: ['banking', 'insurance', 'shared'],
+      label: 'Domain',
+    },
+    {
+      name: 'working_days',
+      type: 'string',
+      max_length: 32,
+      label: 'Working days (CSV, ISO Mon=1..Sun=7)',
+    },
+    { name: 'holidays_csv', type: 'string', max_length: 4000, label: 'Holiday dates (YYYY-MM-DD, comma-sep)' },
+    { name: 'active', type: 'boolean', label: 'Active' },
+  ],
+  seed: [
+    {
+      code: 'IN_BANK_2026',
+      name: 'India · Banking · 2026',
+      country_code: 'IN',
+      domain: 'banking',
+      working_days: '1,2,3,4,5',
+      holidays_csv: '2026-01-26,2026-08-15,2026-10-02,2026-12-25',
+      active: true,
+    },
+    {
+      code: 'IN_INS_2026',
+      name: 'India · Insurance · 2026',
+      country_code: 'IN',
+      domain: 'insurance',
+      working_days: '1,2,3,4,5,6',
+      holidays_csv: '2026-01-26,2026-08-15,2026-10-02,2026-12-25',
+      active: true,
+    },
+    {
+      code: 'BT_SHARED_2026',
+      name: 'Bhutan · Shared · 2026',
+      country_code: 'BT',
+      domain: 'shared',
+      working_days: '1,2,3,4,5',
+      holidays_csv: '2026-02-21,2026-12-17',
+      active: true,
+    },
+  ],
+};
+
 const CHANNEL_SCHEMA: MasterSchema = {
   entity: 'channels',
   label: 'Channel',
@@ -297,6 +382,10 @@ export const MASTER_SCHEMAS: readonly MasterSchema[] = [
   CASE_PRIORITY_SCHEMA,
   REGULATORY_FRAMEWORK_SCHEMA,
   CHANNEL_SCHEMA,
+  // Governance Center additions — wire into the same T11 framework for
+  // auto-CRUD + audit fan-out + permission gates.
+  REGION_SCHEMA,
+  BUSINESS_CALENDAR_SCHEMA,
 ] as const;
 
 const _byEntity = new Map<string, IMasterStore>();

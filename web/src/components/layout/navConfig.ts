@@ -71,6 +71,11 @@ import {
   UserCog,
   Eye,
   Monitor,
+  Settings2,
+  Globe,
+  Layers,
+  Calendar,
+  AlertTriangle,
   Beaker,
   BookOpen,
   Umbrella,
@@ -249,6 +254,16 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     icon: Cog,
     items: [
       { to: '/admin/master-setup',         i18nKey: 'master_setup',         icon: Library,             requireRole: ['admin'], featured: true },
+      // ── Enterprise Governance Center (additive) ───────────────
+      // Layers 11 governance sections over the existing Master Setup
+      // + Tenant + Branch + RBAC + IAM surface. Every legacy URL still
+      // resolves — this is purely additive navigation.
+      { to: '/admin/governance',                  i18nKey: 'governance_center',                 icon: Settings2,    requireRole: ['admin', 'supervisor'], featured: true },
+      { to: '/admin/governance/organization',     i18nKey: 'governance_center_organization',    icon: Globe,        requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/governance/domains',          i18nKey: 'governance_center_domains',         icon: Layers,       requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/governance/roles',            i18nKey: 'governance_center_roles',           icon: Users,        requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/governance/risk',             i18nKey: 'governance_center_risk',            icon: AlertTriangle, requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/masters/business-calendars',  i18nKey: 'governance_center_calendar',        icon: Calendar,     requireRole: ['admin'] },
       // Phase 9 T11 — reusable master entity CRUD framework
       { to: '/admin/masters',              i18nKey: 'master_data',          icon: Library,             requireRole: ['admin'] },
       // Enterprise Permission Matrix (049 overlay) — role × module × action editor

@@ -83,6 +83,12 @@ import { MasterEntityPage } from '@/modules/admin/masters/MasterEntityPage';
 import { PermissionMatrixPage } from '@/modules/admin/rbac/PermissionMatrixPage';
 import { BranchesPage } from '@/modules/admin/governance/BranchesPage';
 import { ComplianceRulesPage } from '@/modules/admin/governance/ComplianceRulesPage';
+// Enterprise Governance Center (additive — every legacy admin URL untouched).
+import { GovernanceCenterPage } from '@/modules/admin/governance/GovernanceCenterPage';
+import { OrganizationGovernancePage } from '@/modules/admin/governance/OrganizationGovernancePage';
+import { DomainGovernancePage } from '@/modules/admin/governance/DomainGovernancePage';
+import { RoleGovernancePage } from '@/modules/admin/governance/RoleGovernancePage';
+import { RiskAndAlertGovernancePage } from '@/modules/admin/governance/RiskAndAlertGovernancePage';
 import { IntegrationsPage } from '@/modules/admin/IntegrationsPage';
 import { AuditLogPage } from '@/modules/admin/AuditLogPage';
 import { AuditTrailPage } from '@/modules/admin/AuditTrailPage';
@@ -284,6 +290,14 @@ export function App() {
             <Route path="admin/permission-matrix" element={<PermissionMatrixPage />} />
             <Route path="admin/governance/branches" element={<BranchesPage />} />
             <Route path="admin/governance/compliance-rules" element={<ComplianceRulesPage />} />
+            {/* Enterprise Governance Center — additive landings (every Master Setup
+                URL above + every legacy admin/* config URL still resolves). */}
+            <Route path="admin/governance" element={<GovernanceCenterPage />} />
+            <Route path="admin/governance/organization" element={<OrganizationGovernancePage />} />
+            <Route path="admin/governance/domains" element={<DomainGovernancePage />} />
+            <Route path="admin/governance/roles" element={<RoleGovernancePage />} />
+            <Route path="admin/governance/risk" element={<RiskAndAlertGovernancePage />} />
+            <Route path="admin/governance/alerts" element={<RiskAndAlertGovernancePage />} />
             <Route path="admin/integrations" element={<IntegrationsPage />} />
             <Route path="admin/audit-log" element={<AuditLogPage />} />
             <Route path="admin/audit-trail" element={<AuditTrailPage />} />
