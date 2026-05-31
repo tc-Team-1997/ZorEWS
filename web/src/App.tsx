@@ -35,6 +35,8 @@ import { PredictiveRiskCenterPage } from '@/modules/predictive/PredictiveRiskCen
 import { InvestigationCenterPage } from '@/modules/investigation/InvestigationCenterPage';
 // Regulatory Compliance Center — enterprise regulatory + reporting overlay (13th IA addition this session).
 import { RegulatoryComplianceCenterPage } from '@/modules/regulatory/RegulatoryComplianceCenterPage';
+// Data Fabric Center — enterprise data fabric + integration hub (14th IA addition this session).
+import { DataFabricCenterPage } from '@/modules/dataFabric/DataFabricCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -239,6 +241,10 @@ export function App() {
             {/* Regulatory Compliance Center — additive overlay; existing Audit Center
                 / Governance / IAM / Rule Center / Recovery untouched. */}
             <Route path="regulatory-compliance-center" element={<RegulatoryComplianceCenterPage />} />
+            {/* Data Fabric Center — additive overlay; existing Data Ingestion /
+                Profiling / Validation / Standardization / Anomaly / Reconciliation /
+                Data Quality Score modules untouched. */}
+            <Route path="data-fabric-center" element={<DataFabricCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
