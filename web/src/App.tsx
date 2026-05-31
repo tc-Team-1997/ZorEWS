@@ -27,6 +27,8 @@ import { RequireDomain } from '@/components/layout/RequireDomain';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 // Role-Based Dashboard Engine — additive overlay (existing / dashboard untouched).
 import { RoleBasedDashboardPage } from '@/modules/dashboard/roleEngine/RoleBasedDashboardPage';
+// Executive Risk Cockpit — additive overlay (existing dashboards untouched).
+import { ExecutiveCockpitPage } from '@/modules/executive/ExecutiveCockpitPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -219,6 +221,9 @@ export function App() {
                 untouched). Resolves widgets per (role × domain × country ×
                 tenant × branch) governance. */}
             <Route path="dashboards/role-based" element={<RoleBasedDashboardPage />} />
+            {/* Executive Risk Cockpit — additive overlay (existing dashboards
+                untouched). Role-gated inside the page to 7 executive personas. */}
+            <Route path="executive-cockpit" element={<ExecutiveCockpitPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />

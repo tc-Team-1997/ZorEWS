@@ -42,6 +42,7 @@ const en = {
   nav: {
     dashboard: 'Dashboard',
     role_based_dashboard: 'Role Dashboard',
+    executive_cockpit: 'Executive Cockpit',
     alerts: 'Alerts',
     customers: 'Customers',
     borrower_watch: 'Borrower watch',
@@ -294,6 +295,7 @@ const hi: typeof en = {
   nav: {
     dashboard: 'डैशबोर्ड',
     role_based_dashboard: 'भूमिका डैशबोर्ड',
+    executive_cockpit: 'कार्यकारी कॉकपिट',
     alerts: 'अलर्ट',
     customers: 'ग्राहक',
     borrower_watch: 'उधारकर्ता निगरानी',
@@ -548,6 +550,7 @@ const dz: typeof en = {
   nav: {
     dashboard: 'གདོང་ཁྲམ་',
     role_based_dashboard: 'གོ་ཐོབ་གདོང་ཁྲམ་',
+    executive_cockpit: 'གཙོ་འཛིན་ཀོ་ཀི་ཊི་',
     alerts: 'དྲན་སྐུལ་',
     customers: 'ཞབས་ཏོག་སྤྱོད་མི་',
     borrower_watch: 'ཁྲོམ་ཁག་ལ་ཞིབ་ལྟ་',
@@ -801,6 +804,7 @@ const ne: typeof en = {
   nav: {
     dashboard: 'ड्यासबोर्ड',
     role_based_dashboard: 'भूमिका ड्यासबोर्ड',
+    executive_cockpit: 'कार्यकारी कक्ष',
     alerts: 'अलर्ट',
     customers: 'ग्राहक',
     borrower_watch: 'ऋणी निगरानी',

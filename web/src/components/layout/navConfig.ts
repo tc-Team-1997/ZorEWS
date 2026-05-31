@@ -21,6 +21,7 @@
 
 import {
   LayoutDashboard,
+  Crown,
   Bell,
   Users,
   UsersRound,
@@ -186,6 +187,10 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // Resolves widgets per (role × domain × country × tenant × branch).
       // Existing "/" Dashboard untouched.
       { to: '/dashboards/role-based',        i18nKey: 'role_based_dashboard',    icon: LayoutDashboard, featured: true },
+      // Executive Risk Cockpit — gated inside the page to 7 executive personas.
+      // Sidebar entry visible to admin + supervisor so they discover it; the
+      // page itself bounces non-executive roles via canAccessExecutiveCockpit.
+      { to: '/executive-cockpit',            i18nKey: 'executive_cockpit',       icon: Crown,           requireRole: ['admin', 'supervisor'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },
