@@ -213,6 +213,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/demo-readiness-center',        i18nKey: 'demo_readiness_center',   icon: ClipboardCheck,  requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Digital Twin Risk Simulation Center — Phase 17 overlay.
       { to: '/digital-twin-center',          i18nKey: 'digital_twin_center',     icon: Cpu,             requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Autonomous Risk Operations Center — AI agents (Phase 18 overlay).
+      { to: '/autonomous-risk-center',       i18nKey: 'autonomous_risk_center',  icon: Bot,             requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },

@@ -43,6 +43,8 @@ import { EnterpriseDemoCenterPage } from '@/modules/enterpriseDemo/EnterpriseDem
 import { DemoReadinessCenterPage } from '@/modules/demoReadiness/DemoReadinessCenterPage';
 // Digital Twin Risk Simulation Center — deterministic scenario engine (17th IA overlay).
 import { DigitalTwinCenterPage } from '@/modules/digitalTwin/DigitalTwinCenterPage';
+// Autonomous Risk Operations Center — AI agents overlay (18th IA overlay).
+import { AutonomousRiskCenterPage } from '@/modules/autonomousRisk/AutonomousRiskCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -263,6 +265,7 @@ export function App() {
                 changes to prior 16 overlays); deterministic scenario engine,
                 multi-horizon impact analysis, AI recommendations. */}
             <Route path="digital-twin-center" element={<DigitalTwinCenterPage />} />
+            <Route path="autonomous-risk-center" element={<AutonomousRiskCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
