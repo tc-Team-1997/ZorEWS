@@ -45,6 +45,8 @@ import { DemoReadinessCenterPage } from '@/modules/demoReadiness/DemoReadinessCe
 import { DigitalTwinCenterPage } from '@/modules/digitalTwin/DigitalTwinCenterPage';
 // Autonomous Risk Operations Center — AI agents overlay (18th IA overlay).
 import { AutonomousRiskCenterPage } from '@/modules/autonomousRisk/AutonomousRiskCenterPage';
+// Advanced AI Decisioning Center — intelligence orchestration layer (19th IA overlay).
+import { AiDecisioningCenterPage } from '@/modules/aiDecisioning/AiDecisioningCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -266,6 +268,8 @@ export function App() {
                 multi-horizon impact analysis, AI recommendations. */}
             <Route path="digital-twin-center" element={<DigitalTwinCenterPage />} />
             <Route path="autonomous-risk-center" element={<AutonomousRiskCenterPage />} />
+            {/* Advanced AI Decisioning Center — additive Phase 19; all 18 prior centers untouched. */}
+            <Route path="ai-decisioning-center" element={<AiDecisioningCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
