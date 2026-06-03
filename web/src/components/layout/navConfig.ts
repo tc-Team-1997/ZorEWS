@@ -217,6 +217,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/autonomous-risk-center',       i18nKey: 'autonomous_risk_center',  icon: Bot,             requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Advanced AI Decisioning Center — Phase 19 orchestration overlay.
       { to: '/ai-decisioning-center', i18nKey: 'ai_decisioning_center', icon: BrainCircuit, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Enterprise Integration Marketplace — Phase 20 overlay.
+      { to: '/integration-marketplace', i18nKey: 'integration_marketplace', icon: Plug, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },
