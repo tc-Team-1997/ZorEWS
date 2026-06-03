@@ -51,6 +51,8 @@ import { AiDecisioningCenterPage } from '@/modules/aiDecisioning/AiDecisioningCe
 import { IntegrationMarketplacePage } from '@/modules/integrationMarketplace/IntegrationMarketplacePage';
 // Enterprise Reporting & Board Packs Center — board intelligence platform (Phase 21 IA overlay).
 import { BoardReportingCenterPage } from '@/modules/boardReporting/BoardReportingCenterPage';
+// Real-Time Event Streaming Center — enterprise event backbone (Phase 22 IA overlay).
+import { EventStreamingCenterPage } from '@/modules/eventStreaming/EventStreamingCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -278,6 +280,8 @@ export function App() {
             <Route path="integration-marketplace" element={<IntegrationMarketplacePage />} />
             {/* Enterprise Reporting & Board Packs Center — additive Phase 21. */}
             <Route path="board-reporting-center" element={<BoardReportingCenterPage />} />
+            {/* Real-Time Event Streaming Center — additive Phase 22. */}
+            <Route path="event-streaming-center" element={<EventStreamingCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
