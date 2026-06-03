@@ -53,6 +53,8 @@ import { IntegrationMarketplacePage } from '@/modules/integrationMarketplace/Int
 import { BoardReportingCenterPage } from '@/modules/boardReporting/BoardReportingCenterPage';
 // Real-Time Event Streaming Center — enterprise event backbone (Phase 22 IA overlay).
 import { EventStreamingCenterPage } from '@/modules/eventStreaming/EventStreamingCenterPage';
+// Production Operations Center — enterprise platform operations command (Phase 23 IA overlay).
+import { OperationsCenterPage } from '@/modules/operationsCenter/OperationsCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -282,6 +284,8 @@ export function App() {
             <Route path="board-reporting-center" element={<BoardReportingCenterPage />} />
             {/* Real-Time Event Streaming Center — additive Phase 22. */}
             <Route path="event-streaming-center" element={<EventStreamingCenterPage />} />
+            {/* Production Operations Center — additive Phase 23. */}
+            <Route path="operations-center" element={<OperationsCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />

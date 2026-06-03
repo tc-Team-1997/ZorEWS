@@ -223,6 +223,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/board-reporting-center', i18nKey: 'board_reporting_center', icon: FileBarChart, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Real-Time Event Streaming Center — Phase 22 overlay.
       { to: '/event-streaming-center', i18nKey: 'event_streaming_center', icon: Activity, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Production Operations Center — Phase 23 overlay.
+      { to: '/operations-center', i18nKey: 'operations_center', icon: Cog, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },
