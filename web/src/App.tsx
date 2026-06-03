@@ -49,6 +49,8 @@ import { AutonomousRiskCenterPage } from '@/modules/autonomousRisk/AutonomousRis
 import { AiDecisioningCenterPage } from '@/modules/aiDecisioning/AiDecisioningCenterPage';
 // Enterprise Integration Marketplace — single integration hub (Phase 20 IA overlay).
 import { IntegrationMarketplacePage } from '@/modules/integrationMarketplace/IntegrationMarketplacePage';
+// Enterprise Reporting & Board Packs Center — board intelligence platform (Phase 21 IA overlay).
+import { BoardReportingCenterPage } from '@/modules/boardReporting/BoardReportingCenterPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -274,6 +276,8 @@ export function App() {
             <Route path="ai-decisioning-center" element={<AiDecisioningCenterPage />} />
             {/* Enterprise Integration Marketplace — additive Phase 20. */}
             <Route path="integration-marketplace" element={<IntegrationMarketplacePage />} />
+            {/* Enterprise Reporting & Board Packs Center — additive Phase 21. */}
+            <Route path="board-reporting-center" element={<BoardReportingCenterPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />
