@@ -16705,4 +16705,44 @@ handlers.push(
     ];
     return HttpResponse.json(envelope({ items: breaches, total: breaches.length }));
   }),
+
+  // ── Notification stream / publish /v1/notifications/* ───────────────────
+  // NOTE: GET /v1/notifications/stream uses the browser's native EventSource
+  // API which MSW's service worker cannot intercept (EventSource is not
+  // fetch). In the test environment, EventSource is replaced by MockEventSource
+  // (see web/src/__tests__/setup.ts) so no MSW handler is needed for the
+  // stream itself.
+  //
+  // POST /v1/notifications/publish IS a regular fetch — handled here so the
+  // bell's "Send test notification" button works in MSW dev mode and tests
+  // that call publishTest() don't throw an "unhandled request" error.
+  http.post('/v1/notifications/publish', async ({ request }) => {
+    const body = await request.json() as {
+      level?: string;
+      title?: string;
+      body?: string;
+      href?: string;
+      type?: string;
+    };
+    const VALID_LEVELS = ['info', 'success', 'warning', 'danger'];
+    if (!body?.title || !VALID_LEVELS.includes(body?.level ?? '')) {
+      return HttpResponse.json(
+        { header: { status: 'FAILURE' }, error: { code: 'EWS_400', message: 'title and valid level are required', severity: 'MEDIUM' } },
+        { status: 400 },
+      );
+    }
+    const notification = {
+      id: `mock-notif-${Date.now()}`,
+      ts: new Date().toISOString(),
+      level: body.level,
+      title: body.title,
+      body: body.body,
+      href: body.href,
+      type: body.type ?? 'system',
+    };
+    return HttpResponse.json(
+      envelope({ ok: true, notification, subscribers: 0 }),
+      { status: 201 },
+    );
+  }),
 );

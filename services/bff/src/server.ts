@@ -9612,10 +9612,35 @@ export function makeApp(deps: AppDeps = {}) {
    * here and stays open; reconnect is handled by the browser's EventSource.
    * Auth: any role with cases:list (i.e. all 5 seed roles) — notifications
    * are intentionally low-sensitivity (titles + deep links, no PII).
+   *
+   * Dev-mode fallback: the browser's native EventSource cannot send custom
+   * headers, so a missing X-Tenant-ID is defaulted to BANK_DEMO for SSE
+   * connections only (identified by Accept: text/event-stream or no Accept
+   * that looks like a JSON client). The Vite proxy also injects the header
+   * via its `headers` option, so in practice the header will be present.
    */
-  app.get('/v1/notifications/stream', requireTenantMw, requireRole('cases:list'), (req: Request, res: Response) => {
-    openSse(req, res, bus);
-  });
+  app.get(
+    '/v1/notifications/stream',
+    (req: Request, _res: Response, next: NextFunction) => {
+      // EventSource opens with Accept: text/event-stream (or no Accept at all).
+      // JSON clients always send Accept: application/json. Default the tenant
+      // header for SSE-only callers so they don't hit the 400 from requireTenant.
+      const accept = (req.headers['accept'] ?? '').toLowerCase();
+      if (
+        !req.headers['x-tenant-id'] &&
+        (accept.includes('text/event-stream') || !accept.includes('application/json'))
+      ) {
+        req.headers['x-tenant-id'] = 'BANK_DEMO';
+        req.headers['x-channel'] = 'API';
+      }
+      next();
+    },
+    requireTenantMw,
+    requireRole('cases:list'),
+    (req: Request, res: Response) => {
+      openSse(req, res, bus);
+    },
+  );
 
   /**
    * POST /v1/notifications/publish
@@ -10776,7 +10801,21 @@ export function makeApp(deps: AppDeps = {}) {
         ),
       };
     }
-    throw e;
+    // Defensive: unknown/unexpected errors are wrapped as 500 rather than
+    // re-thrown. Re-throwing into Express 4's async handler pipeline silently
+    // drops the response (no global error handler registered) and the client
+    // receives a connection-close / empty-body 500. Log + return a structured
+    // envelope so API consumers see a machine-readable error instead.
+    const message = e instanceof Error ? e.message : String(e ?? 'internal error');
+    // eslint-disable-next-line no-console
+    console.error('[CMS] unexpected error:', e);
+    return {
+      status: 500,
+      body: wrapError(
+        { code: 'EWS_500_internal', message, severity: 'HIGH' },
+        ctx,
+      ),
+    };
   }
 
   function writeCmsAuditEvents(
@@ -10835,53 +10874,58 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('cases:list'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
-      const by_status = Object.fromEntries(
-        CMS_CASE_STATES.map((s) => [s, 0]),
-      ) as Record<CmsCaseState, number>;
-      const by_priority = Object.fromEntries(
-        CMS_PRIORITIES.map((p) => [p, 0]),
-      ) as Record<CmsPriority, number>;
-      let sla_breached_count = 0;
-      let sla_warning_count = 0;
-      const closedDurations: number[] = [];
-      const t = now();
-      for (const c of items) {
-        by_status[c.status] += 1;
-        by_priority[c.priority] += 1;
-        if (c.status !== 'CLOSED') {
-          const due = new Date(c.sla_due_at);
-          const created = new Date(c.created_at);
-          if (isSlaBreached(t, due)) sla_breached_count += 1;
-          else if (slaProgressPct(t, created, due) >= CMS_SLA_WARNING_PCT) {
-            sla_warning_count += 1;
+      try {
+        const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
+        const by_status = Object.fromEntries(
+          CMS_CASE_STATES.map((s) => [s, 0]),
+        ) as Record<CmsCaseState, number>;
+        const by_priority = Object.fromEntries(
+          CMS_PRIORITIES.map((p) => [p, 0]),
+        ) as Record<CmsPriority, number>;
+        let sla_breached_count = 0;
+        let sla_warning_count = 0;
+        const closedDurations: number[] = [];
+        const t = now();
+        for (const c of items) {
+          by_status[c.status] += 1;
+          by_priority[c.priority] += 1;
+          if (c.status !== 'CLOSED') {
+            const due = new Date(c.sla_due_at);
+            const created = new Date(c.created_at);
+            if (isSlaBreached(t, due)) sla_breached_count += 1;
+            else if (slaProgressPct(t, created, due) >= CMS_SLA_WARNING_PCT) {
+              sla_warning_count += 1;
+            }
+          } else if (c.resolved_at) {
+            closedDurations.push(
+              new Date(c.resolved_at).getTime() - new Date(c.created_at).getTime(),
+            );
           }
-        } else if (c.resolved_at) {
-          closedDurations.push(
-            new Date(c.resolved_at).getTime() - new Date(c.created_at).getTime(),
-          );
         }
+        const avg_resolution_hours =
+          closedDurations.length === 0
+            ? null
+            : Math.round(
+                (closedDurations.reduce((s, x) => s + x, 0) / closedDurations.length) /
+                  36_000,
+              ) / 100;
+        return res.json(
+          wrapResponse(
+            {
+              total: items.length,
+              by_status,
+              by_priority,
+              sla_breached_count,
+              sla_warning_count,
+              avg_resolution_hours,
+            },
+            ctx,
+          ),
+        );
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
       }
-      const avg_resolution_hours =
-        closedDurations.length === 0
-          ? null
-          : Math.round(
-              (closedDurations.reduce((s, x) => s + x, 0) / closedDurations.length) /
-                36_000,
-            ) / 100;
-      return res.json(
-        wrapResponse(
-          {
-            total: items.length,
-            by_status,
-            by_priority,
-            sla_breached_count,
-            sla_warning_count,
-            avg_resolution_hours,
-          },
-          ctx,
-        ),
-      );
     },
   );
 
@@ -10893,26 +10937,31 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('cases:list'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
-      const t = now();
-      const breaches = items
-        .filter((c) => c.status !== 'CLOSED' && isSlaBreached(t, new Date(c.sla_due_at)))
-        .map((c) => ({
-          case_id: c.case_id,
-          case_number: c.case_number,
-          title: c.title,
-          priority: c.priority,
-          assigned_to: c.assigned_to,
-          status: c.status,
-          sla_due_at: c.sla_due_at,
-          overshoot_hours:
-            (t.getTime() - new Date(c.sla_due_at).getTime()) / 3_600_000,
-          progress_pct: slaProgressPct(t, new Date(c.created_at), new Date(c.sla_due_at)),
-        }))
-        .sort((a, b) => b.overshoot_hours - a.overshoot_hours);
-      return res.json(
-        wrapResponse({ items: breaches, total: breaches.length }, ctx),
-      );
+      try {
+        const items = cmsCaseStore.list(req.tenant!.tenant_id, {});
+        const t = now();
+        const breaches = items
+          .filter((c) => c.status !== 'CLOSED' && isSlaBreached(t, new Date(c.sla_due_at)))
+          .map((c) => ({
+            case_id: c.case_id,
+            case_number: c.case_number,
+            title: c.title,
+            priority: c.priority,
+            assigned_to: c.assigned_to,
+            status: c.status,
+            sla_due_at: c.sla_due_at,
+            overshoot_hours:
+              (t.getTime() - new Date(c.sla_due_at).getTime()) / 3_600_000,
+            progress_pct: slaProgressPct(t, new Date(c.created_at), new Date(c.sla_due_at)),
+          }))
+          .sort((a, b) => b.overshoot_hours - a.overshoot_hours);
+        return res.json(
+          wrapResponse({ items: breaches, total: breaches.length }, ctx),
+        );
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
     },
   );
 
@@ -11149,76 +11198,95 @@ export function makeApp(deps: AppDeps = {}) {
     requireRole('cases:list'),
     async (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const q = req.query;
-      const filter: CmsListFilter = {};
-      if (typeof q.status === 'string' && q.status) {
-        if (!isCmsCaseState(q.status)) {
-          return res.status(400).json(
-            wrapError(
-              { code: 'EWS_400_invalid_input', message: 'invalid status', severity: 'MEDIUM' },
-              ctx,
-            ),
-          );
+      try {
+        const q = req.query;
+        const filter: CmsListFilter = {};
+        if (typeof q.status === 'string' && q.status) {
+          if (!isCmsCaseState(q.status)) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: 'invalid status', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          filter.status = q.status;
         }
-        filter.status = q.status;
-      }
-      if (typeof q.priority === 'string' && q.priority) {
-        if (!isCmsPriority(q.priority)) {
-          return res.status(400).json(
-            wrapError(
-              { code: 'EWS_400_invalid_input', message: 'invalid priority', severity: 'MEDIUM' },
-              ctx,
-            ),
-          );
+        if (typeof q.priority === 'string' && q.priority) {
+          if (!isCmsPriority(q.priority)) {
+            return res.status(400).json(
+              wrapError(
+                { code: 'EWS_400_invalid_input', message: 'invalid priority', severity: 'MEDIUM' },
+                ctx,
+              ),
+            );
+          }
+          filter.priority = q.priority;
         }
-        filter.priority = q.priority;
-      }
-      if (typeof q.assigned_to === 'string' && q.assigned_to) filter.assigned_to = q.assigned_to;
-      if (typeof q.alert_id === 'string' && q.alert_id) filter.alert_id = q.alert_id;
-      if (typeof q.since === 'string' && q.since) filter.since = q.since;
-      if (typeof q.until === 'string' && q.until) filter.until = q.until;
-      if (typeof q.q === 'string' && q.q) filter.q = q.q;
-      if (typeof q.case_number === 'string' && q.case_number) filter.case_number = q.case_number;
-      if (typeof q.tags === 'string' && q.tags) {
-        filter.tags_any = q.tags.split(',').map((s) => s.trim()).filter(Boolean);
-      }
-      let items = cmsCaseStore.list(req.tenant!.tenant_id, filter);
+        if (typeof q.assigned_to === 'string' && q.assigned_to) filter.assigned_to = q.assigned_to;
+        if (typeof q.alert_id === 'string' && q.alert_id) filter.alert_id = q.alert_id;
+        if (typeof q.since === 'string' && q.since) filter.since = q.since;
+        if (typeof q.until === 'string' && q.until) filter.until = q.until;
+        if (typeof q.q === 'string' && q.q) filter.q = q.q;
+        if (typeof q.case_number === 'string' && q.case_number) filter.case_number = q.case_number;
+        if (typeof q.tags === 'string' && q.tags) {
+          filter.tags_any = q.tags.split(',').map((s) => s.trim()).filter(Boolean);
+        }
+        let items = cmsCaseStore.list(req.tenant!.tenant_id, filter);
 
-      // ?breached=true — server-side breach filter using app_admin.sla_config
-      // resolver. Same math as the dashboard SLA Breach Matrix, so the
-      // dashboard tile click-through lands the user on a list whose
-      // count agrees with the tile (BAC §3.1.9.1.4).
-      const breachedParam = q.breached;
-      if (breachedParam === 'true' && deps.slaMatrixSource) {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { buildSlaConfigIndex } = require('./dashboard/sla_breach_matrix') as
-          typeof import('./dashboard/sla_breach_matrix');
-        const configs = await deps.slaMatrixSource.loadConfigs(req.tenant!.tenant_id);
-        const resolveTarget = buildSlaConfigIndex(configs);
-        const asOfMs = now().getTime();
-        items = items.filter((c) => {
-          if (c.status === 'CLOSED') return false;
-          const target = resolveTarget(
-            req.tenant!.tenant_id,
-            // CmsCase doesn't carry case_category in the in-memory shape;
-            // PG path stores it on the column added by migration 019.
-            // When unavailable, the resolver falls through to
-            // default_fallback automatically.
-            (c as { case_category?: string | null }).case_category ?? null,
-            c.priority,
-            null, // no first-class business_unit on cms_cases yet
-          );
-          if (target === undefined) return false;
-          const created = Date.parse(c.created_at);
-          if (!Number.isFinite(created)) return false;
-          // Float days so sub-day SLAs (P1 fraud = 0.5d) work — same
-          // formula as computeSlaBreachMatrix in dashboard/sla_breach_matrix.ts.
-          const ageDays = Math.max(0, (asOfMs - created) / 86_400_000);
-          return ageDays > target;
-        });
-      }
+        // ?breached=true — server-side breach filter using app_admin.sla_config
+        // resolver. Same math as the dashboard SLA Breach Matrix, so the
+        // dashboard tile click-through lands the user on a list whose
+        // count agrees with the tile (BAC §3.1.9.1.4).
+        // Wrapped in its own try/catch so a PG connectivity failure on the
+        // slaMatrixSource (ECONNREFUSED, missing table, etc.) degrades
+        // gracefully to returning the unfiltered list rather than 500-ing
+        // the entire request. The sla_breached_filter_error header lets
+        // the SPA surface an optional advisory banner.
+        const breachedParam = q.breached;
+        if (breachedParam === 'true' && deps.slaMatrixSource) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { buildSlaConfigIndex } = require('./dashboard/sla_breach_matrix') as
+              typeof import('./dashboard/sla_breach_matrix');
+            const configs = await deps.slaMatrixSource.loadConfigs(req.tenant!.tenant_id);
+            const resolveTarget = buildSlaConfigIndex(configs);
+            const asOfMs = now().getTime();
+            items = items.filter((c) => {
+              if (c.status === 'CLOSED') return false;
+              const target = resolveTarget(
+                req.tenant!.tenant_id,
+                // CmsCase doesn't carry case_category in the in-memory shape;
+                // PG path stores it on the column added by migration 019.
+                // When unavailable, the resolver falls through to
+                // default_fallback automatically.
+                (c as { case_category?: string | null }).case_category ?? null,
+                c.priority,
+                null, // no first-class business_unit on cms_cases yet
+              );
+              if (target === undefined) return false;
+              const created = Date.parse(c.created_at);
+              if (!Number.isFinite(created)) return false;
+              // Float days so sub-day SLAs (P1 fraud = 0.5d) work — same
+              // formula as computeSlaBreachMatrix in dashboard/sla_breach_matrix.ts.
+              const ageDays = Math.max(0, (asOfMs - created) / 86_400_000);
+              return ageDays > target;
+            });
+          } catch (slaErr) {
+            // SLA config source unavailable (PG down, table missing, etc.).
+            // Degrade gracefully: return the unfiltered list and signal the
+            // condition via a response header so the SPA can show an advisory.
+            // eslint-disable-next-line no-console
+            console.warn('[CMS] slaMatrixSource.loadConfigs failed — returning unfiltered list:', slaErr);
+            res.setHeader('X-Cms-Sla-Filter-Error', 'sla_config_unavailable');
+          }
+        }
 
-      return res.json(wrapResponse({ items, total: items.length }, ctx));
+        return res.json(wrapResponse({ items, total: items.length }, ctx));
+      } catch (e) {
+        const r = cmsErrorResponse(e, ctx);
+        return res.status(r.status).json(r.body);
+      }
     },
   );
 
@@ -41039,6 +41107,24 @@ export function makeApp(deps: AppDeps = {}) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'pdf_failed';
       return res.status(400).json(wrapError({ code: 'EWS_400_invalid_input', message: msg, severity: 'MEDIUM' }, ctx));
+    }
+  });
+
+  // ── Global error handler (Express 4 catch-all) ──────────────────────
+  // Must be registered AFTER all routes so it acts as the last middleware
+  // in the chain. Catches any unhandled synchronous throw AND any async
+  // rejection that was forwarded via next(err) or left unhandled in an
+  // async route. Without this, Express 4 returns an empty-body 500 or
+  // silently drops the response when a promise rejects inside an async
+  // handler that has no try/catch.
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const message = err instanceof Error ? err.message : String(err ?? 'internal error');
+    // eslint-disable-next-line no-console
+    console.error('[bff] unhandled route error:', err);
+    if (!res.headersSent) {
+      res.status(500).json(
+        wrapError({ code: 'EWS_500_internal', message, severity: 'HIGH' }, {}),
+      );
     }
   });
 
