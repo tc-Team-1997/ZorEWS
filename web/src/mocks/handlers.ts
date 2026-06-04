@@ -16923,4 +16923,255 @@ handlers.push(
       { status: 201 },
     );
   }),
+
+  // ── Report Schedules /v1/reports/schedules/* ─────────────────────────────
+  //
+  // ROOT CAUSE: GET /v1/reports/schedules/upcoming → HTTP 500
+  //             POST /v1/reports/schedules          → HTTP 400
+  //
+  // No MSW handlers existed for ANY schedule endpoint. The SPA's SchedulerPanel
+  // (ReportsPage.tsx) and schedulerApi.ts call three endpoints:
+  //   listSchedules  → GET  /v1/reports/schedules           ← missing
+  //   upcoming       → GET  /v1/reports/schedules/upcoming  ← missing (HTTP 500)
+  //   tick           → POST /v1/reports/schedules/tick      ← missing
+  //
+  // Additionally POST /v1/reports/schedules (schedule creation) and the CRUD
+  // endpoints were all missing. The bypass→BFF-not-running path caused
+  // connection errors that React Query surfaces as "HTTP 500/400" in the UI.
+  //
+  // All schedule endpoints are now stubbed. The in-memory __mswScheduleStore
+  // maintains state across calls within the same MSW session (page reload clears
+  // it). Stable anchor: 2026-06-04T06:00:00.000Z matches the BFF seed time.
+
+  ...(() => {
+    const __SCHED_BASE_MS = 1749017600000; // 2026-06-04T06:00:00.000Z
+    const __SCHED_VALID_CADENCES = ['daily', 'weekly', 'monthly', 'quarterly', 'last_day_of_month'] as const;
+    const __SCHED_VALID_FORMATS = ['json', 'csv', 'pdf', 'xlsx'];
+    const __SCHED_VALID_REPORTS = [
+      'portfolio_snapshot_daily', 'alerts_activity_weekly', 'case_outcomes_monthly',
+      'sla_breach_digest', 'rbi_quarterly_summary', 'irdai_claims_quarterly',
+      'irdai_solvency_monthly', 'audit_compliance_dump', 'agent_productivity_monthly',
+    ];
+
+    // Per-tenant in-memory store so create/list/delete stay consistent
+    const __mswScheduleStore = new Map<string, Record<string, unknown>[]>();
+
+    function __schedTenant(req: Request): string {
+      return (req.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    }
+    function __schedItems(tenant: string): Record<string, unknown>[] {
+      if (!__mswScheduleStore.has(tenant)) __mswScheduleStore.set(tenant, []);
+      return __mswScheduleStore.get(tenant)!;
+    }
+    function __schedEnvelope(body: unknown, status = 200) {
+      return HttpResponse.json(
+        { header: { status: 'success', code: status === 201 ? 'EWS_201' : 'EWS_200', message: 'ok',
+            requestId: `req-msw-sched-${Date.now()}`, timestamp: new Date().toISOString() }, body },
+        { status },
+      );
+    }
+    function __nextRunAt(cadence: string, hourUtc: number, from: Date): string {
+      const d = new Date(from);
+      // Advance to next firing time (simplified for MSW mock)
+      switch (cadence) {
+        case 'daily': d.setUTCHours(hourUtc, 0, 0, 0); if (d <= from) d.setUTCDate(d.getUTCDate() + 1); break;
+        case 'weekly': d.setUTCDate(d.getUTCDate() + 7); d.setUTCHours(hourUtc, 0, 0, 0); break;
+        case 'monthly': d.setUTCMonth(d.getUTCMonth() + 1, 1); d.setUTCHours(hourUtc, 0, 0, 0); break;
+        case 'quarterly': d.setUTCMonth(d.getUTCMonth() + 3, 1); d.setUTCHours(hourUtc, 0, 0, 0); break;
+        default: d.setUTCDate(d.getUTCDate() + 1); d.setUTCHours(hourUtc, 0, 0, 0);
+      }
+      return d.toISOString();
+    }
+
+    return [
+      // GET /v1/reports/schedules — list all schedules for this tenant
+      http.get('/v1/reports/schedules', ({ request }) => {
+        const tenant = __schedTenant(request);
+        const url = new URL(request.url);
+        const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
+        const page_size = Math.min(100, Math.max(1, parseInt(url.searchParams.get('page_size') ?? '20', 10)));
+        const items = __schedItems(tenant);
+        const start = (page - 1) * page_size;
+        return __schedEnvelope({ items: items.slice(start, start + page_size), page, page_size, total: items.length });
+      }),
+
+      // POST /v1/reports/schedules — create a schedule
+      http.post('/v1/reports/schedules', async ({ request }) => {
+        const tenant = __schedTenant(request);
+        const raw = await request.json() as Record<string, unknown>;
+        // Unwrap envelope body if present
+        const body: Record<string, unknown> = (raw && typeof raw === 'object' && 'body' in raw)
+          ? raw.body as Record<string, unknown> : raw ?? {};
+
+        // Validate required fields — matching BFF validateInput() error codes
+        if (!body.report_id || typeof body.report_id !== 'string')
+          return __schedEnvelope({ code: 'EWS_400_invalid_report_id', message: 'report_id is required', severity: 'MEDIUM' }, 400);
+        if (!__SCHED_VALID_REPORTS.includes(String(body.report_id)))
+          return __schedEnvelope({ code: 'EWS_400_invalid_report_id', message: `Unknown report_id: ${body.report_id}`, severity: 'MEDIUM' }, 400);
+        if (!body.format || !__SCHED_VALID_FORMATS.includes(String(body.format)))
+          return __schedEnvelope({ code: 'EWS_400_invalid_format', message: 'format must be json/csv/pdf/xlsx', severity: 'MEDIUM' }, 400);
+        if (!body.name || typeof body.name !== 'string' || !(body.name as string).trim())
+          return __schedEnvelope({ code: 'EWS_400_invalid_input', message: 'name is required', severity: 'MEDIUM' }, 400);
+        if (!body.cadence || !__SCHED_VALID_CADENCES.includes(body.cadence as never))
+          return __schedEnvelope({ code: 'EWS_400_invalid_cadence', message: `cadence must be one of ${__SCHED_VALID_CADENCES.join(',')}`, severity: 'MEDIUM' }, 400);
+        const hourUtc = Number(body.hour_utc ?? 0);
+        if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23)
+          return __schedEnvelope({ code: 'EWS_400_invalid_input', message: 'hour_utc must be 0-23', severity: 'MEDIUM' }, 400);
+        const recipients = body.recipients as string[] | undefined;
+        if (!Array.isArray(recipients) || recipients.length === 0)
+          return __schedEnvelope({ code: 'EWS_400_invalid_recipients', message: 'at least one recipient required', severity: 'MEDIUM' }, 400);
+
+        const now = new Date(__SCHED_BASE_MS);
+        const entry: Record<string, unknown> = {
+          schedule_id: `sched-${tenant}-${Date.now()}`,
+          tenant_id: tenant, report_id: body.report_id, format: body.format,
+          name: String(body.name).trim(), cadence: body.cadence, hour_utc: hourUtc,
+          day_of_week: body.day_of_week ?? null, day_of_month: body.day_of_month ?? null,
+          recipients, enabled: body.enabled !== false, parameters: body.parameters ?? {},
+          created_by: (request.headers.get('x-apex-user') ?? 'admin'),
+          created_at: now.toISOString(), updated_at: now.toISOString(),
+          next_run_at: __nextRunAt(String(body.cadence), hourUtc, now),
+          last_run_at: null, tz: body.tz ?? 'UTC', retry_state: null,
+        };
+        const items = __schedItems(tenant);
+        if (items.length >= 50)
+          return __schedEnvelope({ code: 'EWS_409_cap_reached', message: 'Max 50 schedules per tenant', severity: 'MEDIUM' }, 409);
+        items.unshift(entry); // newest-first
+        return __schedEnvelope(entry, 201);
+      }),
+
+      // GET /v1/reports/schedules/upcoming — next N firing times across fleet
+      http.get('/v1/reports/schedules/upcoming', ({ request }) => {
+        const tenant = __schedTenant(request);
+        const url = new URL(request.url);
+        const n = Math.min(100, Math.max(1, parseInt(url.searchParams.get('n') ?? '20', 10)));
+        const from = url.searchParams.get('from') ? new Date(url.searchParams.get('from')!) : new Date(__SCHED_BASE_MS);
+        const items = __schedItems(tenant);
+        // Generate upcoming firings from enabled schedules
+        const firings: Array<{ schedule_id: string; name: string; report_id: string; format: string; fire_at: string }> = [];
+        for (const s of items) {
+          if (!s.enabled) continue;
+          firings.push({
+            schedule_id: String(s.schedule_id), name: String(s.name),
+            report_id: String(s.report_id), format: String(s.format),
+            fire_at: __nextRunAt(String(s.cadence), Number(s.hour_utc), from),
+          });
+          if (firings.length >= n * 2) break; // enough candidates
+        }
+        firings.sort((a, b) => a.fire_at.localeCompare(b.fire_at));
+        return __schedEnvelope({
+          from: from.toISOString(),
+          total_schedules_considered: items.length,
+          total_enabled: items.filter(s => s.enabled).length,
+          total_returned: Math.min(n, firings.length),
+          items: firings.slice(0, n),
+        });
+      }),
+
+      // POST /v1/reports/schedules/tick — scheduler worker tick
+      http.post('/v1/reports/schedules/tick', async ({ request }) => {
+        const tenant = __schedTenant(request);
+        const body = await request.json() as Record<string, unknown>;
+        const dry_run = Boolean(body?.dry_run ?? false);
+        const tolerance = Number(body?.tolerance_minutes ?? 5);
+        const max_retries = Number(body?.max_retries ?? 3);
+        const backoff = Number(body?.backoff_minutes ?? 15);
+        const as_of = body?.as_of ? new Date(String(body.as_of)) : new Date(__SCHED_BASE_MS);
+        const items = __schedItems(tenant);
+        const due = items.filter(s => s.enabled && s.next_run_at);
+        // All due in this tick (simplified)
+        const fired = dry_run ? [] : due.map(s => ({
+          schedule_id: String(s.schedule_id), name: String(s.name),
+          report_id: String(s.report_id), job_id: `job-${Date.now()}-${s.schedule_id}`,
+          next_run_at: __nextRunAt(String(s.cadence), Number(s.hour_utc), as_of),
+        }));
+        return __schedEnvelope({
+          tenant_id: tenant, generated_at: new Date().toISOString(),
+          as_of: as_of.toISOString(), tolerance_minutes: tolerance,
+          max_retries, backoff_minutes: backoff, dry_run,
+          total_considered: items.length, would_fire: due.length,
+          candidates: dry_run ? due.slice(0, 10) : undefined,
+          fired, retried_later: [], parked: [], errors: [],
+        });
+      }),
+
+      // GET /v1/reports/schedules/due — schedules ready to fire
+      http.get('/v1/reports/schedules/due', ({ request }) => {
+        const tenant = __schedTenant(request);
+        const items = __schedItems(tenant);
+        const as_of = new Date(__SCHED_BASE_MS);
+        return __schedEnvelope({ items: items.filter(s => s.enabled), total: items.filter(s => s.enabled).length, as_of: as_of.toISOString() });
+      }),
+
+      // GET /v1/reports/schedules/cadence-stats
+      http.get('/v1/reports/schedules/cadence-stats', ({ request }) => {
+        const tenant = __schedTenant(request);
+        const items = __schedItems(tenant);
+        const cadences = __SCHED_VALID_CADENCES.map(c => ({
+          cadence: c, total_count: items.filter(s => s.cadence === c).length,
+          enabled_count: items.filter(s => s.cadence === c && s.enabled).length,
+          disabled_count: items.filter(s => s.cadence === c && !s.enabled).length,
+          next_run_within_24h_count: 0, next_run_within_7d_count: 0,
+          earliest_next_run_at: null,
+        }));
+        return __schedEnvelope({
+          tenant_id: tenant, generated_at: new Date(__SCHED_BASE_MS).toISOString(),
+          total_schedules: items.length, total_enabled: items.filter(s => s.enabled).length,
+          total_disabled: items.filter(s => !s.enabled).length,
+          cadences, most_common_cadence: null, unused_cadences: __SCHED_VALID_CADENCES.filter(c => items.every(s => s.cadence !== c)),
+        });
+      }),
+
+      // GET /v1/reports/schedules/:schedule_id — single schedule
+      http.get('/v1/reports/schedules/:schedule_id', ({ request, params }) => {
+        const tenant = __schedTenant(request);
+        const id = String(params.schedule_id);
+        const entry = __schedItems(tenant).find(s => s.schedule_id === id);
+        if (!entry) return __schedEnvelope({ code: 'EWS_404_unknown_schedule', message: `Schedule ${id} not found`, severity: 'LOW' }, 404);
+        return __schedEnvelope(entry);
+      }),
+
+      // PATCH /v1/reports/schedules/:schedule_id — update schedule
+      http.patch('/v1/reports/schedules/:schedule_id', async ({ request, params }) => {
+        const tenant = __schedTenant(request);
+        const id = String(params.schedule_id);
+        const items = __schedItems(tenant);
+        const idx = items.findIndex(s => s.schedule_id === id);
+        if (idx === -1) return __schedEnvelope({ code: 'EWS_404_unknown_schedule', message: `Schedule ${id} not found`, severity: 'LOW' }, 404);
+        const patch = await request.json() as Record<string, unknown>;
+        const inner = (patch && typeof patch === 'object' && 'body' in patch) ? patch.body as Record<string, unknown> : patch ?? {};
+        Object.assign(items[idx], inner, { updated_at: new Date().toISOString() });
+        if (inner.cadence || inner.hour_utc !== undefined) {
+          items[idx].next_run_at = __nextRunAt(String(items[idx].cadence), Number(items[idx].hour_utc), new Date());
+        }
+        return __schedEnvelope(items[idx]);
+      }),
+
+      // DELETE /v1/reports/schedules/:schedule_id — delete schedule
+      http.delete('/v1/reports/schedules/:schedule_id', ({ request, params }) => {
+        const tenant = __schedTenant(request);
+        const id = String(params.schedule_id);
+        const items = __schedItems(tenant);
+        const idx = items.findIndex(s => s.schedule_id === id);
+        if (idx === -1) return __schedEnvelope({ code: 'EWS_404_unknown_schedule', message: `Schedule ${id} not found`, severity: 'LOW' }, 404);
+        items.splice(idx, 1);
+        return new Response(null, { status: 204 });
+      }),
+
+      // POST /v1/reports/schedules/:schedule_id/mark-run — advance schedule
+      http.post('/v1/reports/schedules/:schedule_id/mark-run', ({ request, params }) => {
+        const tenant = __schedTenant(request);
+        const id = String(params.schedule_id);
+        const items = __schedItems(tenant);
+        const entry = items.find(s => s.schedule_id === id);
+        if (!entry) return __schedEnvelope({ code: 'EWS_404_unknown_schedule', message: `Schedule ${id} not found`, severity: 'LOW' }, 404);
+        const now = new Date();
+        entry.last_run_at = now.toISOString();
+        entry.next_run_at = __nextRunAt(String(entry.cadence), Number(entry.hour_utc), now);
+        entry.retry_state = null;
+        entry.updated_at = now.toISOString();
+        return __schedEnvelope(entry);
+      }),
+    ];
+  })(),
 );
