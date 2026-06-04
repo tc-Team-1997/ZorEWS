@@ -16532,4 +16532,177 @@ handlers.push(
       }),
     );
   }),
+
+  // ── CMS Cases /v1/cms/* ──────────────────────────────────────────────────
+  // Explicit mock coverage for the 3 CMS read endpoints.
+  // Provides consistent dev-mode behaviour even when BFF is not running
+  // (onUnhandledRequest:'bypass' normally passes these through, but explicit
+  // handlers give faster feedback + predictable test baselines).
+
+  http.get('/v1/cms/cases', ({ request }) => {
+    const url = new URL(request.url);
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const statusFilter = url.searchParams.get('status');
+    const priorityFilter = url.searchParams.get('priority');
+    const qFilter = url.searchParams.get('q') ?? '';
+    const assignedToFilter = url.searchParams.get('assigned_to');
+    const breachedFilter = url.searchParams.get('breached');
+
+    // Validate status enum if provided
+    const VALID_STATES = ['OPEN','ASSIGNED','INVESTIGATING','PENDING_APPROVAL','ESCALATED','CLOSED','REOPENED'];
+    if (statusFilter && !VALID_STATES.includes(statusFilter)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'invalid status', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+    const VALID_PRIORITIES = ['P1','P2','P3','P4'];
+    if (priorityFilter && !VALID_PRIORITIES.includes(priorityFilter)) {
+      return HttpResponse.json(
+        envelopeError('EWS_400_invalid_input', 'invalid priority', 'MEDIUM'),
+        { status: 400 },
+      );
+    }
+
+    // Seed cases matching services/bff/src/cms_store.ts seedDemoCmsCases()
+    const BASE_MS = 1748736000000; // 2025-06-01T00:00:00Z — stable anchor
+    const seedCases = [
+      {
+        case_id: 'mock-cms-001', case_number: 'EWS-2026-00001', tenant_id: tenant,
+        title: 'Multi-bureau delinquency on Olivia Cherop',
+        description: 'Cross-product cascade detected; collections must verify employment.',
+        alert_id: 'a-1009', status: 'ESCALATED', priority: 'P1',
+        assigned_to: 'carl.collect', created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 3 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS - 86400000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['critical', 'collections', 'site-visit'], is_locked: false, case_category: null,
+      },
+      {
+        case_id: 'mock-cms-002', case_number: 'EWS-2026-00002', tenant_id: tenant,
+        title: 'DPD≥30 + 95% utilisation — Achieng Otieno',
+        description: 'Card maxed out and 30 days behind.',
+        alert_id: 'a-1001', status: 'INVESTIGATING', priority: 'P1',
+        assigned_to: 'sue.super', created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 5 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 2 * 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS - 2 * 86400000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['restructure', 'maker-checker'], is_locked: false, case_category: null,
+      },
+      {
+        case_id: 'mock-cms-003', case_number: 'EWS-2026-00003', tenant_id: tenant,
+        title: 'Direct-debit bounce x3 — Ruth Akinyi',
+        description: 'Standing instruction failures across 30d window.',
+        alert_id: 'a-1010', status: 'OPEN', priority: 'P2',
+        assigned_to: null, created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 2 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS + 22 * 3600000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['payments', 'fraud-watch'], is_locked: false, case_category: null,
+      },
+      {
+        case_id: 'mock-cms-004', case_number: 'EWS-2026-00004', tenant_id: tenant,
+        title: 'Cheque return 2x in 30d — Catherine Wanjiru',
+        description: 'Cheque return pattern flagged; verify with branch.',
+        alert_id: 'a-1003', status: 'ASSIGNED', priority: 'P3',
+        assigned_to: 'ravi.risk', created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 7 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 3 * 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS + 65 * 3600000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['msme'], is_locked: false, case_category: null,
+      },
+      {
+        case_id: 'mock-cms-005', case_number: 'EWS-2026-00005', tenant_id: tenant,
+        title: 'Bureau enquiry surge — Daniel Mwangi',
+        description: '4 bureau enquiries in 14 days.',
+        alert_id: 'a-1004', status: 'OPEN', priority: 'P4',
+        assigned_to: 'ravi.risk', created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 4 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS + 4 * 86400000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['credit-shopping'], is_locked: false, case_category: null,
+      },
+      {
+        case_id: 'mock-cms-006', case_number: 'EWS-2026-00006', tenant_id: tenant,
+        title: 'Salary inflow stopped — Faisal Hussein',
+        description: '60-day salary inflow gap; possible employment loss.',
+        alert_id: 'a-1006', status: 'OPEN', priority: 'P2',
+        assigned_to: 'fiona.field', created_by: 'alice.admin',
+        created_at: new Date(BASE_MS - 4 * 86400000).toISOString(),
+        updated_at: new Date(BASE_MS - 86400000).toISOString(),
+        sla_due_at: new Date(BASE_MS + 20 * 3600000).toISOString(),
+        resolved_at: null, resolution_category: null, resolution_notes: '',
+        tags: ['employment-shock'], is_locked: false, case_category: null,
+      },
+    ].filter(c => c.tenant_id === tenant);
+
+    let items = seedCases;
+    if (statusFilter) items = items.filter(c => c.status === statusFilter);
+    if (priorityFilter) items = items.filter(c => c.priority === priorityFilter);
+    if (qFilter) items = items.filter(c => c.title.toLowerCase().includes(qFilter.toLowerCase()));
+    if (assignedToFilter) items = items.filter(c => c.assigned_to === assignedToFilter);
+    if (breachedFilter === 'true') {
+      // Stable anchor: cases with sla_due_at before BASE_MS are always "breached"
+      items = items.filter(c => c.status !== 'CLOSED' && new Date(c.sla_due_at).getTime() < BASE_MS);
+    }
+
+    return HttpResponse.json(envelope({ items, total: items.length }));
+  }),
+
+  http.get('/v1/cms/cases/stats', ({ request }) => {
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    // Return stats that match the seed data above regardless of tenant
+    // (empty tenants get all-zero stats, BANK_DEMO/BIL get seeded numbers)
+    const isKnownTenant = tenant === 'BANK_DEMO' || tenant === 'BIL';
+    if (!isKnownTenant) {
+      return HttpResponse.json(envelope({
+        total: 0,
+        by_status: { OPEN:0, ASSIGNED:0, INVESTIGATING:0, PENDING_APPROVAL:0, ESCALATED:0, CLOSED:0, REOPENED:0 },
+        by_priority: { P1:0, P2:0, P3:0, P4:0 },
+        sla_breached_count: 0,
+        sla_warning_count: 0,
+        avg_resolution_hours: null,
+      }));
+    }
+    return HttpResponse.json(envelope({
+      total: 6,
+      by_status: { OPEN:3, ASSIGNED:1, INVESTIGATING:1, PENDING_APPROVAL:0, ESCALATED:1, CLOSED:0, REOPENED:0 },
+      by_priority: { P1:2, P2:2, P3:1, P4:1 },
+      sla_breached_count: 2,
+      sla_warning_count: 1,
+      avg_resolution_hours: null,
+    }));
+  }),
+
+  http.get('/v1/cms/cases/sla-breaches', ({ request }) => {
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO').toUpperCase();
+    const isKnownTenant = tenant === 'BANK_DEMO' || tenant === 'BIL';
+    if (!isKnownTenant) {
+      return HttpResponse.json(envelope({ items: [], total: 0 }));
+    }
+    // Stable anchor: cases 001 and 002 have sla_due_at before BASE_MS → always breached
+    const BASE_MS = 1748736000000;
+    const breaches = [
+      {
+        case_id: 'mock-cms-002', case_number: 'EWS-2026-00002',
+        title: 'DPD≥30 + 95% utilisation — Achieng Otieno',
+        priority: 'P1', assigned_to: 'sue.super', status: 'INVESTIGATING',
+        sla_due_at: new Date(BASE_MS - 2 * 86400000).toISOString(),
+        overshoot_hours: 48.2, progress_pct: 148,
+      },
+      {
+        case_id: 'mock-cms-001', case_number: 'EWS-2026-00001',
+        title: 'Multi-bureau delinquency on Olivia Cherop',
+        priority: 'P1', assigned_to: 'carl.collect', status: 'ESCALATED',
+        sla_due_at: new Date(BASE_MS - 86400000).toISOString(),
+        overshoot_hours: 24.5, progress_pct: 124,
+      },
+    ];
+    return HttpResponse.json(envelope({ items: breaches, total: breaches.length }));
+  }),
 );
