@@ -12446,12 +12446,115 @@ const __mswSmaHandlers = [
 
 handlers.push(...__mswSmaHandlers);
 
-// ── M2.5 — NPA Prediction (3 net-new endpoints for the SPA in dev mode) ──
+// ── M2.5 — NPA Prediction (all 5 NPA endpoints stubbed for MSW dev/test mode) ──
 //
-// Predictions list / why / backtest / portfolio-drivers come from the live
-// BFF via vite proxy in dev — those handlers aren't stubbed here. The 3
-// below cover the M2.5 additions: single-prediction lookup, AI model
-// detail (Manage Model modal), and dataset lineage (Data Lineage modal).
+// Previously only /predictions/:account_id was stubbed; /high-risk and
+// /portfolio-drivers were missing, so they bypassed MSW and tried the real
+// BFF. When the BFF is not running the connection is refused → React Query
+// surfaces this as an error state → "HTTP 500" in the UI.
+//
+// All 5 NPA endpoints are now stubbed here:
+//   GET /v1/banking/npa/high-risk?horizon=N          ← WAS MISSING (root cause)
+//   GET /v1/banking/npa/portfolio-drivers?horizon=N  ← WAS MISSING (root cause)
+//   GET /v1/banking/npa/predictions/:account_id      ← already existed
+//   GET /v1/banking/npa/predictions/:id/why          ← already existed (vite proxy fallback)
+//   GET /v1/banking/npa/backtest/latest              ← now stubbed here too
+//
+// Synthesis uses FNV-1a + mulberry32 with a stable anchor date so output is
+// deterministic across dev sessions — the same approach as the BFF engine.
+
+// Stable anchor: 2026-06-04
+const __NPA_BASE_MS = 1749081600000;
+const __NPA_DAY = '2026-06-04';
+
+function __npaMul32(seed: number) {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+  };
+}
+function __npaFnv(s: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h >>> 0;
+}
+
+const __NPA_SECTORS = ['Manufacturing', 'Power', 'Construction', 'Real_Estate', 'Textiles', 'Auto_Components', 'Pharma', 'IT_Services', 'Hospitality', 'Logistics'];
+const __NPA_FIRST = ['Alice', 'Rajesh', 'Priya', 'Mohan', 'Vikram', 'Meera', 'Arjun', 'Kavya'];
+const __NPA_LAST = ['Patel', 'Kumar', 'Sharma', 'Singh', 'Reddy', 'Nair', 'Iyer', 'Mehta'];
+
+function __buildNpaHighRiskMsw(tenant_id: string, horizon: number) {
+  const cap = tenant_id.toUpperCase() === 'BIL' ? 120 : 200;
+  const scale = tenant_id.toUpperCase() === 'BIL' ? 0.6 : 1.0;
+  const rows: Record<string, unknown>[] = [];
+  let totalExp = 0; let totalCritical = 0;
+  for (let i = 0; i < cap; i++) {
+    const cid = `c-${String(100000 + i).slice(-6)}`;
+    const rng = __npaMul32(__npaFnv(`${tenant_id}|${cid}|${__NPA_DAY}|${horizon}`));
+    const pd = rng();
+    if (pd < 0.6) continue;
+    const band = pd >= 0.85 ? 'critical' : 'high';
+    if (band === 'critical') totalCritical++;
+    const exposure = Math.round((1_000_000 + rng() * 50_000_000) * scale);
+    totalExp += exposure;
+    rows.push({
+      prediction_id: `pred-${tenant_id}-${cid}-${__NPA_DAY}-${horizon}`,
+      customer_id: cid,
+      customer_name: `${__NPA_FIRST[Math.floor(rng() * __NPA_FIRST.length)]} ${__NPA_LAST[Math.floor(rng() * __NPA_LAST.length)]}`,
+      pd: Math.round(pd * 1000) / 1000, band,
+      predicted_at: new Date(__NPA_BASE_MS).toISOString(),
+      horizon_days: horizon, outstanding_kes: exposure,
+      sector: __NPA_SECTORS[Math.floor(rng() * __NPA_SECTORS.length)],
+      current_dpd: Math.floor(rng() * 90),
+    });
+  }
+  rows.sort((a, b) => (b.pd as number) - (a.pd as number));
+  return {
+    tenant_id, generated_at: new Date(__NPA_BASE_MS).toISOString(),
+    horizon_days: horizon, total_high_risk: rows.length,
+    total_critical: totalCritical, total_exposure_kes: totalExp,
+    rows: rows.slice(0, 200),
+  };
+}
+
+function __buildPortfolioDriversMsw(tenant_id: string, horizon: number) {
+  const FEATURE_POOL = [
+    'dpd_max_90d', 'utilization_pct', 'emi_bounce_rate_180d',
+    'cash_withdrawal_velocity', 'bureau_score',
+  ];
+  let grandTotal = 0;
+  const drivers = FEATURE_POOL.map((feature_name) => {
+    const rng = __npaMul32(__npaFnv(`${tenant_id}|${feature_name}|${__NPA_DAY}|${horizon}`));
+    const affected = Math.round(30 + rng() * 60);
+    const total_contribution = Math.round((0.5 + rng() * 2.5) * 10000) / 10000;
+    grandTotal += total_contribution;
+    const up_count = Math.round(affected * (0.5 + rng() * 0.4));
+    const bySector: Record<string, number> = {};
+    __NPA_SECTORS.slice(0, 4).forEach(s => { bySector[s] = Math.round(1 + rng() * 8); });
+    return { feature_name, total_contribution, affected_predictions: affected,
+      avg_weight: Math.round((total_contribution / Math.max(1, affected)) * 10000) / 10000,
+      direction_split: { up: up_count, down: Math.max(0, affected - up_count) },
+      by_sector: bySector, pct_of_total: 0 };
+  });
+  drivers.forEach(d => { d.pct_of_total = grandTotal > 0 ? Math.round((d.total_contribution / grandTotal) * 10000) / 10000 : 0; });
+  drivers.sort((a, b) => b.total_contribution - a.total_contribution || a.feature_name.localeCompare(b.feature_name));
+  const mostUniversal = drivers.length > 0
+    ? drivers.reduce((best, d) => d.affected_predictions > best.affected_predictions ? d : best, drivers[0])
+    : null;
+  return {
+    tenant_id, generated_at: new Date(__NPA_BASE_MS).toISOString(),
+    horizon_days: horizon,
+    total_predictions_analyzed: Math.max(...drivers.map(d => d.affected_predictions), 0),
+    total_drivers: drivers.length, drivers,
+    most_universal_driver: mostUniversal
+      ? { feature_name: mostUniversal.feature_name, affected_predictions: mostUniversal.affected_predictions }
+      : null,
+  };
+}
 
 function __mswNpaWrap(b: unknown, status = 200) {
   return HttpResponse.json(
@@ -12540,6 +12643,81 @@ const __mswNpaHandlers = [
         'app_alerts.alerts',
       ],
       tags: ['npa', 'pd', 'ai'],
+    });
+  }),
+
+  // ── FIX: GET /v1/banking/npa/high-risk — was missing, caused HTTP 500 ──
+  http.get('/v1/banking/npa/high-risk', ({ request }) => {
+    const url = new URL(request.url);
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO');
+    const h = parseInt(url.searchParams.get('horizon') ?? '90', 10);
+    const horizon = [30, 60, 90, 180].includes(h) ? h : 90;
+    return __mswNpaWrap(__buildNpaHighRiskMsw(tenant, horizon));
+  }),
+
+  // ── FIX: GET /v1/banking/npa/portfolio-drivers — was missing, caused HTTP 500 ──
+  http.get('/v1/banking/npa/portfolio-drivers', ({ request }) => {
+    const url = new URL(request.url);
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO');
+    const h = parseInt(url.searchParams.get('horizon') ?? '90', 10);
+    const horizon = [30, 60, 90, 180].includes(h) ? h : 90;
+    return __mswNpaWrap(__buildPortfolioDriversMsw(tenant, horizon));
+  }),
+
+  // ── GET /v1/banking/npa/backtest/latest — stub so SPA works fully offline ──
+  http.get('/v1/banking/npa/backtest/latest', ({ request }) => {
+    const tenant = (request.headers.get('x-tenant-id') ?? 'BANK_DEMO');
+    const scale = tenant.toUpperCase() === 'BIL' ? 0.6 : 1.0;
+    const rng = __npaMul32(__npaFnv(`${tenant}|${__NPA_DAY}|backtest`));
+    const cohort = Math.round((4000 + rng() * 3000) * scale);
+    const auc = Math.round((0.82 + rng() * 0.1) * 1000) / 1000;
+    return __mswNpaWrap({
+      tenant_id: tenant,
+      generated_at: new Date(__NPA_BASE_MS).toISOString(),
+      model_id: 'pd-xgb-prod', model_version: 'v3.2.0',
+      back_to: '2026-03-05',
+      cohort_size: cohort, auc, ks: Math.round((auc - 0.3) * 1000) / 1000,
+      precision_at_top_decile: 0.71, recall_at_top_decile: 0.58,
+      confusion: { tp: Math.round(cohort * 0.04), fp: Math.round(cohort * 0.02),
+        tn: Math.round(cohort * 0.9), fn: Math.round(cohort * 0.04) },
+      by_segment: ['Retail', 'SME', 'Corporate', 'Agriculture'].map(seg => ({
+        segment: seg,
+        auc: Math.round((0.79 + __npaMul32(__npaFnv(`${tenant}|${seg}|bt`))() * 0.11) * 1000) / 1000,
+        cohort_size: Math.round(cohort / 4),
+      })),
+    });
+  }),
+
+  // ── GET /v1/banking/npa/predictions/:prediction_id/why — stub for offline ──
+  http.get('/v1/banking/npa/predictions/:prediction_id/why', ({ params }) => {
+    const prediction_id = String(params.prediction_id);
+    const tenant = 'BANK_DEMO';
+    const rng = __npaMul32(__npaFnv(`${tenant}|${prediction_id}|why`));
+    const pd = 0.55 + rng() * 0.4;
+    const band = pd >= 0.85 ? 'critical' : pd >= 0.7 ? 'high' : 'medium';
+    return __mswNpaWrap({
+      tenant_id: tenant, account_id: prediction_id,
+      customer_id: `c-${String(Math.floor(100000 + rng() * 9999)).slice(-6)}`,
+      generated_at: new Date(__NPA_BASE_MS).toISOString(),
+      pd: Math.round(pd * 1000) / 1000, band,
+      model_id: 'pd-xgb-prod', model_version: 'v3.2.0',
+      top_features: [
+        { feature_name: 'dpd_max_90d', weight: 0.32, direction: 'up', value: '45 days' },
+        { feature_name: 'utilization_pct', weight: 0.18, direction: 'up', value: '92%' },
+        { feature_name: 'emi_bounce_rate_180d', weight: 0.21, direction: 'up', value: '3 of 12' },
+        { feature_name: 'cash_withdrawal_velocity', weight: 0.12, direction: 'up', value: '+2.4σ' },
+        { feature_name: 'bureau_score', weight: -0.15, direction: 'down', value: '612 (Subprime)' },
+      ],
+      comparable_customers: [
+        { customer_id: 'c-301234', pd: Math.round(pd * 0.95 * 1000) / 1000, outcome: 'npa' },
+        { customer_id: 'c-302567', pd: Math.round(pd * 0.88 * 1000) / 1000, outcome: 'cured' },
+        { customer_id: 'c-303890', pd: Math.round(pd * 1.05 * 1000) / 1000, outcome: 'pending' },
+      ],
+      recommended_actions: [
+        band === 'critical' ? 'Escalate to head_of_risk + initiate covenant breach review' : 'Notify supervisor + watchlist',
+        'Request fresh stock statement (covenant due)',
+        'Review with relationship manager within 5 days',
+      ],
     });
   }),
 ];
