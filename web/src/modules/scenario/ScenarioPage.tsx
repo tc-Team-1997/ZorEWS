@@ -48,6 +48,7 @@ import {
   downloadScenarioXlsx,
 } from '@/lib/scenarioExport';
 import { SCENARIO_TEMPLATES, type ScenarioTemplate } from '@/lib/scenarioTemplates';
+import { fmtKES } from '@/lib/currency';
 
 const DEFAULTS: ShockInputs = { gdp: 0, rate: 0, fx: 0 };
 
@@ -70,13 +71,8 @@ const STAGE_DESCRIPTION: Record<IfrsStage, string> = {
   3: 'Credit-impaired · lifetime ECL',
 };
 
-function fmtKes(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} Bn`;
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} M`;
-  if (abs >= 1_000) return `${(n / 1_000).toFixed(0)} K`;
-  return n.toLocaleString();
-}
+// Canonical formatter — delegates to @/lib/currency
+function fmtKes(n: number): string { return fmtKES(n); }
 
 function fmtPct(n: number, digits = 2): string {
   return `${(n * 100).toFixed(digits)}%`;

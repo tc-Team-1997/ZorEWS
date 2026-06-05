@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
+import { fmtKES } from '@/lib/currency';
 
 const LEVEL_TONE: Record<CustomerListRow['level'], BadgeTone> = {
   Low: 'success',
@@ -22,12 +23,8 @@ const LEVEL_TONE: Record<CustomerListRow['level'], BadgeTone> = {
 
 const LEVELS: ReadonlyArray<CustomerListRow['level']> = ['Low', 'Medium', 'High'];
 
-const fmtCurrency = (n: number) =>
-  new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'KES',
-    maximumFractionDigits: 0,
-  }).format(n);
+// Compact currency — delegates to canonical @/lib/currency fmtKES
+const fmtCurrency = fmtKES;
 
 export function CustomerListPage() {
   const navigate = useNavigate();

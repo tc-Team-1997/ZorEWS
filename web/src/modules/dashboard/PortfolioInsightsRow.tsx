@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, BrainCircuit, Database } from 'lucide-react';
 import { Badge, MetricCard, Panel } from '@/components/ui';
 import { api } from '@/lib/api';
+import { fmtKES } from '@/lib/currency';
 
 const HEAT_TONES: Record<string, string> = {
   critical: 'bg-danger',
@@ -28,11 +29,8 @@ const STATUS_TONES: Record<string, string> = {
   paused: 'bg-ink/40',
 };
 
-function fmtKes(v: number): string {
-  if (v >= 10_000_000) return `KES ${(v / 10_000_000).toFixed(1)}cr`;
-  if (v >= 100_000) return `KES ${(v / 100_000).toFixed(1)}L`;
-  return `KES ${v.toLocaleString()}`;
-}
+// Canonical formatter — use @/lib/currency fmtKES everywhere
+const fmtKes = fmtKES;
 
 export function PortfolioInsightsRow() {
   const heatmap = useQuery({

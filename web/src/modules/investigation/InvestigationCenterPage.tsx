@@ -61,6 +61,7 @@ import {
   buildExecutiveInvestigationView,
   buildInvestigationAnalytics,
 } from './investigationAnalytics';
+import { fmtKES } from '@/lib/currency';
 
 const ACTIVE_TENANT = 'BANK_DEMO';
 
@@ -92,11 +93,8 @@ function titleWithIcon(label: string, icon: LucideIcon, sub?: string): ReactNode
   );
 }
 
-function fmtKes(n: number): string {
-  if (n >= 10_000_000) return `KES ${(n / 10_000_000).toFixed(1)}Cr`;
-  if (n >= 100_000) return `KES ${(n / 100_000).toFixed(1)}L`;
-  return `KES ${n.toLocaleString('en-IN')}`;
-}
+// Canonical formatter — delegates to @/lib/currency fmtKES
+function fmtKes(n: number): string { return fmtKES(n); }
 
 function fmtPct(v: number): string {
   return `${Math.round(v * 100)}%`;

@@ -123,8 +123,15 @@ export function MetricCard({ label, value, sub, tone = 'neutral', to, ariaLabel,
 
   const body = (
     <>
-      <p className="text-xs text-aurora-ink-sub mb-2">{label}</p>
-      <p className="text-2xl font-bold text-aurora-ink leading-tight tracking-tight tabular">{value}</p>
+      <p className="text-xs text-aurora-ink-sub mb-2 truncate">{label}</p>
+      {/* Overflow protection: value is always single-line, never wraps, ellipsis on extreme overflow */}
+      <p
+        className="text-2xl font-bold text-aurora-ink leading-tight tracking-tight tabular"
+        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        title={typeof value === 'string' ? value : String(value)}
+      >
+        {value}
+      </p>
       {(trend || series) && (
         <div className="mt-2 flex items-center gap-2">
           {trend && <TrendChip trend={trend} />}

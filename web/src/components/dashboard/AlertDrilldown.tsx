@@ -25,6 +25,7 @@ import { Link } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { api, type Alert, type Severity } from '@/lib/api';
 import { Badge, Panel } from '@/components/ui';
+import { fmtKES } from '@/lib/currency';
 
 const SEVERITY_TONE: Record<Severity, 'danger' | 'warning' | 'blue' | 'success'> = {
   critical: 'danger',
@@ -447,8 +448,4 @@ function pctOf(part: number, total: number): string {
   return `${Math.round((part / total) * 100)} %`;
 }
 
-function fmtKES(v: number): string {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)} M KES`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(0)} k KES`;
-  return `${v} KES`;
-}
+// fmtKES now imported from @/lib/currency — local stub removed.

@@ -39,6 +39,7 @@ import {
   type ReportType,
 } from '@/lib/api';
 import { color } from '@/styles/tokens';
+import { fmtKES } from '@/lib/currency';
 
 const TYPES: { value: ReportType; label: string; description: string }[] = [
   {
@@ -69,13 +70,8 @@ const PERIODS: { value: ReportPeriod; label: string }[] = [
   { value: 'quarter', label: 'Last 90 days' },
 ];
 
-function fmtKes(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} Bn`;
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} M`;
-  if (abs >= 1_000) return `${(n / 1_000).toFixed(0)} K`;
-  return n.toLocaleString();
-}
+// Canonical formatter — delegates to @/lib/currency fmtKES
+function fmtKes(n: number): string { return fmtKES(n); }
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString();

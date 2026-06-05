@@ -25,6 +25,7 @@ import type { Alert } from '@/lib/api';
 import { Panel } from '@/components/ui';
 import { AlertBarChart } from './charts/AlertBarChart';
 import { AlertTrendChart } from './charts/AlertTrendChart';
+import { fmtKES } from '@/lib/currency';
 
 export interface DrillFilter {
   dimension: AlertDimension;
@@ -280,9 +281,5 @@ function SubDimensionCard({ alerts, dimension, onSubDrill, testId }: SubDimensio
   );
 }
 
-function fmtKES(v: number): string {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
-  return v.toFixed(0);
-}
+// fmtKES now imported from @/lib/currency — local stub removed.
 

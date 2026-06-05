@@ -22,3 +22,4 @@ export { Modal } from './Modal';
 export type { ModalProps, ModalSize } from './Modal';
 export { EmptyState } from './EmptyState';
 export { Skeleton, SkeletonText, SkeletonCard } from './Skeleton';
+export { CurrencyValue, CurrencyRow } from './CurrencyValue';

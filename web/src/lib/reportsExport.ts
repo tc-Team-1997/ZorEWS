@@ -58,10 +58,16 @@ function row(cells: Array<string | number>): Cell[] {
   );
 }
 
+// Canonical formatter — see @/lib/currency
 function fmtKes(n: number): string {
-  if (Math.abs(n) >= 1_000_000_000) return `KES ${(n / 1_000_000_000).toFixed(2)} Bn`;
-  if (Math.abs(n) >= 1_000_000) return `KES ${(n / 1_000_000).toFixed(2)} M`;
-  return `KES ${n.toLocaleString()}`;
+  // Use inline implementation here (no @/lib alias in this file context for safety)
+  const abs = Math.abs(n);
+  const CR = 10_000_000; const L = 100_000; const K = 1_000;
+  const sign = n < 0 ? '−' : '';
+  if (abs >= CR)  return `KES ${sign}${(abs / CR).toFixed(2)}Cr`;
+  if (abs >= L)   return `KES ${sign}${(abs / L).toFixed(2)}L`;
+  if (abs >= K)   return `KES ${sign}${(abs / K).toFixed(2)}K`;
+  return `KES ${sign}${abs.toLocaleString('en-IN')}`;
 }
 
 function fmtPct(n: number): string {
