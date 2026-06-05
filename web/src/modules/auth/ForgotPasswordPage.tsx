@@ -104,7 +104,7 @@ export function ForgotPasswordPage() {
                   className="rounded border border-divider bg-surface-alt p-4 mb-4"
                 >
                   <p className="text-[11px] uppercase tracking-wide text-muted mb-2">
-                    {t('forgot.prototype_link_label')}
+                    {t('forgot.dev_reset_link_label')}
                   </p>
                   <div className="flex items-center gap-2">
                     <a

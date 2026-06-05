@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ShieldCheck,
@@ -7,6 +7,10 @@ import {
   Clock,
   ChevronDown,
   Search,
+  User,
+  Settings,
+  KeyRound,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -15,7 +19,8 @@ import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { LanguageToggle } from '@/components/layout/LanguageToggle';
 import { ModeToggle } from '@/components/layout/ModeToggle';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
-import { useDomain } from '@/lib/useOnboardingContext';
+import { useDomain, useTenantContext } from '@/lib/useOnboardingContext';
+import { getOrganization } from '@/lib/organizations';
 import { Button } from '@/components/ui';
 import { CommandPalette } from './CommandPalette';
 import { NAV_GROUPS, NAV_HOME, visibleItems, type NavGroup, type NavLeaf } from './navConfig';
@@ -77,6 +82,38 @@ export function AppShell() {
   const { idleMs, warnMs } = readIdleConfig();
   const { t } = useTranslation();
   const [domain] = useDomain();
+  const [tenantCtx] = useTenantContext();
+
+  // Resolve the organisation display name from the tenant context.
+  // Falls back through: org short_name → org name → tenant_id → 'Enterprise'
+  const orgName = (() => {
+    if (tenantCtx?.organization_id) {
+      const org = getOrganization(tenantCtx.organization_id);
+      if (org) return org.short_name ?? org.name;
+    }
+    if (tenantCtx?.tenant_id) {
+      const tidMap: Record<string, string> = {
+        BANK_DEMO: 'Banking Enterprise',
+        BIL: 'BIL Insurance',
+      };
+      return tidMap[tenantCtx.tenant_id] ?? tenantCtx.tenant_id;
+    }
+    return 'Enterprise';
+  })();
+
+  // Enterprise user-menu dropdown state
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [userMenuOpen]);
 
   // Domain-scoped sidebar: a domain-tagged group is shown only when it
   // matches the active domain. Super-admins (the canonical `admin` backend
@@ -213,26 +250,100 @@ export function AppShell() {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t border-aurora-line">
-          <div className="px-2 pb-2 flex items-center gap-2.5">
+        {/* Enterprise user menu — replaces the bare Sign Out button */}
+        <div className="px-3 py-3 border-t border-aurora-line relative" ref={userMenuRef}>
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((o) => !o)}
+            aria-haspopup="true"
+            aria-expanded={userMenuOpen}
+            data-testid="user-menu-trigger"
+            className="w-full flex items-center gap-2.5 rounded-input px-2 py-2 hover:bg-sidebar-hover/60 transition-colors group"
+          >
             <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-white text-[11px] font-semibold bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow">
               {initials}
             </div>
-            <div className="min-w-0">
-              <p className="text-aurora-ink text-xs font-medium leading-tight truncate">{user?.username ?? '—'}</p>
-              <p className="text-slate-500 text-[10px] leading-tight truncate">
-                {user?.roles.join(', ') ?? 'guest'}
+            <div className="min-w-0 flex-1 text-left">
+              <p className="text-aurora-ink text-xs font-medium leading-tight truncate">{user?.display_name ?? user?.username ?? '—'}</p>
+              <p className="text-slate-500 text-[10px] leading-tight truncate capitalize">
+                {(user?.roles[0] ?? 'guest').replace(/_/g, ' ')}
               </p>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="w-full flex items-center gap-2 rounded-input px-3 py-2 text-[12px] text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink transition-colors"
-          >
-            <LogOut size={14} strokeWidth={1.75} />
-            <span>{t('common.sign_out')}</span>
+            <ChevronDown
+              size={13}
+              strokeWidth={2}
+              className={cn('text-slate-400 shrink-0 transition-transform duration-150', userMenuOpen && 'rotate-180')}
+            />
           </button>
+
+          {/* Dropdown panel — opens upward */}
+          {userMenuOpen && (
+            <div
+              role="menu"
+              data-testid="user-menu-dropdown"
+              className="absolute left-3 right-3 bottom-full mb-1 bg-white rounded-xl border border-aurora-line shadow-float z-50 overflow-hidden"
+            >
+              {/* Identity header */}
+              <div className="px-4 py-3 border-b border-aurora-line bg-aurora-canvas">
+                <p className="text-[12px] font-semibold text-aurora-ink truncate">
+                  {user?.display_name ?? user?.username ?? '—'}
+                </p>
+                <p className="text-[11px] text-slate-500 truncate">{user?.username ?? ''}</p>
+                <div className="mt-1 flex items-center gap-1">
+                  <Building2 size={10} className="text-aurora-indigo shrink-0" strokeWidth={2} />
+                  <span className="text-[10px] text-aurora-indigo font-medium truncate">{orgName}</span>
+                </div>
+              </div>
+
+              {/* Menu items */}
+              <div className="py-1">
+                <Link
+                  to="/profile/sessions"
+                  role="menuitem"
+                  data-testid="user-menu-profile"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
+                >
+                  <User size={14} strokeWidth={1.75} className="text-slate-400" />
+                  <span>{t('common.my_profile')}</span>
+                </Link>
+                <Link
+                  to="/admin/users"
+                  role="menuitem"
+                  data-testid="user-menu-settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
+                >
+                  <Settings size={14} strokeWidth={1.75} className="text-slate-400" />
+                  <span>{t('common.settings')}</span>
+                </Link>
+                <Link
+                  to="/reset-password"
+                  role="menuitem"
+                  data-testid="user-menu-change-password"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
+                >
+                  <KeyRound size={14} strokeWidth={1.75} className="text-slate-400" />
+                  <span>{t('common.change_password')}</span>
+                </Link>
+              </div>
+
+              {/* Divider + Sign Out */}
+              <div className="border-t border-aurora-line py-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="user-menu-sign-out"
+                  onClick={() => { setUserMenuOpen(false); onLogout(); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-rose-600 hover:bg-rose-50 transition-colors"
+                >
+                  <LogOut size={14} strokeWidth={1.75} />
+                  <span>{t('common.sign_out')}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -257,8 +368,11 @@ export function AppShell() {
             <ModeToggle />
             <LanguageToggle />
             <NotificationBell />
-            <span className="text-xs text-aurora-ink-sub">
-              {t('nav.tenant')} · <span className="text-aurora-ink font-medium">apex-prototype</span>
+            <span className="text-xs text-aurora-ink-sub flex items-center gap-1.5">
+              <Building2 size={12} strokeWidth={1.75} className="text-aurora-indigo shrink-0" />
+              <span>{t('nav.tenant')}</span>
+              <span className="text-aurora-line">·</span>
+              <span className="text-aurora-ink font-medium">{orgName}</span>
             </span>
           </div>
         </header>

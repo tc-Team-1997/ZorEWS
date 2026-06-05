@@ -28,6 +28,9 @@ const en = {
   common: {
     sign_in: 'Sign in',
     sign_out: 'Sign out',
+    my_profile: 'My Profile',
+    settings: 'Settings',
+    change_password: 'Change Password',
     username: 'Username',
     password: 'Password',
     email: 'Email',
@@ -227,7 +230,7 @@ const en = {
     back_to_signin: '← Back to sign in',
     remember_it: 'Remembered it?',
     inbox_heading: 'Check your inbox',
-    prototype_link_label: 'Prototype reset link (no SMTP in dev)',
+    dev_reset_link_label: 'Password reset link (dev mode)',
     copy_link: 'Copy reset link',
     expires_default: 'in 15 minutes',
     failure: 'Reset request failed. Try again.',
@@ -250,10 +253,10 @@ const en = {
     welcome: 'Welcome,',
     heading: 'Set up your account',
     subtitle:
-      "Choose a new password and accept the prototype terms before you continue. You won't see this screen again.",
+      "Choose a new password and accept the platform terms before you continue. You won't see this screen again.",
     accept_terms:
-      'I understand this is a prototype environment with synthetic data. I will treat all dashboards, alerts, and exports as confidential.',
-    must_accept_terms: 'You must accept the prototype terms to continue.',
+      'I understand this platform contains confidential risk data. I will treat all dashboards, alerts, and exports accordingly.',
+    must_accept_terms: 'You must accept the platform terms to continue.',
     submit: 'Set password and continue',
     generic_error: "Couldn't complete first sign-in. Please try again.",
     password_reused: 'This password has been used before — choose a different one.',
@@ -294,6 +297,9 @@ const hi: typeof en = {
   common: {
     sign_in: 'साइन इन करें',
     sign_out: 'साइन आउट',
+    my_profile: 'मेरी प्रोफ़ाइल',
+    settings: 'सेटिंग्स',
+    change_password: 'पासवर्ड बदलें',
     username: 'उपयोगकर्ता नाम',
     password: 'पासवर्ड',
     email: 'ईमेल',
@@ -493,7 +499,7 @@ const hi: typeof en = {
     back_to_signin: '← साइन इन पर वापस',
     remember_it: 'याद आ गया?',
     inbox_heading: 'अपना इनबॉक्स देखें',
-    prototype_link_label: 'प्रोटोटाइप रीसेट लिंक (डेव में SMTP नहीं)',
+    dev_reset_link_label: 'पासवर्ड रीसेट लिंक (डेव मोड)',
     copy_link: 'रीसेट लिंक कॉपी करें',
     expires_default: '15 मिनट में',
     failure: 'रीसेट अनुरोध विफल। पुनः प्रयास करें।',
@@ -519,7 +525,7 @@ const hi: typeof en = {
       'जारी रखने से पहले एक नया पासवर्ड चुनें और प्रोटोटाइप शर्तों को स्वीकार करें। आप यह स्क्रीन फिर से नहीं देखेंगे।',
     accept_terms:
       'मैं समझता हूं कि यह सिंथेटिक डेटा वाला प्रोटोटाइप वातावरण है। मैं सभी डैशबोर्ड, अलर्ट और निर्यात को गोपनीय मानूंगा।',
-    must_accept_terms: 'जारी रखने के लिए आपको प्रोटोटाइप शर्तें स्वीकार करनी होंगी।',
+    must_accept_terms: 'जारी रखने के लिए आपको प्लेटफ़ॉर्म की शर्तें स्वीकार करनी होंगी।',
     submit: 'पासवर्ड सेट करें और जारी रखें',
     generic_error: 'पहली बार साइन-इन पूरा नहीं हो सका। कृपया पुनः प्रयास करें।',
     password_reused: 'यह पासवर्ड पहले उपयोग किया जा चुका है — कोई अलग चुनें।',
@@ -561,6 +567,9 @@ const hi: typeof en = {
 const dz: typeof en = {
   common: {
     sign_in: 'ནང་འཛུལ་',
+    my_profile: 'ངའི་དོ་གཡོག་',
+    settings: 'སྒྲིག་བཀོད་',
+    change_password: 'གསང་ཚིག་བསྒྱུར་',
     sign_out: 'ཕྱིར་འཐོན་',
     username: 'སྤྱོད་མིང་',
     password: 'གསང་ཡིག་',
@@ -761,7 +770,7 @@ const dz: typeof en = {
     back_to_signin: '← ནང་འཛུལ་ལུ་ལོག་',
     remember_it: 'དྲན་སོང་ངག?',
     inbox_heading: 'ཁྱོད་ཀྱི་ནང་ཡིག་ཁུག་ལུ་བལྟ་',
-    prototype_link_label: 'གསར་གཞི་ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་ (Dev ནང་ SMTP མེད་)',
+    dev_reset_link_label: 'གསང་ཚིག་ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་ (Dev Mode)',
     copy_link: 'ཡང་བསྐྱར་སྒྲིག་འབྲེལ་མཐུད་འདྲ་བཤུས་',
     expires_default: 'སྐར་མ་ ༡༥ གི་ནང་འཁོད་',
     failure: 'ཡང་བསྐྱར་སྒྲིག་མ་ཐུབ། ཡང་བསྐྱར་འབད་གནང་།',
@@ -787,7 +796,7 @@ const dz: typeof en = {
       'མུ་མཐུད་མ་འགྱུར་གོང་ལུ་ གསང་ཡིག་གསར་པ་འདེམས་ནས་ གསར་གཞི་ཁ་ཚིག་ལུ་ལེན་གནང་། འདི་གི་ཤོག་ལེབ་འདི་ལོག་མ་མཐོང་།',
     accept_terms:
       'ང་གིས་ཤེས་ཡོད་ འདི་ནི་གསར་གཞི་ཁོར་ཡུག་ཅིག་ ཨིན་ལ་ ཟུར་སྦྱར་གནད་སྡུད་ཡོད། སྡེ་ཚན་ཡོངས་ཀྱི་གདོང་ཁྲམ་ དྲན་སྐུལ་ དང་ ཕྱིར་གཏང་ཚུ་གསང་བར་ངོས་བཟུང་འབད་གི།',
-    must_accept_terms: 'མུ་མཐུད་ནིའི་དོན་ལུ་ གསར་གཞི་ཁ་ཚིག་ལུ་ལེན་དགོ།',
+    must_accept_terms: 'མུ་མཐུད་ནིའི་དོན་ལུ་ སྦྱོར་ལམ་གྱི་ཁ་ཚིག་ལུ་ལེན་དགོ།',
     submit: 'གསང་ཡིག་སྒྲིག་ ལ་སྦྲགས་ མུ་མཐུད་',
     generic_error: 'ལན་ཐེངས་དང་པོའི་ནང་འཛུལ་མ་ཚུགས། ཡང་བསྐྱར་འབད་གནང་།',
     password_reused: 'གསང་ཡིག་འདི་སྔོན་ལུ་ལག་ལེན་སོང་ཡོད — སོ་སོར་ཅིག་འདེམས་གནང་།',
@@ -828,6 +837,9 @@ const dz: typeof en = {
 const ne: typeof en = {
   common: {
     sign_in: 'साइन इन गर्नुहोस्',
+    my_profile: 'मेरो प्रोफाइल',
+    settings: 'सेटिङहरू',
+    change_password: 'पासवर्ड परिवर्तन गर्नुहोस्',
     sign_out: 'साइन आउट',
     username: 'प्रयोगकर्ता नाम',
     password: 'पासवर्ड',
@@ -1028,7 +1040,7 @@ const ne: typeof en = {
     back_to_signin: '← साइन इनमा फर्कनुहोस्',
     remember_it: 'सम्झनुभयो?',
     inbox_heading: 'आफ्नो इनबक्स जाँच्नुहोस्',
-    prototype_link_label: 'प्रोटोटाइप रिसेट लिङ्क (Dev मा SMTP छैन)',
+    dev_reset_link_label: 'पासवर्ड रिसेट लिङ्क (Dev मोड)',
     copy_link: 'रिसेट लिङ्क प्रतिलिपि गर्नुहोस्',
     expires_default: '१५ मिनेटमा',
     failure: 'रिसेट अनुरोध असफल भयो। पुनः प्रयास गर्नुहोस्।',
@@ -1054,7 +1066,7 @@ const ne: typeof en = {
       'जारी राख्नुअघि नयाँ पासवर्ड छान्नुहोस् र प्रोटोटाइप सर्तहरू स्वीकार गर्नुहोस्। तपाईंले यो स्क्रिन फेरि देख्नुहुने छैन।',
     accept_terms:
       'म बुझ्छु कि यो सिन्थेटिक डेटा भएको प्रोटोटाइप वातावरण हो। म सबै ड्यासबोर्ड, अलर्ट, र निर्यातहरूलाई गोप्य रूपमा व्यवहार गर्नेछु।',
-    must_accept_terms: 'जारी राख्न तपाईंले प्रोटोटाइप सर्तहरू स्वीकार गर्नुपर्छ।',
+    must_accept_terms: 'जारी राख्न तपाईंले प्लेटफर्म सर्तहरू स्वीकार गर्नुपर्छ।',
     submit: 'पासवर्ड सेट गरेर जारी राख्नुहोस्',
     generic_error: 'पहिलो पटक साइन-इन पूरा गर्न सकिएन। पुनः प्रयास गर्नुहोस्।',
     password_reused: 'यो पासवर्ड पहिले प्रयोग गरिएको छ — अर्को छान्नुहोस्।',

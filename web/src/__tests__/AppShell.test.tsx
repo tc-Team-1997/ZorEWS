@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
-import { screen } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { AppShell } from '@/components/layout/AppShell';
 import { renderWithProviders } from './utils';
 import { useAuth } from '@/store/auth';
@@ -37,7 +37,13 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: /^case management$/i })).toBeInTheDocument();
     // Disambiguated from /admin/case-scenarios admin entry (M14.21)
     expect(screen.getByRole('link', { name: /^scenario/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+    // Enterprise user menu: the trigger is always visible; Sign Out is inside
+    // the dropdown which opens on click. Verify both the trigger and the
+    // username text are present.
+    expect(screen.getByTestId('user-menu-trigger')).toBeInTheDocument();
     expect(screen.getByText('alice.admin')).toBeInTheDocument();
+    // Open the menu and verify Sign Out is reachable.
+    fireEvent.click(screen.getByTestId('user-menu-trigger'));
+    expect(screen.getByTestId('user-menu-sign-out')).toBeInTheDocument();
   });
 });
