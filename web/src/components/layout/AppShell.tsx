@@ -26,7 +26,6 @@ import { CommandPalette } from './CommandPalette';
 import { NAV_GROUPS, NAV_HOME, visibleItems, type NavGroup, type NavLeaf } from './navConfig';
 
 // Backward-compat alias retained for callers that imported the old shape.
-// New code should import from ./navConfig.
 export type NavItem = NavLeaf;
 
 const COLLAPSE_STORAGE_KEY = 'apex.ews.nav.collapsed';
@@ -38,9 +37,7 @@ function readCollapsedFromStorage(): Set<string> {
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return new Set(parsed.filter((v) => typeof v === 'string'));
-  } catch {
-    /* corrupt blob → ignore + fall through to default */
-  }
+  } catch { /* corrupt blob → ignore */ }
   return new Set();
 }
 
@@ -48,14 +45,10 @@ function writeCollapsedToStorage(set: Set<string>) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...set]));
-  } catch {
-    /* quota or disabled — ignore */
-  }
+  } catch { /* quota or disabled */ }
 }
 
-// Backward-compat: assemble the flat NAV array from the new grouped config
-// for any external consumer that previously imported `NAV`. Order matches
-// the rendered sidebar (home → groups → items in declared order).
+// Flat NAV array for external consumers that previously imported `NAV`.
 const NAV: readonly NavLeaf[] = ((): NavLeaf[] => {
   const out: NavLeaf[] = [NAV_HOME];
   for (const group of NAV_GROUPS) {
@@ -65,9 +58,6 @@ const NAV: readonly NavLeaf[] = ((): NavLeaf[] => {
 })();
 export { NAV };
 
-// 15-min idle limit, 2-min warning window — banking standard.
-// Read at render time (not module load) so test environments can override
-// VITE_IDLE_MS / VITE_IDLE_WARN_MS in beforeEach.
 function readIdleConfig() {
   return {
     idleMs: Number(import.meta.env.VITE_IDLE_MS ?? 15 * 60 * 1000),
@@ -84,8 +74,7 @@ export function AppShell() {
   const [domain] = useDomain();
   const [tenantCtx] = useTenantContext();
 
-  // Resolve the organisation display name from the tenant context.
-  // Falls back through: org short_name → org name → tenant_id → 'Enterprise'
+  // Resolve organisation display name from TenantContext
   const orgName = (() => {
     if (tenantCtx?.organization_id) {
       const org = getOrganization(tenantCtx.organization_id);
@@ -101,7 +90,7 @@ export function AppShell() {
     return 'Enterprise';
   })();
 
-  // Enterprise user-menu dropdown state
+  // Enterprise user-menu dropdown — lives in the top navbar
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -115,18 +104,13 @@ export function AppShell() {
     return () => document.removeEventListener('mousedown', onOutside);
   }, [userMenuOpen]);
 
-  // Domain-scoped sidebar: a domain-tagged group is shown only when it
-  // matches the active domain. Super-admins (the canonical `admin` backend
-  // role) see BOTH domains. When no domain is chosen yet (e.g. a test that
-  // renders AppShell directly, or pre-onboarding), show everything — the
-  // RequireOnboarding gate handles forcing a choice in normal use.
+  // Domain-scoped sidebar
   const isSuperAdmin = (user?.roles ?? []).includes('admin');
   const visibleGroups = NAV_GROUPS.filter(
     (g) => !g.domain || isSuperAdmin || !domain || g.domain === domain,
   );
 
-  // Collapse state — persisted to localStorage so the operator's preference
-  // survives reloads. Default: every group expanded.
+  // Collapse state persisted to localStorage
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readCollapsedFromStorage(),
   );
@@ -154,15 +138,12 @@ export function AppShell() {
     },
   });
 
-  // When the warning modal opens, move focus to its primary action so
-  // screen-reader and keyboard users land on the "Stay signed in" button.
-  // The ref is attached on the button below.
   const stayBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (idle.warning) stayBtnRef.current?.focus();
   }, [idle.warning]);
 
-  // ⌘K / Ctrl-K opens the command palette (Esc closes it from within).
+  // ⌘K palette
   const [paletteOpen, setPaletteOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -175,8 +156,7 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Avatar initials for the sidebar footer — first letter of each
-  // dot-separated username segment (alice.admin → "AA"), capped at 2.
+  // Avatar initials — first letter of each dot-separated segment (alice.admin → AA)
   const initials =
     (user?.username ?? '—')
       .split(/[._\s-]+/)
@@ -185,37 +165,42 @@ export function AppShell() {
       .map((s) => s[0]!.toUpperCase())
       .join('') || '—';
 
+  const displayName = user?.display_name ?? user?.username ?? '—';
+  const roleLabel = (user?.roles[0] ?? 'guest').replace(/_/g, ' ');
+
   return (
-    <div className="min-h-screen flex aurora-canvas">
-      {/* Skip-to-content link — only visible when keyboard-focused. Lets
-          screen-reader and keyboard-only users bypass the sidebar nav and
-          jump straight to the main work area. */}
+    <div className="min-h-screen flex bg-[#F5F7FA]">
+      {/* Skip-to-content */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:bg-action focus:text-white focus:px-3 focus:py-1.5 focus:rounded focus:text-[12px] focus:font-medium focus:shadow"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:bg-[#4F46E5] focus:text-white focus:px-3 focus:py-1.5 focus:rounded-lg focus:text-[12px] focus:font-medium focus:shadow"
         data-testid="skip-to-main"
       >
         Skip to main content
       </a>
-      {/* Sidebar — Aurora LIGHT premium surface (per refined spec) */}
-      <aside className="w-60 shrink-0 bg-sidebar text-sidebar-text flex flex-col border-r border-aurora-line">
-        <div className="px-5 py-5 flex items-center gap-2.5 border-b border-aurora-line">
-          <div className="relative w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow aurora-pulse">
-            <ShieldCheck size={16} className="text-white" strokeWidth={2.25} />
+
+      {/* ── SIDEBAR ──────────────────────────────────────────────────── */}
+      <aside className="w-[220px] shrink-0 bg-white flex flex-col border-r border-[#E5E7EB]">
+
+        {/* Logo */}
+        <div className="h-[56px] px-4 flex items-center gap-3 border-b border-[#E5E7EB]">
+          <div className="w-8 h-8 rounded-[10px] flex items-center justify-center bg-[#4F46E5] shadow-sm">
+            <ShieldCheck size={15} className="text-white" strokeWidth={2.25} />
           </div>
           <div>
-            <p className="text-aurora-ink text-[13px] font-semibold leading-tight tracking-tight">ZorEWS</p>
-            <p className="text-slate-500 text-[10px] leading-tight">Early Warning System</p>
+            <p className="text-[13px] font-semibold text-[#111827] leading-tight tracking-tight">ZorEWS</p>
+            <p className="text-[10px] text-[#6B7280] leading-tight">Early Warning System</p>
           </div>
         </div>
 
+        {/* Navigation */}
         <nav
-          className="flex-1 overflow-y-auto py-3"
+          className="flex-1 overflow-y-auto py-3 px-2"
           aria-label="Primary"
           data-testid="primary-nav"
         >
-          {/* Home — always visible above the categories */}
-          <ul className="px-2" data-testid="nav-home">
+          {/* Home */}
+          <ul className="mb-1" data-testid="nav-home">
             <li>
               <NavLink
                 to={NAV_HOME.to}
@@ -223,21 +208,21 @@ export function AppShell() {
                 data-testid={`nav-link-${NAV_HOME.to}`}
                 className={({ isActive }) =>
                   cn(
-                    'relative flex items-center gap-2.5 rounded-input px-3 py-2 text-[13px] transition-colors',
+                    'relative flex items-center gap-2.5 rounded-[8px] px-3 py-[7px] text-[12.5px] transition-all duration-150',
                     isActive
-                      ? 'bg-sidebar-hover text-aurora-indigo font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
-                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink',
+                      ? 'bg-sidebar-hover text-indigo-600 font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-indigo-600'
+                      : 'text-[#374151] hover:bg-[#F9FAFB] hover:text-[#111827]',
                   )
                 }
               >
-                <NAV_HOME.icon size={16} strokeWidth={1.75} />
+                <NAV_HOME.icon size={15} strokeWidth={1.75} />
                 <span>{t(`nav.${NAV_HOME.i18nKey}`)}</span>
               </NavLink>
             </li>
           </ul>
 
-          {/* 6 enterprise category groups (collapsible) */}
-          <div className="mt-2 space-y-1 px-2">
+          {/* Category groups */}
+          <div className="space-y-0.5">
             {visibleGroups.map((group) => (
               <NavGroupSection
                 key={group.id}
@@ -249,133 +234,149 @@ export function AppShell() {
             ))}
           </div>
         </nav>
-
-        {/* Enterprise user menu — replaces the bare Sign Out button */}
-        <div className="px-3 py-3 border-t border-aurora-line relative" ref={userMenuRef}>
-          <button
-            type="button"
-            onClick={() => setUserMenuOpen((o) => !o)}
-            aria-haspopup="true"
-            aria-expanded={userMenuOpen}
-            data-testid="user-menu-trigger"
-            className="w-full flex items-center gap-2.5 rounded-input px-2 py-2 hover:bg-sidebar-hover/60 transition-colors group"
-          >
-            <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-white text-[11px] font-semibold bg-gradient-to-br from-aurora-indigo to-aurora-violet shadow-glow">
-              {initials}
-            </div>
-            <div className="min-w-0 flex-1 text-left">
-              <p className="text-aurora-ink text-xs font-medium leading-tight truncate">{user?.display_name ?? user?.username ?? '—'}</p>
-              <p className="text-slate-500 text-[10px] leading-tight truncate capitalize">
-                {(user?.roles[0] ?? 'guest').replace(/_/g, ' ')}
-              </p>
-            </div>
-            <ChevronDown
-              size={13}
-              strokeWidth={2}
-              className={cn('text-slate-400 shrink-0 transition-transform duration-150', userMenuOpen && 'rotate-180')}
-            />
-          </button>
-
-          {/* Dropdown panel — opens upward */}
-          {userMenuOpen && (
-            <div
-              role="menu"
-              data-testid="user-menu-dropdown"
-              className="absolute left-3 right-3 bottom-full mb-1 bg-white rounded-xl border border-aurora-line shadow-float z-50 overflow-hidden"
-            >
-              {/* Identity header */}
-              <div className="px-4 py-3 border-b border-aurora-line bg-aurora-canvas">
-                <p className="text-[12px] font-semibold text-aurora-ink truncate">
-                  {user?.display_name ?? user?.username ?? '—'}
-                </p>
-                <p className="text-[11px] text-slate-500 truncate">{user?.username ?? ''}</p>
-                <div className="mt-1 flex items-center gap-1">
-                  <Building2 size={10} className="text-aurora-indigo shrink-0" strokeWidth={2} />
-                  <span className="text-[10px] text-aurora-indigo font-medium truncate">{orgName}</span>
-                </div>
-              </div>
-
-              {/* Menu items */}
-              <div className="py-1">
-                <Link
-                  to="/profile/sessions"
-                  role="menuitem"
-                  data-testid="user-menu-profile"
-                  onClick={() => setUserMenuOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
-                >
-                  <User size={14} strokeWidth={1.75} className="text-slate-400" />
-                  <span>{t('common.my_profile')}</span>
-                </Link>
-                <Link
-                  to="/admin/users"
-                  role="menuitem"
-                  data-testid="user-menu-settings"
-                  onClick={() => setUserMenuOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
-                >
-                  <Settings size={14} strokeWidth={1.75} className="text-slate-400" />
-                  <span>{t('common.settings')}</span>
-                </Link>
-                <Link
-                  to="/reset-password"
-                  role="menuitem"
-                  data-testid="user-menu-change-password"
-                  onClick={() => setUserMenuOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-slate-700 hover:bg-aurora-tint hover:text-aurora-indigo transition-colors"
-                >
-                  <KeyRound size={14} strokeWidth={1.75} className="text-slate-400" />
-                  <span>{t('common.change_password')}</span>
-                </Link>
-              </div>
-
-              {/* Divider + Sign Out */}
-              <div className="border-t border-aurora-line py-1">
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="user-menu-sign-out"
-                  onClick={() => { setUserMenuOpen(false); onLogout(); }}
-                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-rose-600 hover:bg-rose-50 transition-colors"
-                >
-                  <LogOut size={14} strokeWidth={1.75} />
-                  <span>{t('common.sign_out')}</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* No sidebar footer — user profile moved to top navbar */}
       </aside>
 
-      {/* Main area */}
+      {/* ── MAIN AREA ─────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 shrink-0 bg-white/70 backdrop-blur-xl border-b border-aurora-line flex items-center justify-between px-6">
-          <div className="flex items-center gap-4 min-w-0">
-            <span className="module-label text-xs text-aurora-ink-sub">{t('nav.risk_operations')}</span>
+
+        {/* Top Navbar */}
+        <header className="h-[56px] shrink-0 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-5 gap-4">
+
+          {/* Left: search */}
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="hidden md:flex items-center gap-2 rounded-full border border-aurora-line bg-white/60 px-3 py-1.5 text-[12px] text-aurora-ink-sub hover:border-aurora-indigo/40 hover:text-aurora-indigo transition-colors"
+              className="hidden md:flex items-center gap-2 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-[6px] text-[12px] text-[#6B7280] hover:border-[#4F46E5]/40 hover:text-[#4F46E5] hover:bg-[#F5F7FA] transition-all duration-150"
               aria-label="Open command palette"
               data-testid="open-command-palette"
             >
               <Search size={13} strokeWidth={2} />
               <span>Search…</span>
-              <kbd className="ml-1 rounded bg-aurora-tint px-1.5 py-0.5 text-[10px] font-semibold text-aurora-indigo">⌘K</kbd>
+              <kbd className="ml-1 rounded-[4px] bg-[#EEF2FF] px-1.5 py-0.5 text-[10px] font-semibold text-[#4F46E5]">⌘K</kbd>
             </button>
           </div>
-          <div className="flex items-center gap-3">
+
+          {/* Right: tools + user menu */}
+          <div className="flex items-center gap-1.5">
             <ModeToggle />
             <LanguageToggle />
             <NotificationBell />
-            <span className="text-xs text-aurora-ink-sub flex items-center gap-1.5">
-              <Building2 size={12} strokeWidth={1.75} className="text-aurora-indigo shrink-0" />
-              <span>{t('nav.tenant')}</span>
-              <span className="text-aurora-line">·</span>
-              <span className="text-aurora-ink font-medium">{orgName}</span>
-            </span>
+
+            {/* Divider */}
+            <div className="w-px h-5 bg-[#E5E7EB] mx-1" />
+
+            {/* User avatar + dropdown trigger */}
+            <div className="relative" ref={userMenuRef}>
+              <button
+                type="button"
+                onClick={() => setUserMenuOpen((o) => !o)}
+                aria-haspopup="true"
+                aria-expanded={userMenuOpen}
+                data-testid="user-menu-trigger"
+                className="flex items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-[#F5F7FA] transition-colors duration-150 group"
+              >
+                {/* Avatar */}
+                <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-white text-[11px] font-semibold bg-[#4F46E5] select-none">
+                  {initials}
+                </div>
+                {/* Name + role — hidden on small screens */}
+                <div className="hidden lg:block text-left leading-none">
+                  <p className="text-[12px] font-medium text-[#111827] leading-tight">{displayName}</p>
+                  <p className="text-[10px] text-[#6B7280] leading-tight capitalize">{roleLabel}</p>
+                </div>
+                <ChevronDown
+                  size={13}
+                  strokeWidth={2}
+                  className={cn(
+                    'text-[#9CA3AF] shrink-0 transition-transform duration-200',
+                    userMenuOpen && 'rotate-180',
+                  )}
+                />
+              </button>
+
+              {/* Dropdown panel — opens downward */}
+              {userMenuOpen && (
+                <div
+                  role="menu"
+                  data-testid="user-menu-dropdown"
+                  className="absolute right-0 top-full mt-1.5 w-[240px] bg-white rounded-[12px] border border-[#E5E7EB] shadow-[0_4px_24px_rgba(0,0,0,0.08)] z-50 overflow-hidden"
+                  style={{ animation: 'fadeSlideDown 0.15s ease-out' }}
+                >
+                  {/* Identity header */}
+                  <div className="px-4 py-3.5 bg-[#F9FAFB] border-b border-[#E5E7EB]">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[13px] font-semibold bg-[#4F46E5] shrink-0 select-none">
+                        {initials}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-[#111827] truncate leading-tight">
+                          {displayName}
+                        </p>
+                        <p className="text-[11px] text-[#6B7280] truncate leading-tight">{user?.username ?? ''}</p>
+                        <div className="mt-1 flex items-center gap-1">
+                          <Building2 size={10} className="text-[#4F46E5] shrink-0" strokeWidth={2} />
+                          <span className="text-[10px] text-[#4F46E5] font-medium truncate">{orgName}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Menu items */}
+                  <div className="py-1">
+                    <Link
+                      to="/profile/sessions"
+                      role="menuitem"
+                      data-testid="user-menu-profile"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-[#374151] hover:bg-[#F5F7FA] hover:text-[#4F46E5] transition-colors duration-100"
+                    >
+                      <User size={14} strokeWidth={1.75} className="text-[#9CA3AF]" />
+                      <span>{t('common.my_profile')}</span>
+                    </Link>
+                    <Link
+                      to="/admin/users"
+                      role="menuitem"
+                      data-testid="user-menu-settings"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-[#374151] hover:bg-[#F5F7FA] hover:text-[#4F46E5] transition-colors duration-100"
+                    >
+                      <Settings size={14} strokeWidth={1.75} className="text-[#9CA3AF]" />
+                      <span>{t('common.settings')}</span>
+                    </Link>
+                    <Link
+                      to="/reset-password"
+                      role="menuitem"
+                      data-testid="user-menu-change-password"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-[#374151] hover:bg-[#F5F7FA] hover:text-[#4F46E5] transition-colors duration-100"
+                    >
+                      <KeyRound size={14} strokeWidth={1.75} className="text-[#9CA3AF]" />
+                      <span>{t('common.change_password')}</span>
+                    </Link>
+                  </div>
+
+                  {/* Divider + Sign Out */}
+                  <div className="border-t border-[#E5E7EB] py-1">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="user-menu-sign-out"
+                      onClick={() => { setUserMenuOpen(false); onLogout(); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-[#DC2626] hover:bg-red-50 transition-colors duration-100"
+                    >
+                      <LogOut size={14} strokeWidth={1.75} />
+                      <span>{t('common.sign_out')}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
+
+        {/* Page content */}
         <main
           id="main-content"
           tabIndex={-1}
@@ -384,6 +385,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
       <ChatWidget />
 
       <CommandPalette
@@ -394,31 +396,32 @@ export function AppShell() {
         isSuperAdmin={isSuperAdmin}
       />
 
+      {/* Idle timeout warning modal */}
       {idle.warning && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="idle-warning-title"
           data-testid="idle-warning"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-6"
         >
-          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+          <div className="bg-white rounded-[16px] shadow-[0_8px_40px_rgba(0,0,0,0.12)] max-w-sm w-full p-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-9 h-9 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                <Clock size={18} className="text-amber-600" strokeWidth={2} />
+                <Clock size={18} className="text-amber-500" strokeWidth={2} />
               </div>
               <div>
-                <h2 id="idle-warning-title" className="text-base font-semibold text-ink leading-snug">
+                <h2 id="idle-warning-title" className="text-[15px] font-semibold text-[#111827] leading-snug">
                   {t('idle.title')}
                 </h2>
-                <p className="text-[13px] text-sub mt-1">
+                <p className="text-[13px] text-[#6B7280] mt-1">
                   {t('idle.body', { minutes: Math.round(idleMs / 60000) })}
                 </p>
               </div>
             </div>
-            <p className="text-[13px] text-ink mb-4">
+            <p className="text-[13px] text-[#111827] mb-4">
               {t('idle.countdown_prefix')}{' '}
-              <span className="font-semibold tabular-nums" data-testid="idle-countdown">{idle.remainingSec}</span>{' '}
+              <span className="font-semibold tabular-nums text-[#4F46E5]" data-testid="idle-countdown">{idle.remainingSec}</span>{' '}
               {t('idle.countdown_suffix')}
             </p>
             <div className="flex gap-2">
@@ -463,7 +466,6 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
   const { t } = useTranslation();
   const items = useMemo(() => visibleItems(group, userRoles), [group, userRoles]);
 
-  // Hide the entire group when role-gating leaves zero items.
   if (items.length === 0) return null;
 
   const GroupIcon = group.icon;
@@ -477,7 +479,7 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
         aria-expanded={!isCollapsed}
         aria-controls={`nav-group-${group.id}-items`}
         data-testid={`nav-group-header-${group.id}`}
-        className="w-full flex items-center justify-between gap-2 px-3 pt-3 pb-1.5 text-[10px] uppercase tracking-[0.08em] font-semibold text-slate-500 hover:text-aurora-ink transition-colors"
+        className="w-full flex items-center justify-between gap-2 px-3 pt-3 pb-1.5 text-[10px] uppercase tracking-[0.08em] font-semibold text-[#9CA3AF] hover:text-[#6B7280] transition-colors"
       >
         <span className="flex items-center gap-2">
           <GroupIcon size={11} strokeWidth={2} />
@@ -486,10 +488,7 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
         <ChevronDown
           size={12}
           strokeWidth={2}
-          className={cn(
-            'transition-transform duration-150',
-            isCollapsed && '-rotate-90',
-          )}
+          className={cn('transition-transform duration-150', isCollapsed && '-rotate-90')}
           aria-hidden="true"
         />
       </button>
@@ -507,14 +506,14 @@ function NavGroupSection({ group, isCollapsed, onToggle, userRoles }: NavGroupSe
                 data-testid={`nav-link-${to}`}
                 className={({ isActive }) =>
                   cn(
-                    'relative flex items-center gap-2.5 rounded-input px-3 py-2 text-[13px] transition-colors',
+                    'relative flex items-center gap-2.5 rounded-[8px] px-3 py-[7px] text-[12.5px] transition-all duration-150',
                     isActive
-                      ? 'bg-sidebar-hover text-aurora-indigo font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-aurora-lilac'
-                      : 'text-sidebar-text hover:bg-sidebar-hover/60 hover:text-aurora-ink',
+                      ? 'bg-[#EEF2FF] text-[#4F46E5] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[#4F46E5]'
+                      : 'text-[#374151] hover:bg-[#F9FAFB] hover:text-[#111827]',
                   )
                 }
               >
-                <Icon size={16} strokeWidth={1.75} />
+                <Icon size={15} strokeWidth={1.75} />
                 <span>{t(`nav.${i18nKey}`)}</span>
               </NavLink>
             </li>
