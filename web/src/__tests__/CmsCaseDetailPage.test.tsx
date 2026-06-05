@@ -262,7 +262,7 @@ describe('CmsCaseDetailPage — Investigation deep-link (note/attachment)', () =
 describe('CmsCaseDetailPage — re-categorise flow', () => {
   beforeEach(async () => {
     // Auth: admin so the Edit button is visible.
-    const user = { id: 'u-001', username: 'alice.admin', roles: ['admin'] as const };
+    const user = { id: 'u-001', username: 'alice.admin', roles: ['admin' as const] };
     localStorage.setItem('apex.ews.user', JSON.stringify(user));
     localStorage.setItem('apex.ews.token', 'test-token');
     const { useAuth } = await import('@/store/auth');

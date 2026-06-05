@@ -11,7 +11,7 @@ import { renderWithProviders } from './utils';
 import { useAuth } from '@/store/auth';
 
 function setAdmin() {
-  const user = { id: 'u-001', username: 'alice.admin', roles: ['admin'] };
+  const user = { id: 'u-001', username: 'alice.admin', roles: ['admin' as const] };
   localStorage.setItem('apex.ews.user', JSON.stringify(user));
   localStorage.setItem('apex.ews.token', 'mock.test.token');
   useAuth.setState({ status: 'authenticated', user, token: 'mock.test.token' });

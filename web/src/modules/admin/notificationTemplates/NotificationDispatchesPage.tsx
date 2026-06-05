@@ -13,7 +13,7 @@ import {
   type NotificationDispatchStatus,
   type NotificationDispatchTrigger,
 } from '@/lib/api';
-import { Badge, Button, DataTable, Input, type BadgeTone, type Column } from '@/components/ui';
+import { Badge, DataTable, Input, type BadgeTone, type Column } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
 const STATUS_TONE: Record<NotificationDispatchStatus, BadgeTone> = {

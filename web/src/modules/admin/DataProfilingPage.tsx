@@ -33,10 +33,9 @@ import {
 import {
   api,
   type DqColumnProfile,
-  type DqSourceProfile,
   type DqSuggestedRule,
 } from '@/lib/api';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { color } from '@/styles/tokens';
 

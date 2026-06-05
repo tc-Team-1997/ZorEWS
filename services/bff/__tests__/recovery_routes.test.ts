@@ -82,6 +82,7 @@ describe('/v1/recovery — empty store', () => {
       'bureau_master',
       'cbs_sync_job',
       'cms_case_attachment',
+      'custom_dashboard',
       'customer_master',
       'dq_rule',
       'dr_game_day_record',

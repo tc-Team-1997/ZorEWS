@@ -60,7 +60,7 @@ describe('M13.17 — buildConfigCategoryActorMatrix', () => {
     expect(m.total_overrides).toBe(0);
     expect(m.total_actors).toBe(0);
     expect(m.actors).toEqual([]);
-    expect(m.rows.length).toBe(5);
+    expect(m.rows.length).toBe(6);
     for (const row of m.rows) {
       expect(row.total_overrides).toBe(0);
       expect(row.by_actor).toEqual({});
@@ -72,7 +72,7 @@ describe('M13.17 — buildConfigCategoryActorMatrix', () => {
     expect(m.most_versatile_actor).toBeNull();
     expect(m.most_active_category).toBeNull();
     expect(m.empty_cells).toEqual([]);
-    expect(m.total_categories).toBe(5);
+    expect(m.total_categories).toBe(6);
   });
 
   test('all-defaults input → empty matrix', () => {
@@ -121,14 +121,14 @@ describe('M13.17 — buildConfigCategoryActorMatrix', () => {
     ]);
   });
 
-  test('every by_category key present per column (5 keys)', () => {
+  test('every by_category key present per column (6 keys)', () => {
     const entries = [makeEntry('a', 'alerts', 'alice')];
     const m = buildConfigCategoryActorMatrix('BIL', entries, NOW);
     const col = m.columns[0];
     for (const cat of listCategories()) {
       expect(col.by_category[cat]).toBeGreaterThanOrEqual(0);
     }
-    expect(Object.keys(col.by_category).length).toBe(5);
+    expect(Object.keys(col.by_category).length).toBe(6);
   });
 
   test('Σ col.by_category = col.total_overrides partition', () => {
@@ -212,7 +212,8 @@ describe('M13.17 — buildConfigCategoryActorMatrix', () => {
     const entries = [makeEntry('a', 'alerts', 'alice')];
     const m = buildConfigCategoryActorMatrix('BIL', entries, NOW);
     const col = m.columns[0];
-    expect(col.categories_without.length).toBe(4);
+    // 6 categories - 1 populated (alerts) = 5 without
+    expect(col.categories_without.length).toBe(5);
     // Canonical listCategories order, minus 'alerts'
     expect(col.categories_without).toEqual(
       listCategories().filter((c) => c !== 'alerts'),
@@ -324,12 +325,12 @@ describe('M13.17 — buildConfigCategoryActorMatrix', () => {
       makeEntry('b', 'notifications', 'bob'),
     ];
     const m = buildConfigCategoryActorMatrix('BIL', entries, NOW);
-    // 5 categories × 2 actors = 10 cells; 2 populated, 8 empty
-    expect(m.empty_cells.length).toBe(8);
-    // First should be (alerts, bob)
+    // 6 categories × 2 actors = 12 cells; 2 populated (alerts/alice + notifications/bob), 10 empty
+    expect(m.empty_cells.length).toBe(10);
+    // First should be (alerts, bob) — category 'alerts', second actor alphabetically
     expect(m.empty_cells[0]).toEqual({ category: 'alerts', actor_username: 'bob' });
-    // Then (notifications, alice)
-    expect(m.empty_cells[1]).toEqual({ category: 'notifications', actor_username: 'alice' });
+    // Then (cases, alice) — 'cases' is 2nd category in canonical listCategories() order
+    expect(m.empty_cells[1]).toEqual({ category: 'cases', actor_username: 'alice' });
   });
 
   test('defaults excluded from counting', () => {
@@ -380,7 +381,7 @@ describe('M13.17 — GET /v1/admin/config/category-actor-matrix', () => {
     expect(r.status).toBe(200);
     expect(r.body.body.total_overrides).toBe(0);
     expect(r.body.body.actors).toEqual([]);
-    expect(r.body.body.rows.length).toBe(5);
+    expect(r.body.body.rows.length).toBe(6);
   });
 
   test('populated reflects overrides', async () => {

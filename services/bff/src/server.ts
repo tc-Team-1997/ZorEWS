@@ -2322,6 +2322,25 @@ export function makeApp(deps: AppDeps = {}) {
   app.use(securityHeaders());
   app.use(express.json({ limit: '512kb' }));
 
+  // JSON body-parse error handler: body-parser strict mode rejects top-level
+  // JSON primitives (null, true, 42) with a SyntaxError. Without this
+  // middleware, those errors propagate to Express's default error handler
+  // which returns HTTP 500. We intercept them here and return 400 instead.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'type' in (err as Record<string, unknown>) &&
+      (err as Record<string, unknown>).type === 'entity.parse.failed'
+    ) {
+      return res.status(400).json({
+        header: { status: 'FAILURE', code: 'EWS_400', message: 'Invalid JSON in request body', timestamp: new Date().toISOString() },
+        error: { code: 'EWS_400_invalid_json', message: 'Request body must be a valid JSON object', severity: 'MEDIUM' },
+      });
+    }
+    return next(err);
+  });
+
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
   // ---------- /v1/admin/* — User Access Override (BAC §3.1.6/§3.1.7) ----------
@@ -13463,15 +13482,18 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  // M11.2 — Underwriting Dashboard. High-risk proposals, churn trend
-  // (6 months trailing), lapse predictions sorted by 30-day probability.
+  // M11.2 — BIL Underwriting Dashboard (banking vertical). High-risk
+  // proposals, 6-month churn trend, lapse predictions sorted by 30-day
+  // probability. Uses the BIL `buildUnderwritingDashboard` from
+  // bil_dashboards.ts, NOT the insurance underwriting builder — they share
+  // the same export name but have different shapes.
   app.get(
     '/v1/dashboards/bil/underwriting',
     requireTenantMw,
     requireRole('audit:read'),
     (req: Request, res: Response) => {
       const ctx = extractCtx(req, now);
-      const dashboard = buildInsuranceUnderwritingDashboard(req.tenant!.tenant_id, now());
+      const dashboard = buildUnderwritingDashboard(req.tenant!.tenant_id, now());
       res.json(wrapResponse(dashboard, ctx));
     },
   );

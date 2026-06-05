@@ -497,8 +497,12 @@ describe('GET /v1/recovery/analytics route', () => {
 
   test('200 with populated state after archiving via the store', async () => {
     const { app, recoveryStore } = setup();
-    // Seed the store with 3 archives via the same archive() method
-    // the real adopters use.
+    // Seed the store with 3 archives using NOW as the timestamp so the
+    // records fall within the analytics window. The app is bootstrapped
+    // with now: () => NOW (2026-05-21); the window is [NOW-30d, NOW].
+    // Without passing NOW to archive(), the store uses new Date() (real
+    // current time) which is AFTER NOW, placing records outside the window
+    // and producing total_archives_in_window = 0.
     for (let i = 0; i < 3; i++) {
       await recoveryStore.archive({
         tenant_id: TENANT,
@@ -508,7 +512,7 @@ describe('GET /v1/recovery/analytics route', () => {
         original_table: 'app_bff.webhook_subscriptions',
         payload: { id: `wh-${i}` },
         deleted_by: 'alice.admin',
-      });
+      }, NOW);
     }
     const r = await request(app).get('/v1/recovery/analytics').set(HEADERS);
     expect(r.status).toBe(200);
@@ -565,7 +569,9 @@ describe('GET /v1/recovery/analytics route', () => {
 
   test('cross-tenant: a BIL admin sees only BIL data', async () => {
     const { app, recoveryStore } = setup();
-    // Archive 2 BANK_DEMO records + 3 BIL records.
+    // Archive 2 BANK_DEMO records + 3 BIL records using NOW as the
+    // timestamp to keep them inside the analytics window (see comment
+    // in the populated-state test above).
     for (let i = 0; i < 2; i++) {
       await recoveryStore.archive({
         tenant_id: 'BANK_DEMO',
@@ -575,7 +581,7 @@ describe('GET /v1/recovery/analytics route', () => {
         original_table: 'app_bff.webhook_subscriptions',
         payload: {},
         deleted_by: 'alice.admin',
-      });
+      }, NOW);
     }
     for (let i = 0; i < 3; i++) {
       await recoveryStore.archive({
@@ -586,7 +592,7 @@ describe('GET /v1/recovery/analytics route', () => {
         original_table: 'app_bff.webhook_subscriptions',
         payload: {},
         deleted_by: 'bil.admin',
-      });
+      }, NOW);
     }
     const r = await request(app)
       .get('/v1/recovery/analytics')

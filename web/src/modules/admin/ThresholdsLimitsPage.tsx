@@ -35,7 +35,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
 import {
   api,
-  type IndicatorThresholdRow,
   type ThresholdAuditEvent,
   type ThresholdDriftRow,
   type ThresholdEffectiveRow,

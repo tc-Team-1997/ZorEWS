@@ -45,8 +45,11 @@ describe('i18n', () => {
     await user.selectOptions(toggle, 'hi');
 
     await waitFor(() => {
-      // "डैशबोर्ड" is the HI translation of "Dashboard"
-      expect(screen.getByRole('link', { name: /डैशबोर्ड/ })).toBeInTheDocument();
+      // "डैशबोर्ड" is the HI translation of "Dashboard". Use getAllByRole
+      // since the nav may render the label in both the desktop sidebar and a
+      // mobile nav — multiple matching elements are acceptable here.
+      const links = screen.getAllByRole('link', { name: /डैशबोर्ड/ });
+      expect(links.length).toBeGreaterThanOrEqual(1);
     });
     // English label should be gone after the switch.
     expect(screen.queryByRole('link', { name: /^dashboard$/i })).not.toBeInTheDocument();

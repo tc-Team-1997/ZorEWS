@@ -17,8 +17,8 @@ const NOW = new Date('2026-05-23T12:00:00.000Z');
 beforeEach(() => _resetMissingMastersStore());
 
 describe('enum', () => {
-  it('has 12 master types', () => {
-    expect(MISSING_MASTER_TYPES).toHaveLength(12);
+  it('has 16 master types', () => {
+    expect(MISSING_MASTER_TYPES).toHaveLength(16);
     expect(MISSING_MASTER_TYPES).toContain('currencies');
     expect(MISSING_MASTER_TYPES).toContain('regulators');
   });

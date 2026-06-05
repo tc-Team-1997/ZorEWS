@@ -140,7 +140,7 @@ describe('AuditComplianceReportsPage', () => {
 });
 
 describe('RecoveryCenterPage', () => {
-  it('admin sees the landing + all 4 cards', () => {
+  it('admin sees the landing + all 10 cards', () => {
     setUser('admin');
     renderRecovery();
     expect(screen.getByTestId('recovery-center-page')).toBeInTheDocument();
@@ -161,9 +161,12 @@ describe('RecoveryCenterPage', () => {
     expect(screen.queryByTestId('recovery-center-page')).not.toBeInTheDocument();
   });
 
-  it('exports exactly 4 cards in canonical order', () => {
+  it('exports exactly 10 cards in canonical order', () => {
     const ids = RECOVERY_CENTER_CARDS.map((c) => c.id);
-    expect(ids).toEqual(['deleted', 'restore', 'permanent-delete', 'analytics']);
+    expect(ids).toEqual([
+      'deleted', 'restore', 'permanent-delete', 'analytics',
+      'workflow', 'history', 'search', 'policies', 'rbac', 'governance',
+    ]);
   });
 
   it('permanent-delete card uses the danger tone', () => {

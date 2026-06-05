@@ -29,11 +29,14 @@ function envelope<T>(body: T) {
   };
 }
 
-const NOW = new Date('2026-05-18T12:00:00Z');
-const TODAY_ISO = '2026-05-18T08:30:00Z';
-const YESTERDAY_ISO = '2026-05-17T15:00:00Z';
-const LAST_WEEK_ISO = '2026-05-14T10:00:00Z';
-const OLD_ISO = '2026-05-01T09:00:00Z';
+// Use RELATIVE dates so the bucket test is calendar-safe regardless of
+// when the suite runs. Fixed ISO dates (2026-05-xx) fell outside the
+// "today / yesterday / this_week" windows once real time passed them.
+const NOW = new Date();
+const TODAY_ISO = new Date(NOW.getTime() - 2 * 3600_000).toISOString();        // 2h ago → today
+const YESTERDAY_ISO = new Date(NOW.getTime() - 26 * 3600_000).toISOString();   // 26h ago → yesterday
+const LAST_WEEK_ISO = new Date(NOW.getTime() - 4 * 86400_000).toISOString();   // 4d ago → this_week
+const OLD_ISO = new Date(NOW.getTime() - 30 * 86400_000).toISOString();        // 30d ago → older
 
 const SAMPLE_EVENTS: TrackingEvent[] = [
   {
