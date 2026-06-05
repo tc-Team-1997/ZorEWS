@@ -35,6 +35,7 @@ import {
 import { AlertAnalyticsSection } from '@/components/dashboard/AlertAnalyticsSection';
 import { RecoveryStatsCard } from '@/components/dashboard/RecoveryStatsCard';
 import { PortfolioInsightsRow } from '@/modules/dashboard/PortfolioInsightsRow';
+import { EnterpriseCommandCenter } from '@/modules/dashboard/EnterpriseCommandCenter';
 
 const SEVERITY_FILL: Record<string, string> = {
   critical: color.danger,
@@ -147,9 +148,21 @@ export function DashboardPage() {
   return (
     <div>
       <PageHeader
-        title="EWS Dashboard"
-        subtitle="Portfolio-wide risk posture · refreshed every 60 seconds"
+        title="Enterprise Risk Command Center"
+        subtitle="Portfolio-wide risk posture · Enterprise AI-powered · Live"
       />
+
+      {/* Enterprise Command Center — 10 intelligence sections (additive, no existing widgets removed) */}
+      <EnterpriseCommandCenter />
+
+      {/* ── Divider: existing operational dashboard below ── */}
+      <div className="mt-6 mb-4 flex items-center gap-3">
+        <div className="flex-1 h-px bg-[#E5E7EB]" />
+        <span className="text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-widest px-2">
+          Operational Dashboard
+        </span>
+        <div className="flex-1 h-px bg-[#E5E7EB]" />
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         <MetricCard
