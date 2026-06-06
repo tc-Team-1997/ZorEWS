@@ -40,6 +40,10 @@ import {
   findRoleGuide,
   formatRoleGuideResponse,
 } from './copilotRoleGuideCatalog';
+// ── Enterprise Brain Layer imports (Phase 1-9) ────────────────────────────
+import { detectLanguage, formatConceptResponse } from './copilotLanguageEngine';
+import { findConcept } from './copilotConceptDictionary';
+import { reasonAndRespond } from './copilotReasoningEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -156,6 +160,8 @@ type Intent =
   | 'workflow_explain'  // "How does alert lifecycle work?" / "Explain maker-checker"
   | 'role_training'     // "I am a Risk Analyst" / "Guide for CRO"
   | 'where_to_find'     // "Where can I manage rules?" / "Where is compliance?"
+  // ── Enterprise Brain Layer ──
+  | 'concept_explain'   // "What is NPA?" / "NPA kya hai?" / "DPD kya hota hai?"
   | 'fallback';
 
 const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
@@ -231,6 +237,13 @@ const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
   // Navigation
   { pattern: /where\s+(can\s+i|do\s+i|is|are)\s+(manage|see|find|view|configure|check|access|navigate|go\s+to)/i, intent: 'where_to_find' },
   { pattern: /where\s+is\s+(compliance|rules|alerts|cases|investigations|dashboard|reports|iam|governance|security|recovery|audit|ai|model|integration|data|operations|notification|streaming)/i, intent: 'where_to_find' },
+  // ── Enterprise Brain Layer — multilingual concept detection ───────────
+  // Hindi/Hinglish concept queries
+  { pattern: /\b(npa|sma|dpd|ews|ltv|dscr|crar|ecl|ifrs9|basel|pd\b|lgd|ead|raroc|ots|sarfaesi|write.off)\b.*(kya|hai|matlab|matlab\s+kya|means|explain)/i, intent: 'concept_explain' },
+  { pattern: /(kya\s+(h(ai|ota|oti)|hota|hoti|hote))\s+(npa|sma|dpd|ews|kyc|aml|sar|persistency|lapse|solvency|crar|ecl|ifrs9|claims\s+ratio|shap|psi|rwa|sarfaesi|ots|write.off|fraud\s+ring|channel\s+risk|data\s+lineage|audit\s+trail|maker.checker|rbac)/i, intent: 'concept_explain' },
+  // English concept queries (broad)
+  { pattern: /what\s+is\s+(an?\s+|the\s+)?(npa|sma|dpd|ews|ltv|dscr|crar|ecl|ifrs9|basel|probability\s+of\s+default|loss\s+given\s+default|exposure\s+at\s+default|ots|sarfaesi|write.off|fraud\s+ring|synthetic\s+identity|aml|kyc|sar|persistency|lapse\s+rate|claims\s+ratio|solvency\s+ratio|reinsurance|irdai|channel\s+risk|underwriting|stress\s+testing|raroc|shap|model\s+drift|psi|data\s+lineage|audit\s+trail|maker.checker|rbac|hash\s+chain|api\s+gateway|operational\s+risk|recovery\s+rate|credit\s+risk|portfolio\s+concentration|data\s+quality|digital\s+twin|autonomous\s+agent|integration\s+pipeline)/i, intent: 'concept_explain' },
+  { pattern: /define|meaning\s+of|explain\s+the\s+concept|what\s+does\s+(npa|sma|dpd|ecl|crar|shap|psi|dscr|ltv|ods|ots)\s+(mean|stand|refer)/i, intent: 'concept_explain' },
 ];
 
 export function detectIntent(query: string): Intent {
@@ -389,6 +402,9 @@ export function generateResponse(
       return workflowExplainResponse(resolvedQuery);
     case 'role_training':
       return roleTrainingResponse(resolvedQuery);
+    // ── Enterprise Brain Layer ────────────────────────────────────────
+    case 'concept_explain':
+      return conceptExplainResponse(resolvedQuery);
     default:
       return fallbackResponse(query, context);
   }
@@ -744,11 +760,61 @@ function capabilitiesResponse(): CopilotResponse {
   };
 }
 
+// ─── Enterprise Brain: Concept Explain ───────────────────────────────────
+
+function conceptExplainResponse(query: string): CopilotResponse {
+  const lang = detectLanguage(query);
+  const concept = findConcept(query);
+  if (concept) {
+    return {
+      reply: formatConceptResponse(concept, lang),
+      suggestions: concept.relatedTerms.slice(0, 2).map(t =>
+        lang === 'hi' ? `${t} क्या है?` : lang === 'hinglish' ? `${t} kya hai?` : `What is ${t}?`
+      ).concat(
+        lang === 'hi' ? ['संबंधित मॉड्यूल दिखाएं', 'इसका workflow क्या है?']
+        : lang === 'hinglish' ? ['Related modules dikhao', 'Iska workflow kya hai?']
+        : ['Show related modules', `How does ${concept.term} work?`]
+      ),
+      sections: [
+        {
+          title: lang === 'hi' ? 'संबंधित अवधारणाएं' : 'Related Concepts',
+          type: 'bullets',
+          items: concept.relatedTerms,
+        },
+      ],
+      actions: concept.relatedModules.slice(0, 2).map(m => {
+        const mod = MODULE_REGISTRY.find(mr => mr.name.toLowerCase().includes(m.toLowerCase().split(' ')[0]!));
+        return { label: m, href: mod ? (Array.isArray(mod.route) ? mod.route[0]! : mod.route) : '/', icon: 'external-link' };
+      }),
+    };
+  }
+  // Use reasoning engine as fallback
+  return reasonAndRespond(query);
+}
+
 function fallbackResponse(query: string, context: ChatContext): CopilotResponse {
   const page = context.page ?? 'unknown';
   const q = query.toLowerCase();
 
-  // Phase 10: Smart Fallback Engine — never return generic responses
+  // Phase 10 + Enterprise Brain: Smart Fallback — NEVER return generic responses
+
+  // 0. Enterprise Brain — concept dictionary (200+ BFSI terms)
+  const concept = findConcept(q);
+  if (concept) {
+    const lang = detectLanguage(query);
+    return {
+      reply: formatConceptResponse(concept, lang),
+      suggestions: concept.relatedTerms.slice(0, 2).map(t =>
+        lang === 'hi' ? `${t} क्या है?` : lang === 'hinglish' ? `${t} kya hai?` : `What is ${t}?`
+      ).concat(['Show related modules', 'Executive summary']),
+    };
+  }
+
+  // 0.5 Enterprise Brain — Reasoning Engine (multilingual + domain inference)
+  const reasoned = reasonAndRespond(q, context.page ? `/${context.page}` : undefined);
+  if (reasoned && reasoned.reply && !reasoned.reply.includes('ZorEWS Copilot is your enterprise knowledge brain')) {
+    return reasoned;
+  }
 
   // 1. Search module catalog
   const moduleMatches = searchModules(q);
