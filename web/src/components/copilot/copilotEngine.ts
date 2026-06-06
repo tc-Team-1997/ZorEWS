@@ -5,8 +5,41 @@
 // All synthesis is deterministic (no external AI call required for demo).
 // The existing /v1/copilot/chat API is still used as the primary path;
 // this engine enriches the SPA-side experience before/after the API call.
+//
+// ── Knowledge Intelligence Layer (additive, 100% backward compatible) ──
+// Phase 1:  Platform Knowledge Registry  → copilotKnowledgeRegistry.ts
+// Phase 2:  Full Module Coverage         → MODULE_REGISTRY (30+ modules)
+// Phase 3:  Module Explainability        → module_explain intent
+// Phase 4:  Workflow Explainability      → workflow_explain intent
+// Phase 5:  Screen Awareness             → pageSummaryResponse uses registry
+// Phase 6:  Navigation Assistant         → navigateResponse uses NavCatalog
+// Phase 7:  Role-Based Training          → role_training intent
+// Phase 8:  Contextual Page Summaries    → smart fallback (no generic responses)
+// Phase 9:  Knowledge Graph              → 4 catalog files
+// Phase 10: Smart Fallback Engine        → fallbackResponse always meaningful
 
 import type { ChatContext } from '@/store/chat';
+
+// ── Knowledge Intelligence Layer imports ─────────────────────────────────
+import {
+  MODULE_REGISTRY,
+  findModuleByRoute,
+  findModuleById,
+  searchModules,
+} from './copilotKnowledgeRegistry';
+import {
+  findWorkflow,
+  formatWorkflowResponse,
+  searchWorkflows,
+} from './copilotWorkflowCatalog';
+import {
+  searchNavEntries,
+  NAV_CATALOG,
+} from './copilotNavigationCatalog';
+import {
+  findRoleGuide,
+  formatRoleGuideResponse,
+} from './copilotRoleGuideCatalog';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -118,6 +151,11 @@ type Intent =
   | 'alert_radar'
   | 'page_summary'
   | 'capabilities'
+  // ── Knowledge Intelligence Layer new intents ──
+  | 'module_explain'    // "What is Data Ingestion?" / "Explain Investigation Center"
+  | 'workflow_explain'  // "How does alert lifecycle work?" / "Explain maker-checker"
+  | 'role_training'     // "I am a Risk Analyst" / "Guide for CRO"
+  | 'where_to_find'     // "Where can I manage rules?" / "Where is compliance?"
   | 'fallback';
 
 const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
@@ -175,6 +213,24 @@ const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
   { pattern: /what\s+can\s+you|how\s+do\s+you\s+work|capabilities|help/i, intent: 'capabilities' },
   // Tenant bench
   { pattern: /benchmark|compare\s+(tenant|bank|insurer)|peer\s+comparison/i, intent: 'tenant_bench' },
+  // ── Knowledge Intelligence Layer ──────────────────────────────────────
+  // Module explainability
+  { pattern: /what\s+is\s+(data\s+ingestion|investigation\s+center|data\s+fabric|digital\s+twin|predictive\s+risk|recovery\s+center|audit\s+center|ai\s+governance|autonomous\s+risk|ai\s+decisioning|integration\s+marketplace|event\s+streaming|board\s+reporting|operations\s+center|iam\s+center|rule\s+(engine|center)|governance\s+center|notification|data\s+quality|data\s+profiling|data\s+catalog|executive\s+cockpit|role.based\s+dashboard)/i, intent: 'module_explain' },
+  { pattern: /explain\s+(the\s+)?(data\s+ingestion|investigation|data\s+fabric|digital\s+twin|predictive|recovery\s+center|audit|ai\s+governance|autonomous|decisioning|integration|event\s+streaming|board\s+reporting|operations|iam|rule\s+engine|governance|notification|data\s+quality|data\s+profiling|data\s+catalog|executive\s+cockpit|compliance\s+center|security\s+center)/i, intent: 'module_explain' },
+  { pattern: /why\s+do\s+we\s+need|what\s+does\s+.+\s+(do|center)\s*\?|purpose\s+of|how\s+does\s+.+\s+center\s+work/i, intent: 'module_explain' },
+  { pattern: /tell\s+me\s+about\s+(data|alert|case|invest|compliance|predict|govern|ai|integrat|recovery|audit|rule|security|iam|report|operation|board|event|stream|fabric|twin|autonomous|decisioning|notif)/i, intent: 'module_explain' },
+  // Workflow explainability
+  { pattern: /how\s+does\s+(alert|case|invest|compliance|recovery|maker.checker|ai\s+decis|npa|data\s+ingestion|model\s+promot)\s+(lifecycle|workflow|work|flow|process)/i, intent: 'workflow_explain' },
+  { pattern: /explain\s+(alert|case|investigation|compliance|recovery|maker.checker|npa\s+early.warning|model\s+promot)\s+(lifecycle|workflow|work|flow|process)/i, intent: 'workflow_explain' },
+  { pattern: /step.by.step|complete\s+(flow|process|workflow)|walk\s+me\s+through/i, intent: 'workflow_explain' },
+  { pattern: /how\s+(maker.checker|4.eyes|four.eyes|segregation)\s+work/i, intent: 'workflow_explain' },
+  // Role-based training
+  { pattern: /i\s+(am\s+a?|'m\s+a?|work\s+as)\s+(risk\s+analyst|fraud\s+analyst|collection\s+officer|supervisor|cro|executive|compliance\s+officer|auditor|admin|branch\s+manager|recovery\s+manager)/i, intent: 'role_training' },
+  { pattern: /guide\s+for\s+(risk\s+analyst|fraud\s+analyst|collection|supervisor|cro|executive|compliance|auditor|admin)/i, intent: 'role_training' },
+  { pattern: /training\s+(for|guide)|role\s+guide|what\s+should\s+(a|an)\s+(risk\s+analyst|fraud|collection|supervisor|cro|compliance|auditor)\s+(do|focus|use)/i, intent: 'role_training' },
+  // Navigation
+  { pattern: /where\s+(can\s+i|do\s+i|is|are)\s+(manage|see|find|view|configure|check|access|navigate|go\s+to)/i, intent: 'where_to_find' },
+  { pattern: /where\s+is\s+(compliance|rules|alerts|cases|investigations|dashboard|reports|iam|governance|security|recovery|audit|ai|model|integration|data|operations|notification|streaming)/i, intent: 'where_to_find' },
 ];
 
 export function detectIntent(query: string): Intent {
@@ -320,11 +376,19 @@ export function generateResponse(
     case 'tenant_bench':
       return tenantBenchResponse(tenant, day);
     case 'navigate':
+    case 'where_to_find':
       return navigateResponse(resolvedQuery);
     case 'page_summary':
       return pageSummaryResponse(context);
     case 'capabilities':
       return capabilitiesResponse();
+    // ── Knowledge Intelligence Layer handlers ──────────────────────────
+    case 'module_explain':
+      return moduleExplainResponse(resolvedQuery);
+    case 'workflow_explain':
+      return workflowExplainResponse(resolvedQuery);
+    case 'role_training':
+      return roleTrainingResponse(resolvedQuery);
     default:
       return fallbackResponse(query, context);
   }
@@ -575,55 +639,97 @@ function tenantBenchResponse(_tenant: string, day: string): CopilotResponse {
 }
 
 function navigateResponse(query: string): CopilotResponse {
-  const MODULE_MAP: Array<{ pattern: RegExp; label: string; href: string }> = [
-    { pattern: /executive|cockpit/i, label: 'Executive Risk Cockpit', href: '/executive-cockpit' },
-    { pattern: /investigat/i,        label: 'Investigation Center',   href: '/investigation-center' },
-    { pattern: /compliance|regulat/i, label: 'Compliance Center',    href: '/regulatory-compliance-center' },
-    { pattern: /predict/i,           label: 'Predictive Risk Center', href: '/predictive-risk-center' },
-    { pattern: /governance/i,        label: 'Governance Center',      href: '/admin/governance' },
-    { pattern: /security|iam/i,      label: 'Security Center',        href: '/admin/security' },
-    { pattern: /dashboard/i,         label: 'Dashboard',              href: '/' },
-    { pattern: /alert/i,             label: 'Alert Center',           href: '/alerts' },
-    { pattern: /report/i,            label: 'Reports Center',          href: '/reports' },
-    { pattern: /recover/i,           label: 'Recovery Center',        href: '/recovery-center' },
-    { pattern: /autonomous/i,        label: 'Autonomous Risk Center', href: '/autonomous-risk-center' },
-    { pattern: /data.fabric/i,       label: 'Data Fabric Center',     href: '/data-fabric-center' },
-    { pattern: /digital.twin/i,      label: 'Digital Twin Center',    href: '/digital-twin-center' },
-    { pattern: /ai.decis/i,          label: 'AI Decisioning Center',  href: '/ai-decisioning-center' },
-    { pattern: /integrat/i,          label: 'Integration Marketplace', href: '/integration-marketplace' },
-    { pattern: /operations?/i,        label: 'Operations Center',      href: '/operations-center' },
-  ];
-  const match = MODULE_MAP.find(m => m.pattern.test(query));
-  if (match) {
+  // First: try Knowledge Navigation Catalog (comprehensive)
+  const navEntries = searchNavEntries(query);
+  if (navEntries.length > 0) {
+    const primary = navEntries[0]!;
+    const others = navEntries.slice(1, 4);
+    const otherLinks = others.map(e => `• [${e.label}](${e.route})`).join('\n');
     return {
-      reply: `Opening **${match.label}**. Click the button below to navigate.`,
-      suggestions: ['Show overview first', 'What\'s in this center?'],
-      actions: [{ label: match.label, href: match.href, icon: 'external-link' }],
+      reply: `**Navigate to: ${primary.label}**\n\n${primary.description}\n\nRoute: \`${primary.route}\`${others.length > 0 ? `\n\n**Related modules:**\n${otherLinks}` : ''}`,
+      suggestions: [
+        'What does this module do?',
+        'Show me an overview',
+        ...navEntries.slice(1, 3).map(e => e.label),
+      ],
+      actions: [
+        { label: primary.label, href: primary.route, icon: 'external-link' },
+        ...others.map(e => ({ label: e.label, href: e.route, icon: 'arrow-right' })),
+      ],
     };
   }
+  // Fallback: show navigation categories
+  const categories = ['risk', 'compliance', 'ai', 'data', 'reporting', 'admin'];
+  const sample = categories.flatMap(c => NAV_CATALOG.filter(e => e.category === c).slice(0, 2));
   return {
-    reply: `I can navigate to any enterprise center. Which module would you like to open?\n\nAvailable: Executive Cockpit, Investigation Center, Compliance, Predictive Risk, Governance, Security, Reports, Recovery, Autonomous Risk, Data Fabric, Digital Twin, AI Decisioning, Integration Marketplace, Operations Center`,
-    suggestions: ['Executive Cockpit', 'Investigation Center', 'Compliance Center', 'Predictive Center'],
+    reply: `I can navigate to any platform module. Which area are you looking for?\n\n**Risk:** Alert Center, Investigation Center, Predictive Risk, CMS\n**Compliance:** Regulatory Compliance, Audit Center, Board Reporting\n**AI/ML:** AI Governance, Autonomous Risk, Digital Twin, AI Decisioning\n**Data:** Data Ingestion, Data Quality, Data Fabric\n**Admin:** IAM Center, Governance, Security, Operations\n\nJust ask "Where is [module name]?" and I'll guide you there.`,
+    suggestions: ['Where is compliance?', 'Where can I manage rules?', 'Where are investigations?', 'Where is AI governance?'],
+    actions: sample.slice(0, 4).map(e => ({ label: e.label, href: e.route, icon: 'arrow-right' })),
   };
 }
 
 function pageSummaryResponse(context: ChatContext): CopilotResponse {
+  const path = context.page ?? 'unknown';
+
+  // Phase 5: Try Knowledge Registry first (comprehensive coverage)
+  const module = findModuleByRoute(path === 'unknown' ? '' : `/${path}`);
+  if (module) {
+    const kpis = module.kpis.slice(0, 4).map(k => `• ${k}`).join('\n');
+    const actions = module.keyScreens.slice(0, 3);
+    const relatedNames = module.relatedModules.slice(0, 3).join(', ');
+    return {
+      reply: `**${module.name}**\n\n${module.purpose}\n\n**Business Objective:** ${module.businessObjective}\n\n**Key KPIs:**\n${kpis}\n\n**Main Screens:** ${actions.join(' · ')}\n\n**Related modules:** ${relatedNames}\n\n*Users: ${module.users.join(', ')}*`,
+      suggestions: module.exampleQuestions.slice(0, 4),
+      sections: [
+        { title: 'Inputs', type: 'bullets', items: module.inputs.slice(0, 4) },
+        { title: 'Outputs', type: 'bullets', items: module.outputs.slice(0, 4) },
+      ],
+      actions: (Array.isArray(module.route)
+        ? [{ label: module.name, href: module.route[0]!, icon: 'external-link' }]
+        : [{ label: module.name, href: module.route, icon: 'external-link' }]
+      ),
+    };
+  }
+
+  // Phase 8: Legacy page key fallback (backward compat)
   const PAGE_SUMMARIES: Record<string, string> = {
-    dashboard: 'This is the Enterprise Risk Command Center — your single view of portfolio-wide risk. It shows the Enterprise Risk Index, executive briefing, emerging risks, heat map, forecast strip, and AI-powered insights across all connected modules.',
-    alerts: 'This is the Alert Management Center. It shows all risk alerts across the portfolio, filtered by severity (Critical/High/Medium/Low). You can acknowledge alerts, create investigations, and track SLA compliance.',
-    customer: 'This is the Customer Risk Profile page. It shows the complete risk picture for this borrower: PD score, SHAP explainability, linked alerts, open cases, and predictive outlook.',
-    customers: 'This is the Customer Intelligence Center. It lists all monitored customers with risk scores, exposure, and DPD metrics. Filter by risk band, segment, or SMA classification.',
-    case: 'This is the Case Management view for an individual case. It shows the full investigation lifecycle, evidence, timeline, and maker-checker approvals.',
-    cases: 'This is the Case Management System (CMS). It shows all open investigations across fraud, NPA, KYC, and compliance categories.',
-    rules: 'This is the Rule Engine Center. It manages EWS rules — their conditions, firing frequency, and performance metrics.',
-    scenario: 'This is the Scenario Simulation Engine. Run stress tests based on RBI/IRDAI macroeconomic scenarios (GDP shock, rate hike, FX devaluation) and see portfolio impact.',
-    reports: 'This is the Enterprise Reporting Center. Schedule, generate, and export regulatory and executive reports.',
-    unknown: 'I\'m ZorEWS Copilot — your enterprise risk intelligence assistant. I can help you navigate any module, search for entities, explain risk decisions, and generate executive summaries.',
+    dashboard: 'This is the **Enterprise Risk Command Center** — your single view of portfolio-wide risk. It shows the Enterprise Risk Index, executive briefing, emerging risks, heat map, forecast strip, and AI-powered insights across all connected modules.',
+    alerts: 'This is the **Alert Management Center**. It shows all risk alerts across the portfolio, filtered by severity (Critical/High/Medium/Low). You can acknowledge alerts, create investigations, and track SLA compliance.',
+    customer: 'This is the **Customer Risk Profile** page. It shows the complete risk picture for this borrower: PD score, SHAP explainability, linked alerts, open cases, and predictive outlook.',
+    customers: 'This is the **Customer Intelligence Center**. It lists all monitored customers with risk scores, exposure, and DPD metrics. Filter by risk band, segment, or SMA classification.',
+    case: 'This is the **Case Management** view for an individual case. It shows the full investigation lifecycle, evidence, timeline, and maker-checker approvals.',
+    cases: 'This is the **Case Management System (CMS)**. It shows all open investigations across fraud, NPA, KYC, and compliance categories.',
+    rules: 'This is the **Rule Engine Center**. It manages EWS rules — their conditions, firing frequency, and performance metrics.',
+    scenario: 'This is the **Scenario Simulation Engine (Digital Twin)**. Run stress tests based on RBI/IRDAI macroeconomic scenarios (GDP shock, rate hike, FX devaluation) and see portfolio impact on ECL and NPA.',
+    reports: 'This is the **Enterprise Reporting Center**. Schedule, generate, and export regulatory and executive reports in PDF/Excel/CSV format.',
   };
-  const page = context.page ?? 'unknown';
+  const summary = PAGE_SUMMARIES[path];
+  if (summary) {
+    return {
+      reply: summary,
+      suggestions: getSuggestionsForPage(path).slice(0, 4),
+    };
+  }
+
+  // Phase 10: Smart fallback — search catalog by path keywords, never generic
+  const pathKeywords = path.replace(/[-_]/g, ' ').replace(/\//g, ' ');
+  const matches = searchModules(pathKeywords);
+  if (matches.length > 0) {
+    const m = matches[0]!;
+    return {
+      reply: `**${m.name}**\n\n${m.summary}\n\n**Purpose:** ${m.purpose}\n\n**Key users:** ${m.users.join(', ')}\n\n**Main KPIs:** ${m.kpis.slice(0, 3).join(' · ')}`,
+      suggestions: m.exampleQuestions.slice(0, 4),
+    };
+  }
+
+  // Absolute last resort — still meaningful, never "page not supported"
   return {
-    reply: PAGE_SUMMARIES[page] ?? PAGE_SUMMARIES.unknown,
-    suggestions: getSuggestionsForPage(page).slice(0, 4),
+    reply: `**ZorEWS Platform — Current Page Context**\n\nYou are on: \`${path}\`\n\nI can help you understand any platform module, navigate anywhere, or answer risk questions.\n\nTry:\n• "What is this page?" — I'll explain the current module\n• "Show me navigation options" — I'll list all available centers\n• "Executive summary" — Get today's risk briefing\n• "How does [workflow] work?" — Step-by-step explanations`,
+    suggestions: getSuggestionsForPage(path).slice(0, 4),
+    actions: [
+      { label: 'All Modules', href: '/', icon: 'layout-dashboard' },
+      { label: 'Navigation Help', href: '/dashboards/role-based', icon: 'compass' },
+    ],
   };
 }
 
@@ -640,8 +746,147 @@ function capabilitiesResponse(): CopilotResponse {
 
 function fallbackResponse(query: string, context: ChatContext): CopilotResponse {
   const page = context.page ?? 'unknown';
+  const q = query.toLowerCase();
+
+  // Phase 10: Smart Fallback Engine — never return generic responses
+
+  // 1. Search module catalog
+  const moduleMatches = searchModules(q);
+  if (moduleMatches.length > 0) {
+    const m = moduleMatches[0]!;
+    return {
+      reply: `**${m.name}**\n\n${m.summary}\n\n**Purpose:** ${m.purpose}\n\n**Users:** ${m.users.join(', ')}\n\n**Key KPIs:** ${m.kpis.slice(0, 3).join(' · ')}`,
+      suggestions: m.exampleQuestions.slice(0, 4),
+      actions: (Array.isArray(m.route)
+        ? [{ label: `Open ${m.name}`, href: m.route[0]!, icon: 'external-link' }]
+        : [{ label: `Open ${m.name}`, href: m.route, icon: 'external-link' }]
+      ),
+    };
+  }
+
+  // 2. Search workflow catalog
+  const workflowMatches = searchWorkflows(q);
+  if (workflowMatches.length > 0) {
+    const w = workflowMatches[0]!;
+    return {
+      reply: formatWorkflowResponse(w),
+      suggestions: [`Navigate to ${w.name}`, 'What are the actors?', 'Show related module', 'How long does this take?'],
+      actions: [{ label: w.name, href: w.route, icon: 'git-branch' }],
+    };
+  }
+
+  // 3. Search navigation catalog
+  const navMatches = searchNavEntries(q);
+  if (navMatches.length > 0) {
+    const n = navMatches[0]!;
+    return {
+      reply: `**I found a relevant module:** ${n.label}\n\n${n.description}\n\nClick below to navigate there, or ask me to explain what this module does.`,
+      suggestions: [`What does ${n.label} do?`, 'Executive summary', 'Show all modules', 'Navigation help'],
+      actions: [{ label: n.label, href: n.route, icon: 'external-link' }],
+    };
+  }
+
+  // 4. Context-aware response based on current page
+  const pageModule = findModuleByRoute(page === 'unknown' ? '' : `/${page}`);
+  if (pageModule) {
+    return {
+      reply: `I'm on the **${pageModule.name}** page. For your query "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}" — let me help you with what this module offers:\n\n${pageModule.summary}\n\nYou can ask me:\n${pageModule.exampleQuestions.slice(0, 4).map(q => `• "${q}"`).join('\n')}`,
+      suggestions: pageModule.exampleQuestions.slice(0, 4),
+    };
+  }
+
+  // 5. Helpful fallback with specific suggestions — never "I don't know"
   return {
-    reply: `I understand you're asking about: "${query.slice(0, 80)}${query.length > 80 ? '...' : ''}"\n\nI can help with:\n• Risk intelligence across all 16 enterprise centers\n• Customer/case/alert/loan search by ID\n• Executive briefings and compliance status\n• Predictive forecasts and explainability\n• Navigation to any enterprise module\n\nTry a more specific query, or use one of the suggestions below.`,
-    suggestions: getSuggestionsForPage(page).slice(0, 4),
+    reply: `I understand you're asking: *"${query.slice(0, 80)}${query.length > 80 ? '...' : ''}"*\n\nLet me help you navigate this. ZorEWS has **30+ enterprise modules** covering:\n\n🔴 **Risk:** Alert Center, Predictive Risk, Investigation Center, CMS\n🟡 **Compliance:** Regulatory Compliance, Audit Center, Board Reporting\n🔵 **AI/ML:** AI Governance, Autonomous Risk, Digital Twin, AI Decisioning\n🟢 **Data:** Data Ingestion, Data Quality, Data Fabric, Data Profiling\n⚙️ **Admin:** IAM, Security, Operations, Integration Marketplace\n\n**Try:**\n• "What is [module name]?" to understand any module\n• "How does [workflow] work?" for step-by-step explanations\n• "I am a [your role]" for personalized guidance\n• "Where can I find [topic]?" for navigation`,
+    suggestions: [
+      getSuggestionsForPage(page)[0] ?? 'Executive summary',
+      'What modules does ZorEWS have?',
+      'How does alert lifecycle work?',
+      'Navigation help',
+    ],
+    actions: [
+      { label: 'Dashboard', href: '/', icon: 'layout-dashboard' },
+      { label: 'Alert Center', href: '/alerts', icon: 'bell' },
+    ],
+  };
+}
+
+// ─── Knowledge Intelligence Layer Response Builders ────────────────────────
+
+function moduleExplainResponse(query: string): CopilotResponse {
+  // Search by query
+  const matches = searchModules(query);
+  if (matches.length === 0) {
+    // Try to find by module name keywords
+    const q = query.toLowerCase();
+    const found = MODULE_REGISTRY.find(m =>
+      q.includes(m.name.toLowerCase().replace(' center', '').replace(' management', '').trim()) ||
+      m.id.split('_').some(part => q.includes(part))
+    );
+    if (found) matches.push(found);
+  }
+
+  if (matches.length === 0) {
+    // Provide a list of all modules as a helpful response
+    const moduleList = MODULE_REGISTRY.map(m => `• **${m.name}** — ${m.summary.split('.')[0]}`).join('\n');
+    return {
+      reply: `I can explain any of the following ZorEWS platform modules. Which one would you like to know about?\n\n${moduleList}`,
+      suggestions: ['What is Investigation Center?', 'What is Data Fabric?', 'What is AI Governance?', 'What is Predictive Risk?'],
+    };
+  }
+
+  const m = matches[0]!;
+  const kpis = m.kpis.slice(0, 5).map(k => `• ${k}`).join('\n');
+  const inputs = m.inputs.slice(0, 4).map(i => `• ${i}`).join('\n');
+  const outputs = m.outputs.slice(0, 4).map(o => `• ${o}`).join('\n');
+  const screens = m.keyScreens.slice(0, 4).join(' · ');
+
+  return {
+    reply: `**${m.name}**\n\n**Purpose:** ${m.purpose}\n\n**Business Objective:** ${m.businessObjective}\n\n**Users:** ${m.users.join(', ')}\n\n**Key Inputs:**\n${inputs}\n\n**Key Outputs:**\n${outputs}\n\n**Key KPIs:**\n${kpis}\n\n**Main Screens:** ${screens}\n\n**Summary:** ${m.summary}`,
+    suggestions: m.exampleQuestions.slice(0, 4),
+    sections: [
+      { title: 'Related Modules', type: 'bullets', items: m.relatedModules.map(r => findModuleById(r)?.name ?? r) },
+    ],
+    actions: (Array.isArray(m.route)
+      ? [{ label: `Open ${m.name}`, href: m.route[0]!, icon: 'external-link' }]
+      : [{ label: `Open ${m.name}`, href: m.route, icon: 'external-link' }]
+    ),
+  };
+}
+
+function workflowExplainResponse(query: string): CopilotResponse {
+  const workflow = findWorkflow(query);
+  if (!workflow) {
+    const list = ['Alert Lifecycle', 'Case Workflow', 'Investigation Workflow', 'Maker-Checker Approval', 'Compliance Workflow', 'NPA Early Warning', 'Data Ingestion Flow', 'AI Model Promotion', 'Recovery Workflow'];
+    return {
+      reply: `I can explain any of these platform workflows in detail:\n\n${list.map(w => `• ${w}`).join('\n')}\n\nAsk "How does [workflow name] work?" for a step-by-step explanation.`,
+      suggestions: ['How does alert lifecycle work?', 'How does maker-checker work?', 'How does investigation workflow work?', 'How does NPA early warning work?'],
+    };
+  }
+  return {
+    reply: formatWorkflowResponse(workflow),
+    suggestions: [
+      `Navigate to ${workflow.name.split(' ')[0]} module`,
+      'What are the key actors?',
+      'What is the SLA for each step?',
+      'Related workflows',
+    ],
+    actions: [{ label: `Open ${workflow.relatedModule.replace('_', ' ')}`, href: workflow.route, icon: 'external-link' }],
+  };
+}
+
+function roleTrainingResponse(query: string): CopilotResponse {
+  const guide = findRoleGuide(query);
+  if (!guide) {
+    const roles = ['Risk Analyst', 'Fraud Analyst', 'Collection Officer', 'Supervisor', 'CRO / Executive', 'Compliance Officer', 'Auditor', 'Platform Admin'];
+    return {
+      reply: `I can provide personalized platform guidance for any of these roles:\n\n${roles.map(r => `• ${r}`).join('\n')}\n\nTell me your role: "I am a [role name]" and I'll guide you through responsibilities, key screens, and daily workflows.`,
+      suggestions: ['I am a Risk Analyst', 'I am a Compliance Officer', 'I am a CRO', 'I am an Auditor'],
+    };
+  }
+  return {
+    reply: formatRoleGuideResponse(guide),
+    suggestions: guide.suggestedQuestions.slice(0, 4),
+    actions: guide.primaryScreens.slice(0, 3).map(s => ({ label: s.label, href: s.route, icon: 'external-link' })),
   };
 }
