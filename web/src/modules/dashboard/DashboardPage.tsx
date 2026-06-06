@@ -574,7 +574,11 @@ export function DashboardPage() {
             </div>
             <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-[8px] px-3 py-1.5">
               <span className="text-[10px] text-[#9CA3AF]">Tenant</span>
-              <span className="text-[11px] font-semibold text-[#374151]">{tenantId}</span>
+              <span className="text-[11px] font-semibold text-[#374151]">
+                {tenantCtx?.organization_id
+                  ? getOrganization(tenantCtx.organization_id)?.name ?? orgName
+                  : tenantId === 'BIL' ? 'BIL Insurance Platform' : 'ZorFino Bank Demo'}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-[8px] px-3 py-1.5">
               <span className="text-[10px] text-[#9CA3AF]">Domain</span>
