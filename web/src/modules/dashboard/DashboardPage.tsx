@@ -566,25 +566,23 @@ export function DashboardPage() {
               Real-time Early Warning Intelligence · Updated {timeStr}, {dateStr}
             </p>
           </div>
-          {/* Context strip */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-[8px] px-3 py-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-[11px] font-medium text-[#374151]">{orgName}</span>
+          {/* Context strip — single tenant chip, no duplication */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Unified tenant chip */}
+            <div className="flex items-center gap-2 bg-white border border-[#E5E7EB] rounded-[8px] px-2.5 py-1.5 min-w-0">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-[#1F2937] leading-tight truncate max-w-[160px]">
+                  {tenantCtx?.organization_id
+                    ? getOrganization(tenantCtx.organization_id)?.name ?? orgName
+                    : tenantId === 'BIL' ? 'BIL Insurance Platform' : 'ZorFino Bank Demo'}
+                </p>
+                <p className="text-[9px] text-[#9CA3AF] leading-tight">
+                  {domainLabel} · {orgName}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-[8px] px-3 py-1.5">
-              <span className="text-[10px] text-[#9CA3AF]">Tenant</span>
-              <span className="text-[11px] font-semibold text-[#374151]">
-                {tenantCtx?.organization_id
-                  ? getOrganization(tenantCtx.organization_id)?.name ?? orgName
-                  : tenantId === 'BIL' ? 'BIL Insurance Platform' : 'ZorFino Bank Demo'}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-[8px] px-3 py-1.5">
-              <span className="text-[10px] text-[#9CA3AF]">Domain</span>
-              <span className="text-[11px] font-semibold text-[#4F46E5]">{domainLabel}</span>
-            </div>
-            <Link to="/executive-cockpit" className="flex items-center gap-1.5 bg-[#4F46E5] text-white rounded-[8px] px-3 py-1.5 text-[11px] font-medium hover:bg-[#4338CA] transition-colors">
+            <Link to="/executive-cockpit" className="flex items-center gap-1.5 bg-[#4F46E5] text-white rounded-[8px] px-3 py-1.5 text-[11px] font-medium hover:bg-[#4338CA] transition-colors shrink-0">
               Executive Cockpit <ArrowUpRight size={11} />
             </Link>
           </div>
