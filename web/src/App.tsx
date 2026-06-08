@@ -27,6 +27,8 @@ import { RequireDomain } from '@/components/layout/RequireDomain';
 import { DashboardPage } from '@/modules/dashboard/DashboardPage';
 // Role-Based Dashboard Engine — additive overlay (existing / dashboard untouched).
 import { RoleBasedDashboardPage } from '@/modules/dashboard/roleEngine/RoleBasedDashboardPage';
+// Dashboard Builder — additive new route /dashboards/builder
+import { DashboardBuilderPage } from '@/modules/dashboard/builder/DashboardBuilderPage';
 // Executive Risk Cockpit — additive overlay (existing dashboards untouched).
 import { ExecutiveCockpitPage } from '@/modules/executive/ExecutiveCockpitPage';
 // Predictive Risk Center — additive overlay; transforms ZorEWS from monitoring → predictive intelligence.
@@ -247,6 +249,8 @@ export function App() {
                 untouched). Resolves widgets per (role × domain × country ×
                 tenant × branch) governance. */}
             <Route path="dashboards/role-based" element={<RoleBasedDashboardPage />} />
+            {/* Dashboard Builder — drag-and-drop enterprise dashboard composer */}
+            <Route path="dashboards/builder" element={<DashboardBuilderPage />} />
             {/* Executive Risk Cockpit — additive overlay (existing dashboards
                 untouched). Role-gated inside the page to 7 executive personas. */}
             <Route path="executive-cockpit" element={<ExecutiveCockpitPage />} />

@@ -194,6 +194,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       // Resolves widgets per (role × domain × country × tenant × branch).
       // Existing "/" Dashboard untouched.
       { to: '/dashboards/role-based',        i18nKey: 'role_based_dashboard',    icon: LayoutDashboard, featured: true },
+      { to: '/dashboards/builder',           i18nKey: 'dashboard_builder',       icon: LayoutDashboard, requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       // Executive Risk Cockpit — gated inside the page to 7 executive personas.
       // Sidebar entry visible to admin + supervisor so they discover it; the
       // page itself bounces non-executive roles via canAccessExecutiveCockpit.

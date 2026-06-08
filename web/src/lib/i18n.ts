@@ -45,6 +45,7 @@ const en = {
   nav: {
     dashboard: 'Dashboard',
     role_based_dashboard: 'Role Dashboard',
+    dashboard_builder: 'Dashboard Builder',
     executive_cockpit: 'Executive Cockpit',
     predictive_risk_center: 'Predictive Risk Center',
     investigation_center: 'Investigation Center',
@@ -314,6 +315,7 @@ const hi: typeof en = {
   nav: {
     dashboard: 'डैशबोर्ड',
     role_based_dashboard: 'भूमिका डैशबोर्ड',
+    dashboard_builder: 'डैशबोर्ड बिल्डर',
     executive_cockpit: 'कार्यकारी कॉकपिट',
     predictive_risk_center: 'पूर्वानुमान जोखिम केंद्र',
     investigation_center: 'जाँच केंद्र',
@@ -585,6 +587,7 @@ const dz: typeof en = {
   nav: {
     dashboard: 'གདོང་ཁྲམ་',
     role_based_dashboard: 'གོ་ཐོབ་གདོང་ཁྲམ་',
+    dashboard_builder: 'Dashboard Builder',
     executive_cockpit: 'གཙོ་འཛིན་ཀོ་ཀི་ཊི་',
     predictive_risk_center: 'སྔོན་དཔག་ཉེན་ཁ་ལྟེ་གནས་',
     investigation_center: 'ཞིབ་འཇུག་ལྟེ་གནས་',
@@ -855,6 +858,7 @@ const ne: typeof en = {
   nav: {
     dashboard: 'ड्यासबोर्ड',
     role_based_dashboard: 'भूमिका ड्यासबोर्ड',
+    dashboard_builder: 'Dashboard Builder',
     executive_cockpit: 'कार्यकारी कक्ष',
     predictive_risk_center: 'पूर्वानुमान जोखिम केन्द्र',
     investigation_center: 'अनुसन्धान केन्द्र',
