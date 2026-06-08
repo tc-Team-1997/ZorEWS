@@ -938,6 +938,10 @@ import {
   type EvidencePackageStore,
 } from './audit_evidence';
 import { renderEvidenceSummary } from './audit_evidence_summary';
+import {
+  TemplateEffectivenessError,
+  runTemplateEffectivenessBacktestById,
+} from './rule_template_effectiveness';
 import { renderPerformanceSummary } from './model_performance_summary';
 import {
   defaultIngestionRegistry,
@@ -3206,6 +3210,38 @@ export function makeApp(deps: AppDeps = {}) {
       },
     );
   }
+
+  // ── T6 M1.4 — Optional API key auth on all /v1/* routes ─────────────
+  //
+  // When an `Authorization: Bearer apex_…` header is present the
+  // middleware validates the key, populates req.apiKey + req.tenant,
+  // and ALSO synthesises X-Tenant-ID + X-Channel headers so the
+  // downstream requireTenantMw still passes without any per-route
+  // changes. When the header is absent, falls through silently to the
+  // normal X-Tenant-ID + JWT path.
+  //
+  // /v1/svc/* routes continue to use requireApiKey (machine-only gate).
+  app.use('/v1/', (req: Request, res: Response, next: NextFunction): void | Response => {
+    const raw = req.headers['authorization'];
+    // Only intercept if an apex_ Bearer is present — leave everything
+    // else to requireTenantMw unchanged.
+    if (typeof raw !== 'string' || !raw.toLowerCase().startsWith('bearer apex_')) {
+      return next();
+    }
+    const apiKeyHandler = optionalApiKeyAuth(apiKeyStore, now);
+    return apiKeyHandler(req, res, () => {
+      // If optionalApiKeyAuth populated req.apiKey (valid key), inject
+      // X-Tenant-ID + X-Channel headers so requireTenantMw downstream
+      // doesn't 400 for missing headers. The tenant_id from the key is
+      // already the authoritative binding — headers are for downstream
+      // compatibility only.
+      if (req.apiKey) {
+        req.headers['x-tenant-id'] = req.tenant!.tenant_id;
+        req.headers['x-channel'] = 'API';
+      }
+      return next();
+    });
+  });
 
   /**
    * /v1/alerts — same data + filters as /api/alerts; T4.24 wraps the
@@ -29512,6 +29548,94 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/evidence/:package_id/export.csv (T6 M15.4)
+   *  — CSV export of all events in the evidence package.
+   *  RFC 4180 format: header row + one row per event.
+   *  Columns: event_id, ts, actor_username, action, resource_type,
+   *  resource_id, outcome, severity, correlation_id.
+   *  Mounted BEFORE /:package_id catch-all. */
+  app.get(
+    '/v1/audit/evidence/:package_id/export.csv',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const package_id = req.params.package_id ?? '';
+      const pkg = evidenceStore.get(req.tenant!.tenant_id, package_id);
+      if (!pkg) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_package', message: `evidence package ${package_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      // Build RFC 4180 CSV
+      const COLUMNS = [
+        'event_id', 'ts', 'actor_username', 'action',
+        'resource_type', 'resource_id', 'outcome', 'severity', 'correlation_id',
+      ] as const;
+      function csvEscape(v: unknown): string {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        // Wrap in quotes when the value contains comma, quote, or newline
+        if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      }
+      const rows: string[] = [];
+      rows.push(COLUMNS.map(csvEscape).join(','));
+      for (const ev of pkg.events) {
+        rows.push([
+          ev.event_id,
+          ev.ts,
+          ev.actor_username,
+          ev.action,
+          ev.resource_type,
+          ev.resource_id,
+          ev.outcome,
+          ev.severity,
+          ev.correlation_id ?? '',
+        ].map(csvEscape).join(','));
+      }
+      const body = rows.join('\r\n') + '\r\n';
+      void ctx;
+      res.set('Content-Type', 'text/csv; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="evidence-${package_id}.csv"`);
+      return res.status(200).send(body);
+    },
+  );
+
+  /** GET /v1/audit/evidence/:package_id/export.pdf (T6 M15.4)
+   *  — Printable plain-text evidence summary, served with a .pdf
+   *  filename so the browser's "Save as" dialog defaults to PDF.
+   *  Uses the existing renderEvidenceSummary() function from M15.4.
+   *  Mounted BEFORE /:package_id catch-all. */
+  app.get(
+    '/v1/audit/evidence/:package_id/export.pdf',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const package_id = req.params.package_id ?? '';
+      const pkg = evidenceStore.get(req.tenant!.tenant_id, package_id);
+      if (!pkg) {
+        return res.status(404).json(
+          wrapError(
+            { code: 'EWS_404_unknown_package', message: `evidence package ${package_id} not found`, severity: 'LOW' },
+            ctx,
+          ),
+        );
+      }
+      const text = renderEvidenceSummary(pkg);
+      void ctx;
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.set('Content-Disposition', `inline; filename="evidence-${package_id}.pdf"`);
+      return res.status(200).send(text);
+    },
+  );
+
   /** GET /v1/audit/evidence/:package_id/summary.txt (T6 M15.4)
    *  — printable plain-text summary suitable for browser print-to-PDF.
    *  Returns text/plain (NOT the T4.24 envelope) so the SPA can pipe
@@ -34051,6 +34175,58 @@ export function makeApp(deps: AppDeps = {}) {
           );
         }
         throw e;
+      }
+    },
+  );
+
+  /** POST /v1/rules/templates/:template_id/effectiveness-backtest (T6 M5.11)
+   *  — simulate what precision/recall this template WOULD HAVE achieved
+   *  if deployed over the last N days. Deterministic synthetic simulation
+   *  calibrated by category + supporting indicator count; confidence
+   *  level derived from window length. Mounted BEFORE /:id so the
+   *  literal `/effectiveness-backtest` segment isn't captured as a
+   *  template id. 404 on unknown template, 400 on invalid window_days. */
+  app.post(
+    '/v1/rules/templates/:template_id/effectiveness-backtest',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const template_id = req.params.template_id ?? '';
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      const window_days_raw = (inner && typeof inner === 'object')
+        ? (inner as Record<string, unknown>)['window_days']
+        : undefined;
+      try {
+        const result = runTemplateEffectivenessBacktestById(template_id, window_days_raw);
+        return res.json(wrapResponse(result, ctx));
+      } catch (e) {
+        if (e instanceof TemplateEffectivenessError) {
+          if (e.code === 'unknown_template') {
+            return res.status(404).json(
+              wrapError(
+                { code: 'EWS_404_unknown_template', message: e.message, severity: 'LOW' },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              { code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        return res.status(500).json(
+          wrapError(
+            { code: 'EWS_500', message: e instanceof Error ? e.message : 'backtest failed', severity: 'HIGH' },
+            ctx,
+          ),
+        );
       }
     },
   );
