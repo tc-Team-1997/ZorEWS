@@ -129,6 +129,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/admin/dq-score',          i18nKey: 'dq_score',           icon: Gauge,        requireRole: ['admin', 'supervisor'], featured: true },
       // Pipeline observability — auxiliary entry
       { to: '/admin/streaming-latency', i18nKey: 'streaming_latency',  icon: Gauge,        requireRole: ['admin', 'supervisor'] },
+      { to: '/admin/integration-readiness', i18nKey: 'integration_readiness', icon: Activity, requireRole: ['admin', 'supervisor'], featured: true },
     ],
   },
 

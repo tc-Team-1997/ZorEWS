@@ -78,6 +78,7 @@ import { CasesDetailReportPage } from '@/modules/reports/CasesDetailReportPage';
 import { ReportBuilderPage } from '@/modules/reports/builder/ReportBuilderPage';
 import { FeatureStorePage } from '@/modules/admin/featureStore/FeatureStorePage';
 import { StreamingLatencyPage } from '@/modules/admin/streamingLatency/StreamingLatencyPage';
+import { IntegrationReadinessPage } from '@/modules/admin/IntegrationReadinessPage';
 import { AnalyticsPage } from '@/modules/dashboard/AnalyticsPage';
 import { AiWorkbenchPage } from '@/modules/ai/AiWorkbenchPage';
 import { ModelRegistryPage } from '@/modules/ai/ModelRegistryPage';
@@ -322,6 +323,8 @@ export function App() {
             <Route path="reports/builder" element={<ReportBuilderPage />} />
             <Route path="admin/feature-store" element={<FeatureStorePage />} />
             <Route path="admin/streaming-latency" element={<StreamingLatencyPage />} />
+            {/* Integration Readiness — dual-mode architecture dashboard */}
+            <Route path="admin/integration-readiness" element={<IntegrationReadinessPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="ai/workbench" element={<AiWorkbenchPage />} />
             <Route path="ai/workbench/explainability" element={<ExplainabilityPage />} />
