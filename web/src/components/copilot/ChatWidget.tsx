@@ -23,7 +23,6 @@ import {
   getWelcomeSnapshot,
   getSuggestionsForPage,
   generateResponse,
-  detectIntent,
   type CopilotAction,
   type ResponseSection,
 } from './copilotEngine';
@@ -283,41 +282,35 @@ export function ChatWidget() {
   const lastBot = [...messages].reverse().find(m => m.who === 'bot');
   const suggestions = (lastBot?.suggestions?.length ? lastBot.suggestions : pageSuggestions).slice(0, 4);
 
-  // Enhanced send — enriches responses client-side
+  // Enhanced send — Enterprise Knowledge Brain always responds locally
   const handleSend = async (text: string) => {
     if (!text.trim() || sending) return;
 
-    // Client-side response generation (enriches the MSW/API response)
+    // ── Enterprise Intelligence Layer: ALWAYS use local knowledge engine ──
+    // The local engine covers 200+ BFSI concepts, 30+ modules, 8 workflows,
+    // 50+ nav entries, 8 role guides, and multilingual (EN/HI/Hinglish).
+    // API fallback was eliminated because it returned "I don't have a
+    // templated answer" — the knowledge brain handles everything now.
     const clientResponse = generateResponse(text, context, _lastUserQuery);
     _lastUserQuery = text;
 
-    // Store the user message locally with rich response if we detect a known intent
-    const intent = detectIntent(text);
-    if (intent !== 'fallback') {
-      // Inject rich client-side response directly (bypasses API for known intents)
-      const uid = `m-local-${Date.now()}-u`;
-      const bid = `m-local-${Date.now()}-b`;
-      setLocalMessages(prev => [
-        ...prev,
-        { id: uid, who: 'user', text },
-        {
-          id: bid,
-          who: 'bot',
-          text: clientResponse.reply,
-          suggestions: clientResponse.suggestions,
-          sections: clientResponse.sections,
-          actions: clientResponse.actions,
-        },
-      ]);
-      setDraft('');
-      // Still fire the API in background for logging (non-blocking)
-      void send(text).catch(() => null);
-      return;
-    }
-
-    // For unknown intent, fall through to the existing store API
+    const uid = `m-local-${Date.now()}-u`;
+    const bid = `m-local-${Date.now()}-b`;
+    setLocalMessages(prev => [
+      ...prev,
+      { id: uid, who: 'user', text },
+      {
+        id: bid,
+        who: 'bot',
+        text: clientResponse.reply,
+        suggestions: clientResponse.suggestions,
+        sections: clientResponse.sections,
+        actions: clientResponse.actions,
+      },
+    ]);
     setDraft('');
-    await send(text);
+    // Fire API in background for logging/analytics only (non-blocking, result discarded)
+    void send(text).catch(() => null);
   };
 
   const onSubmit = (e: FormEvent) => {

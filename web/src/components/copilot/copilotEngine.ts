@@ -40,10 +40,14 @@ import {
   findRoleGuide,
   formatRoleGuideResponse,
 } from './copilotRoleGuideCatalog';
-// ── Enterprise Brain Layer imports (Phase 1-9) ────────────────────────────
+// ── Enterprise Brain Layer imports ────────────────────────────────────────
 import { detectLanguage, formatConceptResponse } from './copilotLanguageEngine';
 import { findConcept } from './copilotConceptDictionary';
 import { reasonAndRespond } from './copilotReasoningEngine';
+// ── New knowledge files (Domain + Module + Workflow) ─────────────────────
+import { findDomainTopic, formatDomainResponse, searchDomainTopics } from './copilotDomainKnowledge';
+import { findModuleScreen, formatModuleScreenResponse } from './copilotModuleKnowledge';
+import { findWorkflowKnowledge, formatWorkflowKnowledgeResponse } from './copilotWorkflowKnowledge';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -162,6 +166,7 @@ type Intent =
   | 'where_to_find'     // "Where can I manage rules?" / "Where is compliance?"
   // ── Enterprise Brain Layer ──
   | 'concept_explain'   // "What is NPA?" / "NPA kya hai?" / "DPD kya hota hai?"
+  | 'domain_knowledge'  // "How to manage credit risk?" / "Collections management"
   | 'fallback';
 
 const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
@@ -244,6 +249,19 @@ const INTENT_PATTERNS: Array<{ pattern: RegExp; intent: Intent }> = [
   // English concept queries (broad)
   { pattern: /what\s+is\s+(an?\s+|the\s+)?(npa|sma|dpd|ews|ltv|dscr|crar|ecl|ifrs9|basel|probability\s+of\s+default|loss\s+given\s+default|exposure\s+at\s+default|ots|sarfaesi|write.off|fraud\s+ring|synthetic\s+identity|aml|kyc|sar|persistency|lapse\s+rate|claims\s+ratio|solvency\s+ratio|reinsurance|irdai|channel\s+risk|underwriting|stress\s+testing|raroc|shap|model\s+drift|psi|data\s+lineage|audit\s+trail|maker.checker|rbac|hash\s+chain|api\s+gateway|operational\s+risk|recovery\s+rate|credit\s+risk|portfolio\s+concentration|data\s+quality|digital\s+twin|autonomous\s+agent|integration\s+pipeline)/i, intent: 'concept_explain' },
   { pattern: /define|meaning\s+of|explain\s+the\s+concept|what\s+does\s+(npa|sma|dpd|ecl|crar|shap|psi|dscr|ltv|ods|ots)\s+(mean|stand|refer)/i, intent: 'concept_explain' },
+  // ── Domain knowledge queries ──────────────────────────────────────────
+  { pattern: /credit\s+risk|portfolio\s+risk|stress\s+test|financial\s+ratio|collections\s+management|recovery\s+management|rbi\s+guideline|fraud\s+risk|insurance\s+claim|persistency|solvency|channel\s+risk|irdai\s+rule|reinsurance|underwriting\s+process/i, intent: 'domain_knowledge' },
+  { pattern: /how\s+to\s+(manage|handle|reduce|monitor|measure|assess|calculate|improve)\s+(credit|npa|fraud|compliance|risk|recovery|collection|solvency|persistency)/i, intent: 'domain_knowledge' },
+  { pattern: /(credit|portfolio|insurance|compliance|fraud|recovery|collection)\s+(risk|management|workflow|process|monitoring|strategy)/i, intent: 'domain_knowledge' },
+  // ── Module screen awareness ───────────────────────────────────────────
+  { pattern: /what\s+(is|does)\s+this\s+(page|screen|module|section)\s+(do|show)?|explain\s+this\s+(page|screen|module)|current\s+page|yeh\s+(page|screen)\s+kya\s+hai|is\s+page\s+pe\s+kya\s+hai/i, intent: 'page_summary' },
+  { pattern: /how\s+(do|can)\s+i\s+(use|work\s+with|navigate|understand)\s+this\s+(page|module|screen)|what\s+can\s+i\s+do\s+here|kya\s+kar\s+sakte\s+hain\s+yahan/i, intent: 'page_summary' },
+  { pattern: /what\s+are\s+the\s+kpis\s+(on|for|in)\s+this|explain\s+(the\s+)?kpis|yeh\s+kpis\s+kya\s+hain/i, intent: 'page_summary' },
+  // ── Workflow knowledge queries (enhanced) ────────────────────────────
+  { pattern: /npa\s+early\s+warning\s+(workflow|process|kaise\s+kaam)|ews\s+(workflow|process)|early\s+warning\s+(system\s+)?(workflow|work|process)/i, intent: 'workflow_explain' },
+  { pattern: /investigation\s+(workflow|kaise\s+kaam|process|steps|how)|sar\s+(filing\s+)?(workflow|process|kaise)/i, intent: 'workflow_explain' },
+  { pattern: /compliance\s+(workflow|filing\s+process|kaise|how)|rbi\s+filing\s+(workflow|process|kaise)/i, intent: 'workflow_explain' },
+  { pattern: /recovery\s+(workflow|process|kaise|how)|collections?\s+(workflow|process|kaise|how)/i, intent: 'workflow_explain' },
 ];
 
 export function detectIntent(query: string): Intent {
@@ -405,6 +423,8 @@ export function generateResponse(
     // ── Enterprise Brain Layer ────────────────────────────────────────
     case 'concept_explain':
       return conceptExplainResponse(resolvedQuery);
+    case 'domain_knowledge':
+      return domainKnowledgeResponse(resolvedQuery);
     default:
       return fallbackResponse(query, context);
   }
@@ -686,8 +706,14 @@ function navigateResponse(query: string): CopilotResponse {
 
 function pageSummaryResponse(context: ChatContext): CopilotResponse {
   const path = context.page ?? 'unknown';
+  const lang = detectLanguage(''); // default en, context-based
 
-  // Phase 5: Try Knowledge Registry first (comprehensive coverage)
+  // NEW: Try ModuleKnowledge first (deepest screen awareness)
+  const screenPath = path === 'unknown' ? '' : `/${path}`;
+  const screen = findModuleScreen(screenPath) ?? findModuleScreen(path.replace(/\//g, ' '));
+  if (screen) return formatModuleScreenResponse(screen, lang);
+
+  // Phase 5: Try Knowledge Registry (comprehensive coverage)
   const module = findModuleByRoute(path === 'unknown' ? '' : `/${path}`);
   if (module) {
     const kpis = module.kpis.slice(0, 4).map(k => `• ${k}`).join('\n');
@@ -798,10 +824,22 @@ function fallbackResponse(query: string, context: ChatContext): CopilotResponse 
 
   // Phase 10 + Enterprise Brain: Smart Fallback — NEVER return generic responses
 
+  const lang = detectLanguage(query);
+
+  // -1. New: WorkflowKnowledge (most specific — step-by-step)
+  const wfKnowledge = findWorkflowKnowledge(q);
+  if (wfKnowledge) return formatWorkflowKnowledgeResponse(wfKnowledge, lang);
+
+  // -0.5: New: ModuleScreen (current page context)
+  const screenPath = context.page ? `/${context.page}` : '';
+  if (screenPath) {
+    const screen = findModuleScreen(screenPath);
+    if (screen) return formatModuleScreenResponse(screen, lang);
+  }
+
   // 0. Enterprise Brain — concept dictionary (200+ BFSI terms)
   const concept = findConcept(q);
   if (concept) {
-    const lang = detectLanguage(query);
     return {
       reply: formatConceptResponse(concept, lang),
       suggestions: concept.relatedTerms.slice(0, 2).map(t =>
@@ -809,6 +847,10 @@ function fallbackResponse(query: string, context: ChatContext): CopilotResponse 
       ).concat(['Show related modules', 'Executive summary']),
     };
   }
+
+  // 0.3 Domain knowledge (credit risk, insurance, compliance topics)
+  const domainMatch = findDomainTopic(q);
+  if (domainMatch) return formatDomainResponse(domainMatch, lang);
 
   // 0.5 Enterprise Brain — Reasoning Engine (multilingual + domain inference)
   const reasoned = reasonAndRespond(q, context.page ? `/${context.page}` : undefined);
@@ -921,24 +963,44 @@ function moduleExplainResponse(query: string): CopilotResponse {
 }
 
 function workflowExplainResponse(query: string): CopilotResponse {
+  const lang = detectLanguage(query);
+
+  // NEW: Try WorkflowKnowledge first (richer, with steps + tips + mistakes)
+  const wfKnowledge = findWorkflowKnowledge(query);
+  if (wfKnowledge) return formatWorkflowKnowledgeResponse(wfKnowledge, lang);
+
+  // Fallback to WorkflowCatalog
   const workflow = findWorkflow(query);
   if (!workflow) {
-    const list = ['Alert Lifecycle', 'Case Workflow', 'Investigation Workflow', 'Maker-Checker Approval', 'Compliance Workflow', 'NPA Early Warning', 'Data Ingestion Flow', 'AI Model Promotion', 'Recovery Workflow'];
+    const list = ['Alert Lifecycle', 'Case Workflow', 'Investigation Workflow', 'Maker-Checker Workflow', 'Compliance Workflow', 'NPA Early Warning Workflow', 'Recovery Workflow'];
+    const reply = lang === 'hinglish'
+      ? `Main yeh workflows explain kar sakta hun:\n\n${list.map(w => `• ${w}`).join('\n')}\n\n"How does [workflow] work?" puchho.`
+      : `I can explain any platform workflow in detail:\n\n${list.map(w => `• ${w}`).join('\n')}\n\nAsk "How does [workflow name] work?" for step-by-step explanation with SLAs and tips.`;
     return {
-      reply: `I can explain any of these platform workflows in detail:\n\n${list.map(w => `• ${w}`).join('\n')}\n\nAsk "How does [workflow name] work?" for a step-by-step explanation.`,
-      suggestions: ['How does alert lifecycle work?', 'How does maker-checker work?', 'How does investigation workflow work?', 'How does NPA early warning work?'],
+      reply,
+      suggestions: ['How does alert lifecycle work?', 'How does maker-checker work?', 'How does NPA early warning work?', 'How does investigation workflow work?'],
     };
   }
   return {
     reply: formatWorkflowResponse(workflow),
-    suggestions: [
-      `Navigate to ${workflow.name.split(' ')[0]} module`,
-      'What are the key actors?',
-      'What is the SLA for each step?',
-      'Related workflows',
-    ],
+    suggestions: [`Navigate to ${workflow.name.split(' ')[0]} module`, 'What are the key actors?', 'What is the SLA?', 'Common mistakes'],
     actions: [{ label: `Open ${workflow.relatedModule.replace('_', ' ')}`, href: workflow.route, icon: 'external-link' }],
   };
+}
+
+function domainKnowledgeResponse(query: string): CopilotResponse {
+  const lang = detectLanguage(query);
+
+  // Try domain knowledge first
+  const topic = findDomainTopic(query);
+  if (topic) return formatDomainResponse(topic, lang);
+
+  // Search domain topics
+  const matches = searchDomainTopics(query);
+  if (matches.length > 0) return formatDomainResponse(matches[0]!, lang);
+
+  // Fall through to reasoning engine
+  return reasonAndRespond(query);
 }
 
 function roleTrainingResponse(query: string): CopilotResponse {
