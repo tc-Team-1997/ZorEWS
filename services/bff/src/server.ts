@@ -4422,6 +4422,36 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/volume-forecast (T6 M8.19) — Forward-looking 7-day
+   *  alert volume forecast based on the M8.6 routing ledger.
+   *  Computes historical_7d_avg + historical_14d_avg from ledger,
+   *  extrapolates forecast_next_7d (moving average), classifies
+   *  trend (rising / falling / stable based on 7d vs 14d comparison),
+   *  confidence (high ≥14 data points / medium ≥7 / low <7),
+   *  by_class_forecast (proportional from recent class distribution),
+   *  and an optional warning when forecast > 2× historical average.
+   *  Distinct from M8.15 (backward-looking daily volume trend) by being
+   *  FORWARD-LOOKING. Drives "should we staff up for next week?"
+   *  capacity planning. RBAC audit:read. */
+  app.get(
+    '/v1/alerts/volume-forecast',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const records = routingLedger.list(req.tenant!.tenant_id, 200);
+      const { buildAlertVolumeForecast } =
+        require('./alert_volume_forecast') as
+        typeof import('./alert_volume_forecast');
+      const out = buildAlertVolumeForecast(
+        req.tenant!.tenant_id,
+        records,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/sla-compliance-by-class?window=N (T6 M8.16) —
    *  PER-CLASS SLA compliance rate over the M8.6 routing ledger.
    *  Distinct from M8.11 (worst-offender row list) by being aggregate
@@ -9333,6 +9363,67 @@ export function makeApp(deps: AppDeps = {}) {
         typeof import('./scenario_axis_severity_matrix');
       const out = buildScenarioAxisSeverityMatrix(now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** POST /v1/scenarios/ecl-impact-comparison (T6 M16.24) — richer
+   *  preset-to-preset ECL comparison. Runs preset_ids[] (1-15 items)
+   *  against the standard portfolio via runScenario (T4.2) and returns
+   *  per-preset: ecl_delta_kes, ecl_pct_change, stage_migrations_total
+   *  (off-diagonal count), worst_segment (highest stressed PD),
+   *  rank (1=most stressed). Envelope: results[] sorted ecl_delta
+   *  desc + max/min/spread_kes + most_stressed_preset +
+   *  most_resilient_preset. Distinct from M16.2 (bulk-run which uses
+   *  preset_ids OR category + simpler row shape) by accepting only
+   *  preset_ids and returning richer per-preset ECL diagnostics.
+   *  ScenarioEclComparisonError: invalid_input → 400,
+   *  unknown_preset → 404. RBAC customers:read_risk_profile.
+   *  Mounted BEFORE `/:id` catch-all. */
+  app.post(
+    '/v1/scenarios/ecl-impact-comparison',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const body = (req.body?.body ?? req.body) as { preset_ids?: unknown };
+      const { buildScenarioEclComparison, ScenarioEclComparisonError } =
+        require('./scenario_ecl_comparison') as
+        typeof import('./scenario_ecl_comparison');
+      try {
+        const result = buildScenarioEclComparison(
+          req.tenant!.tenant_id,
+          body?.preset_ids as string[],
+          now(),
+        );
+        return res.status(200).json(wrapResponse(result, ctx));
+      } catch (e: unknown) {
+        const err = e as { name?: string; code?: string; message?: string };
+        if (err.name === 'ScenarioEclComparisonError') {
+          if (err.code === 'unknown_preset') {
+            return res.status(404).json(
+              wrapError(
+                {
+                  code: 'EWS_404_unknown_preset',
+                  message: err.message ?? 'unknown preset',
+                  severity: 'LOW',
+                },
+                ctx,
+              ),
+            );
+          }
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: err.message ?? 'invalid input',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
     },
   );
 
@@ -15123,6 +15214,93 @@ export function makeApp(deps: AppDeps = {}) {
   // aggressive × banking/insurance) tenants can apply on top of the
   // M6.2 catalog defaults. Pure-data — no store, no tenant overrides
   // here; M6.4 will land custom presets.
+
+  /** GET /v1/scoring/presets/compare-effectiveness?preset_a=X&preset_b=Y
+   *  (T6 M6.20) — A/B effectiveness comparison between two weight presets.
+   *  Fans 50 synthetic customers (deterministic per (preset_a_id,
+   *  preset_b_id, day)) through both presets and compares score
+   *  distributions. Returns: preset_a + preset_b metadata, sample_size,
+   *  score_delta_mean/p50/p95, a_higher_count + b_higher_count + tied_count,
+   *  band_agreement_rate (fraction where both produce same Low/Med/High),
+   *  per_band_shift {b_higher_band, b_same_band, b_lower_band},
+   *  recommendation (human-readable). Resolves via getEffectiveWeightPreset
+   *  (library + custom). Distinct from M6.7 (caller-supplied indicator values)
+   *  by synthesising a representative sample. RBAC customers:read_risk_profile;
+   *  400 when same ID; 404 unknown preset. Mounted BEFORE /:preset_id. */
+  app.get(
+    '/v1/scoring/presets/compare-effectiveness',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const preset_a = req.query.preset_a as string | undefined;
+      const preset_b = req.query.preset_b as string | undefined;
+      if (!preset_a || !preset_b) {
+        return res.status(400).json(
+          wrapError(
+            {
+              code: 'EWS_400_invalid_input',
+              message: 'preset_a and preset_b query params are required',
+              severity: 'MEDIUM',
+            },
+            ctx,
+          ),
+        );
+      }
+      try {
+        const { buildPresetAbComparison } =
+          require('./scoring_preset_ab_comparison') as
+          typeof import('./scoring_preset_ab_comparison');
+        const result = buildPresetAbComparison(
+          preset_a,
+          preset_b,
+          now(),
+          req.tenant!.tenant_id,
+          customWeightPresetStore,
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e: unknown) {
+        const err = e as { name?: string; code?: string; message?: string };
+        if (err.name === 'PresetAbComparisonError' && err.code === 'same_preset') {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_same_preset',
+                message: err.message ?? 'presets must be different',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        if (err.name === 'PresetAbComparisonError') {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: 'EWS_400_invalid_input',
+                message: err.message ?? 'invalid input',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        if (err.name === 'WeightPresetError' && err.code === 'unknown_preset') {
+          return res.status(404).json(
+            wrapError(
+              {
+                code: 'EWS_404_unknown_preset',
+                message: err.message ?? 'unknown preset',
+                severity: 'LOW',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
+    },
+  );
 
   /** GET /v1/scoring/presets/custom/multiplier-histogram (T6 M6.19)
    *  — same shape as M6.16 but over the M6.4 per-tenant CUSTOM weight
@@ -27690,6 +27868,42 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/rotation-analytics (T6 M1.19) — API key
+   *  rotation workflow analytics. Answers "which keys are overdue for
+   *  rotation?" and "how fast are we rotating?". Returns: total_active,
+   *  rotation_due_30d (active expiring in 30 days), rotation_overdue
+   *  (already expired), never_rotated_count (active + never used + > 90d
+   *  old), avg_key_age_days + oldest_active_key_age_days, rotation_velocity_30d
+   *  (revocations in last 30 days — proxy for rotation rate),
+   *  recommended_rotations[] (top 10 by age with human-readable reason).
+   *  Distinct from M1.10 (lifecycle stage dist), M1.13 (recency histogram),
+   *  M1.15 (revocation daily volume), M1.18 (time-to-revocation histogram).
+   *  Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/rotation-analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyRotationAnalytics } =
+        require('./api_key_rotation_analytics') as
+        typeof import('./api_key_rotation_analytics');
+      const summary = buildApiKeyRotationAnalytics(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row
@@ -29197,6 +29411,67 @@ export function makeApp(deps: AppDeps = {}) {
         now(),
       );
       return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
+  /** GET /v1/audit/search?q=&limit= (T6 M15.21) — full-text search
+   *  across all audit events for the calling tenant. Case-insensitive
+   *  substring match across: actor_username, action, resource_id,
+   *  resource_type, outcome, severity, JSON.stringify(metadata).
+   *  Per-match: event_id + ts + key fields + match_fields[] (which
+   *  fields matched) + snippet (200-char context). Returned newest-
+   *  first. Query 2–200 chars after trim; limit 1–200, default 50.
+   *  Drains audit chain via page_size=1000 up to 10 pages (10k events).
+   *  AuditSearchError codes: invalid_query → 400, invalid_limit → 400.
+   *  Distinct from M15.1 (exact field filters), M15.6 (action catalog),
+   *  M15.8 (per-actor rollup). RBAC audit:read. */
+  app.get(
+    '/v1/audit/search',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const query = req.query.q as string | undefined;
+      const limitRaw = req.query.limit as string | undefined;
+      const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : 50;
+      const {
+        searchAuditEvents,
+        AuditSearchError,
+      } = require('./audit_search') as typeof import('./audit_search');
+      try {
+        const events: import('./audit_trail').AuditEvent[] = [];
+        const PAGE = 1000;
+        for (let page = 1; page <= 10; page++) {
+          const result = auditTrailStore.list(req.tenant!.tenant_id, {
+            page,
+            page_size: PAGE,
+          });
+          events.push(...result.items);
+          if (result.items.length < PAGE) break;
+        }
+        const result = searchAuditEvents(
+          req.tenant!.tenant_id,
+          events,
+          query ?? '',
+          limit,
+        );
+        return res.json(wrapResponse(result, ctx));
+      } catch (e: unknown) {
+        const err = e as { name?: string; code?: string; message?: string };
+        if (err.name === 'AuditSearchError') {
+          return res.status(400).json(
+            wrapError(
+              {
+                code: `EWS_400_${err.code ?? 'invalid_input'}`,
+                message: err.message ?? 'invalid input',
+                severity: 'MEDIUM',
+              },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
     },
   );
 
