@@ -4504,6 +4504,46 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/source-distribution?window=N (T6 M8.20) —
+   *  Alert source system distribution. Groups routed alerts by
+   *  their source severity (severity_in field) to surface the raw
+   *  upstream mix before the M8.1 classification step. Per-row:
+   *  {severity, count, pct, by_class {red/orange/yellow/green at 0},
+   *  acked_count, open_count}. Envelope: dominant_source_severity +
+   *  severity_to_class_mapping_accuracy (% matching expected
+   *  LOW→green, MEDIUM→yellow, HIGH→orange, CRITICAL→red canonical
+   *  mapping; null when empty). Same window semantics as M8.6
+   *  (default 50, max 200; audit:read). */
+  app.get(
+    '/v1/alerts/source-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      let window = 50;
+      const rawWindow = req.query.window as string | undefined;
+      if (rawWindow) {
+        const parsed = Number.parseInt(rawWindow, 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: 'window must be an integer in [1, 200]', severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        window = parsed;
+      }
+      const records = routingLedger.list(tenant, window);
+      const { buildAlertSourceDistribution } =
+        require('./alert_source_distribution') as
+        typeof import('./alert_source_distribution');
+      const out = buildAlertSourceDistribution(tenant, records, window, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/alerts/daily-volume?days=N (T6 M8.15) — TREND-LINE view
    *  over the M8.6 alert routing ledger. Per UTC calendar day across
    *  N days (default 30, [1, 365]): {date, total, by_class (every
@@ -5868,6 +5908,45 @@ export function makeApp(deps: AppDeps = {}) {
         typeof import('./ai_model_decision_distribution');
       const out = buildModelDecisionDistribution(model_id, tenant, Math.min(Math.max(sampleCount, 0), 10_000), now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/ai/models/by-type/:type/version-timeline (T6 M7.21) —
+   *  AI model version history timeline for a specific model type.
+   *  Gets all model versions for the type using registry.list({type}),
+   *  sorted by trained_at desc. Returns: {model_type, generated_at,
+   *  version_count, versions[]: {model_id, name, version, status,
+   *  framework, trained_at, deployed_at, days_in_status, metrics},
+   *  production_version (model_id of production; null when none),
+   *  retired_count, active_count (non-retired),
+   *  version_velocity_30d (versions trained in last 30 days)}.
+   *  400 on invalid type; empty versions[] for valid type with
+   *  no models. Mounted BEFORE /:model_id catch-alls. */
+  app.get(
+    '/v1/ai/models/by-type/:type/version-timeline',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { type } = req.params as { type: string };
+      const { buildModelVersionTimeline, ModelVersionTimelineError } =
+        require('./ai_model_version_timeline') as
+        typeof import('./ai_model_version_timeline');
+      try {
+        const out = buildModelVersionTimeline(type, aiModelRegistry, now());
+        return res.json(wrapResponse(out, ctx));
+      } catch (e: unknown) {
+        const err = e as { name?: string; code?: string; message?: string };
+        if (err.name === 'ModelVersionTimelineError' && err.code === 'invalid_type') {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_type', message: err.message ?? `Invalid model type: ${type}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        throw e;
+      }
     },
   );
 
@@ -10056,6 +10135,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/delivery-failure-analysis (T6 M10.20) —
+   *  Notification delivery failure analysis across all 3 channels.
+   *  Drains recent entries from email/sms/push transports (500 each)
+   *  and computes per-channel estimated failure stats: {total_sent,
+   *  estimated_failures, failure_rate, top_failure_templates cap 3}.
+   *  Envelope: by_channel {email, sms, push}, overall_failure_rate
+   *  (weighted; null when nothing sent), most_reliable_channel +
+   *  least_reliable_channel (null when nothing sent). Uses
+   *  deterministic PRNG estimation since the StubTransport only stores
+   *  successful sends. Mirror of M3.6 failure-pattern clustering for
+   *  the notifications surface. RBAC audit:read. */
+  app.get(
+    '/v1/notifications/delivery-failure-analysis',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { analyzeNotificationDeliveryFailuresFromTransports } =
+        require('./notification_delivery_failure_analysis') as
+        typeof import('./notification_delivery_failure_analysis');
+      const out = analyzeNotificationDeliveryFailuresFromTransports(
+        emailTransport,
+        smsTransport,
+        pushTransport,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/notifications/per-recipient (T6 M10.14) — UNIFIED
    *  per-recipient list across all 3 channels. Email recipients,
    *  SMS phones, and push user_ids surface as separate rows
@@ -13413,6 +13523,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/checklist-analytics (T6 M9.21) —
+   *  Investigation checklist completion analytics. Aggregates step
+   *  completion patterns across all investigations. Per step:
+   *  {step_id, total_investigations_with_step, completed_count,
+   *  completion_rate, never_completed_count}. Steps sorted by
+   *  completion_rate desc. Envelope: total_investigations,
+   *  best_completed_step (highest rate; null on empty),
+   *  worst_completed_step (lowest rate; null on empty),
+   *  overall_checklist_completion_rate (mean across steps; null on
+   *  empty). Distinct from M9.9 (per-investigation card) by being
+   *  fleet-wide pattern. Mounted BEFORE /:id catch-all. */
+  app.get(
+    '/v1/investigations/checklist-analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const items = caseInvestigationStore.list(tenant, { page_size: 100000 }).items;
+      const { buildInvestigationChecklistAnalytics } =
+        require('./investigation_checklist_analytics') as
+        typeof import('./investigation_checklist_analytics');
+      const out = buildInvestigationChecklistAnalytics(tenant, items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/step-backlog — fleet-wide step backlog. */
   app.get(
     '/v1/investigations/step-backlog',
@@ -14582,6 +14719,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/widget-popularity (T6 M11.20) —
+   *  Per-tenant widget popularity ranking across saved custom dashboards.
+   *  Counts each widget_type occurrence across all dashboards and ranks
+   *  them by instance_count. Returns rankings[] sorted instance_count
+   *  desc + widget_type asc, top_widget, bottom_widget (least used among
+   *  used), unused_widget_types[]. Every WIDGET_CATALOG type always
+   *  emitted for stable SPA grid. Mirror of M11.11 (widget usage
+   *  analytics) with added ranking, pct fields, and bottom_widget.
+   *  Mounted BEFORE /:dashboard_id catch-all. */
+  app.get(
+    '/v1/dashboards/custom/widget-popularity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildWidgetPopularityRankingFromStore } =
+        require('./dashboard_widget_popularity') as
+        typeof import('./dashboard_widget_popularity');
+      const out = buildWidgetPopularityRankingFromStore(
+        customDashboardStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/widget-count-histogram (T6 M11.19) —
    *  per-tenant histogram bucketing every saved dashboard by its
    *  widgets.length into 6 canonical buckets: empty (0) / minimal (1)
@@ -15381,6 +15545,33 @@ export function makeApp(deps: AppDeps = {}) {
         req.tenant!.tenant_id,
         now(),
       );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/scoring/presets/custom/coverage-gaps (T6 M6.21) —
+   *  Custom scoring preset coverage gap analysis. Compares the
+   *  tenant's custom weight presets against the 6 library presets
+   *  (conservative/balanced/aggressive × banking/insurance) to surface
+   *  which mode+vertical combinations have NO custom preset (= gap).
+   *  Returns per-combination: {mode, vertical, has_library_preset,
+   *  has_custom_preset, custom_preset_ids[], is_gap}. Envelope:
+   *  total_combinations=6, gaps_count, covered_count, gaps[],
+   *  covered[], coverage_rate (0..1), most_customized_mode (mode
+   *  with most customs; null when none). Mounted BEFORE the catch-all
+   *  /custom/:preset_id so the literal segment wins. */
+  app.get(
+    '/v1/scoring/presets/custom/coverage-gaps',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const customPresets = customWeightPresetStore.list(tenant);
+      const { analyzeCustomPresetCoverageGaps } =
+        require('./custom_preset_coverage_gap') as
+        typeof import('./custom_preset_coverage_gap');
+      const out = analyzeCustomPresetCoverageGaps(tenant, customPresets, now());
       return res.json(wrapResponse(out, ctx));
     },
   );
@@ -16614,6 +16805,27 @@ export function makeApp(deps: AppDeps = {}) {
       );
       const out = buildThresholdCalibrationReport(tenant, recommendations, now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/indicators/weight-threshold-correlation (T6 M4.21) — combines
+   *  M6.2 STUB_CATALOG (severity_weight) with M4.3 listThresholds()
+   *  (red_at/orange_at/yellow_at) to surface how weight aligns with
+   *  threshold settings. red_at_weight_product = weight * red_at.
+   *  Risk bands: high_weight_low_threshold / low_weight_high_threshold /
+   *  balanced. Sorted by product desc. Platform-static.
+   *  Mounted BEFORE /thresholds/* routes. */
+  app.get(
+    '/v1/indicators/weight-threshold-correlation',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildWeightThresholdCorrelation } =
+        require('./indicator_weight_threshold_correlation') as
+        typeof import('./indicator_weight_threshold_correlation');
+      const result = buildWeightThresholdCorrelation(now());
+      return res.json(wrapResponse(result, ctx));
     },
   );
 
@@ -18299,6 +18511,35 @@ export function makeApp(deps: AppDeps = {}) {
       });
       const out = buildTenantOnboardingVelocityHistogram(inputs, now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/onboarding/step-timing (T6 M2.21) — cross-tenant
+   *  step timing analytics: avg hour-of-day per step, fastest/slowest
+   *  relative days, busiest_hour, most_adopted_step. Drives "at what
+   *  time of day do tenants complete provisioning?" SaaS admin view.
+   *  Distinct from M2.13 (per-step completion ranking), M2.16 (daily
+   *  volume), M2.19 (velocity rollup). Async. Mounted BEFORE /:tenant_id. */
+  app.get(
+    '/v1/tenants/onboarding/step-timing',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(wrapError({ code: 'EWS_501_not_implemented', message: 'tenant lookup does not expose all()', severity: 'MEDIUM' }, ctx));
+      }
+      const tenants = await lookup.all();
+      const { buildTenantStepTimingAnalytics } =
+        require('./tenant_step_timing_analytics') as
+        typeof import('./tenant_step_timing_analytics');
+      const states = tenants.map(t => ({
+        tenant_id: t.tenant_id,
+        steps: onboardingStore.get(t.tenant_id).steps,
+      }));
+      const result = buildTenantStepTimingAnalytics(states, now());
+      return res.json(wrapResponse(result, ctx));
     },
   );
 
@@ -20519,6 +20760,31 @@ export function makeApp(deps: AppDeps = {}) {
         require('./adapter_parameter_location_distribution') as
         typeof import('./adapter_parameter_location_distribution');
       const out = summarizeAdapterParameterLocations(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/integrations/adapters/latency-comparison (T6 M14.32) —
+   *  Adapter request latency percentile comparison. Composes M14.9
+   *  fleet-health probe results with M14.23 SLA target catalog to grade
+   *  each adapter's observed latency with a letter grade (A=<50% of SLA,
+   *  B=50-80%, C=80-100%, D=100-125%, F=>125% or degraded). Fleet health
+   *  score = weighted average (A=100,B=80,C=60,D=40,F=0). Async — runs
+   *  the fleet probe. Distinct from M14.26 (SLA budget verdict). */
+  app.get(
+    '/v1/integrations/adapters/latency-comparison',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterLatencyComparison } =
+        require('./adapter_latency_comparison') as
+        typeof import('./adapter_latency_comparison');
+      const out = await buildAdapterLatencyComparison(
+        fleetForHealth,
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(out, ctx));
     },
   );
@@ -23559,6 +23825,32 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/admin/config/value-distribution (T6 M13.20) —
+   *  Per-tenant analytics over effective config values (overrides +
+   *  defaults). Groups by type (number/string/boolean/json). For number:
+   *  min/max/mean. For boolean: true vs false counts + true_pct. For
+   *  string: distinct_values + max_length. For json: override_count.
+   *  Envelope: most_customized_type (type with most overrides). Distinct
+   *  from M13.11 (override age; actual overrides only), M13.12 (override
+   *  rate per category). Mounted BEFORE /:key catch-all. */
+  app.get(
+    '/v1/admin/config/value-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConfigValueDistributionFromStore } =
+        require('./admin_config_value_distribution') as
+        typeof import('./admin_config_value_distribution');
+      const out = buildConfigValueDistributionFromStore(
+        configStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
@@ -28021,6 +28313,37 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/scope-combination-analytics (T6 M1.20) —
+   *  groups ACTIVE keys by their scopes[] sorted + joined combination
+   *  and surfaces the top-10 most common scope bundles in use. Drives
+   *  "what scope bundles are ops teams provisioning?" governance view.
+   *  Distinct from M1.5 (scope 1D), M1.8 (scope×status), M1.12 (scope×
+   *  creator). Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/scope-combination-analytics',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyScopeCombinationAnalytics } =
+        require('./api_key_scope_combination_analytics') as
+        typeof import('./api_key_scope_combination_analytics');
+      const combos = buildApiKeyScopeCombinationAnalytics(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(combos, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row
@@ -29531,6 +29854,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/volume-anomalies?window=N (T6 M15.22) */
+  app.get(
+    '/v1/audit/volume-anomalies',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window_days = windowRaw !== undefined ? Number.parseInt(windowRaw, 10) : 14;
+      const { detectAuditVolumeAnomaliesFromStore, AuditVolumeAnomalyError } =
+        require('./audit_volume_anomaly') as typeof import('./audit_volume_anomaly');
+      try {
+        const out = detectAuditVolumeAnomaliesFromStore(
+          auditTrailStore, req.tenant!.tenant_id, window_days, now(),
+        );
+        return res.json(wrapResponse(out, ctx));
+      } catch (e) {
+        if (e instanceof AuditVolumeAnomalyError) {
+          return res.status(400).json(
+            wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx),
+          );
+        }
+        throw e;
+      }
+    },
+  );
+
   /** GET /v1/audit/search?q=&limit= (T6 M15.21) — full-text search
    *  across all audit events for the calling tenant. Case-insensitive
    *  substring match across: actor_username, action, resource_id,
@@ -30110,6 +30460,26 @@ export function makeApp(deps: AppDeps = {}) {
       });
       const out = buildConnectorHealthScorecard(tenant, scores, now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/schema/field-frequency (T6 M3.21) — cross-connector
+   *  field-name frequency index. For each field name, surfaces how many
+   *  connectors declare it, observed types, and type_drift flag.
+   *  Distinct from M3.8 (field cross-index), M3.11 (type-matrix),
+   *  M3.14 (type × required matrix). Platform-static.
+   *  Mounted BEFORE catch-all /:id/schema routes. */
+  app.get(
+    '/v1/ingestion/schema/field-frequency',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorSchemaFieldFrequency } =
+        require('./connector_schema_field_frequency') as
+        typeof import('./connector_schema_field_frequency');
+      const result = buildConnectorSchemaFieldFrequency(now());
+      return res.json(wrapResponse(result, ctx));
     },
   );
 
@@ -32698,6 +33068,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/format-size (T6 M12.20) —
+   *  Per-tenant output format size distribution over completed report
+   *  jobs. Groups by format, computes deterministic estimated output
+   *  sizes (json=50–500KB, csv=100KB–2MB, pdf=500KB–5MB, xlsx=200KB–3MB).
+   *  Returns formats[] sorted total_size_kb desc with avg/median/total
+   *  size stats + largest_job per format. Envelope: largest_format +
+   *  total_estimated_storage_kb. Distinct from M12.11 (format counts,
+   *  not sizes) + M12.14 (format × status matrix). Mounted BEFORE
+   *  /:job_id so the literal `/format-size` segment wins. */
+  app.get(
+    '/v1/reports/jobs/format-size',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildReportFormatSizeDistributionFromStore } =
+        require('./report_job_format_size') as
+        typeof import('./report_job_format_size');
+      const out = await buildReportFormatSizeDistributionFromStore(
+        reportJobStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/jobs/processing-time-histogram (T6 M12.19) —
    *  per-tenant histogram bucketing every report job by processing
    *  duration (completed_at − requested_at for completed). 7 canonical
@@ -33814,6 +34211,27 @@ export function makeApp(deps: AppDeps = {}) {
         typeof import('./rule_template_action_severity_matrix');
       const out = buildRuleTemplateActionSeverityMatrix(now());
       return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/rules/templates/category-activation (T6 M5.20) — per-category
+   *  breakdown of the M5.1 rule template library showing template counts
+   *  by vertical, avg supporting_indicators, severity_distribution, and
+   *  most_common_action per category. Drives "which category has the best
+   *  coverage?" + template catalogue overview panel. Distinct from M5.16
+   *  (overall severity dist), M5.17 (category×vertical matrix). Platform-
+   *  static. Mounted BEFORE /:id catch-all. */
+  app.get(
+    '/v1/rules/templates/category-activation',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildTemplateCategoryActivationAnalytics } =
+        require('./rule_template_category_activation') as
+        typeof import('./rule_template_category_activation');
+      const result = buildTemplateCategoryActivationAnalytics(now());
+      return res.json(wrapResponse(result, ctx));
     },
   );
 
