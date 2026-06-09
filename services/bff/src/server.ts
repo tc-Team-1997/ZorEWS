@@ -9533,6 +9533,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scenarios/library/portfolio-ranking (T6 M16.25) —
+   *  Ranks every library preset by a weighted impact_index:
+   *  |gdp|/7*0.4 + |rate|/400*0.35 + |fx|/15*0.25 (RBI severely-
+   *  adverse maxima as reference). Per-row: rank, preset metadata,
+   *  impact_index [0-1], portfolio_tier (catastrophic/severe/
+   *  moderate/mild). Envelope: most_impactful, average_impact_index,
+   *  catastrophic_count, zero_impact_count. RBAC customers:read_risk_
+   *  profile. Platform-static. Mounted BEFORE /:preset_id. */
+  app.get(
+    '/v1/scenarios/library/portfolio-ranking',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioPortfolioRanking } =
+        require('./scenario_portfolio_ranking') as
+        typeof import('./scenario_portfolio_ranking');
+      const out = buildScenarioPortfolioRanking(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/scenarios/library/coverage-matrix (T6 M16.17) — 2D
    *  rollup over the M16.1 library showing per-(category,
    *  regulator) coverage counts. Cells with `count < expected_min`
@@ -16829,6 +16851,28 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/percentile-comparison (T6 M4.22) —
+   *  Fleet-wide percentiles (p25, p50, p75) for each threshold band
+   *  (yellow_at, orange_at, red_at) across all platform indicators.
+   *  Per indicator: yellow/orange/red_percentile_rank (0-100),
+   *  is_tightest_yellow (yellow_at > fleet p75), is_most_lenient_red
+   *  (red_at < fleet p25). Envelope: fleet_percentiles, tightest_yellow_
+   *  indicators[], most_lenient_red_indicators[]. Platform-static.
+   *  Mounted BEFORE /thresholds/* catch-alls. */
+  app.get(
+    '/v1/indicators/thresholds/percentile-comparison',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorThresholdPercentiles } =
+        require('./indicator_threshold_percentile') as
+        typeof import('./indicator_threshold_percentile');
+      const result = buildIndicatorThresholdPercentiles(now());
+      return res.json(wrapResponse(result, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/band-gap (T6 M4.14) — quality
    *  scorecard over the platform DEFAULTS threshold catalog.
    *  Distinct from M4.12 (per-tenant drift) — M4.14 audits the
@@ -18539,6 +18583,39 @@ export function makeApp(deps: AppDeps = {}) {
         steps: onboardingStore.get(t.tenant_id).steps,
       }));
       const result = buildTenantStepTimingAnalytics(states, now());
+      return res.json(wrapResponse(result, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/onboarding/bottleneck-predictor (T6 M2.22) —
+   *  Identifies which required onboarding steps are most commonly
+   *  blocking fleet completion. Per bottleneck: step_id, name, order,
+   *  total_tenants_pending, pct_blocked, estimated_hours_blocked,
+   *  risk_tier (critical/high/medium). Envelope: critical_bottleneck,
+   *  fleet_completion_probability. Async. Mounted BEFORE /:tenant_id. */
+  app.get(
+    '/v1/tenants/onboarding/bottleneck-predictor',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(wrapError({
+          code: 'EWS_501_not_implemented',
+          message: 'tenant lookup does not expose all()',
+          severity: 'MEDIUM',
+        }, ctx));
+      }
+      const tenants = await lookup.all();
+      const { predictOnboardingBottlenecks } =
+        require('./tenant_onboarding_bottleneck') as
+        typeof import('./tenant_onboarding_bottleneck');
+      const fleet = tenants.map((t) => ({
+        tenant_id: t.tenant_id,
+        state: onboardingStore.get(t.tenant_id),
+      }));
+      const result = predictOnboardingBottlenecks(fleet, now());
       return res.json(wrapResponse(result, ctx));
     },
   );
@@ -28344,6 +28421,38 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/api-keys/access-pattern-summary (T6 M1.21) —
+   *  Groups active keys by last_used_at recency (today / this_week /
+   *  this_month / this_quarter / never_used / expired_or_revoked).
+   *  Surfaces usage_coverage, dormancy_risk_score (0-100), top-5
+   *  most-recently-used keys, and human-readable security_flags.
+   *  Distinct from M1.10 (lifecycle stages), M1.13 (recency histogram).
+   *  Mounted BEFORE /:key_id wildcard. */
+  app.get(
+    '/v1/admin/api-keys/access-pattern-summary',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const PAGE = 100;
+      const out: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, PAGE);
+        out.push(...result.items);
+        if (result.items.length < PAGE) break;
+      }
+      const { buildApiKeyAccessPatternSummary } =
+        require('./api_key_access_pattern') as
+        typeof import('./api_key_access_pattern');
+      const summary = buildApiKeyAccessPatternSummary(
+        req.tenant!.tenant_id,
+        out,
+        now(),
+      );
+      return res.json(wrapResponse(summary, ctx));
+    },
+  );
+
   /** GET /v1/admin/api-keys/creator-status-matrix (T6 M1.14) — 2D
    *  cross-tab combining OPEN creator axis × CLOSED 2-ApiKeyStatus
    *  axis (active / revoked). Each key in exactly one cell. Per-row
@@ -30479,6 +30588,31 @@ export function makeApp(deps: AppDeps = {}) {
         require('./connector_schema_field_frequency') as
         typeof import('./connector_schema_field_frequency');
       const result = buildConnectorSchemaFieldFrequency(now());
+      return res.json(wrapResponse(result, ctx));
+    },
+  );
+
+  /** GET /v1/ingestion/run-errors/taxonomy (T6 M3.22) — fleet-wide
+   *  error message taxonomy over recent failed/partial runs across all
+   *  connectors. Categories: timeout / connection / schema / auth /
+   *  rate_limit / data / unknown. Per-category: count, pct, sample_messages
+   *  cap 3, affected_connectors[] sorted asc. Envelope: most_common_
+   *  error_category, connectors_with_most_errors cap 5. Tenant-scoped.
+   *  Distinct from M3.6 (per-connector regex clustering). */
+  app.get(
+    '/v1/ingestion/run-errors/taxonomy',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorErrorTaxonomy } =
+        require('./connector_error_taxonomy') as
+        typeof import('./connector_error_taxonomy');
+      const result = buildConnectorErrorTaxonomy(
+        ingestionRegistry,
+        req.tenant!.tenant_id,
+        now(),
+      );
       return res.json(wrapResponse(result, ctx));
     },
   );
