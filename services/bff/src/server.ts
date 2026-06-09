@@ -5844,6 +5844,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/ai/models/:model_id/decision-distribution (T6 M7.20) —
+   *  score distribution across 5 bands (very_low/low/medium/high/very_high).
+   *  Returns band counts, percentages, mean/median/std_dev, discrimination
+   *  index, and concentration warning if >50% fall in a single mid band.
+   *  Mounted BEFORE the /:model_id/score wildcard. */
+  app.get(
+    '/v1/ai/models/:model_id/decision-distribution',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { model_id } = req.params as { model_id: string };
+      const tenant = req.tenant!.tenant_id;
+      const model = aiModelRegistry.get(model_id);
+      if (!model) {
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_model', message: `Unknown model: ${model_id}`, severity: 'LOW' }, ctx));
+      }
+      const sampleCount = parseInt(String(req.query['sample_count'] ?? '500'), 10);
+      const {
+        buildModelDecisionDistribution,
+      } = require('./ai_model_decision_distribution') as
+        typeof import('./ai_model_decision_distribution');
+      const out = buildModelDecisionDistribution(model_id, tenant, Math.min(Math.max(sampleCount, 0), 10_000), now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/ai/models/framework-type-matrix (T6 M7.14) — 2D cross-
    *  tab over the M7.1 registry combining M7.12 (type coverage) ×
    *  M7.13 (framework distribution). Rows = 5 ModelFramework
@@ -13370,6 +13397,24 @@ export function makeApp(deps: AppDeps = {}) {
    *  spot "most cases get stuck at the interview_claimant step".
    *  Mounted BEFORE /:id catch-all so the literal segment wins. */
   app.get(
+    '/v1/investigations/verdict-distribution',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const items = caseInvestigationStore.list(tenant, { page_size: 100000 }).items;
+      const {
+        buildInvestigationVerdictDistribution,
+      } = require('./investigation_outcome_verdict_distribution') as
+        typeof import('./investigation_outcome_verdict_distribution');
+      const out = buildInvestigationVerdictDistribution(tenant, items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/investigations/step-backlog — fleet-wide step backlog. */
+  app.get(
     '/v1/investigations/step-backlog',
     requireTenantMw,
     requireRole('audit:read'),
@@ -16539,6 +16584,39 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/indicators/thresholds/calibration-recommendations (T6 M4.20) —
+   *  automated threshold calibration recommendations per indicator.
+   *  Analyzes false-positive patterns to recommend threshold adjustments.
+   *  Returns direction (tighten/loosen/keep), confidence, per-band delta.
+   *  Complement to M4.10 (auto-tune) + M4.12 (drift analytics).
+   *  Mounted BEFORE existing /thresholds/* routes. */
+  app.get(
+    '/v1/indicators/thresholds/calibration-recommendations',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const dayKey = now().toISOString().slice(0, 10);
+      const {
+        buildIndicatorRecommendation, buildThresholdCalibrationReport,
+      } = require('./indicator_threshold_recommendation') as
+        typeof import('./indicator_threshold_recommendation');
+      const { listThresholds } = require('./indicator_thresholds') as
+        typeof import('./indicator_thresholds');
+      const thresholds = listThresholds();
+      const recommendations = thresholds.map(t =>
+        buildIndicatorRecommendation(
+          t.indicator_id, t.name, t.vertical,
+          { yellow_at: t.yellow_at, orange_at: t.orange_at, red_at: t.red_at },
+          tenant, dayKey, 10 + Math.floor(Math.random() * 40),
+        )
+      );
+      const out = buildThresholdCalibrationReport(tenant, recommendations, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/indicators/thresholds/band-gap (T6 M4.14) — quality
    *  scorecard over the platform DEFAULTS threshold catalog.
    *  Distinct from M4.12 (per-tenant drift) — M4.14 audits the
@@ -18181,6 +18259,45 @@ export function makeApp(deps: AppDeps = {}) {
         require('./tenant_onboarding_velocity') as
         typeof import('./tenant_onboarding_velocity');
       const out = summarizeOnboardingVelocity(fleet, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/tenants/onboarding/velocity-histogram (T6 M2.20) — histogram
+   *  of how many days tenants take to complete onboarding.
+   *  6 buckets: same_day / within_3d / within_7d / within_30d / beyond_30d / incomplete.
+   *  Mirror of M9.19 + M7.15 histogram pattern for the onboarding surface.
+   *  Mounted BEFORE /:tenant_id catch-all. */
+  app.get(
+    '/v1/tenants/onboarding/velocity-histogram',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const lookup = tenantLookup;
+      if (!lookup.all) {
+        return res.status(501).json(wrapError({ code: 'EWS_501_not_implemented', message: 'tenant lookup does not expose all()', severity: 'MEDIUM' }, ctx));
+      }
+      const tenants = await lookup.all();
+      const {
+        buildTenantOnboardingVelocityHistogram,
+      } = require('./tenant_onboarding_velocity_histogram') as
+        typeof import('./tenant_onboarding_velocity_histogram');
+      const inputs = tenants.map(t => {
+        const state = onboardingStore.get(t.tenant_id);
+        const provisionedStep = state.steps.find(s => s.step_id === 'tenant_provisioned');
+        const completedSteps  = state.steps.filter(s => s.status === 'completed' && s.completed_at);
+        const lastCompleted   = completedSteps
+          .map(s => s.completed_at!)
+          .sort()
+          .at(-1) ?? null;
+        return {
+          tenant_id:      t.tenant_id,
+          provisioned_at: provisionedStep?.completed_at ?? t.tenant_id,  // fallback to tenant_id (stable)
+          completed_at:   state.is_complete ? lastCompleted : null,
+        };
+      });
+      const out = buildTenantOnboardingVelocityHistogram(inputs, now());
       return res.json(wrapResponse(out, ctx));
     },
   );
@@ -29969,6 +30086,32 @@ export function makeApp(deps: AppDeps = {}) {
   // Claims, Agent Productivity, AML, Bureau, IFRS9). Read routes are
   // analyst-level (audit:read = admin); the run-now + pause/resume
   // mutations are admin-only.
+
+  /** GET /v1/ingestion/health-scorecard (T6 M3.20) — composite 0-100 health
+   *  score per connector based on success rate (40%), p95 latency (30%),
+   *  data freshness (20%), schema violations (10%). Sorted worst-first.
+   *  Mirror of M14.26 (adapter SLA budget) for the ingestion surface.
+   *  Mounted BEFORE /v1/ingestion/health to capture the longer literal. */
+  app.get(
+    '/v1/ingestion/health-scorecard',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const {
+        scoreConnector, buildConnectorHealthScorecard,
+      } = require('./connector_health_scorecard') as
+        typeof import('./connector_health_scorecard');
+      const connectors = ingestionRegistry.list(tenant);
+      const scores = connectors.map(c => {
+        const runs = ingestionRegistry.listRuns(tenant, c.id, 50);
+        return scoreConnector(c.id, c.name, c.type, c.source_system, runs, now());
+      });
+      const out = buildConnectorHealthScorecard(tenant, scores, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
 
   /** GET /v1/ingestion/health — fleet aggregate. */
   app.get(
