@@ -6518,6 +6518,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── T6 M7.28 — Model version lineage tracker (before /:model_id catch-all) ─
+  app.get('/v1/ai/models/version-lineage', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildModelVersionLineage } = require('./model_version_lineage') as typeof import('./model_version_lineage');
+    const out = buildModelVersionLineage(aiModelRegistry, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/ai/models/:model_id — single model. 404 on miss. */
   app.get(
     '/v1/ai/models/:model_id',
@@ -13880,6 +13888,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── T6 M9.28 — Investigation team workload distribution (before /:id catch-all) ─
+  app.get('/v1/investigations/team-distribution', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildInvestigationTeamDistribution } = require('./investigation_team_distribution') as typeof import('./investigation_team_distribution');
+    const out = buildInvestigationTeamDistribution(req.tenant!.tenant_id, caseInvestigationStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/investigations/:id — single. 404 on miss/cross-tenant. */
   app.get(
     '/v1/investigations/:id',
@@ -15369,6 +15385,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── T6 M11.26 — Dashboard template suggestions (before /:id catch-all) ─
+  app.get('/v1/dashboards/custom/template-suggestions', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDashboardTemplateSuggestions } = require('./dashboard_template_suggestions') as typeof import('./dashboard_template_suggestions');
+    const out = buildDashboardTemplateSuggestions(req.tenant!.tenant_id, customDashboardStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/dashboards/custom/:dashboard_id — single. */
   app.get(
     '/v1/dashboards/custom/:dashboard_id',
@@ -16455,6 +16479,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse({ diff }, ctx));
     },
   );
+
+  // ── T6 M6.28 — Scoring weight sensitivity heatmap (before /:id catch-all) ─
+  app.get('/v1/scoring/presets/sensitivity-heatmap', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildScoringWeightSensitivityHeatmap } = require('./scoring_weight_sensitivity_heatmap') as typeof import('./scoring_weight_sensitivity_heatmap');
+    const out = buildScoringWeightSensitivityHeatmap(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/scoring/presets/:id — single preset. 404 EWS_404_unknown_preset. */
   app.get(
@@ -24901,6 +24933,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  // ── T6 M13.26 — Config rollback readiness (before /:key catch-all) ───
+  app.get('/v1/admin/config/rollback-readiness', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConfigRollbackReadiness } = require('./config_rollback_readiness') as typeof import('./config_rollback_readiness');
+    const out = buildConfigRollbackReadiness(req.tenant!.tenant_id, configStore, auditTrailStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/admin/config/:key — single entry. 404 when key is unknown. */
   app.get(
     '/v1/admin/config/:key',
@@ -29502,6 +29542,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildApiKeyUsagePatterns } = require('./api_key_usage_patterns') as typeof import('./api_key_usage_patterns');
     const out = buildApiKeyUsagePatterns(apiKeyStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M1.28 — API key geographic access (before /:key_id catch-all) ─
+  app.get('/v1/admin/api-keys/geo-access', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildApiKeyGeoAccess } = require('./api_key_geo_access') as typeof import('./api_key_geo_access');
+    const out = buildApiKeyGeoAccess(apiKeyStore, req.tenant!.tenant_id, now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -34481,6 +34529,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  // ── T6 M12.26 — Report subscription health (before /:schedule_id catch-all) ─
+  app.get('/v1/reports/schedules/subscription-health', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildReportSubscriptionHealth } = require('./report_subscription_health') as typeof import('./report_subscription_health');
+    const out = buildReportSubscriptionHealth(req.tenant!.tenant_id, reportScheduleStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/reports/schedules/:schedule_id — single schedule. */
   app.get(
     '/v1/reports/schedules/:schedule_id',
@@ -37515,6 +37571,14 @@ export function makeApp(deps: AppDeps = {}) {
       res.json(wrapResponse(report, ctx));
     },
   );
+
+  // ── T6 M5.28 — Rule conflict detection (before /:id catch-all) ──────
+  app.get('/v1/rules/conflict-detection', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildRuleConflictDetection } = require('./rule_conflict_detection') as typeof import('./rule_conflict_detection');
+    const out = buildRuleConflictDetection(req.tenant!.tenant_id, ruleStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/rules/:id — full rule envelope with audit trail. */
   app.get('/v1/rules/:id', requireTenantMw, requireRole('rules:read'), (req: Request, res: Response) => {
@@ -43475,6 +43539,126 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+
+  // ── T6 M1.28 — API key geographic access analysis ────────────────────
+  app.get('/v1/admin/api-keys/geo-access', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildApiKeyGeoAccess } = require('./api_key_geo_access') as typeof import('./api_key_geo_access');
+    const out = buildApiKeyGeoAccess(apiKeyStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M2.28 — Tenant onboarding ROI estimate ─────────────────────────
+  app.get('/v1/tenants/onboarding/roi-estimate', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildTenantOnboardingRoi } = require('./tenant_onboarding_roi') as typeof import('./tenant_onboarding_roi');
+    const out = buildTenantOnboardingRoi(req.tenant!.tenant_id, onboardingStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M3.28 — Data pipeline execution time analysis ─────────────────
+  app.get('/v1/ingestion/pipeline/timing', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDataPipelineTiming } = require('./data_pipeline_timing') as typeof import('./data_pipeline_timing');
+    const out = buildDataPipelineTiming(ingestionRegistry, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M4.29 — Indicator trigger frequency analysis ───────────────────
+  app.get('/v1/indicators/trigger-frequency', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildIndicatorTriggerFrequency } = require('./indicator_trigger_frequency') as typeof import('./indicator_trigger_frequency');
+    const out = buildIndicatorTriggerFrequency(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M5.28 — Rule conflict detection ───────────────────────────────
+  app.get('/v1/rules/conflict-detection', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildRuleConflictDetection } = require('./rule_conflict_detection') as typeof import('./rule_conflict_detection');
+    const out = buildRuleConflictDetection(req.tenant!.tenant_id, ruleStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M6.28 — Scoring weight sensitivity heatmap ────────────────────
+  app.get('/v1/scoring/presets/sensitivity-heatmap', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildScoringWeightSensitivityHeatmap } = require('./scoring_weight_sensitivity_heatmap') as typeof import('./scoring_weight_sensitivity_heatmap');
+    const out = buildScoringWeightSensitivityHeatmap(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M7.28 — Model version lineage tracker ─────────────────────────
+  app.get('/v1/ai/models/version-lineage', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildModelVersionLineage } = require('./model_version_lineage') as typeof import('./model_version_lineage');
+    const out = buildModelVersionLineage(aiModelRegistry, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M8.27 — Alert resolution time by assignee role ────────────────
+  app.get('/v1/alerts/resolution-by-role', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAlertResolutionByRole } = require('./alert_resolution_by_role') as typeof import('./alert_resolution_by_role');
+    const out = buildAlertResolutionByRole(req.tenant!.tenant_id, routingLedger, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M9.28 — Investigation team workload distribution ───────────────
+  app.get('/v1/investigations/team-distribution', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildInvestigationTeamDistribution } = require('./investigation_team_distribution') as typeof import('./investigation_team_distribution');
+    const out = buildInvestigationTeamDistribution(req.tenant!.tenant_id, caseInvestigationStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M10.26 — Notification retry pattern analysis ───────────────────
+  app.get('/v1/notifications/retry-patterns', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildNotificationRetryPatterns } = require('./notification_retry_patterns') as typeof import('./notification_retry_patterns');
+    const out = buildNotificationRetryPatterns(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M11.26 — Dashboard cross-tenant template suggestions ───────────
+  app.get('/v1/dashboards/custom/template-suggestions', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDashboardTemplateSuggestions } = require('./dashboard_template_suggestions') as typeof import('./dashboard_template_suggestions');
+    const out = buildDashboardTemplateSuggestions(req.tenant!.tenant_id, customDashboardStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M12.26 — Report subscription health check ─────────────────────
+  app.get('/v1/reports/schedules/subscription-health', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildReportSubscriptionHealth } = require('./report_subscription_health') as typeof import('./report_subscription_health');
+    const out = buildReportSubscriptionHealth(req.tenant!.tenant_id, reportScheduleStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M13.26 — Config rollback readiness assessment ─────────────────
+  app.get('/v1/admin/config/rollback-readiness', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConfigRollbackReadiness } = require('./config_rollback_readiness') as typeof import('./config_rollback_readiness');
+    const out = buildConfigRollbackReadiness(req.tenant!.tenant_id, configStore, auditTrailStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M14.38 — Adapter data volume analysis ─────────────────────────
+  app.get('/v1/integrations/adapters/data-volume', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAdapterDataVolume } = require('./adapter_data_volume') as typeof import('./adapter_data_volume');
+    const out = buildAdapterDataVolume(ingestionRegistry, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  // ── T6 M15.28 — Audit event metadata richness score ──────────────────
+  app.get('/v1/audit/metadata-richness', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAuditMetadataRichness } = require('./audit_metadata_richness') as typeof import('./audit_metadata_richness');
+    const out = buildAuditMetadataRichness(req.tenant!.tenant_id, auditTrailStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   // ── T6 M14.33 — Adapter data freshness comparison ────────────────────
   /** GET /v1/integrations/adapters/data-freshness (T6 M14.33) —
