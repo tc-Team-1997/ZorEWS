@@ -13285,6 +13285,31 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/resolution-by-template (T6 M9.22) —
+   *  groups CLOSED investigations by checklist_template_id. Returns
+   *  avg/median resolution days + fraud_rate per template. Sorted
+   *  avg_resolution_days asc (null last). RBAC audit:read. Mounted
+   *  BEFORE /:id catch-all so the literal segment wins. */
+  app.get(
+    '/v1/investigations/resolution-by-template',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = caseInvestigationStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const allItems = page.items;
+      const { buildResolutionByTemplate } =
+        require('./investigation_resolution_by_template') as
+        typeof import('./investigation_resolution_by_template');
+      const out = buildResolutionByTemplate(
+        req.tenant!.tenant_id,
+        allItems,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/investigations/age-distribution (T6 M9.11) — histogram
    *  of open + closed investigations by age bucket (< 24h / 1-3d /
    *  3-7d / 7-30d / 30d+). Per-bucket includes up to 3 oldest as
@@ -15065,6 +15090,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/custom/complexity-scores (T6 M11.21) —
+   *  per-dashboard complexity_score = widget_count*10 + max_row_span*5
+   *  + distinct_widget_types*8. Tiers: simple/moderate/complex.
+   *  Returns scores[] sorted desc, most_complex, tier_distribution.
+   *  RBAC audit:read. Mounted BEFORE /:dashboard_id catch-all. */
+  app.get(
+    '/v1/dashboards/custom/complexity-scores',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const dashboards = customDashboardStore.list(req.tenant!.tenant_id);
+      const { buildDashboardComplexityScores } =
+        require('./dashboard_complexity_score') as
+        typeof import('./dashboard_complexity_score');
+      const out = buildDashboardComplexityScores(req.tenant!.tenant_id, dashboards, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/dashboards/custom/:dashboard_id — single. */
   app.get(
     '/v1/dashboards/custom/:dashboard_id',
@@ -15530,6 +15575,26 @@ export function makeApp(deps: AppDeps = {}) {
         }
         throw e;
       }
+    },
+  );
+
+  /** GET /v1/scoring/presets/custom/multiplier-drift (T6 M6.22) — for each
+   *  custom preset, computes drift_score = mean |multiplier - 1.0| across
+   *  all explicit multipliers. Returns presets[] sorted drift_score desc,
+   *  most_drifted, fleet_avg_drift. RBAC customers:read_risk_profile. */
+  app.get(
+    '/v1/scoring/presets/custom/multiplier-drift',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const { buildScoringPresetMultiplierDrift } =
+        require('./scoring_preset_multiplier_drift') as
+        typeof import('./scoring_preset_multiplier_drift');
+      const presets = customWeightPresetStore.list(tenant);
+      const out = buildScoringPresetMultiplierDrift(presets, now());
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
@@ -24336,6 +24401,30 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/admin/config/change-frequency (T6 M13.21) — groups M15.1
+   *  audit events with resource_type='config' by config key (resource_id).
+   *  Returns keys[] sorted total_changes desc, most_changed_key,
+   *  stable_keys_count (keys in DEFAULTS never changed). RBAC audit:read.
+   *  Mounted BEFORE /:key catch-all so the literal segment isn't captured. */
+  app.get(
+    '/v1/admin/config/change-frequency',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const { buildConfigChangeFrequency } =
+        require('./admin_config_change_frequency') as
+        typeof import('./admin_config_change_frequency');
+      const out = buildConfigChangeFrequency(
+        req.tenant!.tenant_id,
+        page.items,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/admin/config/:key — single entry. 404 when key is unknown. */
   app.get(
     '/v1/admin/config/:key',
@@ -28867,7 +28956,33 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
-  /** GET /v1/admin/api-keys/:key_id — single redacted entry. */
+  // ── T6 M1.22 — API key permission escalation detection ───────────────
+  /** GET /v1/admin/api-keys/permission-escalation (T6 M1.22) — detects
+   *  full-access keys (all 7 scopes), high-privilege keys (>3 scopes),
+   *  and escalation events (newer key with same name prefix has MORE
+   *  scopes). Returns risk_score (0-100). Mounted BEFORE /:key_id. RBAC
+   *  audit:read. */
+  app.get(
+    '/v1/admin/api-keys/permission-escalation',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const entries: import('./api_keys').ApiKeyEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const result = apiKeyStore.list(req.tenant!.tenant_id, page, 100);
+        entries.push(...result.items);
+        if (result.items.length < 100) break;
+      }
+      const { detectApiKeyPermissionEscalation } =
+        require('./api_key_permission_escalation') as
+        typeof import('./api_key_permission_escalation');
+      const out = detectApiKeyPermissionEscalation(req.tenant!.tenant_id, entries, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  /** GET /v1/admin/api-keys/:key_id — single key (redacted). */
   app.get(
     '/v1/admin/api-keys/:key_id',
     requireTenantMw,
@@ -33696,6 +33811,29 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/schedules/adherence (T6 M12.21) — for each
+   *  ENABLED schedule, computes expected_runs_30d (by cadence) vs
+   *  actual (proxied from last_run_at). Returns schedules[] sorted
+   *  adherence_rate asc, worst_adherence, fleet_adherence_rate.
+   *  RBAC audit:read. Mounted BEFORE /:schedule_id catch-all. */
+  app.get(
+    '/v1/reports/schedules/adherence',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScheduleAdherence } =
+        require('./report_schedule_adherence') as
+        typeof import('./report_schedule_adherence');
+      const out = buildScheduleAdherence(
+        reportScheduleStore,
+        req.tenant!.tenant_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   /** GET /v1/reports/schedules/:schedule_id — single schedule. */
   app.get(
     '/v1/reports/schedules/:schedule_id',
@@ -34366,6 +34504,26 @@ export function makeApp(deps: AppDeps = {}) {
         typeof import('./rule_template_category_activation');
       const result = buildTemplateCategoryActivationAnalytics(now());
       return res.json(wrapResponse(result, ctx));
+    },
+  );
+
+  /** GET /v1/rules/firing-time-distribution (T6 M5.21) — groups audit events
+   *  with action='rule.fired' resource_type='rule' by UTC hour-of-day 0-23.
+   *  Returns by_hour[24], peak_hour, quiet_hours, mean_fires_per_hour.
+   *  RBAC rules:list. Mounted BEFORE /:id catch-alls. */
+  app.get(
+    '/v1/rules/firing-time-distribution',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const tenant = req.tenant!.tenant_id;
+      const { buildRuleFiringTimeDistribution } =
+        require('./rule_firing_time_distribution') as
+        typeof import('./rule_firing_time_distribution');
+      const auditPage = auditTrailStore.list(tenant, { resource_type: 'rule', page_size: 1000 });
+      const out = buildRuleFiringTimeDistribution(tenant, auditPage.items, now());
+      return res.json(wrapResponse(out, ctx));
     },
   );
 
@@ -42278,6 +42436,231 @@ export function makeApp(deps: AppDeps = {}) {
     }
   });
 
+  // ── T6 M15.23 — Audit chain completeness check ───────────────────────
+  /** GET /v1/audit/chain-completeness (T6 M15.23) — structural
+   *  completeness check over the tenant's audit chain. Returns:
+   *  total_events, has_gaps, gap_count, out_of_order_count,
+   *  broken_hash_links, completeness_score (0-100), issues[],
+   *  is_complete (score >= 95). RBAC audit:read. */
+  app.get(
+    '/v1/audit/chain-completeness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAuditChainCompleteness } =
+        require('./audit_chain_completeness') as
+        typeof import('./audit_chain_completeness');
+      const page = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 100000 });
+      const out = buildAuditChainCompleteness(req.tenant!.tenant_id, page.items, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M16.26 — Scenario preset sensitivity ranking ───────────────────
+  /** GET /v1/scenarios/library/sensitivity-ranking (T6 M16.26) — ranks
+   *  the M16.1 library presets by absolute shock magnitude per GDP/rate/
+   *  fx axis. Returns by_factor.{gdp,rate,fx}[] sorted by |shock| desc
+   *  with rank, most_*_sensitive leaderboards, and balanced_presets[]
+   *  (all 3 factors non-zero). Mounted BEFORE /:preset_id. RBAC
+   *  customers:read_risk_profile. */
+  app.get(
+    '/v1/scenarios/library/sensitivity-ranking',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScenarioSensitivityRankingFromLibrary } =
+        require('./scenario_sensitivity_ranking') as
+        typeof import('./scenario_sensitivity_ranking');
+      const out = buildScenarioSensitivityRankingFromLibrary(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+
+  // ── T6 M2.23 — Tenant configuration similarity analysis ──────────────
+  /** GET /v1/tenants/config-similarity (T6 M2.23) — for each pair of
+   *  tenants, computes Jaccard similarity over config override key sets.
+   *  Returns pairs[] (cap 20) sorted by similarity desc, most_similar_pair,
+   *  most_divergent_pair, avg_similarity. Async (needs tenantLookup.all()).
+   *  501 when lookup lacks all(). RBAC audit:read admin-only. */
+  app.get(
+    '/v1/tenants/config-similarity',
+    requireTenantMw,
+    requireRole('audit:read'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildTenantConfigSimilarity } =
+        require('./tenant_config_similarity') as
+        typeof import('./tenant_config_similarity');
+      const lookup = tenantLookup;
+      if (typeof (lookup as { all?: unknown }).all !== 'function') {
+        return res.status(501).json(
+          wrapError(
+            { code: 'EWS_501_not_implemented', message: 'tenant lookup does not support all()', severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const all = await (lookup as { all: () => Promise<{ tenant_id: string }[]> }).all();
+      const tenants = all.map((t: { tenant_id: string }) => t.tenant_id);
+      const out = await buildTenantConfigSimilarity(tenants, configStore, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M3.23 — Connector schema version drift detection ──────────────
+  /** GET /v1/ingestion/schema/version-drift (T6 M3.23) — compares field
+   *  counts across connectors of the same source_system type to surface
+   *  divergence. Returns by_source_system[] sorted by drift_magnitude
+   *  desc, plus drifting_systems[] and stable_systems[]. Platform-static.
+   *  RBAC audit:read. Mounted BEFORE catch-alls. */
+  app.get(
+    '/v1/ingestion/schema/version-drift',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildConnectorSchemaVersionDrift } =
+        require('./connector_schema_version_drift') as
+        typeof import('./connector_schema_version_drift');
+      const out = buildConnectorSchemaVersionDrift(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M4.23 — Indicator catalog coverage by customer segment ─────────
+  /** GET /v1/indicators/coverage-by-segment (T6 M4.23) — maps each
+   *  indicator to the customer segments it applies to (retail/sme/
+   *  corporate/msme/individual/group) based on family prefix, then
+   *  computes a per-segment coverage view. Platform-static. RBAC
+   *  audit:read. Mounted BEFORE /thresholds. */
+  app.get(
+    '/v1/indicators/coverage-by-segment',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildIndicatorCoverageBySegment } =
+        require('./indicator_coverage_by_segment') as
+        typeof import('./indicator_coverage_by_segment');
+      const out = buildIndicatorCoverageBySegment(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M5.22 — Rule template complexity scoring ───────────────────────
+  /** GET /v1/rules/templates/complexity-scores (T6 M5.22) — scores each
+   *  template in the M5.1 library. Complexity formula:
+   *  indicators*10 + actions*8 + (both?5:0). Tiers: simple(<20)/
+   *  moderate(20-40)/complex(>40). Platform-static. RBAC rules:list.
+   *  Mounted BEFORE /:id. */
+  app.get(
+    '/v1/rules/templates/complexity-scores',
+    requireTenantMw,
+    requireRole('rules:list'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildRuleTemplateComplexityScores } =
+        require('./rule_template_complexity') as
+        typeof import('./rule_template_complexity');
+      const out = buildRuleTemplateComplexityScores(now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M6.23 — Scoring preset usage frequency tracker ────────────────
+  /** GET /v1/scoring/presets/usage-tracker (T6 M6.23) — tracks how often
+   *  each weight preset is used by scanning audit events for preset_id
+   *  metadata. Falls back to deterministic synthesis when audit data is
+   *  sparse. Returns preset_usage[] cap 10, sorted call_count desc.
+   *  RBAC customers:read_risk_profile. Mounted BEFORE catch-alls. */
+  app.get(
+    '/v1/scoring/presets/usage-tracker',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildScoringPresetUsageTracker } =
+        require('./scoring_preset_usage_tracker') as
+        typeof import('./scoring_preset_usage_tracker');
+      const events = auditTrailStore.list(req.tenant!.tenant_id, { page_size: 1000 }).items;
+      const out = buildScoringPresetUsageTracker(req.tenant!.tenant_id, events, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M7.23 — AI model confidence calibration analysis ──────────────
+  /** GET /v1/ai/models/:model_id/confidence-calibration (T6 M7.23) —
+   *  simulates a calibration curve for a model. Returns 10 buckets
+   *  (0-10%...90-100%), calibration_error (mean|predicted-actual|),
+   *  is_well_calibrated (error < 0.05), overconfident/underconfident
+   *  bucket counts. Deterministic per (tenant, model_id, day). RBAC
+   *  customers:read_risk_profile. Mounted BEFORE /:model_id catch-all. */
+  app.get(
+    '/v1/ai/models/:model_id/confidence-calibration',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const model_id = req.params.model_id ?? '';
+      if (!model_id.trim()) {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400_invalid_input', message: 'model_id is required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      const registry = aiModelRegistry;
+      const model = registry.get(model_id);
+      if (!model) {
+        return res.status(404).json(
+          wrapError({ code: 'EWS_404_unknown_model', message: `unknown model: ${model_id}`, severity: 'LOW' }, ctx),
+        );
+      }
+      const { buildModelConfidenceCalibration } =
+        require('./ai_model_confidence_calibration') as
+        typeof import('./ai_model_confidence_calibration');
+      const out = buildModelConfidenceCalibration(model_id, req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M8.22 — Alert lifecycle SLA efficiency score ───────────────────
+  /** GET /v1/alerts/lifecycle-efficiency?window=N (T6 M8.22) — computes
+   *  per-class efficiency: met_sla_pct, avg_ack_time_vs_sla_pct,
+   *  efficiency_grade (A/B/C/D/F). Fleet efficiency score (0-100).
+   *  Default window=50, max=200. RBAC audit:read. */
+  app.get(
+    '/v1/alerts/lifecycle-efficiency',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const DEFAULT_WINDOW = 50;
+      const MAX_WINDOW = 200;
+      const windowRaw = req.query.window as string | undefined;
+      let window_size = DEFAULT_WINDOW;
+      if (typeof windowRaw === 'string' && windowRaw.trim()) {
+        const n = Number.parseInt(windowRaw, 10);
+        if (!Number.isInteger(n) || n < 1 || n > MAX_WINDOW) {
+          return res.status(400).json(
+            wrapError(
+              { code: 'EWS_400_invalid_input', message: `window must be 1-${MAX_WINDOW}`, severity: 'MEDIUM' },
+              ctx,
+            ),
+          );
+        }
+        window_size = n;
+      }
+      const { buildAlertLifecycleEfficiency } =
+        require('./alert_lifecycle_efficiency') as
+        typeof import('./alert_lifecycle_efficiency');
+      const records = routingLedger.list(req.tenant!.tenant_id, window_size);
+      const out = buildAlertLifecycleEfficiency(req.tenant!.tenant_id, records, null, window_size, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
   // ── Global error handler (Express 4 catch-all) ──────────────────────
   // Must be registered AFTER all routes so it acts as the last middleware
   // in the chain. Catches any unhandled synchronous throw AND any async
@@ -42295,6 +42678,129 @@ export function makeApp(deps: AppDeps = {}) {
       );
     }
   });
+
+  // ── T6 M7.22 — Model performance metric correlation matrix ───────────
+  /** GET /v1/ai/models/:model_id/metric-correlation (T6 M7.22) —
+   *  computes Pearson correlation coefficient for each pair of M7.5
+   *  performance metrics with >= 3 common observations. Returns
+   *  correlations[] sorted by |correlation| desc, strongest_correlation.
+   *  RBAC customers:read_risk_profile. Mounted BEFORE /:model_id. */
+  app.get(
+    '/v1/ai/models/:model_id/metric-correlation',
+    requireTenantMw,
+    requireRole('customers:read_risk_profile'),
+    async (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const model_id = req.params.model_id ?? '';
+      if (!model_id.trim()) {
+        return res.status(400).json(
+          wrapError({ code: 'EWS_400_invalid_input', message: 'model_id required', severity: 'MEDIUM' }, ctx),
+        );
+      }
+      const { buildModelMetricCorrelation } =
+        require('./model_metric_correlation') as
+        typeof import('./model_metric_correlation');
+      const out = await buildModelMetricCorrelation(
+        req.tenant!.tenant_id,
+        modelPerformanceStore,
+        model_id,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M8.21 — Alert burst detection ─────────────────────────────────
+  /** GET /v1/alerts/burst-detection?window=N (T6 M8.21) — groups
+   *  M8.6 routing ledger records into 5-minute buckets and flags
+   *  buckets where count > mean + 2*std_dev as bursts. Returns
+   *  burst_count, bursts[] sorted count desc, current_5min_count,
+   *  is_currently_bursting. Default window=50, max=200.
+   *  RBAC audit:read. */
+  app.get(
+    '/v1/alerts/burst-detection',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const windowRaw = req.query.window as string | undefined;
+      const window =
+        windowRaw === undefined ? ROUTING_ANALYTICS_DEFAULT_WINDOW : Number(windowRaw);
+      if (
+        !Number.isInteger(window) ||
+        window < 1 ||
+        window > ROUTING_ANALYTICS_MAX_WINDOW
+      ) {
+        return res.status(400).json(
+          wrapError(
+            { code: 'EWS_400_invalid_input', message: `window must be 1..${ROUTING_ANALYTICS_MAX_WINDOW}`, severity: 'MEDIUM' },
+            ctx,
+          ),
+        );
+      }
+      const records = routingLedger.list(req.tenant!.tenant_id, window);
+      const { buildAlertBurstDetection } =
+        require('./alert_burst_detection') as
+        typeof import('./alert_burst_detection');
+      const out = buildAlertBurstDetection(
+        req.tenant!.tenant_id,
+        records,
+        window,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  // ── T6 M10.21 — Notification channel performance comparison ──────────
+  /** GET /v1/notifications/channel-performance (T6 M10.21) — per-
+   *  channel analytics over the trailing 30-day window: total_sent_30d,
+   *  avg_per_day, most_active_template, peak_send_hour, distinct_
+   *  recipients_30d. Fleet: total_sent_30d, busiest_channel,
+   *  quietest_channel, combined_distinct_recipients. RBAC audit:read. */
+  app.get(
+    '/v1/notifications/channel-performance',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildNotificationChannelPerformance } =
+        require('./notification_channel_performance') as
+        typeof import('./notification_channel_performance');
+      const emailLedger = emailTransport.recent(req.tenant!.tenant_id, 500);
+      const smsLedger = smsTransport.recent(req.tenant!.tenant_id, 500);
+      const pushLedger = pushTransport.recent(req.tenant!.tenant_id, 500);
+      const out = buildNotificationChannelPerformance(
+        req.tenant!.tenant_id,
+        emailLedger,
+        smsLedger,
+        pushLedger,
+        now(),
+      );
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+
+  // ── T6 M14.33 — Adapter data freshness comparison ────────────────────
+  /** GET /v1/integrations/adapters/data-freshness (T6 M14.33) —
+   *  deterministic last_refreshed_at per (tenant, adapter, day).
+   *  freshness_status: fresh (age<interval) / aging (<2x) / stale.
+   *  Returns adapters[] sorted age_hours desc, stale/aging/fresh counts,
+   *  most_stale. RBAC audit:read. */
+  app.get(
+    '/v1/integrations/adapters/data-freshness',
+    requireTenantMw,
+    requireRole('audit:read'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const { buildAdapterDataFreshness } =
+        require('./adapter_data_freshness') as
+        typeof import('./adapter_data_freshness');
+      const out = buildAdapterDataFreshness(req.tenant!.tenant_id, now());
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
 
   return { app, source, lookups, evaluator, riskProfile, caseAction, portfolio, ruleStore };
 }
