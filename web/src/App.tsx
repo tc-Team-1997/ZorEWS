@@ -57,6 +57,8 @@ import { BoardReportingCenterPage } from '@/modules/boardReporting/BoardReportin
 import { EventStreamingCenterPage } from '@/modules/eventStreaming/EventStreamingCenterPage';
 // Production Operations Center — enterprise platform operations command (Phase 23 IA overlay).
 import { OperationsCenterPage } from '@/modules/operationsCenter/OperationsCenterPage';
+// Risk Intelligence Hub — unified risk signals dashboard.
+import { RiskIntelligenceHubPage } from '@/modules/riskIntelligence/RiskIntelligenceHubPage';
 import { AlertListPage } from '@/modules/alerts/AlertListPage';
 import { CustomerListPage } from '@/modules/customers/CustomerListPage';
 import { CustomerRiskProfilePage } from '@/modules/customers/CustomerRiskProfilePage';
@@ -291,6 +293,8 @@ export function App() {
             <Route path="event-streaming-center" element={<EventStreamingCenterPage />} />
             {/* Production Operations Center — additive Phase 23. */}
             <Route path="operations-center" element={<OperationsCenterPage />} />
+            {/* Risk Intelligence Hub — unified risk signals dashboard. */}
+            <Route path="risk-intelligence" element={<RiskIntelligenceHubPage />} />
             <Route path="alerts" element={<AlertListPage />} />
             <Route path="customers" element={<CustomerListPage />} />
             <Route path="customers/:id" element={<CustomerRiskProfilePage />} />

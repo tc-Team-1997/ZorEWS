@@ -71,7 +71,8 @@ import {
   Cable,
   Sparkles,
   ClipboardCheck,
-  Cpu
+  Cpu,
+  Brain,
 } from 'lucide-react';
 
 export type LucideIcon = typeof LayoutDashboard;
@@ -227,6 +228,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/event-streaming-center', i18nKey: 'event_streaming_center', icon: Activity, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       // Production Operations Center — Phase 23 overlay.
       { to: '/operations-center', i18nKey: 'operations_center', icon: Cog, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
+      // Risk Intelligence Hub — live risk signals, high-risk customer watch, case intelligence.
+      { to: '/risk-intelligence', i18nKey: 'risk_intelligence', icon: Brain, requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/alerts',                       i18nKey: 'alerts',                  icon: Bell,           featured: true },
       { to: '/cms/cases',                    i18nKey: 'cms_cases',               icon: Briefcase,      featured: true },
       { to: '/cms/workflow',                 i18nKey: 'case_workflow',           icon: GitBranch,      requireRole: ['admin', 'supervisor', 'risk_analyst', 'case_owner'], featured: true },

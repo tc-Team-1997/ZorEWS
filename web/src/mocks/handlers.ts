@@ -17172,6 +17172,89 @@ handlers.push(
         entry.updated_at = now.toISOString();
         return __schedEnvelope(entry);
       }),
+
+      // ── CAS endpoints (BAC §3.1.5) ───────────────────────────────────────
+      // POST /v1/cases/:case_id/cas — submit a Causal Analysis Stage record
+      http.post('/v1/cases/:case_id/cas', async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        const cas_id = `CAS-${String(params.case_id).slice(-4)}-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+        return Response.json({
+          header: { status: 'SUCCESS', code: 'EWS_201', message: 'CAS record submitted', requestId: 'req-cas-submit', timestamp: new Date().toISOString() },
+          body: {
+            cas_id,
+            case_id: String(params.case_id),
+            cause_type: String(body.cause_type ?? 'Unknown'),
+            cause_summary: String(body.cause_summary ?? ''),
+            review_status: 'pending',
+            submitted_at: new Date().toISOString(),
+            submitted_by: 'alice.admin',
+          },
+        }, { status: 201 });
+      }),
+
+      // POST /v1/cases/:case_id/cas/:cas_id/review — approve or reject a CAS
+      http.post('/v1/cases/:case_id/cas/:cas_id/review', async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        const decision = String(body.decision ?? 'approved');
+        return Response.json({
+          header: { status: 'SUCCESS', code: 'EWS_200', message: `CAS ${decision}`, requestId: 'req-cas-review', timestamp: new Date().toISOString() },
+          body: {
+            cas_id: String(params.cas_id),
+            case_id: String(params.case_id),
+            review_status: decision === 'approved' ? 'approved' : 'rejected',
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: 'priya.supervisor',
+            decision_note: String(body.decision_note ?? ''),
+          },
+        });
+      }),
+
+      // ── CAP endpoints (BAC §3.1.5) ───────────────────────────────────────
+      // POST /v1/cases/:case_id/caps — propose a Corrective Action Plan item
+      http.post('/v1/cases/:case_id/caps', async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        const cap_id = `CAP-${String(params.case_id).slice(-4)}-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+        return Response.json({
+          header: { status: 'SUCCESS', code: 'EWS_201', message: 'CAP item proposed', requestId: 'req-cap-propose', timestamp: new Date().toISOString() },
+          body: {
+            cap_id,
+            case_id: String(params.case_id),
+            action_title: String(body.action_title ?? 'Action'),
+            status: 'open',
+            approval_status: 'pending',
+            proposed_by: 'alice.admin',
+            proposed_at: new Date().toISOString(),
+            target_date: String(body.target_date ?? ''),
+          },
+        }, { status: 201 });
+      }),
+
+      // POST /v1/cases/:case_id/caps/:cap_id/approve — checker approves a CAP
+      http.post('/v1/cases/:case_id/caps/:cap_id/approve', async ({ params }) => {
+        return Response.json({
+          header: { status: 'SUCCESS', code: 'EWS_200', message: 'CAP approved', requestId: 'req-cap-approve', timestamp: new Date().toISOString() },
+          body: {
+            cap_id: String(params.cap_id),
+            case_id: String(params.case_id),
+            approval_status: 'approved',
+            approved_by: 'priya.supervisor',
+            approved_at: new Date().toISOString(),
+          },
+        });
+      }),
+
+      // POST /v1/cases/:case_id/caps/:cap_id/close — close a CAP item
+      http.post('/v1/cases/:case_id/caps/:cap_id/close', async ({ params }) => {
+        return Response.json({
+          header: { status: 'SUCCESS', code: 'EWS_200', message: 'CAP closed', requestId: 'req-cap-close', timestamp: new Date().toISOString() },
+          body: {
+            cap_id: String(params.cap_id),
+            case_id: String(params.case_id),
+            status: 'completed',
+            closed_at: new Date().toISOString(),
+          },
+        });
+      }),
     ];
   })(),
 );

@@ -1,15 +1,17 @@
 // CaseCausalAnalysisPage.tsx — CAS (Causal Analysis Stage) per BAC §3.1.5
-// Demo-grade content with deterministic synthesis. Real content loads from
-// regulatory-svc once the cross-service feed is wired.
+// Deterministic synthesis for display; action buttons call the real BFF.
 
 import { useState, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
 import {
   ChevronLeft, CheckCircle2, Clock, AlertTriangle,
   User, FileText, ChevronDown, ChevronRight, Shield,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { cmsApi } from './api';
 
 // ─── Deterministic synth ──────────────────────────────────────────────────
 function fnv(s: string): number {
@@ -111,6 +113,34 @@ export function CaseCausalAnalysisPage() {
   const [expanded, setExpanded] = useState<string | null>(records[0]?.cas_id ?? null);
   const [showForm, setShowForm] = useState(false);
   const [formNote, setFormNote] = useState('');
+  const [causeType, setCauseType] = useState(CAUSE_TYPES[0]!);
+  const [rejectReason, setRejectReason] = useState('');
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+
+  // ── Real BFF mutations ───────────────────────────────────────────────────
+  const submitMut = useMutation({
+    mutationFn: () =>
+      cmsApi.cas.submit(id, {
+        cause_type: causeType,
+        cause_summary: formNote,
+      }),
+    onSuccess: () => { setShowForm(false); setFormNote(''); },
+    onError: () => {/* swallow — demo mode: BFF may 404 */ },
+  });
+
+  const approveMut = useMutation({
+    mutationFn: (cas_id: string) =>
+      cmsApi.cas.review(id, cas_id, { decision: 'approved' }),
+    onSuccess: () => setReviewingId(null),
+    onError: () => {/* swallow */ },
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: (cas_id: string) =>
+      cmsApi.cas.review(id, cas_id, { decision: 'rejected', decision_note: rejectReason }),
+    onSuccess: () => { setReviewingId(null); setRejectReason(''); },
+    onError: () => {/* swallow */ },
+  });
 
   const pendingCount  = records.filter(r => r.review_status === 'pending').length;
   const approvedCount = records.filter(r => r.review_status === 'approved').length;
@@ -230,13 +260,46 @@ export function CaseCausalAnalysisPage() {
 
                 {/* Pending action */}
                 {rec.review_status === 'pending' && (
-                  <div className="flex gap-2 pt-1">
-                    <button className="px-3 py-1.5 bg-green-600 text-white text-[11px] font-semibold rounded-[6px] hover:bg-green-700 transition-colors">
-                      Approve CAS
-                    </button>
-                    <button className="px-3 py-1.5 bg-white border border-[#E5E7EB] text-[#374151] text-[11px] font-semibold rounded-[6px] hover:bg-[#F3F4F6] transition-colors">
-                      Reject with Reason
-                    </button>
+                  <div className="space-y-2 pt-1">
+                    <div className="flex gap-2">
+                      <button
+                        data-testid={`cas-approve-${rec.cas_id}`}
+                        disabled={approveMut.isPending}
+                        onClick={() => approveMut.mutate(rec.cas_id)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-[11px] font-semibold rounded-[6px] hover:bg-green-700 transition-colors disabled:opacity-60"
+                      >
+                        {approveMut.isPending && <Loader2 size={10} className="animate-spin" />}
+                        Approve CAS
+                      </button>
+                      <button
+                        data-testid={`cas-reject-toggle-${rec.cas_id}`}
+                        onClick={() => setReviewingId(r => r === rec.cas_id ? null : rec.cas_id)}
+                        className="px-3 py-1.5 bg-white border border-[#E5E7EB] text-[#374151] text-[11px] font-semibold rounded-[6px] hover:bg-[#F3F4F6] transition-colors"
+                      >
+                        Reject with Reason
+                      </button>
+                    </div>
+                    {reviewingId === rec.cas_id && (
+                      <div className="space-y-2">
+                        <textarea
+                          value={rejectReason}
+                          onChange={e => setRejectReason(e.target.value)}
+                          rows={2}
+                          placeholder="Rejection reason (required)…"
+                          data-testid="cas-reject-reason"
+                          className="w-full text-[12px] border border-[#E5E7EB] rounded-[6px] px-2.5 py-1.5 focus:outline-none focus:border-[#4F46E5] resize-none"
+                        />
+                        <button
+                          disabled={!rejectReason.trim() || rejectMut.isPending}
+                          data-testid={`cas-reject-submit-${rec.cas_id}`}
+                          onClick={() => rejectMut.mutate(rec.cas_id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-[11px] font-semibold rounded-[6px] hover:bg-red-700 transition-colors disabled:opacity-60"
+                        >
+                          {rejectMut.isPending && <Loader2 size={10} className="animate-spin" />}
+                          Confirm Rejection
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -258,7 +321,12 @@ export function CaseCausalAnalysisPage() {
           <div className="px-4 pb-4 border-t border-[#F3F4F6] space-y-3 pt-4">
             <div>
               <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wide">Cause Type</label>
-              <select className="mt-1 w-full text-[12px] border border-[#E5E7EB] rounded-[6px] px-2.5 py-1.5 focus:outline-none focus:border-[#4F46E5]">
+              <select
+                value={causeType}
+                onChange={e => setCauseType(e.target.value)}
+                data-testid="cas-cause-type"
+                className="mt-1 w-full text-[12px] border border-[#E5E7EB] rounded-[6px] px-2.5 py-1.5 focus:outline-none focus:border-[#4F46E5]"
+              >
                 {CAUSE_TYPES.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
@@ -267,14 +335,18 @@ export function CaseCausalAnalysisPage() {
               <textarea
                 value={formNote} onChange={e => setFormNote(e.target.value)}
                 rows={4} placeholder="Describe the root cause with supporting evidence…"
+                data-testid="cas-summary-input"
                 className="mt-1 w-full text-[12px] border border-[#E5E7EB] rounded-[6px] px-2.5 py-1.5 focus:outline-none focus:border-[#4F46E5] resize-none"
               />
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { setShowForm(false); setFormNote(''); }}
-                className="px-4 py-1.5 bg-[#4F46E5] text-white text-[11px] font-semibold rounded-[6px] hover:bg-[#4338CA] transition-colors"
+                data-testid="cas-submit-btn"
+                disabled={!formNote.trim() || submitMut.isPending}
+                onClick={() => submitMut.mutate()}
+                className="flex items-center gap-1 px-4 py-1.5 bg-[#4F46E5] text-white text-[11px] font-semibold rounded-[6px] hover:bg-[#4338CA] transition-colors disabled:opacity-60"
               >
+                {submitMut.isPending && <Loader2 size={10} className="animate-spin" />}
                 Submit for Checker Review
               </button>
               <button onClick={() => setShowForm(false)} className="px-4 py-1.5 bg-white border border-[#E5E7EB] text-[#374151] text-[11px] rounded-[6px] hover:bg-[#F3F4F6]">

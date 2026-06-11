@@ -438,6 +438,72 @@ export const cmsApi = {
     unwrap<{ items: Array<CmsCase & { inactive_hours: number }>; total: number; threshold_hours: number }>(
       http.get('/v1/cms/automation/inactive-cases', { params: { threshold_hours } }),
     ),
+
+  // ─── CAS (Causal Analysis Stage) — BAC §3.1.5 ───────────────────────────
+  // POST /v1/cases/:id/cas  (submit a CAS record — BFF M9.x surface)
+  cas: {
+    submit: (
+      case_id: string,
+      body: {
+        cause_type: string;
+        cause_summary: string;
+        severity?: 'critical' | 'high' | 'medium' | 'low';
+        contributing_factors?: string[];
+        attachments?: string[];
+        rationale?: string;
+      },
+    ) =>
+      unwrap<{ cas_id: string; case_id: string; review_status: string; submitted_at: string }>(
+        http.post(`/v1/cases/${case_id}/cas`, body),
+      ),
+    // POST /v1/cases/:id/cas/:cas_id/review
+    review: (
+      case_id: string,
+      cas_id: string,
+      body: { decision: 'approved' | 'rejected'; decision_note?: string },
+    ) =>
+      unwrap<{ cas_id: string; review_status: string; reviewed_at: string; reviewed_by: string }>(
+        http.post(`/v1/cases/${case_id}/cas/${cas_id}/review`, body),
+      ),
+  },
+
+  // ─── CAP (Corrective Action Plan) — BAC §3.1.5 ──────────────────────────
+  // POST /v1/cases/:id/caps  (propose a CAP item)
+  cap: {
+    propose: (
+      case_id: string,
+      body: {
+        action_title: string;
+        description: string;
+        issue_owner: string;
+        owner_group: string;
+        priority?: 'critical' | 'high' | 'medium';
+        target_date: string;
+        success_criteria?: string;
+      },
+    ) =>
+      unwrap<{ cap_id: string; case_id: string; status: string; approval_status: string }>(
+        http.post(`/v1/cases/${case_id}/caps`, body),
+      ),
+    // POST /v1/cases/:id/caps/:cap_id/approve
+    approve: (
+      case_id: string,
+      cap_id: string,
+      body: { decision_notes?: string } = {},
+    ) =>
+      unwrap<{ cap_id: string; approval_status: string; approved_by: string; approved_at: string }>(
+        http.post(`/v1/cases/${case_id}/caps/${cap_id}/approve`, body),
+      ),
+    // POST /v1/cases/:id/caps/:cap_id/close
+    close: (
+      case_id: string,
+      cap_id: string,
+      body: { closure_comments?: string } = {},
+    ) =>
+      unwrap<{ cap_id: string; status: string; closed_at: string }>(
+        http.post(`/v1/cases/${case_id}/caps/${cap_id}/close`, body),
+      ),
+  },
 };
 
 // ─── UI helpers ──────────────────────────────────────────────────────
