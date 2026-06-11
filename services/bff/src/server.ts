@@ -4597,6 +4597,15 @@ export function makeApp(deps: AppDeps = {}) {
    *  RoutingLedger.list interface. Mirror of M12.13 / M15.11 / M10.15
    *  / M1.9 daily-volume pattern for the alerts surface. Distinct
    *  from M8.6 (window aggregate not time-bucketed). */
+
+  /** GET /v1/alerts/severity-migration (T6 M8.26) — Alert severity migration over time. */
+  app.get('/v1/alerts/severity-migration', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAlertSeverityMigration } = require('./alert_severity_migration') as typeof import('./alert_severity_migration');
+    const out = buildAlertSeverityMigration(routingLedger, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   app.get(
     '/v1/alerts/daily-volume',
     requireTenantMw,
@@ -6142,6 +6151,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/ai/models/feature-importance (T6 M7.27) — Model feature importance tracking. */
+  app.get('/v1/ai/models/feature-importance', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildModelFeatureImportance } = require('./model_feature_importance') as typeof import('./model_feature_importance');
+    const out = buildModelFeatureImportance(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/ai/models/promotion-fleet (T6 M7.10) — fleet-wide
    *  promotion-request rollup. Walks the M7.1 registry + drains the
@@ -10342,6 +10359,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/delivery-time-analysis (T6 M10.25) — Notification delivery time analysis. */
+  app.get('/v1/notifications/delivery-time-analysis', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildNotificationDeliveryTime } = require('./notification_delivery_time') as typeof import('./notification_delivery_time');
+    const out = buildNotificationDeliveryTime(emailTransport, smsTransport, pushTransport, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   // ── Email channel (T6 M10.1) — DataNetworks-EWS-Ver1.pdf §13 ──────────
   //
   // Out-of-band delivery transport for BIL. The default StubEmailTransport
@@ -13714,6 +13739,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/investigations/closure-by-decision (T6 M9.27) — Closure time by decision type. */
+  app.get('/v1/investigations/closure-by-decision', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildInvestigationClosureByDecision } = require('./investigation_closure_by_decision') as typeof import('./investigation_closure_by_decision');
+    const out = buildInvestigationClosureByDecision(caseInvestigationStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/investigations/step-backlog (T6 M9.9) — fleet-wide
    *  per-step backlog. For each step_id seen across the cohort
    *  emits {step_id, name, pending_count, completed_count,
@@ -15139,6 +15172,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/widgets/error-rate (T6 M11.25) — Dashboard widget error rate tracking. */
+  app.get('/v1/dashboards/widgets/error-rate', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDashboardWidgetErrorRate } = require('./dashboard_widget_error_rate') as typeof import('./dashboard_widget_error_rate');
+    const out = buildDashboardWidgetErrorRate(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/dashboards/widgets/interaction-heatmap (T6 M11.22) —
    *  Synthetic widget interaction heatmap. Mounted with widget/* routes. */
   app.get(
@@ -16007,6 +16048,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildPresetCoverageRatio } = require('./scoring_preset_coverage') as typeof import('./scoring_preset_coverage');
     const out = buildPresetCoverageRatio(req.tenant!.tenant_id, customWeightPresetStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/scoring/presets/portfolio-impact (T6 M6.27) — Weight preset impact on portfolio. */
+  app.get('/v1/scoring/presets/portfolio-impact', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildScoringPresetPortfolioImpact } = require('./scoring_preset_portfolio_impact') as typeof import('./scoring_preset_portfolio_impact');
+    const out = buildScoringPresetPortfolioImpact(req.tenant!.tenant_id, now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -17024,6 +17073,15 @@ export function makeApp(deps: AppDeps = {}) {
    *  Mirror of M9.11 / M8.12 histogram pattern. Platform-static.
    *  Mounted BEFORE /v1/indicators/thresholds so the literal segment
    *  isn't captured. */
+
+  /** GET /v1/indicators/value-distribution (T6 M4.28) — Indicator value distribution by segment. */
+  app.get('/v1/indicators/value-distribution', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildIndicatorValueDistribution } = require('./indicator_value_distribution') as typeof import('./indicator_value_distribution');
+    const out = buildIndicatorValueDistribution(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   app.get(
     '/v1/indicators/weight-histogram',
     requireTenantMw,
@@ -19626,6 +19684,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  /** GET /v1/tenants/comparison-matrix (T6 M2.27) — BIL vs BANK_DEMO config comparison. */
+  app.get('/v1/tenants/comparison-matrix', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildTenantComparisonMatrix } = require('./tenant_comparison_matrix') as typeof import('./tenant_comparison_matrix');
+    const out = buildTenantComparisonMatrix(configStore, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /**
    * PATCH /v1/tenants/:tenant_id — admin updates name / channels / active.
    * tenant_id is immutable. 404 envelope when missing.
@@ -21441,6 +21507,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(report, ctx));
     },
   );
+
+  /** GET /v1/integrations/adapters/dependency-graph (T6 M14.37) — Adapter dependency graph. */
+  app.get('/v1/integrations/adapters/dependency-graph', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAdapterDependencyGraph } = require('./adapter_dependency_graph') as typeof import('./adapter_dependency_graph');
+    const out = buildAdapterDependencyGraph(now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/integrations/adapters/sla-budget (T6 M14.26) — bridges
    *  M14.9 fleet probe + M14.23 SLA catalog. Per-adapter
@@ -24816,6 +24890,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { detectConfigSchemaDrift } = require('./config_schema_drift') as typeof import('./config_schema_drift');
     const out = detectConfigSchemaDrift(configStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/admin/config/change-patterns (T6 M13.25) — Config change pattern analysis. */
+  app.get('/v1/admin/config/change-patterns', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAdminConfigChangePatterns } = require('./admin_config_change_patterns') as typeof import('./admin_config_change_patterns');
+    const out = buildAdminConfigChangePatterns(auditTrailStore, req.tenant!.tenant_id, now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -29415,6 +29497,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  /** GET /v1/admin/api-keys/usage-patterns (T6 M1.27) — API key usage pattern clustering. */
+  app.get('/v1/admin/api-keys/usage-patterns', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildApiKeyUsagePatterns } = require('./api_key_usage_patterns') as typeof import('./api_key_usage_patterns');
+    const out = buildApiKeyUsagePatterns(apiKeyStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/admin/api-keys/:key_id — single key (redacted). */
   app.get(
     '/v1/admin/api-keys/:key_id',
@@ -30554,6 +30644,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/actor-sessions (T6 M15.27) — Audit actor session analysis. */
+  app.get('/v1/audit/actor-sessions', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAuditActorSessions } = require('./audit_actor_sessions') as typeof import('./audit_actor_sessions');
+    const out = buildAuditActorSessions(auditTrailStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/audit/search?q=&limit= (T6 M15.21) — full-text search
    *  across all audit events for the calling tenant. Case-insensitive
    *  substring match across: actor_username, action, resource_id,
@@ -31281,6 +31379,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/ingestion/schema/evolution (T6 M3.27) — Connector schema evolution tracker. */
+  app.get('/v1/ingestion/schema/evolution', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConnectorSchemaEvolution } = require('./connector_schema_evolution') as typeof import('./connector_schema_evolution');
+    const out = buildConnectorSchemaEvolution(now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/ingestion/schema/record-format-distribution (T6 M3.15) —
    *  PIVOT-BY-RECORD_FORMAT over the M3.2 connector schema catalog.
@@ -33992,6 +34098,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/reports/jobs/quality-metrics (T6 M12.25) — Report output quality metrics. */
+  app.get('/v1/reports/jobs/quality-metrics', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildReportQualityMetrics } = require('./report_quality_metrics') as typeof import('./report_quality_metrics');
+    const out = buildReportQualityMetrics(reportJobStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/reports/jobs/:job_id — single job. 404 on miss/cross-tenant. */
   app.get(
@@ -37246,6 +37360,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse({ items, total: items.length, pending }, ctx));
     },
   );
+
+  /** GET /v1/rules/engine/throughput (T6 M5.27) — Rule engine throughput metrics. */
+  app.get('/v1/rules/engine/throughput', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildRuleEngineThroughput } = require('./rule_engine_throughput') as typeof import('./rule_engine_throughput');
+    const out = buildRuleEngineThroughput(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   // ── Rule simulation against scenario (T6 M5.3) ───────────────────────
   //
