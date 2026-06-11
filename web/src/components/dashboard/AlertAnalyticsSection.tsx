@@ -15,9 +15,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Settings2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Panel } from '@/components/ui';
+import { Button } from '@/components/ui/Button';
 import {
   ALERT_DIMENSIONS,
   type AlertDimension,
@@ -25,6 +26,13 @@ import {
 import { AlertBarChart } from './charts/AlertBarChart';
 import { AlertTrendChart } from './charts/AlertTrendChart';
 import { AlertDeepDrilldown, type DrillFilter } from './AlertDeepDrilldown';
+import {
+  RiskTrendConfigDrawer,
+} from '@/modules/dashboard/riskTrend/RiskTrendConfigDrawer';
+import {
+  buildDefaultConfig,
+  type RiskTrendConfig,
+} from '@/modules/dashboard/riskTrend/riskTrendConfigurationEngine';
 
 const HUMAN: Record<AlertDimension, string> = {
   severity: 'Severity',
@@ -55,6 +63,10 @@ export function AlertAnalyticsSection() {
   const [dim, setDim] = useState<AlertDimension>('severity');
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Enterprise Risk Trend Intelligence Configuration state
+  const [configOpen, setConfigOpen] = useState(false);
+  const [riskTrendConfig, setRiskTrendConfig] = useState<RiskTrendConfig>(() => buildDefaultConfig());
+
   // Reuse the EXACT same queryKey as TrendWeekDrilldown so React Query
   // dedupes across components — zero extra network on this section.
   const q = useQuery({
@@ -65,12 +77,60 @@ export function AlertAnalyticsSection() {
   const alerts = useMemo(() => q.data?.items ?? [], [q.data]);
   const drill = parseAdrill(searchParams.get('adrill'));
 
+  // Filter alerts based on active severity config
+  const filteredAlerts = useMemo(() => {
+    const enabledLevels = riskTrendConfig.severities
+      .filter((s) => s.enabled)
+      .map((s) => s.level);
+    if (enabledLevels.length === 4) return alerts; // all enabled = no filter
+    return alerts.filter((a) => {
+      const sev = (a.severity ?? '').toLowerCase();
+      return enabledLevels.some((l) => sev.includes(l));
+    });
+  }, [alerts, riskTrendConfig.severities]);
+
+  const handleSaveConfig = (cfg: RiskTrendConfig, _asDefault?: boolean) => {
+    setRiskTrendConfig(cfg);
+    setConfigOpen(false);
+    // Fire-and-forget audit trail — best effort, never blocks UI
+    fetch('/v1/audit/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': 'BIL',
+        'X-Channel': 'API',
+      },
+      body: JSON.stringify({
+        actor_username: 'current_user',
+        actor_role: 'admin',
+        action: 'risk_trend_config.update',
+        resource_type: 'config',
+        resource_id: 'risk_trend_chart',
+        outcome: 'success',
+        metadata: { new_config: cfg },
+      }),
+    }).catch(() => {});
+  };
+
   const setDrill = (next: DrillFilter | null) => {
     const sp = new URLSearchParams(searchParams);
     if (next) sp.set('adrill', serialiseAdrill(next));
     else sp.delete('adrill');
     setSearchParams(sp, { replace: false });
   };
+
+  const configureButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => setConfigOpen(true)}
+      data-testid="alert-analytics-configure-btn"
+      className="flex items-center gap-1.5 text-xs"
+    >
+      <Settings2 className="h-3.5 w-3.5" />
+      Configure
+    </Button>
+  );
 
   if (q.isLoading) {
     return (
@@ -81,6 +141,7 @@ export function AlertAnalyticsSection() {
             Alert analytics
           </span>
         }
+        action={configureButton}
         data-testid="alert-analytics-section"
       >
         <div className="py-12 text-center text-[12px] text-muted">Loading…</div>
@@ -97,6 +158,7 @@ export function AlertAnalyticsSection() {
             Alert analytics
           </span>
         }
+        action={configureButton}
         data-testid="alert-analytics-section"
       >
         <div className="py-12 text-center text-[12px] text-danger">
@@ -108,20 +170,31 @@ export function AlertAnalyticsSection() {
 
   if (alerts.length === 0) {
     return (
-      <Panel
-        title={
-          <span className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-muted" aria-hidden />
-            Alert analytics
-          </span>
-        }
-        data-testid="alert-analytics-section"
-      >
-        <div className="py-12 text-center text-[12px] text-muted">
-          No alerts in the queue — the analytics section will populate as
-          rules fire.
-        </div>
-      </Panel>
+      <>
+        <Panel
+          title={
+            <span className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-muted" aria-hidden />
+              Alert analytics
+            </span>
+          }
+          action={configureButton}
+          data-testid="alert-analytics-section"
+        >
+          <div className="py-12 text-center text-[12px] text-muted">
+            No alerts in the queue — the analytics section will populate as
+            rules fire.
+          </div>
+        </Panel>
+        <RiskTrendConfigDrawer
+          open={configOpen}
+          onClose={() => setConfigOpen(false)}
+          config={riskTrendConfig}
+          onChange={setRiskTrendConfig}
+          onSave={handleSaveConfig}
+          onReset={() => setRiskTrendConfig(buildDefaultConfig())}
+        />
+      </>
     );
   }
 
@@ -133,12 +206,15 @@ export function AlertAnalyticsSection() {
             <BarChart3 className="h-4 w-4 text-muted" aria-hidden />
             Alert analytics
             <span className="text-muted text-[11px] font-normal">
-              · {alerts.length.toLocaleString()} alerts in window
+              · {filteredAlerts.length.toLocaleString()}/{alerts.length.toLocaleString()} alerts
             </span>
           </span>
         }
         action={
-          <DimensionToggle value={dim} onChange={setDim} testId="alert-analytics-dim-toggle" />
+          <div className="flex items-center gap-2">
+            <DimensionToggle value={dim} onChange={setDim} testId="alert-analytics-dim-toggle" />
+            {configureButton}
+          </div>
         }
       >
         <p className="caption mb-2" data-testid="alert-analytics-hint">
@@ -152,7 +228,7 @@ export function AlertAnalyticsSection() {
               By {HUMAN[dim].toLowerCase()}
             </h4>
             <AlertBarChart
-              alerts={alerts}
+              alerts={filteredAlerts}
               dimension={dim}
               selected={drill?.dimension === dim ? drill.value : null}
               onSelect={(value) => setDrill(value ? { dimension: dim, value } : null)}
@@ -164,7 +240,7 @@ export function AlertAnalyticsSection() {
               Timeline (daily volume)
             </h4>
             <AlertTrendChart
-              alerts={alerts}
+              alerts={filteredAlerts}
               testId="alert-analytics-trend"
             />
           </div>
@@ -173,7 +249,7 @@ export function AlertAnalyticsSection() {
 
       {drill && (
         <AlertDeepDrilldown
-          alerts={alerts}
+          alerts={filteredAlerts}
           filter={drill}
           onClose={() => setDrill(null)}
           onSubDrill={(next) => {
@@ -182,6 +258,16 @@ export function AlertAnalyticsSection() {
           }}
         />
       )}
+
+      {/* Enterprise Risk Trend Intelligence Configuration Drawer */}
+      <RiskTrendConfigDrawer
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        config={riskTrendConfig}
+        onChange={setRiskTrendConfig}
+        onSave={handleSaveConfig}
+        onReset={() => setRiskTrendConfig(buildDefaultConfig())}
+      />
     </div>
   );
 }
