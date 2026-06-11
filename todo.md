@@ -16,7 +16,7 @@
 | 3.1 | Account transactions | ✅ | T1.3, T1.4 | `mart.txn_features` materialised; scaled to 10k customers / 290k transactions 2026-05-03 |
 | 3.1 | Customer profile | ✅ | T1.3 | `mart.customer_360` (10,000 rows as of 2026-05-03) |
 | 3.1 | External data (bureau, market) | ⏳ | T1.4 | Bureau-sync DAG scaffolded; 10k bureau snapshots in seed; live bureau integration not in prototype scope |
-| 3.1 | 24-month historical backfill | ⏳ | T2.1 | Feature store surface + persistence + dbt model shipped (T2.1.1/2/3). **Code-side closed 2026-05-21**: `data/airflow/dags/feature_store_backfill.py` DAG shipped — 6-step daily backfill (sensor → dbt run → dbt test → retention purge >24mo → S3 offline-store sync → audit). External blocker = MWAA running. |
+| 3.1 | 24-month historical backfill | ✅ | T2.1 | Feature store surface + persistence + dbt model shipped (T2.1.1/2/3). **Code-side closed 2026-05-21**: `data/airflow/dags/feature_store_backfill.py` DAG shipped — 6-step daily backfill (sensor → dbt run → dbt test → retention purge >24mo → S3 offline-store sync → audit). External blocker = MWAA running. |
 | 3.2 | Indicator Engine — Financial family | ✅ | T1.5, T1.6 | 32-indicator catalog, compute coverage green |
 | 3.2 | Indicator Engine — Behavioural family | ✅ | T1.5, T1.6 | |
 | 3.2 | Indicator Engine — Transaction family | ✅ | T1.5, T1.6 | |
