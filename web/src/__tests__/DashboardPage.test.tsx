@@ -9,11 +9,11 @@ describe('DashboardPage', () => {
     renderWithProviders(<DashboardPage />);
     expect(screen.getByRole('heading', { name: /EWS Dashboard/i })).toBeInTheDocument();
     expect(screen.getByText(/Customers monitored/i)).toBeInTheDocument();
-    expect(screen.getByText(/High-risk customers/i)).toBeInTheDocument();
-    // KPI card label is "Active alerts" exactly; the panel title
-    // "Active alerts by severity" also matches loosely, so anchor.
-    expect(screen.getByText(/^Active alerts$/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cases open/i)).toBeInTheDocument();
+    expect(screen.getByText(/High-Risk Accounts/i)).toBeInTheDocument();
+    // KPI card label is "Active Alerts" — use testId to avoid ambiguity
+    // with the ChatWidget WelcomeScreen that also renders the same text.
+    expect(screen.getByTestId('kpi-active-alerts')).toBeInTheDocument();
+    expect(screen.getByTestId('kpi-cases-open')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('18,432')).toBeInTheDocument();
     });

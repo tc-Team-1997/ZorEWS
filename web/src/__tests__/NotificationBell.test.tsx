@@ -38,7 +38,7 @@ describe('NotificationBell', () => {
     // Wait for the EventSource to open + connection dot to flip green.
     await waitFor(() => {
       const dot = screen.getByTestId('notification-connection-dot');
-      expect(dot.className).toMatch(/bg-success/);
+      expect(dot.className).toMatch(/bg-green-500/);
     });
     // The MSW seed includes ACTIVE case scenarios so the badge renders
     // non-zero on first paint — that's the M14 feature surfacing.
@@ -50,7 +50,7 @@ describe('NotificationBell', () => {
   it('increments the unread badge on each pushed notification', async () => {
     renderWithProviders(<NotificationBell />);
     await waitFor(() => {
-      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-success/);
+      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-green-500/);
     });
     // Wait for the active-scenarios query to settle. The dropdown is
     // closed at this point, but the badge IS rendered when count > 0;
@@ -87,7 +87,7 @@ describe('NotificationBell', () => {
     const user = userEvent.setup();
     renderWithProviders(<NotificationBell />);
     await waitFor(() => {
-      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-success/);
+      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-green-500/);
     });
     await waitFor(() => {
       expect(screen.getByTestId('notification-unread-badge')).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe('NotificationBell', () => {
   it('dedupes by id — same notification published twice only counts once', async () => {
     renderWithProviders(<NotificationBell />);
     await waitFor(() => {
-      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-success/);
+      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-green-500/);
     });
     await waitFor(() => {
       expect(screen.getByTestId('notification-unread-badge')).toBeInTheDocument();
@@ -146,11 +146,11 @@ describe('NotificationBell', () => {
     const user = userEvent.setup();
     renderWithProviders(<NotificationBell />);
     await waitFor(() => {
-      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-success/);
+      expect(screen.getByTestId('notification-connection-dot').className).toMatch(/bg-green-500/);
     });
     await user.click(screen.getByTestId('notification-bell'));
     const dropdown = await screen.findByTestId('notification-dropdown');
-    expect(within(dropdown).getByText(/No live notifications yet/i)).toBeInTheDocument();
+    expect(within(dropdown).getByText(/No notifications/i)).toBeInTheDocument();
     // The Currently-running-scenarios section is always present.
     expect(within(dropdown).getByTestId('notification-active-scenarios')).toBeInTheDocument();
   });

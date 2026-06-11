@@ -191,6 +191,35 @@ describe('CmsCaseDetailPage', () => {
     wrap('/cms/cases/cs-1?tab=Related');
     expect(await screen.findByTestId('related-dispatches-empty')).toBeInTheDocument();
   });
+
+  it('shows View Investigation link when an active investigation matches the case_id', async () => {
+    // The investigation engine generates case_id = `CASE-${pad(i*7+1000, 4)}`
+    // for i=0 → case_id = 'CASE-1000'. Status at i=0 is 'open' (active).
+    // Set up the mock to return a case with that case_id.
+    const withInv = { ...DETAIL, case_id: 'CASE-1000', case_number: 'EWS-2026-99001' };
+    (http.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url === '/v1/cms/cases/cs-with-inv')
+        return Promise.resolve({ data: { body: withInv } });
+      if (url === '/v1/cms/cases/cs-with-inv/notes')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-with-inv/attachments')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/cms/cases/cs-with-inv/history')
+        return Promise.resolve({ data: { body: { items: [], total: 0 } } });
+      if (url === '/v1/admin/notification-templates/dispatches')
+        return Promise.resolve({ data: { items: [], total: 0, page: 1, page_size: 50 } });
+      return Promise.reject(new Error(`unmocked ${url}`));
+    });
+    wrap('/cms/cases/cs-with-inv');
+    // Wait for the case data to load (case_number appears in the h1 title)
+    await waitFor(() => {
+      expect(screen.getByText(/EWS-2026-99001/)).toBeInTheDocument();
+    });
+    // The View Investigation link should appear since CASE-1000 has an active investigation
+    const link = await screen.findByTestId('view-investigation-link');
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute('href')).toBe('/investigation-center');
+  });
 });
 
 describe('CmsCaseDetailPage — Investigation deep-link (note/attachment)', () => {

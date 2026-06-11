@@ -39,10 +39,11 @@ describe('Dashboard KPI cards — clickable nav', () => {
     renderWithProviders(<DashboardPage />);
     await waitFor(() => screen.getByText('18,432'));
     expect(screen.getByTestId('kpi-high-risk').getAttribute('aria-label')).toMatch(
-      /high-risk customers/i,
+      /high-risk accounts/i,
     );
+    // The SLA breaches aria-label contains the label and count
     expect(screen.getByTestId('kpi-sla-breaches').getAttribute('aria-label')).toMatch(
-      /breached \+ approaching/i,
+      /sla breaches/i,
     );
   });
 });

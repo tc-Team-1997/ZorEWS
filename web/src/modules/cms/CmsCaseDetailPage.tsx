@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
 } from '@/components/cms/CaseBadges';
 import {
   ArrowLeft,
+  Search,
   Send,
   ShieldAlert,
   UserPlus,
@@ -26,6 +27,7 @@ import {
   type CmsCaseState,
   type CmsResolutionCategory,
 } from './api';
+import { listInvestigations } from '@/modules/investigation/investigationEngine';
 
 // "Activity" added 2026-05-18 — chronologically grouped feed with filter
 // chips + expandable detail rows. Lives alongside "Timeline" (per-event
@@ -148,6 +150,20 @@ export function CmsCaseDetailPage() {
     },
   });
 
+  // Look up any active investigation linked to this case so we can
+  // surface a "View Investigation" deep-link in the header.
+  // NOTE: this hook must run before any early-return so the Rules of Hooks
+  // are satisfied. When `detailQ.data` is not yet available we pass null
+  // and the memo resolves to null (no link shown until data loads).
+  const activeInvestigation = useMemo(() => {
+    const caseId = detailQ.data?.case_id;
+    if (!caseId) return null;
+    const all = listInvestigations('BANK_DEMO');
+    return all.find(
+      (inv) => inv.case_id === caseId && inv.status !== 'closed',
+    ) ?? null;
+  }, [detailQ.data?.case_id]);
+
   if (detailQ.isLoading) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
   if (detailQ.isError || !detailQ.data) {
     return (
@@ -174,10 +190,21 @@ export function CmsCaseDetailPage() {
         title={`${c.case_number} · ${c.title}${isLocked ? ' [LOCKED]' : ''}`}
         subtitle={`Created by ${c.created_by} · ${new Date(c.created_at).toLocaleString()}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <CaseStatusBadge status={c.status} />
             <CasePriorityBadge priority={c.priority} />
             <CaseSlaBadge sla={sla} />
+            {activeInvestigation && (
+              <Link
+                to={`/investigation-center`}
+                className="flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
+                data-testid="view-investigation-link"
+                title={`Open investigation ${activeInvestigation.investigation_id}`}
+              >
+                <Search size={12} />
+                View Investigation
+              </Link>
+            )}
           </div>
         }
       />

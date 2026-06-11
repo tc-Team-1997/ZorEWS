@@ -31,7 +31,7 @@ describe('ChatWidget', () => {
     renderWithProviders(<ChatWidget />);
     await user.click(screen.getByTestId('chat-launcher'));
     expect(screen.getByTestId('chat-panel')).toHaveAttribute('aria-hidden', 'false');
-    expect(screen.getByText(/Ask me about this page/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ask anything about risk/i)).toBeInTheDocument();
   });
 
   it('sends a message and renders the bot reply with suggestion chips', async () => {

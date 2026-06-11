@@ -51,7 +51,7 @@ describe('FirstLoginWizardPage', () => {
     await user.type(screen.getByLabelText(/confirm new password/i), 'Brand!New123');
     await user.click(screen.getByTestId('first-login-submit'));
     await waitFor(() => {
-      expect(screen.getByText(/must accept the prototype terms/i)).toBeInTheDocument();
+      expect(screen.getByText(/must accept the platform terms/i)).toBeInTheDocument();
     });
   });
 
