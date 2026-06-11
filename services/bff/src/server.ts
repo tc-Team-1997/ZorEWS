@@ -4535,6 +4535,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/routing-efficiency (T6 M8.28) — alert routing efficiency analysis. */
+  app.get('/v1/alerts/routing-efficiency', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAlertRoutingEfficiency } = require('./alert_routing_efficiency') as typeof import('./alert_routing_efficiency');
+    const out = buildAlertRoutingEfficiency(req.tenant!.tenant_id, now(), routingLedger);
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/alerts/source-distribution?window=N (T6 M8.20) —
    *  Alert source system distribution. Groups routed alerts by
    *  their source severity (severity_in field) to surface the raw
@@ -5846,6 +5854,14 @@ export function makeApp(deps: AppDeps = {}) {
       }
     },
   );
+
+  /** GET /v1/ai/models/explainability (T6 M7.29) — AI model explainability score. */
+  app.get('/v1/ai/models/explainability', requireTenantMw, requireRole('customers:read_risk_profile'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildModelExplainabilityScore } = require('./model_explainability_score') as typeof import('./model_explainability_score');
+    const out = await buildModelExplainabilityScore(req.tenant!.tenant_id, now(), aiModelRegistry);
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/ai/models/deployment-age (T6 M7.11) — 5-bucket
    *  histogram over non-retired models by days_since_deployed
@@ -10176,6 +10192,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/notifications/priority-scores (T6 M10.27) — notification template priority scoring. */
+  app.get('/v1/notifications/priority-scores', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildNotificationPriorityScores } = require('./notification_priority_score') as typeof import('./notification_priority_score');
+    const out = buildNotificationPriorityScores(now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/notifications/template-usage (T6 M10.16) — pivot the 3
    *  channel ledgers (email/sms/push) by template_id. For each template
    *  in the M10.11 catalog (4 email + 4 SMS + 4 push = 12 templates),
@@ -13699,7 +13723,15 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-/** GET /v1/investigations/duration-histogram (T6 M9.19) —
+  /** GET /v1/investigations/evidence-collection-rate (T6 M9.29) — investigation evidence collection rate. */
+  app.get('/v1/investigations/evidence-collection-rate', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildInvestigationEvidenceRate } = require('./investigation_evidence_rate') as typeof import('./investigation_evidence_rate');
+    const out = buildInvestigationEvidenceRate(req.tenant!.tenant_id, now(), caseInvestigationStore);
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/investigations/duration-histogram (T6 M9.19) —
    *  per-tenant histogram bucketing every investigation by its
    *  duration (closed_at − opened_at). 6 canonical buckets in
    *  resolution-speed order: under_1h / 1_to_24h / 1_to_7d /
@@ -15167,6 +15199,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/dashboards/widgets/dependencies (T6 M11.27) — dashboard widget dependency analysis. */
+  app.get('/v1/dashboards/widgets/dependencies', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDashboardWidgetDependencies } = require('./dashboard_widget_dependencies') as typeof import('./dashboard_widget_dependencies');
+    const out = buildDashboardWidgetDependencies(req.tenant!.tenant_id, now(), customDashboardStore);
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/dashboards/widgets/usage (T6 M11.11) — cross-cut over the
    *  tenant's saved dashboards. For each widget_type in WIDGET_CATALOG
    *  (every row always emitted, even at count=0) returns
@@ -15954,7 +15994,15 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-/** GET /v1/scoring/presets/multiplier-histogram (T6 M6.16) —
+  /** GET /v1/scoring/presets/drift-velocity (T6 M6.29) — weight preset drift velocity. */
+  app.get('/v1/scoring/presets/drift-velocity', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildScoringPresetDriftVelocity } = require('./scoring_preset_drift_velocity') as typeof import('./scoring_preset_drift_velocity');
+    const out = buildScoringPresetDriftVelocity(req.tenant!.tenant_id, now(), customWeightPresetStore);
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/scoring/presets/multiplier-histogram (T6 M6.16) —
    *  per-library-preset histogram of explicit weight_multipliers
    *  bucketed strong_dampen (< 0.5) / mild_dampen [0.5, 1.0) /
    *  mild_boost (1.0, 1.5] / strong_boost (> 1.5). Per-row {preset_id,
@@ -16970,7 +17018,15 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-/** GET /v1/indicators/catalog-stats (T6 M4.13) — platform-static
+  /** GET /v1/indicators/alert-effectiveness (T6 M4.30) — indicator alert effectiveness score. */
+  app.get('/v1/indicators/alert-effectiveness', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildIndicatorAlertEffectiveness } = require('./indicator_alert_effectiveness') as typeof import('./indicator_alert_effectiveness');
+    const out = buildIndicatorAlertEffectiveness(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/indicators/catalog-stats (T6 M4.13) — platform-static
    *  rollup over the M6.2 STUB_CATALOG. Per-vertical (banking +
    *  insurance) count + by_family Record + distinct_families +
    *  weight stats (min/mean/max) + top_weighted top-3. Envelope:
@@ -18454,6 +18510,14 @@ export function makeApp(deps: AppDeps = {}) {
   // carries tenant context (the middleware already populated it).
   // /tenants is admin-only — listing every configured tenant is a
   // platform-admin concern, not a per-tenant one.
+
+  /** GET /v1/tenants/activity-fingerprint (T6 M2.29) — tenant activity fingerprint. */
+  app.get('/v1/tenants/activity-fingerprint', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildTenantActivityFingerprint } = require('./tenant_activity_fingerprint') as typeof import('./tenant_activity_fingerprint');
+    const out = buildTenantActivityFingerprint(auditTrailStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/tenants/me — returns the caller's tenant. */
   app.get('/v1/tenants/me', requireTenantMw, (req: Request, res: Response) => {
@@ -21249,6 +21313,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse({ items, total: items.length }, ctx));
     },
   );
+
+  /** GET /v1/integrations/adapters/sla-trend (T6 M14.39) — adapter SLA trend over batches. */
+  app.get('/v1/integrations/adapters/sla-trend', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAdapterSlaTrend } = require('./adapter_sla_trend') as typeof import('./adapter_sla_trend');
+    const out = buildAdapterSlaTrend(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/integrations/adapters/sla-catalog (T6 M14.23) — per-
    *  adapter expected SLA targets (latency p95, freshness, rate
@@ -24307,6 +24379,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/admin/config/value-range-validation (T6 M13.27) — config value range validation. */
+  app.get('/v1/admin/config/value-range-validation', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConfigValueRangeValidation } = require('./config_value_range_validation') as typeof import('./config_value_range_validation');
+    const out = buildConfigValueRangeValidation(req.tenant!.tenant_id, now(), configStore);
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/admin/config/override-rate (T6 M13.12) — category-pivoted
    *  rollup over the config registry showing per-category default-vs-
@@ -29553,6 +29633,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  /** GET /v1/admin/api-keys/expiry-accuracy (T6 M1.29) — expiry forecast accuracy. */
+  app.get('/v1/admin/api-keys/expiry-accuracy', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildApiKeyExpiryAccuracy } = require('./api_key_expiry_accuracy') as typeof import('./api_key_expiry_accuracy');
+    const out = buildApiKeyExpiryAccuracy(apiKeyStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/admin/api-keys/:key_id — single key (redacted). */
   app.get(
     '/v1/admin/api-keys/:key_id',
@@ -30920,6 +31008,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/volume-forecast (T6 M15.29) — audit event volume forecasting. */
+  app.get('/v1/audit/volume-forecast', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAuditVolumeForecast } = require('./audit_volume_forecast') as typeof import('./audit_volume_forecast');
+    const out = buildAuditVolumeForecast(req.tenant!.tenant_id, now(), auditTrailStore);
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/audit/daily-volume?days=N (T6 M15.11) — trend-line view
    *  across N consecutive UTC calendar days. Complements M15.7
    *  (cyclic dow×hour heatmap). Per-day bucket: total + by_severity
@@ -31433,6 +31529,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildConnectorSchemaEvolution } = require('./connector_schema_evolution') as typeof import('./connector_schema_evolution');
     const out = buildConnectorSchemaEvolution(now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/ingestion/schema/field-usage-stats (T6 M3.29) — connector schema field usage statistics. */
+  app.get('/v1/ingestion/schema/field-usage-stats', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConnectorFieldUsageStats } = require('./connector_field_usage_stats') as typeof import('./connector_field_usage_stats');
+    const out = buildConnectorFieldUsageStats(now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -34311,6 +34415,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/reports/schedules/optimization (T6 M12.27) — report schedule optimization. */
+  app.get('/v1/reports/schedules/optimization', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildReportScheduleOptimization } = require('./report_schedule_optimizer') as typeof import('./report_schedule_optimizer');
+    const out = await buildReportScheduleOptimization(req.tenant!.tenant_id, now(), reportScheduleStore);
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/reports/schedules/cadence-stats (T6 M12.9) — cadence-
    *  pivoted rollup over the M12.2 schedule store. Per-cadence:
@@ -37422,6 +37534,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildRuleEngineThroughput } = require('./rule_engine_throughput') as typeof import('./rule_engine_throughput');
     const out = buildRuleEngineThroughput(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/rules/backtest/portfolio-summary (T6 M5.29) — rule backtest portfolio summary. */
+  app.get('/v1/rules/backtest/portfolio-summary', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildRuleBacktestPortfolio } = require('./rule_backtest_portfolio') as typeof import('./rule_backtest_portfolio');
+    const out = buildRuleBacktestPortfolio(req.tenant!.tenant_id, now(), ruleStore);
     return res.json(wrapResponse(out, ctx));
   });
 
