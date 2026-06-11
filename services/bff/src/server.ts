@@ -4483,6 +4483,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/alerts/sla-achievement (T6 M8.29) — SLA target achievement rate. */
+  app.get('/v1/alerts/sla-achievement', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAlertSlaAchievement } = require('./alert_sla_achievement') as typeof import('./alert_sla_achievement');
+    const out = buildAlertSlaAchievement(routingLedger, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/alerts/sla-compliance-by-class?window=N (T6 M8.16) —
    *  PER-CLASS SLA compliance rate over the M8.6 routing ledger.
    *  Distinct from M8.11 (worst-offender row list) by being aggregate
@@ -5861,6 +5869,15 @@ export function makeApp(deps: AppDeps = {}) {
     const { buildModelExplainabilityScore } = require('./model_explainability_score') as typeof import('./model_explainability_score');
     const out = await buildModelExplainabilityScore(req.tenant!.tenant_id, now(), aiModelRegistry);
     return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/ai/models/ensemble-recommendation (T6 M7.30) — ensemble recommendation per type. */
+  app.get('/v1/ai/models/ensemble-recommendation', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tid = req.tenant!.tenant_id;
+    const { buildModelEnsembleRecommendation } = require('./model_ensemble_recommendation') as typeof import('./model_ensemble_recommendation');
+    const out = buildModelEnsembleRecommendation(aiModelRegistry, now());
+    return res.json(wrapResponse({ ...out, tenant_id: tid }, ctx));
   });
 
   /** GET /v1/ai/models/deployment-age (T6 M7.11) — 5-bucket
@@ -10241,6 +10258,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  /** GET /v1/notifications/channel-synergy (T6 M10.28) — notification channel synergy. */
+  app.get('/v1/notifications/channel-synergy', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildNotificationChannelSynergy } = require('./notification_channel_synergy') as typeof import('./notification_channel_synergy');
+    const out = buildNotificationChannelSynergy(alertRoutingEngine, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
 /** GET /v1/notifications/template-freshness?fresh_days=&stale_days=
    *  (T6 M10.19) — per-template staleness rollup across the M10.1
    *  email + M10.2 SMS + M10.3 push ledgers. Per-row {channel,
@@ -13753,6 +13778,14 @@ export function makeApp(deps: AppDeps = {}) {
    *  investigations dragging past 30 days?" review. Mounted BEFORE
    *  /:id catch-all so the literal segment wins. */
 
+  /** GET /v1/investigations/bottleneck-predictor (T6 M9.30) — investigation bottleneck predictor. */
+  app.get('/v1/investigations/bottleneck-predictor', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildInvestigationBottleneckPredictor } = require('./investigation_bottleneck_predictor') as typeof import('./investigation_bottleneck_predictor');
+    const out = buildInvestigationBottleneckPredictor(caseInvestigationStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/investigations/sla-compliance (T6 M9.26) */
   app.get('/v1/investigations/sla-compliance', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
     const ctx = extractCtx(req, now);
@@ -15102,6 +15135,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildDashboardLayoutEfficiency } = require('./dashboard_layout_efficiency') as typeof import('./dashboard_layout_efficiency');
     const out = buildDashboardLayoutEfficiency(customDashboardStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/dashboards/custom/adoption-funnel (T6 M11.28) — dashboard adoption funnel analysis. */
+  app.get('/v1/dashboards/custom/adoption-funnel', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDashboardAdoptionFunnel } = require('./dashboard_adoption_funnel') as typeof import('./dashboard_adoption_funnel');
+    const out = buildDashboardAdoptionFunnel(customDashboardStore, req.tenant!.tenant_id, now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -16557,6 +16598,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/scoring/model-calibration (T6 M6.30) — scoring model calibration check. */
+  app.get('/v1/scoring/model-calibration', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildScoringModelCalibration } = require('./scoring_model_calibration') as typeof import('./scoring_model_calibration');
+    const out = buildScoringModelCalibration(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** POST /v1/scoring/what-if body { vertical, items } (T6 M6.14) —
    *  fan one indicator input set across every M6.3 library preset
    *  of the given vertical. Per-preset: score + category + delta_vs_balanced.
@@ -17148,6 +17197,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/indicators/correlation-matrix (T6 M4.31) — pairwise Pearson correlation matrix. */
+  app.get('/v1/indicators/correlation-matrix', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildIndicatorCorrelationMatrix } = require('./indicator_correlation_matrix') as typeof import('./indicator_correlation_matrix');
+    const out = buildIndicatorCorrelationMatrix(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/indicators/weight-histogram (T6 M4.15) — weight
    *  distribution histogram over the M6.2 STUB_CATALOG. 5 canonical
@@ -19278,6 +19335,26 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/tenants/production-readiness (T6 M2.30) — production deployment readiness. */
+  app.get('/v1/tenants/production-readiness', requireTenantMw, requireRole('audit:read'), async (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const tid = req.tenant!.tenant_id;
+    const { buildTenantProductionReadiness } = require('./tenant_production_readiness') as typeof import('./tenant_production_readiness');
+    const out = await buildTenantProductionReadiness(tid, now(), {
+      onboardingStore,
+      apiKeyStore,
+      webhookStore: webhookStore as { list(t: string): Array<{ active: boolean }> },
+      alertRoutingEngine,
+      configStore,
+      scenarioStore,
+      ruleStore,
+      caseInvestigationStore,
+      auditTrailStore,
+      emailTransport,
+    });
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/tenants/:tenant_id/onboarding/readiness (T6 M2.6) — admin
    *  lookup of any tenant's readiness. Mounted BEFORE the catch-all
    *  `/:tenant_id/onboarding` so the literal /readiness segment isn't
@@ -21319,6 +21396,14 @@ export function makeApp(deps: AppDeps = {}) {
     const ctx = extractCtx(req, now);
     const { buildAdapterSlaTrend } = require('./adapter_sla_trend') as typeof import('./adapter_sla_trend');
     const out = buildAdapterSlaTrend(req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
+  /** GET /v1/integrations/adapters/version-compatibility (T6 M14.40) — adapter API version compatibility. */
+  app.get('/v1/integrations/adapters/version-compatibility', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAdapterVersionCompatibility } = require('./adapter_version_compatibility') as typeof import('./adapter_version_compatibility');
+    const out = buildAdapterVersionCompatibility(req.tenant!.tenant_id, now());
     return res.json(wrapResponse(out, ctx));
   });
 
@@ -24452,6 +24537,14 @@ export function makeApp(deps: AppDeps = {}) {
       }
     },
   );
+
+  /** GET /v1/admin/config/best-practices (T6 M13.28) — config best practices compliance. */
+  app.get('/v1/admin/config/best-practices', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildConfigBestPractices } = require('./config_best_practices') as typeof import('./config_best_practices');
+    const out = buildConfigBestPractices(configStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/admin/config/change-daily-volume?days=N (T6 M13.18) —
    *  cross-tenant N-day TREND view over the M13.2 audit-trail wiring.
@@ -29641,6 +29734,14 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
+  /** GET /v1/admin/api-keys/compliance-score (T6 M1.30) — API key compliance score. */
+  app.get('/v1/admin/api-keys/compliance-score', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildApiKeyComplianceScore } = require('./api_key_compliance_score') as typeof import('./api_key_compliance_score');
+    const out = buildApiKeyComplianceScore(apiKeyStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/admin/api-keys/:key_id — single key (redacted). */
   app.get(
     '/v1/admin/api-keys/:key_id',
@@ -30702,6 +30803,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/audit/completeness-certification (T6 M15.30) — audit completeness certification. */
+  app.get('/v1/audit/completeness-certification', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildAuditCompletenessCertification } = require('./audit_completeness_certification') as typeof import('./audit_completeness_certification');
+    const out = buildAuditCompletenessCertification(auditTrailStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/audit/actor-outcome-matrix (T6 M15.20) — 2D cross-tab over
    *  the audit chain combining actor × outcome. Actor axis is OPEN (any
    *  actor seen in events); outcome axis is CLOSED (3 canonical
@@ -31501,6 +31610,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/ingestion/data/freshness-report (T6 M3.30) — data freshness report. */
+  app.get('/v1/ingestion/data/freshness-report', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildDataFreshnessReport } = require('./data_freshness_report') as typeof import('./data_freshness_report');
+    const out = buildDataFreshnessReport(ingestionRegistry, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/ingestion/schema/field-count-histogram (T6 M3.18) — 5-
    *  bucket field-count histogram over the M3.2 schema catalog
@@ -33992,6 +34109,14 @@ export function makeApp(deps: AppDeps = {}) {
     },
   );
 
+  /** GET /v1/reports/jobs/consumer-behavior (T6 M12.28) — report consumer behavior analysis. */
+  app.get('/v1/reports/jobs/consumer-behavior', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildReportConsumerBehavior } = require('./report_consumer_behavior') as typeof import('./report_consumer_behavior');
+    const out = buildReportConsumerBehavior(reportJobStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
+
   /** GET /v1/reports/jobs/error-patterns (T6 M12.15) — FAILURE
    *  FORENSICS view over the M12.1 job store. Clusters failed jobs by
    *  normalised error_message template (re-uses `normaliseError` from
@@ -35339,6 +35464,14 @@ export function makeApp(deps: AppDeps = {}) {
       return res.json(wrapResponse(out, ctx));
     },
   );
+
+  /** GET /v1/rules/coverage-by-segment (T6 M5.30) — rule coverage by customer segment. */
+  app.get('/v1/rules/coverage-by-segment', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
+    const ctx = extractCtx(req, now);
+    const { buildRuleCoverageBySegment } = require('./rule_coverage_by_segment') as typeof import('./rule_coverage_by_segment');
+    const out = buildRuleCoverageBySegment(ruleStore, req.tenant!.tenant_id, now());
+    return res.json(wrapResponse(out, ctx));
+  });
 
   /** GET /v1/rules/templates/category-activation (T6 M5.20) — per-category
    *  breakdown of the M5.1 rule template library showing template counts
