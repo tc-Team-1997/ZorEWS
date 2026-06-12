@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/insurance/claims-anomaly
+description: '3 route(s) under /v1/insurance/claims-anomaly'

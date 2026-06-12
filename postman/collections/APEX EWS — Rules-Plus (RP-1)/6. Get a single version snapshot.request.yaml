@@ -1,0 +1,13 @@
+$kind: http-request
+order: 7000
+method: GET
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/versions/0.1.0'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{maker}}'
+  - key: x-apex-role
+    value: '{{makerRole}}'

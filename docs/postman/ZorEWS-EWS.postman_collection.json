@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "ae7651b5-05d1-4ba7-8bb9-cc74deb99bff",
     "name": "ZorEWS — EWS APIs",
-    "description": "EWS routes from the ZorEWS BFF + auth-svc surface. 80 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "EWS routes from the ZorEWS BFF + auth-svc surface. 105 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -310,7 +310,7 @@
     },
     {
       "name": "/v1/ews/rules",
-      "description": "19 route(s) under /v1/ews/rules",
+      "description": "21 route(s) under /v1/ews/rules",
       "item": [
         {
           "name": "GET /v1/ews/rules",
@@ -392,7 +392,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules — auto-discovered (server.ts:30678)"
+          "_summary": "GET /v1/ews/rules — auto-discovered (server.ts:36563)"
         },
         {
           "name": "POST /v1/ews/rules",
@@ -488,7 +488,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/ews/rules — auto-discovered (server.ts:30743)"
+          "_summary": "POST /v1/ews/rules — auto-discovered (server.ts:36628)"
         },
         {
           "name": "DELETE /v1/ews/rules/{rule_id}",
@@ -578,7 +578,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/ews/rules/:rule_id — auto-discovered (server.ts:30890)"
+          "_summary": "DELETE /v1/ews/rules/:rule_id — auto-discovered (server.ts:36775)"
         },
         {
           "name": "GET /v1/ews/rules/{rule_id}",
@@ -668,7 +668,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/:rule_id — auto-discovered (server.ts:30799)"
+          "_summary": "GET /v1/ews/rules/:rule_id — auto-discovered (server.ts:36684)"
         },
         {
           "name": "PUT /v1/ews/rules/{rule_id}",
@@ -772,7 +772,7 @@
             }
           ],
           "response": [],
-          "_summary": "PUT /v1/ews/rules/:rule_id — auto-discovered (server.ts:30820)"
+          "_summary": "PUT /v1/ews/rules/:rule_id — auto-discovered (server.ts:36705)"
         },
         {
           "name": "POST /v1/ews/rules/{rule_id}/activate",
@@ -877,7 +877,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/ews/rules/:rule_id/activate — auto-discovered (server.ts:30981)"
+          "_summary": "POST /v1/ews/rules/:rule_id/activate — auto-discovered (server.ts:36866)"
         },
         {
           "name": "GET /v1/ews/rules/{rule_id}/approvals",
@@ -968,7 +968,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/:rule_id/approvals — auto-discovered (server.ts:31592)"
+          "_summary": "GET /v1/ews/rules/:rule_id/approvals — auto-discovered (server.ts:37643)"
         },
         {
           "name": "POST /v1/ews/rules/{rule_id}/approve",
@@ -1269,7 +1269,98 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/:rule_id/hits — auto-discovered (server.ts:31034)"
+          "_summary": "GET /v1/ews/rules/:rule_id/hits — auto-discovered (server.ts:36919)"
+        },
+        {
+          "name": "GET /v1/ews/rules/{rule_id}/quarantine",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/ews/rules/:rule_id/quarantine",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "ews",
+                "rules",
+                ":rule_id",
+                "quarantine"
+              ],
+              "variable": [
+                {
+                  "key": "rule_id",
+                  "value": "{{rule_id}}",
+                  "description": "Path parameter: rule_id"
+                }
+              ]
+            },
+            "description": "conditions, which means the underlying record didn't pass and is\nquarantined per action_on_fail). Deterministic synthesis per\n(tenant, rule_id, day) — production swap reads from the quarantine\nstore written by the rules-svc consumer. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/ews/rules/{rule_id}/quarantine",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Records currently failing this rule (i.e. matching the rule's"
         },
         {
           "name": "POST /v1/ews/rules/{rule_id}/reject",
@@ -1375,6 +1466,97 @@
           ],
           "response": [],
           "_summary": "4-eyes reject. body { reason } required. */"
+        },
+        {
+          "name": "GET /v1/ews/rules/{rule_id}/stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/ews/rules/:rule_id/stats",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "ews",
+                "rules",
+                ":rule_id",
+                "stats"
+              ],
+              "variable": [
+                {
+                  "key": "rule_id",
+                  "value": "{{rule_id}}",
+                  "description": "Path parameter: rule_id"
+                }
+              ]
+            },
+            "description": "Drives the SPA Rule Library \"Pass %\" column + \"last run\" link per\ncross-cutting #10 (audit-trail link from last-run banners). */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/ews/rules/{rule_id}/stats",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Pass-rate + last-run timestamp + last-audit-event-id for the rule."
         },
         {
           "name": "POST /v1/ews/rules/{rule_id}/submit",
@@ -1675,7 +1857,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/:rule_id/versions — auto-discovered (server.ts:31324)"
+          "_summary": "GET /v1/ews/rules/:rule_id/versions — auto-discovered (server.ts:37375)"
         },
         {
           "name": "GET /v1/ews/rules/{rule_id}/versions/{semver}",
@@ -1772,7 +1954,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/:rule_id/versions/:semver — auto-discovered (server.ts:31349)"
+          "_summary": "GET /v1/ews/rules/:rule_id/versions/:semver — auto-discovered (server.ts:37400)"
         },
         {
           "name": "POST /v1/ews/rules/{rule_id}/versions/{semver}/revert",
@@ -2170,7 +2352,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/ews/rules/indicators — auto-discovered (server.ts:30560)"
+          "_summary": "GET /v1/ews/rules/indicators — auto-discovered (server.ts:36445)"
         }
       ]
     },
@@ -2443,7 +2625,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/feature-store/customers/:customer_id/history — auto-discovered (server.ts:3851)"
+          "_summary": "GET /v1/feature-store/customers/:customer_id/history — auto-discovered (server.ts:4114)"
         },
         {
           "name": "GET /v1/feature-store/customers/{customer_id}/snapshot",
@@ -2535,6 +2717,94 @@
           ],
           "response": [],
           "_summary": "point-in-time row of every catalog feature for this customer. */"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/alert-effectiveness",
+      "description": "1 route(s) under /v1/indicators/alert-effectiveness",
+      "item": [
+        {
+          "name": "GET /v1/indicators/alert-effectiveness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/alert-effectiveness",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "alert-effectiveness"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/alert-effectiveness",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/indicators/alert-effectiveness — auto-discovered (server.ts:17071)"
         }
       ]
     },
@@ -2738,6 +3008,94 @@
       ]
     },
     {
+      "name": "/v1/indicators/catalog-completeness",
+      "description": "1 route(s) under /v1/indicators/catalog-completeness",
+      "item": [
+        {
+          "name": "GET /v1/indicators/catalog-completeness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/catalog-completeness",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "catalog-completeness"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/catalog-completeness",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/indicators/catalog-completeness — auto-discovered (server.ts:17101)"
+        }
+      ]
+    },
+    {
       "name": "/v1/indicators/catalog-stats",
       "description": "1 route(s) under /v1/indicators/catalog-stats",
       "item": [
@@ -2822,6 +3180,358 @@
           ],
           "response": [],
           "_summary": "rollup over the M6.2 STUB_CATALOG. Per-vertical (banking +"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/correlation-matrix",
+      "description": "1 route(s) under /v1/indicators/correlation-matrix",
+      "item": [
+        {
+          "name": "GET /v1/indicators/correlation-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/correlation-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "correlation-matrix"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/correlation-matrix",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/indicators/correlation-matrix — auto-discovered (server.ts:17202)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/coverage-by-segment",
+      "description": "1 route(s) under /v1/indicators/coverage-by-segment",
+      "item": [
+        {
+          "name": "GET /v1/indicators/coverage-by-segment",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/coverage-by-segment",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "coverage-by-segment"
+              ]
+            },
+            "description": "corporate/msme/individual/group) based on family prefix, then\ncomputes a per-segment coverage view. Platform-static. RBAC\naudit:read. Mounted BEFORE /thresholds. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/coverage-by-segment",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "indicator to the customer segments it applies to (retail/sme/"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/economic-sensitivity",
+      "description": "1 route(s) under /v1/indicators/economic-sensitivity",
+      "item": [
+        {
+          "name": "GET /v1/indicators/economic-sensitivity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/economic-sensitivity",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "economic-sensitivity"
+              ]
+            },
+            "description": "STUB_CATALOG with PRNG seeded by (tenant, indicator_id). FIN-/CRD\nindicators are more rate-sensitive; TXN-/BEH- more GDP-sensitive;\nPOL-/CLM- more inflation-sensitive. Sorted by overall_sensitivity\ndesc. Platform-static per tenant. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/economic-sensitivity",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "sensitivity to macroeconomic shifts (GDP, rate, inflation). Uses"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/family-weight-comparison",
+      "description": "1 route(s) under /v1/indicators/family-weight-comparison",
+      "item": [
+        {
+          "name": "GET /v1/indicators/family-weight-comparison",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/family-weight-comparison",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "family-weight-comparison"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/family-weight-comparison",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/indicators/family-weight-comparison — auto-discovered (server.ts:17063)"
         }
       ]
     },
@@ -3120,7 +3830,7 @@
     },
     {
       "name": "/v1/indicators/thresholds",
-      "description": "11 route(s) under /v1/indicators/thresholds",
+      "description": "13 route(s) under /v1/indicators/thresholds",
       "item": [
         {
           "name": "GET /v1/indicators/thresholds",
@@ -3202,7 +3912,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/indicators/thresholds — auto-discovered (server.ts:13996)"
+          "_summary": "GET /v1/indicators/thresholds — auto-discovered (server.ts:17266)"
         },
         {
           "name": "DELETE /v1/indicators/thresholds/{indicator_id}",
@@ -3292,7 +4002,7 @@
             }
           ],
           "response": [],
-          "_summary": "→ revert to platform default. 204 / 404. */"
+          "_summary": "→ revert to platform default. 204 / 404. M5.3 audit-fan-out. */"
         },
         {
           "name": "GET /v1/indicators/thresholds/{indicator_id}",
@@ -3434,7 +4144,7 @@
                 }
               ]
             },
-            "description": "monotonic + [0,1] enforced. */",
+            "description": "monotonic + [0,1] enforced.\nM5.3 acceptance: writes an audit event so the SPA's \"last-run\nbanner\" + the Module 13 config-audit history can reconstruct\nevery threshold change. The store update is in-memory + sync,\nso the \"within 1 minute\" half of the acceptance is already <1ms. */",
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -3675,6 +4385,89 @@
           ],
           "response": [],
           "_summary": "LIBRARY DEFAULTS themselves. Per-row: {indicator_id, vertical,"
+        },
+        {
+          "name": "GET /v1/indicators/thresholds/calibration-recommendations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/thresholds/calibration-recommendations",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "thresholds",
+                "calibration-recommendations"
+              ]
+            },
+            "description": "Analyzes false-positive patterns to recommend threshold adjustments.\nReturns direction (tighten/loosen/keep), confidence, per-band delta.\nComplement to M4.10 (auto-tune) + M4.12 (drift analytics).\nMounted BEFORE existing /thresholds/* routes. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/thresholds/calibration-recommendations",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "automated threshold calibration recommendations per indicator."
         },
         {
           "name": "POST /v1/indicators/thresholds/check",
@@ -4023,6 +4816,89 @@
           "_summary": "overrides (T6 M4.4). Declared BEFORE /:indicator_id. */"
         },
         {
+          "name": "GET /v1/indicators/thresholds/percentile-comparison",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/thresholds/percentile-comparison",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "thresholds",
+                "percentile-comparison"
+              ]
+            },
+            "description": "(yellow_at, orange_at, red_at) across all platform indicators.\nPer indicator: yellow/orange/red_percentile_rank (0-100),\nis_tightest_yellow (yellow_at > fleet p75), is_most_lenient_red\n(red_at < fleet p25). Envelope: fleet_percentiles, tightest_yellow_\nindicators[], most_lenient_red_indicators[]. Platform-static.\nMounted BEFORE /thresholds/* catch-alls. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/thresholds/percentile-comparison",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Fleet-wide percentiles (p25, p50, p75) for each threshold band"
+        },
+        {
           "name": "GET /v1/indicators/thresholds/shift-analysis",
           "request": {
             "method": "GET",
@@ -4104,6 +4980,94 @@
           ],
           "response": [],
           "_summary": "DIRECTION-aware shift view over per-tenant M4.4 threshold"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/trigger-frequency",
+      "description": "1 route(s) under /v1/indicators/trigger-frequency",
+      "item": [
+        {
+          "name": "GET /v1/indicators/trigger-frequency",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/trigger-frequency",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "trigger-frequency"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/trigger-frequency",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "T6 M4.29 — Indicator trigger frequency analysis"
         }
       ]
     },
@@ -4192,6 +5156,94 @@
           ],
           "response": [],
           "_summary": "for every indicator in the M6.2 catalog: which rule templates"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/value-distribution",
+      "description": "1 route(s) under /v1/indicators/value-distribution",
+      "item": [
+        {
+          "name": "GET /v1/indicators/value-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/value-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "value-distribution"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/value-distribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/indicators/value-distribution — auto-discovered (server.ts:17223)"
         }
       ]
     },
@@ -4412,7 +5464,7 @@
                 "weight-histogram"
               ]
             },
-            "description": "buckets (low < 0.2 / low_medium [0.2, 0.4) / medium [0.4, 0.6) /\nhigh [0.6, 0.8) / critical [0.8, 1.0]) with strict-< upper\nbound semantics (1.0 inclusive on critical only). Per-bucket:\ncount + by_vertical (banking + insurance at 0 when absent) +\nsample_indicator_ids (cap 5 sorted asc). Envelope: peak_bucket\n(canonical iteration tie-break), mean_weight (rounded to 4\ndecimals), min_weight + max_weight, empty_buckets[] canonical.\nMirror of M9.11 / M8.12 histogram pattern. Platform-static.\nMounted BEFORE /v1/indicators/thresholds so the literal segment\nisn't captured. */"
+            "description": ""
           },
           "event": [
             {
@@ -4455,7 +5507,95 @@
             }
           ],
           "response": [],
-          "_summary": "distribution histogram over the M6.2 STUB_CATALOG. 5 canonical"
+          "_summary": "GET /v1/indicators/weight-histogram — auto-discovered (server.ts:17230)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/indicators/weight-threshold-correlation",
+      "description": "1 route(s) under /v1/indicators/weight-threshold-correlation",
+      "item": [
+        {
+          "name": "GET /v1/indicators/weight-threshold-correlation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/indicators/weight-threshold-correlation",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "indicators",
+                "weight-threshold-correlation"
+              ]
+            },
+            "description": "(red_at/orange_at/yellow_at) to surface how weight aligns with\nthreshold settings. red_at_weight_product = weight * red_at.\nRisk bands: high_weight_low_threshold / low_weight_high_threshold /\nbalanced. Sorted by product desc. Platform-static.\nMounted BEFORE /thresholds/* routes. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/indicators/weight-threshold-correlation",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "M6.2 STUB_CATALOG (severity_weight) with M4.3 listThresholds()"
         }
       ]
     },
@@ -4542,7 +5682,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules — auto-discovered (server.ts:31704)"
+          "_summary": "GET /v1/rules — auto-discovered (server.ts:37771)"
         }
       ]
     },
@@ -4637,7 +5777,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/:id — auto-discovered (server.ts:31737)"
+          "_summary": "GET /v1/rules/:id — auto-discovered (server.ts:37837)"
         },
         {
           "name": "POST /v1/rules/{id}/backtest",
@@ -4741,7 +5881,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/rules/:id/backtest — auto-discovered (server.ts:31848)"
+          "_summary": "POST /v1/rules/:id/backtest — auto-discovered (server.ts:37948)"
         },
         {
           "name": "GET /v1/rules/{id}/performance",
@@ -4831,7 +5971,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/:id/performance — auto-discovered (server.ts:31860)"
+          "_summary": "GET /v1/rules/:id/performance — auto-discovered (server.ts:37960)"
         },
         {
           "name": "POST /v1/rules/{id}/transition",
@@ -4935,7 +6075,538 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/rules/:id/transition — auto-discovered (server.ts:31758)"
+          "_summary": "POST /v1/rules/:id/transition — auto-discovered (server.ts:37858)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/backtest",
+      "description": "1 route(s) under /v1/rules/backtest",
+      "item": [
+        {
+          "name": "GET /v1/rules/backtest/portfolio-summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/backtest/portfolio-summary",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "backtest",
+                "portfolio-summary"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/backtest/portfolio-summary",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/rules/backtest/portfolio-summary — auto-discovered (server.ts:37674)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/conflict-detection",
+      "description": "1 route(s) under /v1/rules/conflict-detection",
+      "item": [
+        {
+          "name": "GET /v1/rules/conflict-detection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/conflict-detection",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "conflict-detection"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/conflict-detection",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "T6 M5.28 — Rule conflict detection (before /:id catch-all)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/coverage-by-segment",
+      "description": "1 route(s) under /v1/rules/coverage-by-segment",
+      "item": [
+        {
+          "name": "GET /v1/rules/coverage-by-segment",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/coverage-by-segment",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "coverage-by-segment"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/coverage-by-segment",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/rules/coverage-by-segment — auto-discovered (server.ts:35469)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/engine",
+      "description": "1 route(s) under /v1/rules/engine",
+      "item": [
+        {
+          "name": "GET /v1/rules/engine/throughput",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/engine/throughput",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "engine",
+                "throughput"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/engine/throughput",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/rules/engine/throughput — auto-discovered (server.ts:37666)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/firing-time-distribution",
+      "description": "1 route(s) under /v1/rules/firing-time-distribution",
+      "item": [
+        {
+          "name": "GET /v1/rules/firing-time-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/firing-time-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "firing-time-distribution"
+              ]
+            },
+            "description": "Returns by_hour[24], peak_hour, quiet_hours, mean_fires_per_hour.\nRBAC rules:list. Mounted BEFORE /:id catch-alls. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/firing-time-distribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "with action='rule.fired' resource_type='rule' by UTC hour-of-day 0-23."
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/reports",
+      "description": "1 route(s) under /v1/rules/reports",
+      "item": [
+        {
+          "name": "GET /v1/rules/reports/engine-summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/reports/engine-summary",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "reports",
+                "engine-summary"
+              ]
+            },
+            "description": "trailing 12-month fleet volume with per-family breakdown, mean precision /\ncoverage / FP across ACTIVE rules only, plus 3 ranked subsets the SPA\ndrills into (top_firing / underperforming / silent_rules).\nMounted BEFORE `/v1/rules/:id` so the literal `/reports/engine-summary`\nsegment isn't captured by the param wildcard."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/reports/engine-summary",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Fleet-wide rule engine report: cohort counts (by state/family/severity),"
         }
       ]
     },
@@ -5134,13 +6805,13 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/rules/simulate/bundle — auto-discovered (server.ts:31663)"
+          "_summary": "POST /v1/rules/simulate/bundle — auto-discovered (server.ts:37730)"
         }
       ]
     },
     {
       "name": "/v1/rules/templates",
-      "description": "23 route(s) under /v1/rules/templates",
+      "description": "28 route(s) under /v1/rules/templates",
       "item": [
         {
           "name": "GET /v1/rules/templates",
@@ -5222,7 +6893,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/templates — auto-discovered (server.ts:29725)"
+          "_summary": "GET /v1/rules/templates — auto-discovered (server.ts:35558)"
         },
         {
           "name": "GET /v1/rules/templates/{id}",
@@ -5312,7 +6983,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/templates/:id — auto-discovered (server.ts:30498)"
+          "_summary": "GET /v1/rules/templates/:id — auto-discovered (server.ts:36383)"
         },
         {
           "name": "GET /v1/rules/templates/{template_id}/clones-in-tenant",
@@ -5404,6 +7075,111 @@
           ],
           "response": [],
           "_summary": "— back-reference query: for this library template, list every"
+        },
+        {
+          "name": "POST /v1/rules/templates/{template_id}/effectiveness-backtest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/templates/:template_id/effectiveness-backtest",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "templates",
+                ":template_id",
+                "effectiveness-backtest"
+              ],
+              "variable": [
+                {
+                  "key": "template_id",
+                  "value": "<template_id>",
+                  "description": "Path parameter: template_id"
+                }
+              ]
+            },
+            "description": "if deployed over the last N days. Deterministic synthetic simulation\ncalibrated by category + supporting indicator count; confidence\nlevel derived from window length. Mounted BEFORE /:id so the\nliteral `/effectiveness-backtest` segment isn't captured as a\ntemplate id. 404 on unknown template, 400 on invalid window_days. */",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/rules/templates/{template_id}/effectiveness-backtest",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "— simulate what precision/recall this template WOULD HAVE achieved"
         },
         {
           "name": "GET /v1/rules/templates/action-inventory",
@@ -5749,7 +7525,90 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/templates/categories — auto-discovered (server.ts:29713)"
+          "_summary": "GET /v1/rules/templates/categories — auto-discovered (server.ts:35546)"
+        },
+        {
+          "name": "GET /v1/rules/templates/category-activation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/templates/category-activation",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "templates",
+                "category-activation"
+              ]
+            },
+            "description": "by vertical, avg supporting_indicators, severity_distribution, and\nmost_common_action per category. Drives \"which category has the best\ncoverage?\" + template catalogue overview panel. Distinct from M5.16\n(overall severity dist), M5.17 (category×vertical matrix). Platform\nstatic. Mounted BEFORE /:id catch-all. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/templates/category-activation",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "breakdown of the M5.1 rule template library showing template counts"
         },
         {
           "name": "GET /v1/rules/templates/category-vertical-matrix",
@@ -5835,6 +7694,172 @@
           "_summary": "2D cross-tab over RULE_TEMPLATES. Rows = 5 RuleTemplateCategory"
         },
         {
+          "name": "GET /v1/rules/templates/complexity-scores",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/templates/complexity-scores",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "templates",
+                "complexity-scores"
+              ]
+            },
+            "description": "indicators*10 + actions*8 + (both?5:0). Tiers: simple(<20)/\nmoderate(20-40)/complex(>40). Platform-static. RBAC rules:list.\nMounted BEFORE /:id. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/templates/complexity-scores",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "template in the M5.1 library. Complexity formula:"
+        },
+        {
+          "name": "GET /v1/rules/templates/condition-complexity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/templates/condition-complexity",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "templates",
+                "condition-complexity"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/templates/condition-complexity",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/rules/templates/condition-complexity — auto-discovered (server.ts:35355)"
+        },
+        {
           "name": "GET /v1/rules/templates/custom",
           "request": {
             "method": "GET",
@@ -5915,7 +7940,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/templates/custom — auto-discovered (server.ts:29855)"
+          "_summary": "GET /v1/rules/templates/custom — auto-discovered (server.ts:35688)"
         },
         {
           "name": "POST /v1/rules/templates/custom",
@@ -6012,7 +8037,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/rules/templates/custom — auto-discovered (server.ts:29867)"
+          "_summary": "POST /v1/rules/templates/custom — auto-discovered (server.ts:35700)"
         },
         {
           "name": "DELETE /v1/rules/templates/custom/{template_id}",
@@ -7163,6 +9188,89 @@
           "_summary": "reference each rule template's supporting_indicators against"
         },
         {
+          "name": "GET /v1/rules/templates/match-rate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/templates/match-rate",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "templates",
+                "match-rate"
+              ]
+            },
+            "description": "by shared category+family. match_rate = matched/total;\ncoverage_score = min(100, matched * 20). Sorted match_rate desc.\nMounted BEFORE catch-all `/:id` so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/templates/match-rate",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "template, compute how well it matches the tenant's active rules"
+        },
+        {
           "name": "GET /v1/rules/templates/severity-distribution",
           "request": {
             "method": "GET",
@@ -7331,7 +9439,95 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/rules/variables — auto-discovered (server.ts:29540)"
+          "_summary": "GET /v1/rules/variables — auto-discovered (server.ts:35285)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/rules/version-history-summary",
+      "description": "1 route(s) under /v1/rules/version-history-summary",
+      "item": [
+        {
+          "name": "GET /v1/rules/version-history-summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/rules/version-history-summary",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "rules",
+                "version-history-summary"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/rules/version-history-summary",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/rules/version-history-summary — auto-discovered (server.ts:35347)"
         }
       ]
     },
@@ -7419,7 +9615,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/streaming/events — auto-discovered (server.ts:3746)"
+          "_summary": "GET /v1/streaming/events — auto-discovered (server.ts:4009)"
         }
       ]
     },

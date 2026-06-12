@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a6cf06b0-c73e-4f6d-8a3d-c461bf9fb6ab",
     "name": "ZorEWS — Workflow APIs",
-    "description": "Workflow routes from the ZorEWS BFF + auth-svc surface. 92 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Workflow routes from the ZorEWS BFF + auth-svc surface. 109 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -348,7 +348,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cases/:case_id/events — auto-discovered (server.ts:11464)"
+          "_summary": "GET /v1/cases/:case_id/events — auto-discovered (server.ts:13413)"
         },
         {
           "name": "GET /v1/cases/{case_id}/timeline",
@@ -526,7 +526,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cases/events — auto-discovered (server.ts:11331)"
+          "_summary": "GET /v1/cases/events — auto-discovered (server.ts:13280)"
         },
         {
           "name": "POST /v1/cases/events",
@@ -712,7 +712,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cases/events/:event_id — auto-discovered (server.ts:11443)"
+          "_summary": "GET /v1/cases/events/:event_id — auto-discovered (server.ts:13392)"
         },
         {
           "name": "GET /v1/cases/events/action-distribution",
@@ -1062,7 +1062,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cases/maker-checker — auto-discovered (server.ts:11088)"
+          "_summary": "POST /v1/cases/maker-checker — auto-discovered (server.ts:13012)"
         },
         {
           "name": "GET /v1/cases/maker-checker/{action_id}",
@@ -1152,7 +1152,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cases/maker-checker/:action_id — auto-discovered (server.ts:11207)"
+          "_summary": "GET /v1/cases/maker-checker/:action_id — auto-discovered (server.ts:13131)"
         },
         {
           "name": "POST /v1/cases/maker-checker/{action_id}/approve",
@@ -1257,7 +1257,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cases/maker-checker/:action_id/approve — auto-discovered (server.ts:11228)"
+          "_summary": "POST /v1/cases/maker-checker/:action_id/approve — auto-discovered (server.ts:13152)"
         },
         {
           "name": "POST /v1/cases/maker-checker/{action_id}/reject",
@@ -1310,7 +1310,7 @@
                 }
               ]
             },
-            "description": "",
+            "description": "M3.2 acceptance — \"Rejection requires reason.\" The route now\nenforces a non-empty `decision_notes` (≥ 3 chars after trim) BEFORE\nthe engine is called. Approve stays optional-reason (approvals are\nneutral); only rejection must carry a written justification per RBI\nCyber Resilience §4.2 segregation-of-duties + audit chain\ntraceability. The engine itself stays backward-compatible — pure\nfunction tests that call `engine.reject(..., null, ...)` directly\ncontinue to work.",
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -1362,7 +1362,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cases/maker-checker/:action_id/reject — auto-discovered (server.ts:11261)"
+          "_summary": "POST /v1/cases/maker-checker/:action_id/reject body: { decision_notes }"
         },
         {
           "name": "GET /v1/cases/maker-checker/reviewer-rollup",
@@ -1979,7 +1979,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/automation/pool — auto-discovered (server.ts:10620)"
+          "_summary": "GET /v1/cms/automation/pool — auto-discovered (server.ts:12544)"
         },
         {
           "name": "PUT /v1/cms/automation/pool",
@@ -2076,13 +2076,13 @@
             }
           ],
           "response": [],
-          "_summary": "PUT /v1/cms/automation/pool — auto-discovered (server.ts:10632)"
+          "_summary": "PUT /v1/cms/automation/pool — auto-discovered (server.ts:12556)"
         }
       ]
     },
     {
       "name": "/v1/cms/cases",
-      "description": "21 route(s) under /v1/cms/cases",
+      "description": "22 route(s) under /v1/cms/cases",
       "item": [
         {
           "name": "GET /v1/cms/cases",
@@ -2164,7 +2164,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases — auto-discovered (server.ts:9839)"
+          "_summary": "GET /v1/cms/cases — auto-discovered (server.ts:11709)"
         },
         {
           "name": "POST /v1/cms/cases",
@@ -2260,7 +2260,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases — auto-discovered (server.ts:9919)"
+          "_summary": "POST /v1/cms/cases — auto-discovered (server.ts:11808)"
         },
         {
           "name": "GET /v1/cms/cases/{case_id}",
@@ -2350,7 +2350,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases/:case_id — auto-discovered (server.ts:9946)"
+          "_summary": "GET /v1/cms/cases/:case_id — auto-discovered (server.ts:11870)"
         },
         {
           "name": "PATCH /v1/cms/cases/{case_id}",
@@ -2454,7 +2454,7 @@
             }
           ],
           "response": [],
-          "_summary": "PATCH /v1/cms/cases/:case_id — auto-discovered (server.ts:9989)"
+          "_summary": "PATCH /v1/cms/cases/:case_id — auto-discovered (server.ts:11913)"
         },
         {
           "name": "POST /v1/cms/cases/{case_id}/assign",
@@ -2559,7 +2559,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/:case_id/assign — auto-discovered (server.ts:10106)"
+          "_summary": "POST /v1/cms/cases/:case_id/assign — auto-discovered (server.ts:12030)"
         },
         {
           "name": "POST /v1/cms/cases/{case_id}/assign-from-pool",
@@ -2755,7 +2755,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases/:case_id/attachments — auto-discovered (server.ts:10343)"
+          "_summary": "GET /v1/cms/cases/:case_id/attachments — auto-discovered (server.ts:12267)"
         },
         {
           "name": "POST /v1/cms/cases/{case_id}/attachments",
@@ -2957,7 +2957,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/cms/cases/:case_id/attachments/:attachment_id — auto-discovered (server.ts:10393)"
+          "_summary": "DELETE /v1/cms/cases/:case_id/attachments/:attachment_id — auto-discovered (server.ts:12317)"
         },
         {
           "name": "GET /v1/cms/cases/{case_id}/attachments/{attachment_id}",
@@ -3264,7 +3264,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/:case_id/close — auto-discovered (server.ts:10192)"
+          "_summary": "POST /v1/cms/cases/:case_id/close — auto-discovered (server.ts:12116)"
         },
         {
           "name": "POST /v1/cms/cases/{case_id}/escalate",
@@ -3369,7 +3369,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/:case_id/escalate — auto-discovered (server.ts:10163)"
+          "_summary": "POST /v1/cms/cases/:case_id/escalate — auto-discovered (server.ts:12087)"
         },
         {
           "name": "GET /v1/cms/cases/{case_id}/history",
@@ -3460,7 +3460,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases/:case_id/history — auto-discovered (server.ts:10482)"
+          "_summary": "GET /v1/cms/cases/:case_id/history — auto-discovered (server.ts:12406)"
         },
         {
           "name": "GET /v1/cms/cases/{case_id}/notes",
@@ -3551,7 +3551,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases/:case_id/notes — auto-discovered (server.ts:10278)"
+          "_summary": "GET /v1/cms/cases/:case_id/notes — auto-discovered (server.ts:12202)"
         },
         {
           "name": "POST /v1/cms/cases/{case_id}/notes",
@@ -3656,7 +3656,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/:case_id/notes — auto-discovered (server.ts:10247)"
+          "_summary": "POST /v1/cms/cases/:case_id/notes — auto-discovered (server.ts:12171)"
         },
         {
           "name": "GET /v1/cms/cases/{case_id}/tracking",
@@ -3852,7 +3852,104 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/:case_id/transition — auto-discovered (server.ts:10069)"
+          "_summary": "POST /v1/cms/cases/:case_id/transition — auto-discovered (server.ts:11993)"
+        },
+        {
+          "name": "POST /v1/cms/cases/auto-escalate-sla",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/cms/cases/auto-escalate-sla",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "cms",
+                "cases",
+                "auto-escalate-sla"
+              ]
+            },
+            "description": "Returns: { threshold_pct, total_considered, candidates[], escalated[],\nskipped[], errors[], dry_run }\nAudit fan-out — for each successful escalation we call\nwriteCmsAuditEvents(tenant, 'escalate', actor, case, { auto:true, ... })\nwhich writes BOTH the M15.1 trail (`case.escalate`) and the M9.4\ncase-event journal. The reason field carries\n`auto_sla_breach@<pct>%: progress=<p>%` so forensics knows the\nthreshold + observed progress that triggered the escalation.\nRBAC: cases:list (analyst+). The escalate primitive itself is\ncases:list-gated; this batch wrapper follows suit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/cms/cases/auto-escalate-sla",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Body: { dry_run?: boolean, threshold_pct_override?: number 0..1 }"
         },
         {
           "name": "POST /v1/cms/cases/bulk-assign",
@@ -3949,7 +4046,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/cms/cases/bulk-assign — auto-discovered (server.ts:9781)"
+          "_summary": "POST /v1/cms/cases/bulk-assign — auto-discovered (server.ts:11483)"
         },
         {
           "name": "GET /v1/cms/cases/sla-breaches",
@@ -4115,7 +4212,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/cms/cases/stats — auto-discovered (server.ts:9693)"
+          "_summary": "GET /v1/cms/cases/stats — auto-discovered (server.ts:11385)"
         }
       ]
     },
@@ -4738,7 +4835,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/investigations — auto-discovered (server.ts:11518)"
+          "_summary": "GET /v1/investigations — auto-discovered (server.ts:13467)"
         },
         {
           "name": "POST /v1/investigations",
@@ -4928,7 +5025,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/investigations/:id — auto-discovered (server.ts:11855)"
+          "_summary": "GET /v1/investigations/:id — auto-discovered (server.ts:13965)"
         },
         {
           "name": "GET /v1/investigations/{id}/notes",
@@ -5018,7 +5115,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/investigations/:id/notes — auto-discovered (server.ts:11991)"
+          "_summary": "GET /v1/investigations/:id/notes — auto-discovered (server.ts:14101)"
         },
         {
           "name": "POST /v1/investigations/{id}/notes",
@@ -5608,6 +5705,182 @@
       ]
     },
     {
+      "name": "/v1/investigations/bottleneck-predictor",
+      "description": "1 route(s) under /v1/investigations/bottleneck-predictor",
+      "item": [
+        {
+          "name": "GET /v1/investigations/bottleneck-predictor",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/bottleneck-predictor",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "bottleneck-predictor"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/bottleneck-predictor",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/investigations/bottleneck-predictor — auto-discovered (server.ts:13782)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/checklist-analytics",
+      "description": "1 route(s) under /v1/investigations/checklist-analytics",
+      "item": [
+        {
+          "name": "GET /v1/investigations/checklist-analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/checklist-analytics",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "checklist-analytics"
+              ]
+            },
+            "description": "completion patterns across all investigations. Per step:\n{step_id, total_investigations_with_step, completed_count,\ncompletion_rate, never_completed_count}. Steps sorted by\ncompletion_rate desc. Envelope: total_investigations,\nbest_completed_step (highest rate; null on empty),\nworst_completed_step (lowest rate; null on empty),\noverall_checklist_completion_rate (mean across steps; null on\nempty). Distinct from M9.9 (per-investigation card) by being\nfleet-wide pattern. Mounted BEFORE /:id catch-all. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/checklist-analytics",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Investigation checklist completion analytics. Aggregates step"
+        }
+      ]
+    },
+    {
       "name": "/v1/investigations/checklists",
       "description": "4 route(s) under /v1/investigations/checklists",
       "item": [
@@ -5691,7 +5964,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/investigations/checklists — auto-discovered (server.ts:10938)"
+          "_summary": "GET /v1/investigations/checklists — auto-discovered (server.ts:12862)"
         },
         {
           "name": "POST /v1/investigations/checklists",
@@ -5967,7 +6240,95 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/investigations/checklists/:id — auto-discovered (server.ts:10961)"
+          "_summary": "GET /v1/investigations/checklists/:id — auto-discovered (server.ts:12885)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/closure-by-decision",
+      "description": "1 route(s) under /v1/investigations/closure-by-decision",
+      "item": [
+        {
+          "name": "GET /v1/investigations/closure-by-decision",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/closure-by-decision",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "closure-by-decision"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/closure-by-decision",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/investigations/closure-by-decision — auto-discovered (server.ts:13816)"
         }
       ]
     },
@@ -6012,7 +6373,7 @@
                 "duration-histogram"
               ]
             },
-            "description": "Per-bucket {count, samples cap 3 — closed buckets sort\nduration desc (longest first); still_open sorts opened_at asc\n(oldest pending first)}. Envelope: peak_bucket (canonical\niteration tie-break — under_1h beats 1_to_24h at tied; null\nwhen zero), mean/median/p95_duration_ms over closed only via\nM3.5 linear-interpolation percentile (null when no closed),\nlongest_closed + oldest_open samples + empty_buckets[]\ncanonical. Distinct from M9.11 (case age — time SINCE opened),\nM9.13 (age × status matrix), M9.18 (note volume timeline).\nMirror of M8.12 alert ack-time + M7.15 promotion latency\nhistogram for the investigation surface. Drives BIL ops\n\"what's our typical fraud-investigation turnaround? any\ninvestigations dragging past 30 days?\" review. Mounted BEFORE\n/:id catch-all so the literal segment wins. */"
+            "description": ""
           },
           "event": [
             {
@@ -6055,7 +6416,183 @@
             }
           ],
           "response": [],
-          "_summary": "30d → 30d_plus; matches M8.12 / M9.11 boundary convention)."
+          "_summary": "GET /v1/investigations/duration-histogram — auto-discovered (server.ts:13797)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/evidence-collection-rate",
+      "description": "1 route(s) under /v1/investigations/evidence-collection-rate",
+      "item": [
+        {
+          "name": "GET /v1/investigations/evidence-collection-rate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/evidence-collection-rate",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "evidence-collection-rate"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/evidence-collection-rate",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/investigations/evidence-collection-rate — auto-discovered (server.ts:13752)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/evidence-scores",
+      "description": "1 route(s) under /v1/investigations/evidence-scores",
+      "item": [
+        {
+          "name": "GET /v1/investigations/evidence-scores",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/evidence-scores",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "evidence-scores"
+              ]
+            },
+            "description": "Score = checklist_contribution (40%) + notes_contribution (40%\nmax) + evidence_bonus (20%). Grade: A≥80, B≥60, C≥40, D≥20,\nF<20. Sorted by score asc (most needing attention first). Mounted\nBEFORE /:id catch-all. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/evidence-scores",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "evidence sufficiency score (0-100) for each open investigation."
         }
       ]
     },
@@ -6408,6 +6945,270 @@
       ]
     },
     {
+      "name": "/v1/investigations/outcome-confidence",
+      "description": "1 route(s) under /v1/investigations/outcome-confidence",
+      "item": [
+        {
+          "name": "GET /v1/investigations/outcome-confidence",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/outcome-confidence",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "outcome-confidence"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/outcome-confidence",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "outcome prediction confidence per checklist template. */"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/resolution-by-template",
+      "description": "1 route(s) under /v1/investigations/resolution-by-template",
+      "item": [
+        {
+          "name": "GET /v1/investigations/resolution-by-template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/resolution-by-template",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "resolution-by-template"
+              ]
+            },
+            "description": "avg/median resolution days + fraud_rate per template. Sorted\navg_resolution_days asc (null last). RBAC audit:read. Mounted\nBEFORE /:id catch-all so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/resolution-by-template",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "groups CLOSED investigations by checklist_template_id. Returns"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/sla-compliance",
+      "description": "1 route(s) under /v1/investigations/sla-compliance",
+      "item": [
+        {
+          "name": "GET /v1/investigations/sla-compliance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/sla-compliance",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "sla-compliance"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/sla-compliance",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/investigations/sla-compliance — auto-discovered (server.ts:13790)"
+        }
+      ]
+    },
+    {
       "name": "/v1/investigations/step-backlog",
       "description": "1 route(s) under /v1/investigations/step-backlog",
       "item": [
@@ -6448,7 +7249,7 @@
                 "step-backlog"
               ]
             },
-            "description": "emits {step_id, name, pending_count, completed_count,\ncases_with_step, open_pending_count}. Sorted by\nopen_pending_count desc — biggest bottleneck first. Lets ops\nspot \"most cases get stuck at the interview_claimant step\".\nMounted BEFORE /:id catch-all so the literal segment wins. */"
+            "description": ""
           },
           "event": [
             {
@@ -6491,7 +7292,7 @@
             }
           ],
           "response": [],
-          "_summary": "per-step backlog. For each step_id seen across the cohort"
+          "_summary": "GET /v1/investigations/step-backlog — auto-discovered (server.ts:13893)"
         }
       ]
     },
@@ -6580,6 +7381,270 @@
           ],
           "response": [],
           "_summary": "rollup over ALL investigations in the tenant. Returns per-status"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/team-distribution",
+      "description": "1 route(s) under /v1/investigations/team-distribution",
+      "item": [
+        {
+          "name": "GET /v1/investigations/team-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/team-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "team-distribution"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/team-distribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "T6 M9.28 — Investigation team workload distribution (before /:id catch-all)"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/verdict-distribution",
+      "description": "1 route(s) under /v1/investigations/verdict-distribution",
+      "item": [
+        {
+          "name": "GET /v1/investigations/verdict-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/verdict-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "verdict-distribution"
+              ]
+            },
+            "description": "emits {step_id, name, pending_count, completed_count,\ncases_with_step, open_pending_count}. Sorted by\nopen_pending_count desc — biggest bottleneck first. Lets ops\nspot \"most cases get stuck at the interview_claimant step\".\nMounted BEFORE /:id catch-all so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/verdict-distribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "per-step backlog. For each step_id seen across the cohort"
+        }
+      ]
+    },
+    {
+      "name": "/v1/investigations/workload-balance",
+      "description": "1 route(s) under /v1/investigations/workload-balance",
+      "item": [
+        {
+          "name": "GET /v1/investigations/workload-balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/investigations/workload-balance",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "investigations",
+                "workload-balance"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/investigations/workload-balance",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/investigations/workload-balance — auto-discovered (server.ts:13744)"
         }
       ]
     },
@@ -6675,7 +7740,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/tenants/:tenant_id/onboarding — auto-discovered (server.ts:15526)"
+          "_summary": "GET /v1/tenants/:tenant_id/onboarding — auto-discovered (server.ts:19378)"
         },
         {
           "name": "GET /v1/tenants/{tenant_id}/onboarding/readiness",
@@ -6871,7 +7936,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/tenants/:tenant_id/onboarding/reset — auto-discovered (server.ts:15661)"
+          "_summary": "POST /v1/tenants/:tenant_id/onboarding/reset — auto-discovered (server.ts:19513)"
         },
         {
           "name": "POST /v1/tenants/{tenant_id}/onboarding/steps/{step_id}",
@@ -6982,7 +8047,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/tenants/:tenant_id/onboarding/steps/:step_id — auto-discovered (server.ts:15608)"
+          "_summary": "POST /v1/tenants/:tenant_id/onboarding/steps/:step_id — auto-discovered (server.ts:19460)"
         },
         {
           "name": "POST /v1/tenants/{tenant_id}/onboarding/steps/{step_id}/skip",
@@ -7183,7 +8248,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/tenants/me/onboarding — auto-discovered (server.ts:15383)"
+          "_summary": "GET /v1/tenants/me/onboarding — auto-discovered (server.ts:19215)"
         },
         {
           "name": "GET /v1/tenants/me/onboarding/actors",
@@ -7693,7 +8758,7 @@
     },
     {
       "name": "/v1/tenants/onboarding",
-      "description": "9 route(s) under /v1/tenants/onboarding",
+      "description": "14 route(s) under /v1/tenants/onboarding",
       "item": [
         {
           "name": "GET /v1/tenants/onboarding/actor-fleet",
@@ -7777,6 +8842,172 @@
           ],
           "response": [],
           "_summary": "per-actor onboarding contribution. Distinct from M2.10 (per-tenant"
+        },
+        {
+          "name": "GET /v1/tenants/onboarding/bottleneck",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/tenants/onboarding/bottleneck",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "onboarding",
+                "bottleneck"
+              ]
+            },
+            "description": "(pending while others are completed), identifies critical_path_step,\nand provides recommendations. Mounted BEFORE /:tenant_id so the\nliteral segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/tenants/onboarding/bottleneck",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "onboarding bottleneck analysis. Identifies which steps are stuck"
+        },
+        {
+          "name": "GET /v1/tenants/onboarding/bottleneck-predictor",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/tenants/onboarding/bottleneck-predictor",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "onboarding",
+                "bottleneck-predictor"
+              ]
+            },
+            "description": "blocking fleet completion. Per bottleneck: step_id, name, order,\ntotal_tenants_pending, pct_blocked, estimated_hours_blocked,\nrisk_tier (critical/high/medium). Envelope: critical_bottleneck,\nfleet_completion_probability. Async. Mounted BEFORE /:tenant_id. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/tenants/onboarding/bottleneck-predictor",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Identifies which required onboarding steps are most commonly"
         },
         {
           "name": "GET /v1/tenants/onboarding/completion-timeline",
@@ -7943,6 +9174,89 @@
           ],
           "response": [],
           "_summary": "admin view returning onboarding posture for EVERY configured"
+        },
+        {
+          "name": "GET /v1/tenants/onboarding/roi-estimate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/tenants/onboarding/roi-estimate",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "onboarding",
+                "roi-estimate"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/tenants/onboarding/roi-estimate",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "T6 M2.28 — Tenant onboarding ROI estimate"
         },
         {
           "name": "GET /v1/tenants/onboarding/skip-reason-analytics",
@@ -8194,6 +9508,89 @@
           "_summary": "PER-STEP cross-tenant completion rollup. M2.12 pivots BY-TENANT"
         },
         {
+          "name": "GET /v1/tenants/onboarding/step-timing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/tenants/onboarding/step-timing",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "onboarding",
+                "step-timing"
+              ]
+            },
+            "description": "relative days, busiest_hour, most_adopted_step. Drives \"at what\ntime of day do tenants complete provisioning?\" SaaS admin view.\nDistinct from M2.13 (per-step completion ranking), M2.16 (daily\nvolume), M2.19 (velocity rollup). Async. Mounted BEFORE /:tenant_id. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/tenants/onboarding/step-timing",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "step timing analytics: avg hour-of-day per step, fastest/slowest"
+        },
+        {
           "name": "GET /v1/tenants/onboarding/step-vertical-matrix",
           "request": {
             "method": "GET",
@@ -8357,7 +9754,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/tenants/onboarding/steps — auto-discovered (server.ts:14970)"
+          "_summary": "GET /v1/tenants/onboarding/steps — auto-discovered (server.ts:18677)"
         },
         {
           "name": "GET /v1/tenants/onboarding/velocity",
@@ -8441,6 +9838,89 @@
           ],
           "response": [],
           "_summary": "upper bound semantics. Per-bucket {count, sample_tenant_ids cap"
+        },
+        {
+          "name": "GET /v1/tenants/onboarding/velocity-histogram",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/tenants/onboarding/velocity-histogram",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "onboarding",
+                "velocity-histogram"
+              ]
+            },
+            "description": "6 buckets: same_day / within_3d / within_7d / within_30d / beyond_30d / incomplete.\nMirror of M9.19 + M7.15 histogram pattern for the onboarding surface.\nMounted BEFORE /:tenant_id catch-all. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/tenants/onboarding/velocity-histogram",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "of how many days tenants take to complete onboarding."
         }
       ]
     }

@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/admin/audit-activity
+description: '3 route(s) under /v1/admin/audit-activity'

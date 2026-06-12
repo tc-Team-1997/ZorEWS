@@ -1,0 +1,25 @@
+$kind: http-request
+name: 'POST /auth/admin/sessions/{sid}/revoke'
+order: 2000
+method: POST
+url: '{{auth_svc_url}}/auth/admin/sessions/:sid/revoke'
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: sid
+    value: '{{session_id}}'
+body:
+  type: json
+  content: '{}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for POST /auth/admin/sessions/{sid}/revoke
+      pm.test('status is documented', () => {
+        pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

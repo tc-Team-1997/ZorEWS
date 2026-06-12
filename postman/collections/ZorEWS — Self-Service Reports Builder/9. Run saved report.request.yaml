@@ -1,0 +1,18 @@
+$kind: http-request
+order: 9000
+method: POST
+url: '{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}/run'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{}'

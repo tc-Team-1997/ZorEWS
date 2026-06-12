@@ -1,0 +1,18 @@
+$kind: http-request
+order: 4000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/approve'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{checker}}'
+  - key: x-apex-role
+    value: '{{checkerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{ "reason": "Reviewed; aligns with policy 4.2" }'

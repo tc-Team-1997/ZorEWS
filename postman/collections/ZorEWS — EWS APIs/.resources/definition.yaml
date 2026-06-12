@@ -1,0 +1,16 @@
+$kind: collection
+name: ZorEWS — EWS APIs
+description: 'EWS routes from the ZorEWS BFF + auth-svc surface. 105 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.'
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{access_token}}'
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      // Collection-level pre-request — log the active environment + tenant for visibility
+      if (!pm.environment.get('access_token') && pm.request.url.toString().indexOf('/auth/login') === -1 && pm.request.url.toString().indexOf('/oauth/token') === -1 && pm.request.url.toString().indexOf('/healthz') === -1 && pm.request.url.toString().indexOf('/.well-known/') === -1) {
+        console.warn('access_token is empty — run the Smoke > Login request first to capture a token.');
+      }

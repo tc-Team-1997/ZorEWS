@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/alerts/resolution-by-role
+description: '1 route(s) under /v1/alerts/resolution-by-role'

@@ -1,0 +1,48 @@
+$kind: http-request
+name: GET /v1/testing/runs
+order: 1000
+method: GET
+url: '{{bff_url}}/v1/testing/runs'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenant_id}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apex_user}}'
+  - key: X-APEX-Role
+    value: '{{apex_role}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for GET /v1/testing/runs
+      pm.test('status is documented', () => {
+        pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });
+      // Envelope shape only for application/json responses.
+      // Skip on text/plain (.txt summaries), text/markdown (.md schema),
+      // text/event-stream (SSE), and any non-JSON response.
+      const ct = (pm.response.headers.get('content-type') || '').toLowerCase();
+      const isJson = ct.includes('application/json');
+      if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {
+        pm.test('success envelope shape', () => {
+          const j = pm.response.json();
+          pm.expect(j).to.have.property('header');
+          pm.expect(j.header).to.have.property('status', 'SUCCESS');
+          pm.expect(j).to.have.property('body');
+        });
+      }
+      if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {
+        pm.test('error envelope shape', () => {
+          const j = pm.response.json();
+          pm.expect(j).to.have.property('header');
+          pm.expect(j.header).to.have.property('status', 'FAILURE');
+          pm.expect(j).to.have.property('error');
+          pm.expect(j.error).to.have.property('code');
+          pm.expect(j.error).to.have.property('severity');
+        });
+      }

@@ -1,0 +1,16 @@
+$kind: http-request
+order: 2000
+method: GET
+url: '{{baseUrl}}/v1/ews/rules?category=credit&state=active'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+queryParams:
+  - key: category
+    value: credit
+  - key: state
+    value: active

@@ -1,0 +1,22 @@
+$kind: http-request
+name: POST /auth/register
+order: 17000
+method: POST
+url: '{{auth_svc_url}}/auth/register'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: '{}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for POST /auth/register
+      pm.test('status is documented', () => {
+        pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

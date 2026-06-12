@@ -1,0 +1,17 @@
+$kind: http-request
+order: 5000
+method: POST
+url: '{{auth_svc_url}}/auth/login'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "password": "Admin!Pass1"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: 'pm.test(''4xx on missing field'', () => pm.expect(pm.response.code).to.be.within(400, 499));'

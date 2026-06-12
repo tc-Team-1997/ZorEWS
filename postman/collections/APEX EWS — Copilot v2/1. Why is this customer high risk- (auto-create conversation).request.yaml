@@ -1,0 +1,31 @@
+$kind: http-request
+name: '1. Why is this customer high risk? (auto-create conversation)'
+order: 2000
+method: POST
+url: '{{baseUrl}}/v1/copilot/v2/chat'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "message": "Why is this customer flagged as high risk?",
+      "context": {
+        "page": "customer",
+        "entity": {
+          "type": "customer",
+          "id": "cust-001",
+          "label": "Acme Pvt Ltd",
+          "facts": { "pd": 0.72, "dpd_max_90d": 60, "utilization": 0.95, "top_driver": "dpd_max_90d" }
+        }
+      }
+    }

@@ -1,0 +1,18 @@
+$kind: http-request
+order: 11000
+method: POST
+url: '{{baseUrl}}/v1/copilot/v2/chat'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: carlos.collection
+  - key: x-apex-role
+    value: collection_officer
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{ "message": "hi" }'

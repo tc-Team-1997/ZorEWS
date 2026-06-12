@@ -1,0 +1,11 @@
+$kind: http-request
+order: 17000
+method: GET
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}/history'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'

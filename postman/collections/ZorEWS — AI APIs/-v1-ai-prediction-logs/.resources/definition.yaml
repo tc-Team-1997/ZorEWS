@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/ai/prediction-logs
+description: '2 route(s) under /v1/ai/prediction-logs'

@@ -1,0 +1,11 @@
+$kind: http-request
+name: ✅ 3. /healthz (BFF + auth)
+order: 3000
+method: GET
+url: '{{bff_url}}/healthz'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      pm.test('< 1s', () => pm.expect(pm.response.responseTime).to.be.below(1000));

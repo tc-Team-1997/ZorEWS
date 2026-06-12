@@ -1,0 +1,29 @@
+$kind: http-request
+order: 5000
+method: POST
+url: '{{baseUrl}}/v1/copilot/v2/chat'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "message": "What are the next steps for this case?",
+      "context": {
+        "page": "case",
+        "entity": {
+          "type": "case", "id": "EWS-2026-00001",
+          "label": "EWS-2026-00001 — Acme EMI bounce",
+          "facts": { "status": "INVESTIGATING", "priority": "P1", "sla_progress_pct": 87, "sla_breached": "false" }
+        }
+      }
+    }

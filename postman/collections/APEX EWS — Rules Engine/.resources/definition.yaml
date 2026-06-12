@@ -1,0 +1,3 @@
+$kind: collection
+name: APEX EWS — Rules Engine
+description: 'Postman collection for the EWS rules engine (EWS-1 through EWS-5). Covers all 9 routes under /v1/ews/rules/* plus the seeded RULE_CREDIT_001 lifecycle as a quickstart flow.'

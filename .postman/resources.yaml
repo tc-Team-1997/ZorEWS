@@ -1,0 +1,63 @@
+workspace:
+  id: e782c911-b521-4328-8dbc-6b819bae6fe2
+localResources:
+  collections:
+    - ../docs/ews-cms-postman.json
+    - ../docs/ews-copilot-postman.json
+    - ../docs/ews-reports-builder-postman.json
+    - ../docs/ews-rules-plus-postman.json
+    - ../docs/ews-rules-postman.json
+    - ../docs/postman/ZorEWS-AI.postman_collection.json
+    - ../docs/postman/ZorEWS-Alerts.postman_collection.json
+    - ../docs/postman/ZorEWS-Auth.postman_collection.json
+    - ../docs/postman/ZorEWS-Borrower.postman_collection.json
+    - ../docs/postman/ZorEWS-Config.postman_collection.json
+    - ../docs/postman/ZorEWS-Dashboard.postman_collection.json
+    - ../docs/postman/ZorEWS-EWS.postman_collection.json
+    - ../docs/postman/ZorEWS-Reports.postman_collection.json
+    - ../docs/postman/ZorEWS-Users.postman_collection.json
+    - ../docs/postman/ZorEWS-Workflow.postman_collection.json
+  environments:
+    - ../docs/postman/local.postman_environment.json
+  specs:
+    - ../docs/admin-user-access-override-openapi.yaml
+    - ../docs/dashboard-analytics-openapi.yaml
+    - ../docs/dashboard-sla-breach-matrix-openapi.yaml
+    - ../docs/reports-cases-detail-openapi.yaml
+    - ../integrations/aml/openapi.yaml
+    - ../integrations/cbs/openapi.yaml
+    - ../integrations/collection/openapi.yaml
+    - ../integrations/ifrs9/openapi.yaml
+    - ../docs/api/swagger.json
+    - ../docs/api/swagger.yaml
+    - ../services/auth-svc/openapi.yaml
+cloudResources:
+  collections:
+    ../docs/ews-cms-postman.json: 55838040-77d7757e-bfe4-483c-a6b0-387a509a5fe6
+    ../docs/ews-copilot-postman.json: 55838040-b4f693f1-6918-4889-ba08-ae7e76845268
+    ../docs/ews-reports-builder-postman.json: 55838040-e87ee6f1-e1f1-483b-9c25-894fa3e08c74
+    ../docs/ews-rules-plus-postman.json: 55838040-c8d666ef-9509-4d8c-951c-0a3b9f575dc0
+    ../docs/ews-rules-postman.json: 55838040-dda7985d-ef47-4969-a2fb-b4ef57902f35
+    ../docs/postman/ZorEWS-Alerts.postman_collection.json: 55838040-7261fb2f-7868-4685-8604-6a4b7e999311
+    ../docs/postman/ZorEWS-Auth.postman_collection.json: 55838040-7ce058cd-2a4c-4b30-8029-93145a717862
+    ../docs/postman/ZorEWS-Borrower.postman_collection.json: 55838040-a2658944-fa1a-4623-80eb-7a58b998a184
+    ../docs/postman/ZorEWS-Config.postman_collection.json: 55838040-968da455-1e2e-4898-83d3-64d7d59e4fdc
+    ../docs/postman/ZorEWS-Dashboard.postman_collection.json: 55838040-71bb12ee-cf4e-4c68-844f-4dbcc7edb2f8
+    ../docs/postman/ZorEWS-EWS.postman_collection.json: 55838040-ae7651b5-05d1-4ba7-8bb9-cc74deb99bff
+    ../docs/postman/ZorEWS-Reports.postman_collection.json: 55838040-5fa6c149-afc6-4c5a-88b6-a601cbff928a
+    ../docs/postman/ZorEWS-Users.postman_collection.json: 55838040-b5ac5fa5-8f1f-4dfe-879f-80231fb23168
+    ../docs/postman/ZorEWS-Workflow.postman_collection.json: 55838040-a6cf06b0-c73e-4f6d-8a3d-c461bf9fb6ab
+  environments:
+    ../docs/postman/local.postman_environment.json: 55838040-f2de9075-d8e2-4219-89da-750255c6f771
+  specs:
+    ../docs/admin-user-access-override-openapi.yaml: 30ee649f-315d-4d51-91f0-1643a363fcb4
+    ../docs/dashboard-analytics-openapi.yaml: 0c0c3051-417c-4494-89a4-8ff40737c751
+    ../docs/dashboard-sla-breach-matrix-openapi.yaml: 9c5ba395-f128-4bea-b4f9-4e8c755404fe
+    ../docs/reports-cases-detail-openapi.yaml: ee03b189-116d-490b-8626-39a7df6941a2
+    ../integrations/aml/openapi.yaml: 19beb28d-5177-4d24-97cb-9fb9b8ba8bcd
+    ../integrations/cbs/openapi.yaml: 3fae6c2e-84d9-48ae-a80c-113894cac430
+    ../integrations/collection/openapi.yaml: 1895b3d4-e212-4717-8de7-d0aa37d3de33
+    ../integrations/ifrs9/openapi.yaml: 91a71326-beef-45c3-b941-bd10e3fce307
+    ../docs/api/swagger.json: 89c2945c-e6c1-4cfa-96fa-39cd3e7aad5a
+    ../docs/api/swagger.yaml: 09fa26a5-3ca5-4c6e-b59d-b7bae0157502
+    ../services/auth-svc/openapi.yaml: 1b46048e-e1dd-4371-b1c4-7a5405c1f19a

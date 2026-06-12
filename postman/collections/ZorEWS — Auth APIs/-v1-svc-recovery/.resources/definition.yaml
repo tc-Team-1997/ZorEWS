@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/svc/recovery
+description: '1 route(s) under /v1/svc/recovery'

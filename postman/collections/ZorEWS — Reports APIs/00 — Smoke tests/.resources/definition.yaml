@@ -1,0 +1,2 @@
+$kind: collection
+description: Happy-path + negative-test sanity checks. Run this folder first to verify the local stack + auth flow.

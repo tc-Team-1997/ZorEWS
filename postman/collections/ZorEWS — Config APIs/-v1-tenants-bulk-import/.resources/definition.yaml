@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/tenants/bulk-import
+description: '5 route(s) under /v1/tenants/bulk-import'

@@ -1,0 +1,3 @@
+$kind: collection
+name: APEX EWS — Case Management System (CMS)
+description: Postman collection for the EWS CMS — covers all 23 routes shipped in CMS-3 + CMS-4. Run requests in order to walk a case through the full lifecycle.

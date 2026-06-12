@@ -1,0 +1,13 @@
+$kind: http-request
+order: 2000
+method: GET
+url: '{{baseUrl}}/v1/reports/builder/sources/{{sourceId}}'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'

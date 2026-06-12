@@ -1,0 +1,24 @@
+$kind: http-request
+order: 5000
+method: PUT
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{maker}}'
+  - key: x-apex-role
+    value: '{{makerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "conditions": [
+        { "field": "emi_bounce_count_90d", "operator": ">=", "value": 4 }
+      ],
+      "action": { "alert_severity": "RED", "weight": 30 }
+    }

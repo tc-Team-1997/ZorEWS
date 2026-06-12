@@ -1,0 +1,13 @@
+$kind: http-request
+order: 11000
+method: DELETE
+url: '{{baseUrl}}/v1/reports/builder/saved/{{savedReportId}}'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'

@@ -1,0 +1,11 @@
+$kind: http-request
+order: 4000
+method: GET
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'

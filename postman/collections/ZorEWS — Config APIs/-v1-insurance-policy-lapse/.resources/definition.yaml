@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/insurance/policy-lapse
+description: '3 route(s) under /v1/insurance/policy-lapse'

@@ -1,0 +1,11 @@
+$kind: http-request
+order: 12000
+method: GET
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}/notes'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'

@@ -1,0 +1,31 @@
+$kind: http-request
+order: 8000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/evaluate'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "entity_type": "customer",
+      "entity_id": "cust-001",
+      "values": {
+        "emi_bounce_count_90d": 5,
+        "kyc_doc_expiry_days": 60,
+        "premium_overdue_days": 0,
+        "txn_amount_to_avg_ratio": 0,
+        "agent_portfolio_lapse_pct": 0,
+        "login_new_country_24h": 0,
+        "customer_exposure_pct_of_portfolio": 0,
+        "txn_freq_drop_30d_pct": 0,
+        "risk_score_delta_7d": 0
+      }
+    }

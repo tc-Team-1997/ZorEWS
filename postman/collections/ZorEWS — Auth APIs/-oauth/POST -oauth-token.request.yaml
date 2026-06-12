@@ -1,0 +1,37 @@
+$kind: http-request
+name: POST /oauth/token
+order: 1000
+method: POST
+url: '{{auth_svc_url}}/oauth/token'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "grant_type": "client_credentials",
+      "client_id": "apex-mobile-bank-demo",
+      "client_secret": "{{oauth_client_secret}}"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // OAuth client_credentials flow — requires {{oauth_client_secret}}
+      // to be set in the env. Without it, the auth-svc returns 400 +
+      // invalid_client, which is documented behaviour.
+      pm.test('oauth 200 or 400 (when client_secret missing)', () => {
+        pm.expect([200, 400, 401]).to.include(pm.response.code);
+      });
+      if (pm.response.code === 200) {
+        const j = pm.response.json();
+        if (j.access_token) {
+          pm.environment.set('access_token', j.access_token);
+          console.log('oauth access_token captured');
+        }
+        pm.test('token issued', () => {
+          pm.expect(j.access_token).to.be.a('string');
+          pm.expect(j.token_type).to.equal('Bearer');
+        });
+      }

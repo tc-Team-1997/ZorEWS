@@ -1,0 +1,16 @@
+$kind: http-request
+order: 5000
+method: GET
+url: '{{baseUrl}}/v1/cms/cases?priority=P1&status=ASSIGNED'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+queryParams:
+  - key: priority
+    value: P1
+  - key: status
+    value: ASSIGNED

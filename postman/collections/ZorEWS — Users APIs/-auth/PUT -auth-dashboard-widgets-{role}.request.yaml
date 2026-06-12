@@ -1,0 +1,25 @@
+$kind: http-request
+name: 'PUT /auth/dashboard-widgets/{role}'
+order: 5000
+method: PUT
+url: '{{auth_svc_url}}/auth/dashboard-widgets/:role'
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: role
+    value: '<role>'
+body:
+  type: json
+  content: '{}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for PUT /auth/dashboard-widgets/{role}
+      pm.test('status is documented', () => {
+        pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

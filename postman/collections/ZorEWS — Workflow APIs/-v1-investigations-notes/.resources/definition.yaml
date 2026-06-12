@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/investigations/notes
+description: '2 route(s) under /v1/investigations/notes'

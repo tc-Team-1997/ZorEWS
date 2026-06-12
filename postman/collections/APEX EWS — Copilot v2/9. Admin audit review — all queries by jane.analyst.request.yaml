@@ -1,0 +1,16 @@
+$kind: http-request
+order: 10000
+method: GET
+url: '{{baseUrl}}/v1/copilot/v2/audit?user_id=jane.analyst&limit=50'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{adminRole}}'
+queryParams:
+  - key: user_id
+    value: jane.analyst
+  - key: limit
+    value: '50'

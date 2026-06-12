@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/testing/tests
+description: '7 route(s) under /v1/testing/tests'

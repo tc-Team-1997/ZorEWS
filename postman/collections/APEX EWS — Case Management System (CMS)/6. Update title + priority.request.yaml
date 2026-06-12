@@ -1,0 +1,22 @@
+$kind: http-request
+order: 7000
+method: PATCH
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "title": "Customer cust-001 — escalated",
+      "priority": "P1"
+    }

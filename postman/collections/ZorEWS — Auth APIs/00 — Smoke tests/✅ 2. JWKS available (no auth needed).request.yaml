@@ -1,0 +1,10 @@
+$kind: http-request
+order: 2000
+method: GET
+url: '{{auth_svc_url}}/.well-known/jwks.json'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      pm.test('has keys[]', () => pm.expect(pm.response.json().keys).to.be.an('array'));

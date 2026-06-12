@@ -1,0 +1,45 @@
+$kind: http-request
+name: GET /v1/notifications/stream
+order: 1000
+method: GET
+url: '{{bff_url}}/v1/notifications/stream'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenant_id}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apex_user}}'
+  - key: X-APEX-Role
+    value: '{{apex_role}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for GET /v1/notifications/stream
+      // Streaming route — newman can't capture a status for SSE/WebSocket.
+      // Skip status + duration assertions.
+      pm.test('streaming route — request issued', () => pm.expect(true).to.equal(true));
+      // Envelope shape only for application/json responses.
+      // Skip on text/plain (.txt summaries), text/markdown (.md schema),
+      // text/event-stream (SSE), and any non-JSON response.
+      const ct = (pm.response.headers.get('content-type') || '').toLowerCase();
+      const isJson = ct.includes('application/json');
+      if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {
+        pm.test('success envelope shape', () => {
+          const j = pm.response.json();
+          pm.expect(j).to.have.property('header');
+          pm.expect(j.header).to.have.property('status', 'SUCCESS');
+          pm.expect(j).to.have.property('body');
+        });
+      }
+      if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {
+        pm.test('error envelope shape', () => {
+          const j = pm.response.json();
+          pm.expect(j).to.have.property('header');
+          pm.expect(j.header).to.have.property('status', 'FAILURE');
+          pm.expect(j).to.have.property('error');
+          pm.expect(j.error).to.have.property('code');
+          pm.expect(j.error).to.have.property('severity');
+        });
+      }

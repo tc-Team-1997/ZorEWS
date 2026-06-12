@@ -1,0 +1,19 @@
+$kind: http-request
+order: 6000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/test'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "values": { "emi_bounce_count_90d": 5 }
+    }

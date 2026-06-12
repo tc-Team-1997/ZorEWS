@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/indicators/thresholds
+description: '13 route(s) under /v1/indicators/thresholds'

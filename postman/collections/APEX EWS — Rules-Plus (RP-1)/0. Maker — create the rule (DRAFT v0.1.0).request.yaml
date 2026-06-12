@@ -1,0 +1,29 @@
+$kind: http-request
+order: 1000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{maker}}'
+  - key: x-apex-role
+    value: '{{makerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "rule_id": "{{ruleId}}",
+      "name": "RP demo — High EMI bounce",
+      "category": "credit",
+      "description": "3+ EMI bounces in last 90 days.",
+      "conditions": [
+        { "field": "emi_bounce_count_90d", "operator": ">=", "value": 3 }
+      ],
+      "logic": "AND",
+      "action": { "alert_severity": "RED", "weight": 25 }
+    }

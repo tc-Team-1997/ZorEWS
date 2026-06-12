@@ -1,0 +1,21 @@
+$kind: http-request
+name: 'DELETE /auth/service-clients/{tenant_id}/{client_id}'
+order: 20000
+method: DELETE
+url: '{{auth_svc_url}}/auth/service-clients/:tenant_id/:client_id'
+pathVariables:
+  - key: tenant_id
+    value: '{{tenant_id}}'
+  - key: client_id
+    value: '<client_id>'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for DELETE /auth/service-clients/{tenant_id}/{client_id}
+      pm.test('status is documented', () => {
+        pm.expect([204, 200, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

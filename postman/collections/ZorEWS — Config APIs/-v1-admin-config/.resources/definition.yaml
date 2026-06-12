@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/admin/config
+description: '33 route(s) under /v1/admin/config'

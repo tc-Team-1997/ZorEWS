@@ -1,0 +1,32 @@
+$kind: http-request
+order: 4000
+method: POST
+url: '{{baseUrl}}/v1/reports/builder/run'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "source_id": "mart.customer_360",
+      "filters": {
+        "op": "AND",
+        "children": [
+          {
+            "op": "eq",
+            "field": "risk_level",
+            "value": "High"
+          }
+        ]
+      },
+      "limit": 20
+    }

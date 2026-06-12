@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/release/history
+description: '5 route(s) under /v1/release/history'

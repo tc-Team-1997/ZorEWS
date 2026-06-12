@@ -1,0 +1,39 @@
+$kind: http-request
+order: 1000
+method: POST
+url: '{{auth_svc_url}}/auth/login'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "{{apex_user}}",
+      "password": "Admin!Pass1"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Accepts 200 (success) or 429 (rate-limited after repeated calls
+      // in one newman run — newman-full hits this route twice, which
+      // is one shy of the 5-per-15min default rate limit but can still
+      // trip on a 4th retry in the same session).
+      pm.test('login 200 or 429 (rate-limited in same session)', () => {
+        pm.expect([200, 429]).to.include(pm.response.code);
+      });
+      if (pm.response.code === 200) {
+        const j = pm.response.json();
+        if (j.requires_2fa) {
+          pm.environment.set('partial_token', j.partial_token);
+          console.log('2FA required — partial_token saved. Run /auth/login/verify-2fa next.');
+        } else if (j.access_token) {
+          pm.environment.set('access_token', j.access_token);
+          if (j.refresh_token) pm.environment.set('refresh_token', j.refresh_token);
+          console.log('access_token captured (' + j.access_token.slice(0, 24) + '…)');
+        }
+        pm.test('token present', () => {
+          pm.expect(j.access_token || j.partial_token).to.be.a('string');
+        });
+      }

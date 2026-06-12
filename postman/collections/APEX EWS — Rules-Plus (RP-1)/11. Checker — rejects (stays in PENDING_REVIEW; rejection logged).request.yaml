@@ -1,0 +1,18 @@
+$kind: http-request
+order: 12000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/{{cloneRuleId}}/reject'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{checker}}'
+  - key: x-apex-role
+    value: '{{checkerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{ "reason": "Threshold too aggressive — revisit after May data" }'

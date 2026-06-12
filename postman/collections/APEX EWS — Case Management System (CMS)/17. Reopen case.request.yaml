@@ -1,0 +1,21 @@
+$kind: http-request
+order: 18000
+method: POST
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}/transition'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "target": "OPEN"
+    }

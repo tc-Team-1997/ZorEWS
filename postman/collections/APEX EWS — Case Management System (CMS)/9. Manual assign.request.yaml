@@ -1,0 +1,22 @@
+$kind: http-request
+order: 10000
+method: POST
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}/assign'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "assigned_to": "jane.analyst",
+      "reason": "specialist for this rule"
+    }

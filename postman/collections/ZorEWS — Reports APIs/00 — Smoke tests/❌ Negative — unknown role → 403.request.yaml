@@ -1,0 +1,15 @@
+$kind: http-request
+order: 3000
+method: GET
+url: '{{bff_url}}/v1/reports/catalog'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenant_id}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-Role
+    value: unknown_role
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: 'pm.test(''403 with unknown role'', () => pm.expect(pm.response.code).to.equal(403));'

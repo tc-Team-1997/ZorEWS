@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/ingestion/schema
+description: '10 route(s) under /v1/ingestion/schema'

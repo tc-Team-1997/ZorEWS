@@ -1,0 +1,19 @@
+$kind: http-request
+name: 'DELETE /auth/users/{username}'
+order: 33000
+method: DELETE
+url: '{{auth_svc_url}}/auth/users/:username'
+pathVariables:
+  - key: username
+    value: '{{apex_user}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for DELETE /auth/users/{username}
+      pm.test('status is documented', () => {
+        pm.expect([204, 200, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

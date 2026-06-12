@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/governance/branches
+description: '5 route(s) under /v1/governance/branches'

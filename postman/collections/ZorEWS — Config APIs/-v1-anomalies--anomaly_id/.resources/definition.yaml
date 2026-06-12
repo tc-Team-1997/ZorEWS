@@ -1,0 +1,3 @@
+$kind: collection
+name: '/v1/anomalies/:anomaly_id'
+description: '3 route(s) under /v1/anomalies/:anomaly_id'

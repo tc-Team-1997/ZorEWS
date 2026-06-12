@@ -1,0 +1,3 @@
+$kind: collection
+name: APEX EWS — Rules-Plus (RP-1)
+description: 'Postman collection for the Rules-Plus extensions (RP-1). Walks a rule through the 4-eyes maker-checker flow, then versions/diff, then clone, plus a self-approval refusal example. Run sequentially against a fresh BFF.'

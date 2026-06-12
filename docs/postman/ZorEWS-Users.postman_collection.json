@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b5ac5fa5-8f1f-4dfe-879f-80231fb23168",
     "name": "ZorEWS — Users APIs",
-    "description": "Users routes from the ZorEWS BFF + auth-svc surface. 31 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Users routes from the ZorEWS BFF + auth-svc surface. 34 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -69,8 +69,108 @@
     },
     {
       "name": "/auth",
-      "description": "31 route(s) under /auth",
+      "description": "34 route(s) under /auth",
       "item": [
+        {
+          "name": "GET /auth/admin/sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/admin/sessions",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "admin",
+                "sessions"
+              ]
+            },
+            "description": "GET /auth/admin/sessions?user_id=&status=active|revoked|all&limit=N\nAuthorization: Bearer <admin>\nReturns every session across users (vs the self-service GET /auth/sessions\nwhich only returns the caller's own). Each row is decorated with the\nusername + role from the user store so the SPA can render \"alice.admin\n(admin) — 4 active sessions\" without an N+1 join. Status defaults to\n'active'; pass 'revoked' or 'all' to widen.\nUseful for: security ops investigating credential-exposure incidents,\ncompliance reviewing \"who has been signed in past business hours\",\n+ the day-to-day \"stale session sweep\" task documented in BAU runbook."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /auth/admin/sessions",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Phase 9 T2 — admin session governance."
+        },
+        {
+          "name": "POST /auth/admin/sessions/{sid}/revoke",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/admin/sessions/:sid/revoke",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "admin",
+                "sessions",
+                ":sid",
+                "revoke"
+              ],
+              "variable": [
+                {
+                  "key": "sid",
+                  "value": "{{session_id}}",
+                  "description": "Path parameter: sid"
+                }
+              ]
+            },
+            "description": "Authorization: Bearer <admin>\nBody: { reason? }\nAdmin-only force-revoke of any session. Distinct from\nDELETE /auth/sessions/:sid (self-service: caller can only kill their\nown sessions) and from POST /auth/users/:u/force-logout (kills EVERY\nsession for a user). Use this when you need to drop ONE specific\nsession — e.g. a leaked refresh token on one device.\nRecords the new user_force_logout audit event with metadata\n{revoked_sid, target_user_id, reason} so compliance can trace per-session\nactions vs the broader force-logout-all from M1 partial.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/admin/sessions/{sid}/revoke",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "POST /auth/admin/sessions/:sid/revoke"
+        },
         {
           "name": "GET /auth/audit-log",
           "request": {
@@ -488,7 +588,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /auth/me — auto-discovered (server.ts:1117)"
+          "_summary": "GET /auth/me — auto-discovered (server.ts:1409)"
         },
         {
           "name": "GET /auth/me/activity",
@@ -1522,6 +1622,67 @@
           ],
           "response": [],
           "_summary": "DELETE /auth/users/:username"
+        },
+        {
+          "name": "POST /auth/users/{username}/role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{auth_svc_url}}/auth/users/:username/role",
+              "host": [
+                "{{auth_svc_url}}"
+              ],
+              "path": [
+                "auth",
+                "users",
+                ":username",
+                "role"
+              ],
+              "variable": [
+                {
+                  "key": "username",
+                  "value": "{{apex_user}}",
+                  "description": "Path parameter: username"
+                }
+              ]
+            },
+            "description": "live read of user.role + user.locked, the new role takes effect on\nthe user's next request to /auth/me without forcing a logout (spec\nacceptance: \"Role change takes effect on next request, no logout\nrequired\"). Existing JWTs continue to carry the OLD role for the\nlifetime of the token — services that read the role from the JWT\n(X-APEX-ROLE) will still see the old role until the user signs in\nagain. The SPA reads /auth/me on every page mount + before every\nmutation, so it picks up the new role within ~1 page transition.\nRefuses to change the caller's own role (you can't lock yourself\nout of admin by accident). 400 on bad/missing role; 404 unknown\nuser; 403 non-admin; 409 self-change.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /auth/users/{username}/role",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "M6.1 — Users & RBAC: change a user's role. Combined with /auth/me's"
         }
       ]
     }

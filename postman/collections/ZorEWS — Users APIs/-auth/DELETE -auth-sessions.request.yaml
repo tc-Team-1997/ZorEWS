@@ -1,0 +1,16 @@
+$kind: http-request
+name: DELETE /auth/sessions
+order: 21000
+method: DELETE
+url: '{{auth_svc_url}}/auth/sessions'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for DELETE /auth/sessions
+      pm.test('status is documented', () => {
+        pm.expect([204, 200, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/admin/masters
+description: '6 route(s) under /v1/admin/masters'

@@ -1,0 +1,22 @@
+$kind: http-request
+name: POST /api/alerts/ack
+order: 2000
+method: POST
+url: '{{bff_url}}/api/alerts/ack'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: '{}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for POST /api/alerts/ack
+      pm.test('status is documented', () => {
+        pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

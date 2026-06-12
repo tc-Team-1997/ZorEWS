@@ -1,0 +1,19 @@
+$kind: http-request
+name: '12. Test rule (the /test path the wizard uses post-save)'
+order: 13000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/test'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{maker}}'
+  - key: x-apex-role
+    value: '{{makerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{ "values": { "emi_bounce_count_90d": 5 } }'

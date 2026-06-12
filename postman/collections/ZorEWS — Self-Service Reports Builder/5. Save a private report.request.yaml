@@ -1,0 +1,55 @@
+$kind: http-request
+order: 5000
+method: POST
+url: '{{baseUrl}}/v1/reports/builder/saved'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "High-risk customers (daily)",
+      "description": "PD > 0.5 + risk_level=High on customer_360",
+      "visibility": "private",
+      "definition": {
+        "source_id": "mart.customer_360",
+        "filters": {
+          "children": [
+            {
+              "field": "risk_level",
+              "op": "eq",
+              "value": "High"
+            },
+            {
+              "field": "pd_score",
+              "op": "gt",
+              "value": 0.5
+            }
+          ],
+          "op": "AND"
+        },
+        "limit": 100
+      },
+      "tags": [
+        "risk",
+        "daily"
+      ]
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      if (pm.response.code === 201) {
+        const env = pm.response.json();
+        const reportId = env.body?.report?.report_id ?? env.body?.report_id ?? env.report?.report_id;
+        if (reportId) pm.collectionVariables.set('savedReportId', reportId);
+      }

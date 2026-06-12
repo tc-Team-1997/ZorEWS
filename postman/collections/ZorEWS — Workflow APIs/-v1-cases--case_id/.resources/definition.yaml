@@ -1,0 +1,3 @@
+$kind: collection
+name: '/v1/cases/:case_id'
+description: '2 route(s) under /v1/cases/:case_id'

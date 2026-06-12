@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/alerts/auto-ack
+description: '4 route(s) under /v1/alerts/auto-ack'

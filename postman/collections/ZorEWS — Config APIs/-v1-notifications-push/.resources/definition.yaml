@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/notifications/push
+description: '5 route(s) under /v1/notifications/push'

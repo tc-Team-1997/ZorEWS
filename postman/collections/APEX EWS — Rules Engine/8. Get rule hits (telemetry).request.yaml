@@ -1,0 +1,14 @@
+$kind: http-request
+order: 9000
+method: GET
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/hits?limit=20'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+queryParams:
+  - key: limit
+    value: '20'

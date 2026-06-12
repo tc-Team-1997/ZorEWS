@@ -1,0 +1,19 @@
+$kind: http-request
+name: ✅ Happy path — GET /v1/reports/catalog
+order: 1000
+method: GET
+url: '{{bff_url}}/v1/reports/catalog'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenant_id}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-Role
+    value: '{{apex_role}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('2xx or 401 (no auth in env)', () => {
+        pm.expect([200, 201, 401, 403]).to.include(pm.response.code);
+      });

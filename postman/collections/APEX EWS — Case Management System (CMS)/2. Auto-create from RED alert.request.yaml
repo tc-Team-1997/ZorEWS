@@ -1,0 +1,26 @@
+$kind: http-request
+order: 3000
+method: POST
+url: '{{baseUrl}}/v1/cms/automation/auto-create-from-alert'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "alert_id": "{{alertId}}",
+      "alert_severity": "RED",
+      "customer_id": "cust-001",
+      "rule_id": "RULE_CREDIT_001",
+      "rule_name": "High EMI Bounce Risk",
+      "context": "5 EMI bounces in last 90 days"
+    }

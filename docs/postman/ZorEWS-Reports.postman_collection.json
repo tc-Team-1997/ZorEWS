@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "5fa6c149-afc6-4c5a-88b6-a601cbff928a",
     "name": "ZorEWS — Reports APIs",
-    "description": "Reports routes from the ZorEWS BFF + auth-svc surface. 71 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Reports routes from the ZorEWS BFF + auth-svc surface. 86 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -1386,7 +1386,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/reports/catalog — auto-discovered (server.ts:28519)"
+          "_summary": "GET /v1/reports/catalog — auto-discovered (server.ts:33852)"
         },
         {
           "name": "GET /v1/reports/catalog/{id}",
@@ -1476,13 +1476,13 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/reports/catalog/:id — auto-discovered (server.ts:28552)"
+          "_summary": "GET /v1/reports/catalog/:id — auto-discovered (server.ts:33885)"
         }
       ]
     },
     {
       "name": "/v1/reports/jobs",
-      "description": "12 route(s) under /v1/reports/jobs",
+      "description": "17 route(s) under /v1/reports/jobs",
       "item": [
         {
           "name": "GET /v1/reports/jobs",
@@ -1750,7 +1750,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/reports/jobs/:job_id — auto-discovered (server.ts:28981)"
+          "_summary": "GET /v1/reports/jobs/:job_id — auto-discovered (server.ts:34388)"
         },
         {
           "name": "GET /v1/reports/jobs/analytics",
@@ -1834,6 +1834,89 @@
           ],
           "response": [],
           "_summary": "over the M12.1 reports-job ledger: status mix, format mix,"
+        },
+        {
+          "name": "GET /v1/reports/jobs/consumer-behavior",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/jobs/consumer-behavior",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "jobs",
+                "consumer-behavior"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/jobs/consumer-behavior",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/reports/jobs/consumer-behavior — auto-discovered (server.ts:34113)"
         },
         {
           "name": "GET /v1/reports/jobs/daily-volume",
@@ -2085,6 +2168,89 @@
           "_summary": "ReportJobs by format (json / csv / pdf / xlsx). Per-format row:"
         },
         {
+          "name": "GET /v1/reports/jobs/format-size",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/jobs/format-size",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "jobs",
+                "format-size"
+              ]
+            },
+            "description": "jobs. Groups by format, computes deterministic estimated output\nsizes (json=50–500KB, csv=100KB–2MB, pdf=500KB–5MB, xlsx=200KB–3MB).\nReturns formats[] sorted total_size_kb desc with avg/median/total\nsize stats + largest_job per format. Envelope: largest_format +\ntotal_estimated_storage_kb. Distinct from M12.11 (format counts,\nnot sizes) + M12.14 (format × status matrix). Mounted BEFORE\n/:job_id so the literal `/format-size` segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/jobs/format-size",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Per-tenant output format size distribution over completed report"
+        },
+        {
           "name": "GET /v1/reports/jobs/format-status-matrix",
           "request": {
             "method": "GET",
@@ -2249,6 +2415,172 @@
           ],
           "response": [],
           "_summary": "distribution: every job in the tenant's history bucketed by UTC"
+        },
+        {
+          "name": "GET /v1/reports/jobs/output-size-distribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/jobs/output-size-distribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "jobs",
+                "output-size-distribution"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/jobs/output-size-distribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Report output size distribution. Mounted BEFORE /:job_id catch-all. */"
+        },
+        {
+          "name": "GET /v1/reports/jobs/peak-hours",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/jobs/peak-hours",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "jobs",
+                "peak-hours"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/jobs/peak-hours",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/reports/jobs/peak-hours — auto-discovered (server.ts:34241)"
         },
         {
           "name": "GET /v1/reports/jobs/per-requester",
@@ -2417,6 +2749,89 @@
           "_summary": "— completion buckets sort duration desc (slowest first); failed"
         },
         {
+          "name": "GET /v1/reports/jobs/quality-metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/jobs/quality-metrics",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "jobs",
+                "quality-metrics"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/jobs/quality-metrics",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/reports/jobs/quality-metrics — auto-discovered (server.ts:34380)"
+        },
+        {
           "name": "GET /v1/reports/jobs/runtime-trend",
           "request": {
             "method": "GET",
@@ -2503,7 +2918,7 @@
     },
     {
       "name": "/v1/reports/schedules",
-      "description": "13 route(s) under /v1/reports/schedules",
+      "description": "18 route(s) under /v1/reports/schedules",
       "item": [
         {
           "name": "GET /v1/reports/schedules",
@@ -2585,7 +3000,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/reports/schedules — auto-discovered (server.ts:29053)"
+          "_summary": "GET /v1/reports/schedules — auto-discovered (server.ts:34460)"
         },
         {
           "name": "POST /v1/reports/schedules",
@@ -2681,7 +3096,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/reports/schedules — auto-discovered (server.ts:29009)"
+          "_summary": "POST /v1/reports/schedules — auto-discovered (server.ts:34416)"
         },
         {
           "name": "DELETE /v1/reports/schedules/{schedule_id}",
@@ -2771,7 +3186,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:29395)"
+          "_summary": "DELETE /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:34841)"
         },
         {
           "name": "GET /v1/reports/schedules/{schedule_id}",
@@ -2861,7 +3276,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:29332)"
+          "_summary": "GET /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:34778)"
         },
         {
           "name": "PATCH /v1/reports/schedules/{schedule_id}",
@@ -2965,7 +3380,7 @@
             }
           ],
           "response": [],
-          "_summary": "PATCH /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:29353)"
+          "_summary": "PATCH /v1/reports/schedules/:schedule_id — auto-discovered (server.ts:34799)"
         },
         {
           "name": "POST /v1/reports/schedules/{schedule_id}/mark-run",
@@ -3070,7 +3485,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/reports/schedules/:schedule_id/mark-run — auto-discovered (server.ts:29416)"
+          "_summary": "POST /v1/reports/schedules/:schedule_id/mark-run — auto-discovered (server.ts:34862)"
         },
         {
           "name": "GET /v1/reports/schedules/{schedule_id}/preview",
@@ -3162,6 +3577,89 @@
           ],
           "response": [],
           "_summary": "(T6 M12.6) — project the next N firings of a saved schedule by"
+        },
+        {
+          "name": "GET /v1/reports/schedules/adherence",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/schedules/adherence",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "schedules",
+                "adherence"
+              ]
+            },
+            "description": "actual (proxied from last_run_at). Returns schedules[] sorted\nadherence_rate asc, worst_adherence, fleet_adherence_rate.\nRBAC audit:read. Mounted BEFORE /:schedule_id catch-all. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/schedules/adherence",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "ENABLED schedule, computes expected_runs_30d (by cadence) vs"
         },
         {
           "name": "GET /v1/reports/schedules/cadence-format-matrix",
@@ -3413,6 +3911,89 @@
           "_summary": "(T6 M12.8) — finds pairs of DIFFERENT schedules whose fire_at"
         },
         {
+          "name": "GET /v1/reports/schedules/cost-forecast",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/schedules/cost-forecast",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "schedules",
+                "cost-forecast"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/schedules/cost-forecast",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/reports/schedules/cost-forecast — auto-discovered (server.ts:33999)"
+        },
+        {
           "name": "GET /v1/reports/schedules/due",
           "request": {
             "method": "GET",
@@ -3496,6 +4077,89 @@
           "_summary": "Declared BEFORE /:schedule_id so the literal \"due\" wins. */"
         },
         {
+          "name": "GET /v1/reports/schedules/optimization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/schedules/optimization",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "schedules",
+                "optimization"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/schedules/optimization",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "GET /v1/reports/schedules/optimization — auto-discovered (server.ts:34545)"
+        },
+        {
           "name": "GET /v1/reports/schedules/recipient-distribution",
           "request": {
             "method": "GET",
@@ -3577,6 +4241,186 @@
           ],
           "response": [],
           "_summary": "per-recipient pivot over the M12.2 schedule store. Per email:"
+        },
+        {
+          "name": "GET /v1/reports/schedules/subscription-health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/schedules/subscription-health",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "schedules",
+                "subscription-health"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/reports/schedules/subscription-health",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "T6 M12.26 — Report subscription health (before /:schedule_id catch-all)"
+        },
+        {
+          "name": "POST /v1/reports/schedules/tick",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/reports/schedules/tick",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "schedules",
+                "tick"
+              ]
+            },
+            "description": "max_retries?: number, backoff_minutes?: number,\ndry_run?: boolean, simulate_failures?: string[] }\n- simulate_failures is a test hook: report_ids in this list\nare recorded as failures without actually calling submit.\nUseful for E2E retry/park tests without breaking the real\njob path. Empty in production callers.\nReturns: { tenant_id, generated_at, as_of, tolerance_minutes,\nmax_retries, backoff_minutes, dry_run, total_considered,\nfired[], retried_later[], skipped[], errors[], parked[] }\nRBAC: audit:read (admin) — scheduler tick is an ops-tier surface.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/reports/schedules/tick",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Body: { as_of?: ISO, tolerance_minutes?: number,"
         },
         {
           "name": "GET /v1/reports/schedules/upcoming",
@@ -3848,7 +4692,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/scenarios — auto-discovered (server.ts:7107)"
+          "_summary": "GET /v1/scenarios — auto-discovered (server.ts:8544)"
         },
         {
           "name": "POST /v1/scenarios",
@@ -3943,7 +4787,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/scenarios — auto-discovered (server.ts:8364)"
+          "_summary": "POST /v1/scenarios — auto-discovered (server.ts:9929)"
         }
       ]
     },
@@ -4038,7 +4882,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/scenarios/:id — auto-discovered (server.ts:8420)"
+          "_summary": "DELETE /v1/scenarios/:id — auto-discovered (server.ts:9985)"
         },
         {
           "name": "GET /v1/scenarios/{id}",
@@ -4336,8 +5180,110 @@
       ]
     },
     {
+      "name": "/v1/scenarios/ecl-impact-comparison",
+      "description": "1 route(s) under /v1/scenarios/ecl-impact-comparison",
+      "item": [
+        {
+          "name": "POST /v1/scenarios/ecl-impact-comparison",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/scenarios/ecl-impact-comparison",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "scenarios",
+                "ecl-impact-comparison"
+              ]
+            },
+            "description": "against the standard portfolio via runScenario (T4.2) and returns\nper-preset: ecl_delta_kes, ecl_pct_change, stage_migrations_total\n(off-diagonal count), worst_segment (highest stressed PD),\nrank (1=most stressed). Envelope: results[] sorted ecl_delta\ndesc + max/min/spread_kes + most_stressed_preset +\nmost_resilient_preset. Distinct from M16.2 (bulk-run which uses\npreset_ids OR category + simpler row shape) by accepting only\npreset_ids and returning richer per-preset ECL diagnostics.\nScenarioEclComparisonError: invalid_input → 400,\nunknown_preset → 404. RBAC customers:read_risk_profile.\nMounted BEFORE `/:id` catch-all. */",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for POST /v1/scenarios/ecl-impact-comparison",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 201, 400, 401, 403, 404, 409, 422, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "preset-to-preset ECL comparison. Runs preset_ids[] (1-15 items)"
+        }
+      ]
+    },
+    {
       "name": "/v1/scenarios/library",
-      "description": "25 route(s) under /v1/scenarios/library",
+      "description": "29 route(s) under /v1/scenarios/library",
       "item": [
         {
           "name": "GET /v1/scenarios/library",
@@ -4419,7 +5365,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/scenarios/library — auto-discovered (server.ts:7141)"
+          "_summary": "GET /v1/scenarios/library — auto-discovered (server.ts:8578)"
         },
         {
           "name": "GET /v1/scenarios/library/{id}",
@@ -4509,7 +5455,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/scenarios/library/:id — auto-discovered (server.ts:8217)"
+          "_summary": "GET /v1/scenarios/library/:id — auto-discovered (server.ts:9782)"
         },
         {
           "name": "GET /v1/scenarios/library/{preset_id}/clones-in-tenant",
@@ -4603,6 +5549,89 @@
           "_summary": "— back-reference query: for this library scenario preset, list"
         },
         {
+          "name": "GET /v1/scenarios/library/axis-severity-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/scenarios/library/axis-severity-matrix",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "scenarios",
+                "library",
+                "axis-severity-matrix"
+              ]
+            },
+            "description": "severity. Rows = 3 ShockAxis (canonical gdp → rate → fx); cols =\n3 ScenarioSeverity (canonical mild → moderate → severe). A cell\ncounts presets that EXERCISE that axis (raw shock ≠ 0) at that\nseverity tier — so a multi-axis preset counts in multiple ROWS\nbut only one column (its single severity). col.preset_count gives\nthe clean per-severity denominator. Envelope: peak_cell (canonical\niteration tie-break; null on empty), most_exercised_axis (highest\nrow total + canonical tie-break), severity_with_widest_axis_coverage\n(most distinct non-zero by_axis entries + canonical tie-break),\nempty_cells[] canonical row-major. Platform-static. Mirror of the\nM8.14 / M14.30 counts-in-multiple-rows cross-tab pattern. Drives\nstress-test coverage analysis: \"at the SEVERE tier, which shock\ndimensions do we exercise? where are the axis × severity gaps?\".\nMounted BEFORE `/:preset_id` so the literal segment wins. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/scenarios/library/axis-severity-matrix",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "cross-tab over the scenario library combining shock-axis ×"
+        },
+        {
           "name": "GET /v1/scenarios/library/categories",
           "request": {
             "method": "GET",
@@ -4683,7 +5712,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/scenarios/library/categories — auto-discovered (server.ts:7129)"
+          "_summary": "GET /v1/scenarios/library/categories — auto-discovered (server.ts:8566)"
         },
         {
           "name": "GET /v1/scenarios/library/coverage-matrix",
@@ -4849,7 +5878,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/scenarios/library/custom — auto-discovered (server.ts:7187)"
+          "_summary": "GET /v1/scenarios/library/custom — auto-discovered (server.ts:8624)"
         },
         {
           "name": "POST /v1/scenarios/library/custom",
@@ -4946,7 +5975,7 @@
             }
           ],
           "response": [],
-          "_summary": "POST /v1/scenarios/library/custom — auto-discovered (server.ts:7199)"
+          "_summary": "POST /v1/scenarios/library/custom — auto-discovered (server.ts:8636)"
         },
         {
           "name": "DELETE /v1/scenarios/library/custom/{preset_id}",
@@ -5037,7 +6066,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/scenarios/library/custom/:preset_id — auto-discovered (server.ts:7920)"
+          "_summary": "DELETE /v1/scenarios/library/custom/:preset_id — auto-discovered (server.ts:9357)"
         },
         {
           "name": "PUT /v1/scenarios/library/custom/{preset_id}",
@@ -6273,6 +7302,89 @@
           "_summary": "human-readable one-liner per scenario preset. Combines the"
         },
         {
+          "name": "GET /v1/scenarios/library/portfolio-ranking",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/scenarios/library/portfolio-ranking",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "scenarios",
+                "library",
+                "portfolio-ranking"
+              ]
+            },
+            "description": "|gdp|/7*0.4 + |rate|/400*0.35 + |fx|/15*0.25 (RBI severely\nadverse maxima as reference). Per-row: rank, preset metadata,\nimpact_index [0-1], portfolio_tier (catastrophic/severe/\nmoderate/mild). Envelope: most_impactful, average_impact_index,\ncatastrophic_count, zero_impact_count. RBAC customers:read_risk_\nprofile. Platform-static. Mounted BEFORE /:preset_id. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/scenarios/library/portfolio-ranking",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Ranks every library preset by a weighted impact_index:"
+        },
+        {
           "name": "GET /v1/scenarios/library/regulator-severity-matrix",
           "request": {
             "method": "GET",
@@ -6354,6 +7466,89 @@
           ],
           "response": [],
           "_summary": "— 2D pivot combining 3 ScenarioRegulator rows (RBI / IRDAI /"
+        },
+        {
+          "name": "GET /v1/scenarios/library/sensitivity-ranking",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/scenarios/library/sensitivity-ranking",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "scenarios",
+                "library",
+                "sensitivity-ranking"
+              ]
+            },
+            "description": "fx axis. Returns by_factor.{gdp,rate,fx}[] sorted by |shock| desc\nwith rank, most_*_sensitive leaderboards, and balanced_presets[]\n(all 3 factors non-zero). Mounted BEFORE /:preset_id. RBAC\ncustomers:read_risk_profile. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/scenarios/library/sensitivity-ranking",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "the M16.1 library presets by absolute shock magnitude per GDP/rate/"
         },
         {
           "name": "GET /v1/scenarios/library/shock-axis-histogram",
@@ -6603,6 +7798,89 @@
           ],
           "response": [],
           "_summary": "every library preset's GDP/rate/FX shocks onto [-1, 1] using the"
+        },
+        {
+          "name": "GET /v1/scenarios/library/stress-contribution",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/scenarios/library/stress-contribution",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "scenarios",
+                "library",
+                "stress-contribution"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/scenarios/library/stress-contribution",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "preset stress factor decomposition. Mounted BEFORE /:id catch-all. */"
         }
       ]
     }

@@ -1,0 +1,22 @@
+$kind: http-request
+order: 4000
+method: POST
+url: '{{auth_svc_url}}/auth/login'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "alice.admin",
+      "password": "WRONG!"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('401 / 423 / 429 expected on bad password', () => {
+        // 401 = bad creds; 423 = locked after N fails; 429 = rate-limited
+        pm.expect([401, 423, 429]).to.include(pm.response.code);
+      });

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a2658944-fa1a-4623-80eb-7a58b998a184",
     "name": "ZorEWS — Borrower APIs",
-    "description": "Borrower routes from the ZorEWS BFF + auth-svc surface. 8 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
+    "description": "Borrower routes from the ZorEWS BFF + auth-svc surface. 9 operations. Auto-generated from `docs/api/swagger.json` by `scripts/gen-postman.js`. Re-import after running `npm run openapi:generate` to refresh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -153,6 +153,93 @@
           ],
           "response": [],
           "_summary": "/api/customers/:id/risk — full risk profile for the SPA Customer 360 page."
+        }
+      ]
+    },
+    {
+      "name": "/v1/customers",
+      "description": "1 route(s) under /v1/customers",
+      "item": [
+        {
+          "name": "GET /v1/customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenant_id}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Channel",
+                "value": "{{channel}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-USER",
+                "value": "{{apex_user}}",
+                "type": "text"
+              },
+              {
+                "key": "X-APEX-Role",
+                "value": "{{apex_role}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{bff_url}}/v1/customers",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "`stressed` (S1+S2 only); pass `?mode=all` to widen to S3. */"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Smoke assertion — accepts any documented status for GET /v1/customers",
+                  "pm.test('status is documented', () => {",
+                  "  pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('responds in < 5s', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  "// Envelope shape only for application/json responses.",
+                  "// Skip on text/plain (.txt summaries), text/markdown (.md schema),",
+                  "// text/event-stream (SSE), and any non-JSON response.",
+                  "const ct = (pm.response.headers.get('content-type') || '').toLowerCase();",
+                  "const isJson = ct.includes('application/json');",
+                  "if (isJson && pm.response.code >= 200 && pm.response.code < 300 && pm.response.code !== 204) {",
+                  "  pm.test('success envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'SUCCESS');",
+                  "    pm.expect(j).to.have.property('body');",
+                  "  });",
+                  "}",
+                  "if (isJson && pm.response.code >= 400 && pm.response.code !== 429 && pm.response.code !== 501) {",
+                  "  pm.test('error envelope shape', () => {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('header');",
+                  "    pm.expect(j.header).to.have.property('status', 'FAILURE');",
+                  "    pm.expect(j).to.have.property('error');",
+                  "    pm.expect(j.error).to.have.property('code');",
+                  "    pm.expect(j.error).to.have.property('severity');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [],
+          "_summary": "Server-side sort by EWS score (spec acceptance). Default mode is"
         }
       ]
     },
@@ -430,7 +517,7 @@
             }
           ],
           "response": [],
-          "_summary": "GET /v1/watchlist — auto-discovered (server.ts:14434)"
+          "_summary": "GET /v1/watchlist — auto-discovered (server.ts:17854)"
         },
         {
           "name": "POST /v1/watchlist",
@@ -620,7 +707,7 @@
             }
           ],
           "response": [],
-          "_summary": "DELETE /v1/watchlist/:customer_id — auto-discovered (server.ts:14551)"
+          "_summary": "DELETE /v1/watchlist/:customer_id — auto-discovered (server.ts:17971)"
         }
       ]
     },

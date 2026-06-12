@@ -1,0 +1,25 @@
+$kind: http-request
+order: 4000
+method: POST
+url: '{{baseUrl}}/v1/cms/cases'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "title": "Customer cust-002 KYC overdue",
+      "description": "KYC docs expired 45 days ago",
+      "priority": "P3",
+      "alert_id": "alrt-demo-002",
+      "tags": ["kyc"]
+    }

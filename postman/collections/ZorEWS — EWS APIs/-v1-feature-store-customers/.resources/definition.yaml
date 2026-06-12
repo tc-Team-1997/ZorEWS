@@ -1,0 +1,3 @@
+$kind: collection
+name: /v1/feature-store/customers
+description: '2 route(s) under /v1/feature-store/customers'

@@ -1,0 +1,18 @@
+$kind: http-request
+order: 3000
+method: POST
+url: '{{baseUrl}}/v1/ews/rules/{{ruleId}}/approve'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{maker}}'
+  - key: x-apex-role
+    value: '{{makerRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: '{ "reason": "self-approval should fail" }'

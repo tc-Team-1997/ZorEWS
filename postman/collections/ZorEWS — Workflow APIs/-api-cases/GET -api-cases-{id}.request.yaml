@@ -1,0 +1,19 @@
+$kind: http-request
+name: 'GET /api/cases/{id}'
+order: 2000
+method: GET
+url: '{{bff_url}}/api/cases/:id'
+pathVariables:
+  - key: id
+    value: '{{customer_id}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // Smoke assertion — accepts any documented status for GET /api/cases/{id}
+      pm.test('status is documented', () => {
+        pm.expect([200, 204, 400, 401, 403, 404, 409, 501, 503]).to.include(pm.response.code);
+      });
+      pm.test('responds in < 5s', () => {
+        pm.expect(pm.response.responseTime).to.be.below(5000);
+      });

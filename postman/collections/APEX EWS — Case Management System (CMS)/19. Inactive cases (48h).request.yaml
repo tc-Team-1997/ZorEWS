@@ -1,0 +1,11 @@
+$kind: http-request
+order: 20000
+method: GET
+url: '{{baseUrl}}/v1/cms/automation/inactive-cases?threshold_hours=48'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'

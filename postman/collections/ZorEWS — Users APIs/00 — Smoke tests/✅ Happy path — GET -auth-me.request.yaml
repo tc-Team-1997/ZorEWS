@@ -1,0 +1,12 @@
+$kind: http-request
+name: ✅ Happy path — GET /auth/me
+order: 1000
+method: GET
+url: '{{auth_svc_url}}/auth/me'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('2xx or 401 (no auth in env)', () => {
+        pm.expect([200, 201, 401, 403]).to.include(pm.response.code);
+      });

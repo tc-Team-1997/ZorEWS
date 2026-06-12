@@ -1,0 +1,21 @@
+$kind: http-request
+order: 15000
+method: POST
+url: '{{baseUrl}}/v1/cms/cases/{{caseId}}/escalate'
+headers:
+  - key: X-Tenant-ID
+    value: '{{tenantId}}'
+  - key: X-Channel
+    value: '{{channel}}'
+  - key: X-APEX-USER
+    value: '{{apexUser}}'
+  - key: x-apex-role
+    value: '{{apexRole}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: text
+  content: |-
+    {
+      "reason": "Customer threatening litigation"
+    }

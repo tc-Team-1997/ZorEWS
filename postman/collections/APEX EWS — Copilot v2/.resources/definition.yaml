@@ -1,0 +1,3 @@
+$kind: collection
+name: APEX EWS — Copilot v2
+description: Postman collection for the hardened copilot route (Copilot-1 + Copilot-2). Walks a conversation through why_flagged → explain_kri → suggest_case_steps + checks quota and audit.
