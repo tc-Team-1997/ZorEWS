@@ -2,7 +2,7 @@
 // Shared contract for the Enterprise Report Export Framework (P1).
 // Each screen supplies a ReportAdapter; generators consume only ReportData.
 
-export const ALL_EXPORT_FORMATS = ['pdf', 'xlsx', 'csv'] as const;
+export const ALL_EXPORT_FORMATS = ['pdf', 'xlsx', 'csv', 'docx'] as const;
 export type ExportFormat = (typeof ALL_EXPORT_FORMATS)[number];
 
 export const ALL_REPORT_TYPES = [
