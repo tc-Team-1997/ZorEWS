@@ -23,6 +23,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildFraudDetectionReportData } from './fraudDetectionReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtKES = (n: number) =>
@@ -64,9 +66,33 @@ export function FraudDetectionPage() {
         title="Fraud Detection"
         subtitle="Network analysis · ring detection · provider collusion · identity fraud"
         actions={
-          <Button onClick={() => setAnalyzeOpen(true)} data-testid="fraud-analyze-open">
-            <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze entity
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setAnalyzeOpen(true)} data-testid="fraud-analyze-open">
+              <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze entity
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the fraud-ring-detection table + fraud-network KPI totals. */}
+            <ExportButton
+              module="fraud_detection"
+              reportType="risk"
+              adapter={(config) =>
+                buildFraudDetectionReportData(
+                  {
+                    totals: {
+                      entities_tracked: data?.totals.entities_tracked ?? 0,
+                      flagged_entities: data?.totals.flagged_entities ?? 0,
+                      fraud_rings: data?.totals.fraud_rings ?? 0,
+                      open_fraud_cases: data?.totals.open_fraud_cases ?? 0,
+                      estimated_exposure_kes: data?.totals.estimated_exposure_kes ?? 0,
+                    },
+                    fraud_ring_detection: data?.fraud_ring_detection ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
