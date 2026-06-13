@@ -2878,6 +2878,48 @@ const _mswStreamingLatencyHandlers = [
   }),
 ];
 
+// ── P1 Enterprise Report Export Framework — /v1/exports (dev/test mock) ──
+// In-memory export-history mirror of services/bff POST/GET /v1/exports. The
+// real generation is client-side; this records the server-trustworthy
+// history + (server-side) audit. Dev mode + the exportsMsw test exercise it.
+const _mswExports: Record<string, unknown>[] = [];
+let _mswExportSeq = 0;
+export function __resetMswExports(): void {
+  _mswExports.length = 0;
+  _mswExportSeq = 0;
+}
+
+const _mswExportHandlers = [
+  http.post('/v1/exports', async ({ request }) => {
+    const b = (await request.json()) as Record<string, unknown>;
+    const rec = {
+      ...b,
+      export_id: `EXP-BANK_DEMO-${Date.now()}-${++_mswExportSeq}`,
+      tenant_id: 'BANK_DEMO',
+      generated_at: new Date().toISOString(),
+    };
+    _mswExports.unshift(rec);
+    return HttpResponse.json(envelope(rec, 'EWS_201', 'Created'), { status: 201 });
+  }),
+  http.get('/v1/exports', () =>
+    HttpResponse.json(
+      envelope({ items: _mswExports, total: _mswExports.length, page: 1, page_size: 50 }),
+    ),
+  ),
+  http.get('/v1/exports/:id', ({ params }) => {
+    const rec = _mswExports.find((r) => r.export_id === params.id);
+    return rec
+      ? HttpResponse.json(envelope(rec))
+      : HttpResponse.json(
+          {
+            header: { status: 'FAILURE' },
+            error: { code: 'EWS_404_unknown_export', message: 'not found', severity: 'LOW' },
+          },
+          { status: 404 },
+        );
+  }),
+];
+
 // ── Insurance EWS · Module 1 — Policy Lapse Risk (dev/test mock) ───────
 const _lapseBands = ['low', 'medium', 'high', 'critical'] as const;
 const _lapseChannels = ['agent', 'broker', 'bancassurance', 'direct', 'online'] as const;
@@ -4034,6 +4076,7 @@ export const handlers = [
   ..._mswReportBuilderHandlers,
   ..._mswFeatureStoreHandlers,
   ..._mswStreamingLatencyHandlers,
+  ..._mswExportHandlers,
   ..._mswInsurancePolicyLapseHandlers,
   ..._mswInsuranceClaimsAnomalyHandlers,
   ..._mswInsuranceFraudHandlers,
