@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildCasesReportData } from './casesReportAdapter';
 import { useAuth } from '@/store/auth';
 import {
   cmsApi,
@@ -178,6 +180,41 @@ export function CmsCaseListPage() {
         subtitle="Alert-driven cases with full lifecycle, audit trail, and SLA tracking."
         actions={
           <div className="flex gap-2">
+            {/* Enterprise export (P2) — RBAC-gated; renders null without
+                reports:export. Reports the case list rows (post status/
+                priority/assignee filter + role-queue + ageBucket narrowing)
+                + the CMS stat-card strip. */}
+            <ExportButton
+              module="cases"
+              reportType="case"
+              adapter={(config) =>
+                buildCasesReportData(
+                  {
+                    stats: {
+                      total: stats?.total ?? 0,
+                      sla_breached_count: stats?.sla_breached_count ?? slaCount,
+                      sla_warning_count: stats?.sla_warning_count ?? 0,
+                      open_investigating_count:
+                        (stats?.by_status.OPEN ?? 0) +
+                        (stats?.by_status.ASSIGNED ?? 0) +
+                        (stats?.by_status.INVESTIGATING ?? 0),
+                    },
+                    cases: items.map((c) => ({
+                      case_id: c.case_id,
+                      case_number: c.case_number,
+                      title: c.title,
+                      status: c.status,
+                      priority: c.priority,
+                      assigned_to: c.assigned_to,
+                      sla_due_at: c.sla_due_at,
+                      updated_at: c.updated_at,
+                    })),
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: user?.username ?? 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
             <Link to="/cms/cases/kanban">
               <Button variant="ghost">Kanban view</Button>
             </Link>
