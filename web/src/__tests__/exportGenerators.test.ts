@@ -2,6 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { buildReportCsv } from '@/lib/export/generators/csv';
 import { buildReportPdf } from '@/lib/export/generators/pdf';
 import { buildReportXlsxBlob } from '@/lib/export/generators/xlsx';
+import { buildReportDocxBlob } from '@/lib/export/generators/docx';
 import type { ReportData, ExportConfig } from '@/lib/export/types';
 import { DEFAULT_INCLUDE } from '@/lib/export/types';
 
@@ -86,5 +87,26 @@ describe('buildReportXlsxBlob', () => {
     const blob = await buildReportXlsxBlob(data, config);
     expect(blob.size).toBeGreaterThan(0);
     expect(blob.type).toContain('spreadsheet');
+  });
+});
+
+describe('buildReportDocxBlob', () => {
+  test('produces a non-empty .docx blob', async () => {
+    const blob = await buildReportDocxBlob(data, config);
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  test('includes summary + recommendations sections', async () => {
+    const rich: ReportData = {
+      ...data,
+      sections: {
+        summary: [{ label: 'Risk Score', value: '0.82' }],
+        tables: [{ name: 'Cases', columns: ['Case', 'State'], rows: [['case-1', 'open']] }],
+        recommendations: ['Escalate to supervisor'],
+        ai_insights: { narrative: 'Risk is elevated.' },
+      },
+    };
+    const blob = await buildReportDocxBlob(rich, config);
+    expect(blob.size).toBeGreaterThan(0);
   });
 });
