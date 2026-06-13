@@ -66,6 +66,8 @@ import { AlertAnalyticsSection } from '@/components/dashboard/AlertAnalyticsSect
 import { RecoveryStatsCard } from '@/components/dashboard/RecoveryStatsCard';
 import { PortfolioInsightsRow } from '@/modules/dashboard/PortfolioInsightsRow';
 import { useAuth } from '@/store/auth';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildDashboardReportData } from './dashboardReportAdapter';
 import { useDomain, useTenantContext } from '@/lib/useOnboardingContext';
 import { getOrganization } from '@/lib/organizations';
 import {
@@ -582,6 +584,25 @@ export function DashboardPage() {
                 </p>
               </div>
             </div>
+            <ExportButton
+              module="executive_dashboard"
+              reportType="executive"
+              adapter={(config) =>
+                buildDashboardReportData(
+                  {
+                    summary: {
+                      customers_monitored: data?.customers_monitored ?? 0,
+                      high_risk_customers: data?.high_risk_customers ?? 0,
+                      active_alerts: data?.active_alerts ?? 0,
+                      cases_open: data?.cases_open ?? 0,
+                      alerts_by_severity: data?.alerts_by_severity ?? [],
+                    },
+                    meta: { tenant_id: tenantId, generated_by: user?.username ?? 'operator', role: user?.roles?.[0] ?? 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
             <Link to="/executive-cockpit" className="flex items-center gap-1.5 bg-[#4F46E5] text-white rounded-[8px] px-3 py-1.5 text-[11px] font-medium hover:bg-[#4338CA] transition-colors shrink-0">
               Executive Cockpit <ArrowUpRight size={11} />
             </Link>

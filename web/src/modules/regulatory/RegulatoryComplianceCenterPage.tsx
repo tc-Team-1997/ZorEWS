@@ -42,6 +42,8 @@ import {
 import { Badge, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildRegulatoryReportData } from './regulatoryReportAdapter';
 import {
   BANKING_FRAMEWORKS,
   COMPLIANCE_WORKFLOW_ACTIONS,
@@ -218,6 +220,38 @@ export function RegulatoryComplianceCenterPage() {
         subtitle="Central control tower for regulatory monitoring + compliance tracking + audit readiness + reporting — banking + insurance, with AI compliance assistant + executive dashboard."
         actions={
           <div className="flex items-center gap-2">
+            <ExportButton
+              module="regulatory_center"
+              reportType="compliance"
+              adapter={(config) =>
+                buildRegulatoryReportData(
+                  {
+                    command: {
+                      compliance_health_score: command.compliance_health_score,
+                      total_obligations: command.total_obligations,
+                      open_findings: command.open_findings,
+                      regulatory_breaches: command.regulatory_breaches,
+                      sla_violations: command.sla_violations,
+                      high_risk_obligations: command.high_risk_obligations,
+                      pending_actions: command.pending_actions,
+                      audit_readiness: command.audit_readiness,
+                    },
+                    obligations: filteredObligations.map((ob) => ({
+                      obligation_id: ob.obligation_id,
+                      regulation: ob.regulation,
+                      framework: ob.framework,
+                      category: ob.category,
+                      owner: ob.owner,
+                      priority: ob.priority,
+                      status: ob.status,
+                      next_due_date: ob.next_due_date,
+                    })),
+                    meta: { tenant_id: ACTIVE_TENANT, generated_by: user?.username ?? 'operator', role: user?.roles?.[0] ?? 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
             <Badge tone="warning"><Gavel className="size-3 mr-1 inline" />Regulatory</Badge>
             <Badge tone="neutral">Tenant: {ACTIVE_TENANT}</Badge>
             <Badge

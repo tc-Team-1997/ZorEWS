@@ -30,6 +30,8 @@ import {
 import { Badge, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildAuditCenterReportData } from './auditCenterReportAdapter';
 import type { LucideIcon } from 'lucide-react';
 
 interface AuditCenterCard {
@@ -111,6 +113,23 @@ export function AuditCenterPage() {
       <PageHeader
         title="Audit Center"
         subtitle="Single surface for every regulatory + operational audit query across ZorEWS."
+        actions={
+          <ExportButton
+            module="audit_center"
+            reportType="compliance"
+            adapter={(config) =>
+              buildAuditCenterReportData(
+                {
+                  cards: AUDIT_CENTER_CARDS.map((c) => ({
+                    id: c.id, label: c.label, description: c.description, to: c.to,
+                  })),
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       <Panel className="mb-4">

@@ -19,6 +19,8 @@ import {
 import { Badge, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildExecutiveCockpitReportData } from './executiveCockpitReportAdapter';
 import {
   ALL_EXECUTIVE_ACTIONS,
   canAccessExecutiveCockpit,
@@ -98,6 +100,25 @@ export function ExecutiveCockpitPage() {
       <PageHeader
         title="Executive Risk Cockpit"
         subtitle="CEO · CRO · COO · CFO · Board · Country Heads · Executive Leadership. Read-only enterprise risk intelligence."
+        actions={
+          <ExportButton
+            module="executive_cockpit"
+            reportType="executive"
+            adapter={(config) =>
+              buildExecutiveCockpitReportData(
+                {
+                  overview: overview.map((kpi) => ({ label: kpi.label, value: String(kpi.value), sub: kpi.sub })),
+                  exposures: exposures.map((row) => ({
+                    rank: row.rank, entity_name: row.entity_name, exposure_kes: row.exposure_kes,
+                    risk_score: row.risk_score, band: row.band,
+                  })),
+                  meta: { tenant_id: ACTIVE_TENANT, generated_by: user?.username ?? 'operator', role: user?.roles?.[0] ?? 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       {/* Cockpit banner */}
