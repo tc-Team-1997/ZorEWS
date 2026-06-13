@@ -25,6 +25,8 @@ import {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildSectorWatchReportData } from './sectorWatchReportAdapter';
 
 const formatKES = (n: number) =>
   new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n);
@@ -57,6 +59,28 @@ export function SectorWatchPage() {
       <PageHeader
         title="Sector Watch"
         subtitle="Portfolio concentration × stress heatmap. Click a tile for sector summary; open deep-dive for 12-month trend, top at-risk customers, and contributing rules."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Reports the sector heatmap cells + the heat-level
+             KPI strip. */
+          <ExportButton
+            module="sector_watch"
+            reportType="portfolio"
+            adapter={(config) =>
+              buildSectorWatchReportData(
+                {
+                  summary: {
+                    total_sectors: body?.total_sectors ?? 0,
+                    by_heat_level: body?.by_heat_level ?? {},
+                  },
+                  cells: body?.cells ?? [],
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">

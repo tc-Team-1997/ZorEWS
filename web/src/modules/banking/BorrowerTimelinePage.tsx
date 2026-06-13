@@ -22,6 +22,8 @@ import {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildBorrowerTimelineReportData } from './borrowerTimelineReportAdapter';
 
 const SEV_TONE: Record<TimelineSeverity, 'success' | 'warning' | 'danger'> = {
   info: 'success',
@@ -109,6 +111,34 @@ export function BorrowerTimelinePage() {
       <PageHeader
         title="Borrower Timeline"
         subtitle="The borrower's whole risk journey across products — DPD changes, SMA reclassifications, rule firings, alerts, ratio breaches, repayments, restructurings and recovery cases — in one chronological view."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Single-borrower report: reports the risk-event
+             stream (post event-type filter) + journey summary, stamping the
+             borrower as the report subject. */
+          <ExportButton
+            module="borrower_timeline"
+            reportType="customer"
+            adapter={(config) =>
+              buildBorrowerTimelineReportData(
+                {
+                  customer_id: data?.customer_id ?? customerId,
+                  customer_name: data?.customer_name ?? customerId,
+                  summary: {
+                    current_risk_band: data?.current_risk_band ?? '—',
+                    trajectory: data?.trajectory ?? '—',
+                    peak_dpd: data?.peak_dpd ?? 0,
+                    total_events: data?.total_events ?? 0,
+                    critical_events: data?.by_severity.critical ?? 0,
+                  },
+                  events: data?.events ?? [],
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       {/* Borrower selector */}

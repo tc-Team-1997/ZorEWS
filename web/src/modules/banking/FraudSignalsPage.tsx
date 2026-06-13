@@ -26,6 +26,8 @@ import {
 import { Badge, Button, Input, MetricCard, Panel } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildFraudSignalsReportData } from './fraudSignalsReportAdapter';
 import { api } from '@/lib/api';
 import type {
   FraudCaseShape,
@@ -103,9 +105,28 @@ export function FraudSignalsPage() {
         title="Fraud Signals"
         subtitle="AI-scored fraud cases — cheque kiting, account takeover, mule accounts, identity + document fraud. SAR + vigilance referral with audit lock."
         actions={
-          <Button variant="ghost" onClick={() => setRulesOpen(true)} data-testid="fraud-open-rules">
-            <Shield className="h-4 w-4 mr-2" /> Manage rules
-          </Button>
+          <>
+            <Button variant="ghost" onClick={() => setRulesOpen(true)} data-testid="fraud-open-rules">
+              <Shield className="h-4 w-4 mr-2" /> Manage rules
+            </Button>
+            {/* Enterprise export (P2) — RBAC-gated; renders null without
+                reports:export. Reports the active fraud-case rows (post
+                status/priority filter) + the case KPI strip. */}
+            <ExportButton
+              module="fraud_signals"
+              reportType="risk"
+              adapter={(config) =>
+                buildFraudSignalsReportData(
+                  {
+                    summary: stats,
+                    cases,
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </>
         }
       />
 

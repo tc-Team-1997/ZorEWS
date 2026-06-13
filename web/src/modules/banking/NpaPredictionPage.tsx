@@ -22,6 +22,8 @@ import {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildNpaPredictionReportData } from './npaPredictionReportAdapter';
 import { color } from '@/styles/tokens';
 
 type Horizon = 30 | 60 | 90 | 180;
@@ -67,6 +69,28 @@ export function NpaPredictionPage() {
             <Button variant="ghost" onClick={() => setLineageOpen(true)} data-testid="npa-open-lineage">
               <Database className="size-4" aria-hidden /> Data lineage
             </Button>
+            {/* Enterprise export (P2) — RBAC-gated; renders null without
+                reports:export. Reports the high-risk rows for the active
+                horizon + the exposure KPI strip. */}
+            <ExportButton
+              module="npa_prediction"
+              reportType="risk"
+              adapter={(config) =>
+                buildNpaPredictionReportData(
+                  {
+                    horizon,
+                    summary: {
+                      total_high_risk: list?.total_high_risk ?? 0,
+                      total_critical: list?.total_critical ?? 0,
+                      total_exposure_kes: list?.total_exposure_kes ?? 0,
+                    },
+                    rows: list?.rows ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
           </div>
         }
       />

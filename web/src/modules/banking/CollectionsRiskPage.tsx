@@ -21,6 +21,8 @@ import {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildCollectionsRiskReportData } from './collectionsRiskReportAdapter';
 
 const formatKES = (n: number) =>
   new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n);
@@ -114,6 +116,32 @@ export function CollectionsRiskPage() {
       <PageHeader
         title="Collections Risk"
         subtitle="Recovery work-queue ranked by exposure-at-risk. Filter by DPD bucket or recovery stage; open an account for recovery-probability factors, promise-to-pay history, and contact log."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Reports the recovery work-queue rows (post
+             DPD-bucket / stage filter) + the recovery KPI strip. */
+          <ExportButton
+            module="collections_risk"
+            reportType="recovery"
+            adapter={(config) =>
+              buildCollectionsRiskReportData(
+                {
+                  summary: {
+                    total_accounts: summary?.total_accounts ?? 0,
+                    total_overdue_kes: summary?.total_overdue_kes ?? 0,
+                    total_expected_recovery_kes: summary?.total_expected_recovery_kes ?? 0,
+                    recovery_rate_pct: summary?.recovery_rate_pct ?? 0,
+                    ptp_active_count: summary?.ptp_active_count ?? 0,
+                    high_risk_count: summary?.high_risk_count ?? 0,
+                  },
+                  accounts: queue?.accounts ?? [],
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">

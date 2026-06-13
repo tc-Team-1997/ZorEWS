@@ -33,6 +33,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildSmaClassificationReportData } from './smaClassificationReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtKES = (n: number) =>
@@ -94,6 +96,32 @@ export function SmaClassificationPage() {
       <PageHeader
         title="SMA Classification"
         subtitle="Special Mention Account classification per regulator. Drill today's movements, view by sector, trend per borrower, or trigger re-classification."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Reports today's SMA movement rows + the movement
+             KPI strip for the active framework. */
+          <ExportButton
+            module="sma_classification"
+            reportType="risk"
+            adapter={(config) =>
+              buildSmaClassificationReportData(
+                {
+                  framework,
+                  date: body?.date ?? '—',
+                  summary: {
+                    total_movements: body?.total_movements ?? 0,
+                    deteriorations: body?.deteriorations ?? 0,
+                    improvements: body?.improvements ?? 0,
+                    total_exposure_at_risk_kes: body?.total_exposure_at_risk_kes ?? 0,
+                  },
+                  movements: body?.movements ?? [],
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       {/* Framework banner */}
