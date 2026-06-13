@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { buildReportCsv } from '@/lib/export/generators/csv';
 import { buildReportPdf } from '@/lib/export/generators/pdf';
+import { buildReportXlsxBlob } from '@/lib/export/generators/xlsx';
 import type { ReportData, ExportConfig } from '@/lib/export/types';
 import { DEFAULT_INCLUDE } from '@/lib/export/types';
 
@@ -77,5 +78,13 @@ describe('buildReportPdf', () => {
     };
     const doc = buildReportPdf(rich, config);
     expect(doc.output('arraybuffer').byteLength).toBeGreaterThan(1000);
+  });
+});
+
+describe('buildReportXlsxBlob', () => {
+  test('produces a non-empty blob', async () => {
+    const blob = await buildReportXlsxBlob(data, config);
+    expect(blob.size).toBeGreaterThan(0);
+    expect(blob.type).toContain('spreadsheet');
   });
 });
