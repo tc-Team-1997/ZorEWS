@@ -203,6 +203,11 @@
       "admin",
       "supervisor"
     ],
+    "reports:export": [
+      "admin",
+      "supervisor",
+      "risk_analyst"
+    ],
     "recovery:list": [
       "admin"
     ],

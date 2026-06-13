@@ -69,6 +69,14 @@ describe('can(role, operation)', () => {
   test('unknown operations fail closed (deny)', () => {
     expect(can('admin', 'nonexistent:op', REAL_MATRIX)).toBe(false);
   });
+
+  test('reports:export is analyst+ (admin, supervisor, risk_analyst)', () => {
+    expect(can('admin', 'reports:export')).toBe(true);
+    expect(can('supervisor', 'reports:export')).toBe(true);
+    expect(can('risk_analyst', 'reports:export')).toBe(true);
+    expect(can('field_officer', 'reports:export')).toBe(false);
+    expect(can('collection_officer', 'reports:export')).toBe(false);
+  });
 });
 
 describe('operationsFor', () => {
