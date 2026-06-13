@@ -32,6 +32,8 @@ import type {
 import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { Modal } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildPolicyLapseReportData } from './policyLapseReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtKES = (n: number) =>
@@ -65,9 +67,33 @@ export function PolicyLapsePage() {
         title="Policy Lapse Risk"
         subtitle="AI lapse prediction · premium-behaviour tracking · retention prioritisation"
         actions={
-          <Button onClick={() => setPredictOpen(true)} data-testid="lapse-predict-open">
-            <Sparkles size={15} className="mr-1.5 -ml-0.5" /> Predict lapse
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setPredictOpen(true)} data-testid="lapse-predict-open">
+              <Sparkles size={15} className="mr-1.5 -ml-0.5" /> Predict lapse
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the high-risk policies table + lapse KPI totals. */}
+            <ExportButton
+              module="policy_lapse"
+              reportType="risk"
+              adapter={(config) =>
+                buildPolicyLapseReportData(
+                  {
+                    totals: {
+                      in_force_policies: data?.totals.in_force_policies ?? 0,
+                      at_risk_policies: data?.totals.at_risk_policies ?? 0,
+                      critical_count: data?.totals.critical_count ?? 0,
+                      gwp_at_risk_kes: data?.totals.gwp_at_risk_kes ?? 0,
+                      mean_lapse_probability: data?.totals.mean_lapse_probability ?? 0,
+                    },
+                    high_risk_policies: data?.high_risk_policies ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
