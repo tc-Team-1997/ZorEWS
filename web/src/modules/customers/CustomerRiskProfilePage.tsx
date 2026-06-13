@@ -48,6 +48,18 @@ export function CustomerRiskProfilePage() {
     queryKey: ['customer.risk', id],
     queryFn: () => api.customerRisk(id),
   });
+  // Page-level linked-alerts/cases queries reuse the SAME query keys as
+  // LinkedAlertsPanel / LinkedCasesPanel below, so react-query shares one
+  // cache entry — no extra network round-trip. Lifting them into header
+  // scope lets the P1 export carry real linked alerts + case history.
+  const { data: linkedAlerts } = useQuery({
+    queryKey: ['customer.alerts', id],
+    queryFn: () => api.alerts({ customer_id: id, dedup: false, sort: 'criticality' }),
+  });
+  const { data: linkedCases } = useQuery({
+    queryKey: ['customer.cases', id],
+    queryFn: () => api.cases({ customer_id: id }),
+  });
   useChatContext({
     page: 'customer',
     entity: data
@@ -89,10 +101,10 @@ export function CustomerRiskProfilePage() {
               {data.level} risk
             </Badge>
             {/* Enterprise export (P1) — RBAC-gated; renders null without
-                reports:export. Linked alerts/cases are fetched in the child
-                panels below, not in header scope, so the export carries the
-                in-scope customer summary + KPIs; the case/alert tables export
-                empty rather than refetching. BFF stamps tenant/actor. */}
+                reports:export. Linked alerts + case history are sourced from
+                the page-level queries above (shared cache with the child
+                panels), so the customer report carries real linked alerts +
+                cases alongside the summary + KPIs. BFF stamps tenant/actor. */}
             <ExportButton
               module="customer_360"
               reportType="customer"
@@ -105,8 +117,15 @@ export function CustomerRiskProfilePage() {
                       risk_score: data.pd,
                       npa_status: data.level,
                     },
-                    alerts: [],
-                    cases: [],
+                    alerts: (linkedAlerts?.items ?? []).map((a) => ({
+                      alert_id: a.id,
+                      severity: a.severity,
+                      rule_name: a.rule.name,
+                    })),
+                    cases: (linkedCases?.items ?? []).map((c) => ({
+                      case_id: c.id,
+                      state: c.state,
+                    })),
                     meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
                   },
                   config,
