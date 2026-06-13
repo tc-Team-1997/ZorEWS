@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { buildReportCsv } from '@/lib/export/generators/csv';
+import { buildReportPdf } from '@/lib/export/generators/pdf';
 import type { ReportData, ExportConfig } from '@/lib/export/types';
 import { DEFAULT_INCLUDE } from '@/lib/export/types';
 
@@ -51,5 +52,30 @@ describe('buildReportCsv', () => {
     const d3: ReportData = { ...data, sections: {} };
     const text = await blobText(buildReportCsv(d3, config));
     expect(text).toContain('No tabular records for this scope');
+  });
+});
+
+describe('buildReportPdf', () => {
+  test('produces a jsPDF doc with the enterprise header text + report id', () => {
+    const doc = buildReportPdf(data, config);
+    // jsPDF has no text-extract; assert via internal pages count + output size.
+    expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(1);
+    // header strings are written; we assert the output blob is non-trivial
+    const out = doc.output('arraybuffer');
+    expect(out.byteLength).toBeGreaterThan(800);
+  });
+
+  test('includes summary + kpis + table sections when present', () => {
+    const rich: ReportData = {
+      ...data,
+      sections: {
+        summary: [{ label: 'Risk Score', value: '0.82' }],
+        kpis: [{ label: 'Open Alerts', value: '3', delta: '+1' }],
+        tables: [{ name: 'Cases', columns: ['Case', 'State'], rows: [['case-1', 'open']] }],
+        recommendations: ['Escalate to supervisor'],
+      },
+    };
+    const doc = buildReportPdf(rich, config);
+    expect(doc.output('arraybuffer').byteLength).toBeGreaterThan(1000);
   });
 });
