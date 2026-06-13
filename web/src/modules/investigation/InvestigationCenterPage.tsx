@@ -37,6 +37,8 @@ import {
 } from 'recharts';
 import { Badge, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildInvestigationsReportData } from './investigationsReportAdapter';
 import { useAuth } from '@/store/auth';
 import {
   BANKING_INVESTIGATION_KINDS,
@@ -197,6 +199,43 @@ export function InvestigationCenterPage() {
         subtitle="Enterprise investigation + case intelligence command center — banking + insurance, with evidence vault, AI investigator, workflow engine, and executive view."
         actions={
           <div className="flex items-center gap-2">
+            {/* Enterprise export (P2) — RBAC-gated; renders null without
+                reports:export. Reports the post-filter Investigation list +
+                the Case Command Center KPI strip. */}
+            <ExportButton
+              module="investigations"
+              reportType="case"
+              adapter={(config) =>
+                buildInvestigationsReportData(
+                  {
+                    command: {
+                      total_cases: command.total_cases,
+                      open_cases: command.open_cases,
+                      critical_cases: command.critical_cases,
+                      high_risk_cases: command.high_risk_cases,
+                      escalated_cases: command.escalated_cases,
+                      sla_breached_cases: command.sla_breached_cases,
+                      fraud_cases: command.fraud_cases,
+                      resolution_rate: command.resolution_rate,
+                    },
+                    investigations: filtered.map((i) => ({
+                      investigation_id: i.investigation_id,
+                      title: i.title,
+                      domain: i.domain,
+                      kind: i.kind,
+                      status: i.status,
+                      severity: i.severity,
+                      assignee_username: i.assignee_username,
+                      exposure_kes: i.exposure_kes,
+                      due_at: i.due_at,
+                      opened_at: i.opened_at,
+                    })),
+                    meta: { tenant_id: ACTIVE_TENANT, generated_by: user?.username ?? 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
             <Badge tone="warning"><Microscope className="size-3 mr-1 inline" />Investigation</Badge>
             <Badge tone="neutral">Tenant: {ACTIVE_TENANT}</Badge>
           </div>
