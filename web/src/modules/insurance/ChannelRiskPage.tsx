@@ -28,6 +28,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildChannelRiskReportData } from './channelRiskReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtPct = (n: number) => `${(n * 100).toFixed(0)}%`;
@@ -67,9 +69,34 @@ export function ChannelRiskPage() {
         title="Channel Risk"
         subtitle="Agent & broker risk · persistency · fraud · complaints · mis-selling"
         actions={
-          <Button onClick={() => setAnalyzeOpen(true)} data-testid="chr-analyze-open">
-            <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze agent
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setAnalyzeOpen(true)} data-testid="chr-analyze-open">
+              <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze agent
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the channel-risk leaderboard + channel KPIs. */}
+            <ExportButton
+              module="channel_risk"
+              reportType="risk"
+              adapter={(config) =>
+                buildChannelRiskReportData(
+                  {
+                    totals: {
+                      agents_scored: data?.totals.agents_scored ?? 0,
+                      high_risk_agents: data?.totals.high_risk_agents ?? 0,
+                      critical_agents: data?.totals.critical_agents ?? 0,
+                      open_mis_selling_alerts: data?.totals.open_mis_selling_alerts ?? 0,
+                      complaints_30d: data?.totals.complaints_30d ?? 0,
+                      worst_channel: data?.totals.worst_channel ?? null,
+                    },
+                    channel_risk_leaderboard: data?.channel_risk_leaderboard ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
