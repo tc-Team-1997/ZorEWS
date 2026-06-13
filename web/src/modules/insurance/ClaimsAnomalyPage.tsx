@@ -29,6 +29,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildClaimsAnomalyReportData } from './claimsAnomalyReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtKES = (n: number) =>
@@ -68,9 +70,34 @@ export function ClaimsAnomalyPage() {
         title="Claims Anomaly"
         subtitle="Anomaly scoring · fraud probability · SIU queue automation"
         actions={
-          <Button onClick={() => setAnalyzeOpen(true)} data-testid="claim-analyze-open">
-            <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze claim
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setAnalyzeOpen(true)} data-testid="claim-analyze-open">
+              <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze claim
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the suspicious-claims queue + anomaly KPI totals. */}
+            <ExportButton
+              module="claims_anomaly"
+              reportType="risk"
+              adapter={(config) =>
+                buildClaimsAnomalyReportData(
+                  {
+                    totals: {
+                      claims_scored: data?.totals.claims_scored ?? 0,
+                      suspicious_claims: data?.totals.suspicious_claims ?? 0,
+                      critical_count: data?.totals.critical_count ?? 0,
+                      siu_open_cases: data?.totals.siu_open_cases ?? 0,
+                      suspicious_amount_kes: data?.totals.suspicious_amount_kes ?? 0,
+                      mean_anomaly_score: data?.totals.mean_anomaly_score ?? 0,
+                    },
+                    suspicious_claims_queue: data?.suspicious_claims_queue ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
