@@ -31,6 +31,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildPersistencyReportData } from './persistencyReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -62,9 +64,33 @@ export function PersistencyWatchPage() {
         title="Persistency Watch"
         subtitle="13/25/37/49/61-month retention · product · channel · region · AI root-cause"
         actions={
-          <Button onClick={() => setAnalyzeOpen(true)} data-testid="persistency-analyze-open">
-            <Sparkles size={15} className="mr-1.5 -ml-0.5" /> Root-cause analysis
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setAnalyzeOpen(true)} data-testid="persistency-analyze-open">
+              <Sparkles size={15} className="mr-1.5 -ml-0.5" /> Root-cause analysis
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the by-milestone persistency trend + headline KPIs. */}
+            <ExportButton
+              module="persistency"
+              reportType="portfolio"
+              adapter={(config) =>
+                buildPersistencyReportData(
+                  {
+                    totals: {
+                      headline_13m_pct: data?.totals.headline_13m_pct ?? 0,
+                      headline_61m_pct: data?.totals.headline_61m_pct ?? 0,
+                      cohorts_below_target: data?.totals.cohorts_below_target ?? 0,
+                      open_alerts: data?.totals.open_alerts ?? 0,
+                      worst_dimension: data?.totals.worst_dimension ?? null,
+                    },
+                    persistency_trend: data?.persistency_trend ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
