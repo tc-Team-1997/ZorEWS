@@ -26,6 +26,8 @@ import { color } from '@/styles/tokens';
 import { useChatContext } from '@/components/copilot/useChatContext';
 import { ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildCustomerReportData } from './customerReportAdapter';
 
 const LEVEL_TONE: Record<string, BadgeTone> = {
   Low: 'success',
@@ -82,9 +84,36 @@ export function CustomerRiskProfilePage() {
         title={data.name}
         subtitle={`Customer ${data.id} · single-customer risk view`}
         actions={
-          <Badge tone={LEVEL_TONE[data.level]} className="text-[12px] px-3 py-1">
-            {data.level} risk
-          </Badge>
+          <>
+            <Badge tone={LEVEL_TONE[data.level]} className="text-[12px] px-3 py-1">
+              {data.level} risk
+            </Badge>
+            {/* Enterprise export (P1) — RBAC-gated; renders null without
+                reports:export. Linked alerts/cases are fetched in the child
+                panels below, not in header scope, so the export carries the
+                in-scope customer summary + KPIs; the case/alert tables export
+                empty rather than refetching. BFF stamps tenant/actor. */}
+            <ExportButton
+              module="customer_360"
+              reportType="customer"
+              adapter={(config) =>
+                buildCustomerReportData(
+                  {
+                    customer: {
+                      id: data.id,
+                      name: data.name,
+                      risk_score: data.pd,
+                      npa_status: data.level,
+                    },
+                    alerts: [],
+                    cases: [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </>
         }
       />
 
