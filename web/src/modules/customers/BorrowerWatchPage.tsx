@@ -39,6 +39,8 @@ import {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildBorrowerWatchReportData } from './borrowerWatchReportAdapter';
 
 const SECTORS: BorrowerSector[] = ['manufacturing', 'services', 'retail', 'agriculture', 'real_estate', 'msme', 'corporate', 'consumer'];
 const SEGMENTS: BorrowerSegment[] = ['retail', 'sme', 'corporate', 'priority_sector'];
@@ -171,6 +173,31 @@ export function BorrowerWatchPage() {
             <Button variant="ghost" onClick={() => exportRowsCsv(rows, `borrower-watch-${new Date().toISOString().slice(0, 10)}`)} disabled={rows.length === 0} data-testid="bw-export">
               <Download size={14} /> Export CSV
             </Button>
+            {/* Enterprise export (P2) — RBAC-gated; renders null without
+                reports:export. Feeds the post-filter `rows` + KPI totals so
+                the export honours active sector/segment/severity/EWS filters. */}
+            <ExportButton
+              module="borrower_watch"
+              reportType="risk"
+              adapter={(config) =>
+                buildBorrowerWatchReportData(
+                  {
+                    rows,
+                    summary: {
+                      total: report?.total ?? rows.length,
+                      total_unfiltered: report?.total_unfiltered ?? rows.length,
+                      by_severity: {
+                        S1: report?.by_severity?.S1 ?? 0,
+                        S2: report?.by_severity?.S2 ?? 0,
+                        S3: report?.by_severity?.S3 ?? 0,
+                      },
+                    },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
           </>
         }
       />

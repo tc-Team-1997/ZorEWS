@@ -14,6 +14,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ExternalLink, ShieldOff, Star, X, Wallet } from 'lucide-react';
 import { Panel, Button, Input, MetricCard, Badge } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildAccountBehaviourReportData } from './accountBehaviourReportAdapter';
 import { api } from '@/lib/api';
 import type {
   AccountSignalShape,
@@ -104,6 +106,44 @@ export function AccountBehaviourPage() {
       <PageHeader
         title="Account Behaviour"
         subtitle="AI-scored account-level signals — cash-flow drops, salary stops, OD frequency, balance trends, large unusual debits."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Feeds the post-filter `report.signals` + KPI
+             strip so the export honours active customer/status/watchlist
+             filters. BFF stamps tenant/actor server-side. */
+          <ExportButton
+            module="account_behaviour"
+            reportType="risk"
+            adapter={(config) =>
+              buildAccountBehaviourReportData(
+                {
+                  signals: (report?.signals ?? []).map((s) => ({
+                    signal_id: s.signal_id,
+                    account_id: s.account_id,
+                    customer_id: s.customer_id,
+                    customer_name: s.customer_name,
+                    signal_type: s.signal_type,
+                    severity: s.severity,
+                    score: s.score,
+                    observed_at: s.observed_at,
+                    description: s.description,
+                    is_watchlisted: s.is_watchlisted,
+                    status: s.status,
+                  })),
+                  kpis: {
+                    total: kpis?.total ?? 0,
+                    critical: kpis?.critical ?? 0,
+                    high: kpis?.high ?? 0,
+                    watchlisted: kpis?.watchlisted ?? 0,
+                    newCount: kpis?.newCount ?? 0,
+                  },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       {/* KPI strip */}

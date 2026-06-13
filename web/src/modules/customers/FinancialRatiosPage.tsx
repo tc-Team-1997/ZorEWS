@@ -19,6 +19,8 @@ import { FileText, Settings2, Sigma, StickyNote, X } from 'lucide-react';
 import { Panel, Button, Input, MetricCard, Badge } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildFinancialRatiosReportData } from './financialRatiosReportAdapter';
 import { api } from '@/lib/api';
 import type {
   RatioCode,
@@ -117,6 +119,42 @@ export function FinancialRatiosPage() {
       <PageHeader
         title="Financial Ratios"
         subtitle="Per-borrower ratio watchlist with colour banding vs threshold + sector trend. Configure thresholds, drill ratio history, build CMA packs for credit committee."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. Reports the loaded ratio cohort (the same rows
+             the watchlist table renders) + the colour-band KPI strip, with
+             a ratio column per master ratio code. */
+          <ExportButton
+            module="financial_ratios"
+            reportType="risk"
+            adapter={(config) =>
+              buildFinancialRatiosReportData(
+                {
+                  ratioCodes: (masterQ.data?.ratios ?? []).map((r) => r.code),
+                  rows: bundleQueries
+                    .filter((b) => b.q.data)
+                    .map(({ cid, q }) => {
+                      const b = q.data!;
+                      const values: Record<string, number | undefined> = {};
+                      for (const r of masterQ.data?.ratios ?? []) {
+                        values[r.code] = b.current[r.code]?.value;
+                      }
+                      return {
+                        customer_id: cid,
+                        customer_name: b.customer_name,
+                        sector: b.sector,
+                        worst_band: b.worst_band,
+                        values,
+                      };
+                    }),
+                  kpis,
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       {/* KPI strip */}
