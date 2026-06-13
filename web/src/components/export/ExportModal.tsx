@@ -9,6 +9,8 @@ import {
 import { buildReportCsv } from '@/lib/export/generators/csv';
 import { reportPdfBlob } from '@/lib/export/generators/pdf';
 import { buildReportXlsxBlob } from '@/lib/export/generators/xlsx';
+import { buildReportDocxBlob } from '@/lib/export/generators/docx';
+import { buildExecutiveNarrative } from '@/lib/export/narrative';
 import { recordExport } from '@/lib/export/recordExport';
 
 const DATE_RANGES: { key: DateRangeKey; label: string }[] = [
@@ -61,12 +63,16 @@ export function ExportModal({ open, onClose, adapter, module, defaultReportType 
     const config: ExportConfig = { formats, report_type: reportType, date_range: dateRange, data_scope: scope, include };
     try {
       const data = await adapter(config);
+      if (config.include.ai_insights && !data.sections.ai_insights) {
+        data.sections.ai_insights = { narrative: buildExecutiveNarrative(data) };
+      }
       const slug = (data.subject?.id ?? module).replace(/\W+/g, '_');
       const stamp = new Date().toISOString().slice(0, 10);
       for (const fmt of formats) {
         let blob: Blob;
         if (fmt === 'csv') blob = buildReportCsv(data, config);
         else if (fmt === 'pdf') blob = reportPdfBlob(data, config);
+        else if (fmt === 'docx') blob = await buildReportDocxBlob(data, config);
         else blob = await buildReportXlsxBlob(data, config);
         download(blob, `${module}-${slug}-${stamp}.${fmt}`);
         await recordExport({
@@ -99,12 +105,9 @@ export function ExportModal({ open, onClose, adapter, module, defaultReportType 
             {ALL_EXPORT_FORMATS.map((f) => (
               <label key={f} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" data-testid={`export-format-${f}`} checked={formats.includes(f)} onChange={() => toggleFormat(f)} />
-                {f.toUpperCase()}
+                {f === 'docx' ? 'WORD (.docx)' : f.toUpperCase()}
               </label>
             ))}
-            <label className="flex items-center gap-2 text-sm text-slate-400" title="Coming soon (P1.5)">
-              <input type="checkbox" disabled /> Word (.docx)
-            </label>
           </div>
         </div>
 

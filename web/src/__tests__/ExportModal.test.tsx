@@ -1,4 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ExportModal } from '@/components/export/ExportModal';
 import type { ReportData } from '@/lib/export/types';
@@ -7,6 +8,7 @@ vi.mock('@/lib/export/recordExport', () => ({ recordExport: vi.fn().mockResolved
 vi.mock('@/lib/export/generators/csv', () => ({ buildReportCsv: () => new Blob(['Case,State\r\nc-1,open']) }));
 vi.mock('@/lib/export/generators/pdf', () => ({ reportPdfBlob: () => new Blob(['%PDF']) }));
 vi.mock('@/lib/export/generators/xlsx', () => ({ buildReportXlsxBlob: async () => new Blob(['xlsx']) }));
+vi.mock('@/lib/export/generators/docx', () => ({ buildReportDocxBlob: async () => new Blob(['docx']) }));
 
 // jsdom has no URL.createObjectURL / anchor download — stub it.
 // (This jsdom defines createObjectURL/revokeObjectURL as non-writable but
@@ -37,5 +39,31 @@ describe('ExportModal', () => {
     render(<ExportModal open onClose={() => {}} adapter={() => data} module="customer_360" defaultReportType="customer" />);
     fireEvent.click(screen.getByTestId('export-generate'));
     await waitFor(() => expect(recordExport).toHaveBeenCalled());
+  });
+
+  test('Word format is selectable + generates + records', async () => {
+    const { recordExport } = await import('@/lib/export/recordExport');
+    render(<ExportModal open onClose={() => {}} adapter={() => data} module="customer_360" defaultReportType="customer" />);
+    // Word checkbox is enabled now.
+    const word = screen.getByTestId('export-format-docx') as HTMLInputElement;
+    expect(word.disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('export-format-pdf')); // turn pdf OFF (default on)
+    fireEvent.click(word); // turn docx ON
+    fireEvent.click(screen.getByTestId('export-generate'));
+    await waitFor(() => expect(recordExport).toHaveBeenCalledWith(expect.objectContaining({ format: 'docx' })));
+  });
+
+  test('AI Insights toggle injects narrative before generating', async () => {
+    // include.ai_insights defaults false; turn it on and assert generation
+    // succeeds (modal closes). The modal renders only while `open` is true, so
+    // a state-controlled harness lets `onClose` actually unmount it on success.
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return <ExportModal open={open} onClose={() => setOpen(false)} adapter={() => data} module="customer_360" defaultReportType="customer" />;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByTestId('export-section-ai_insights'));
+    fireEvent.click(screen.getByTestId('export-generate'));
+    await waitFor(() => expect(screen.queryByTestId('export-modal')).toBeNull()); // closed on success
   });
 });
