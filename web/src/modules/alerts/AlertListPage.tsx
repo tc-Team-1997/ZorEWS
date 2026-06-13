@@ -15,6 +15,8 @@ import {
 } from './alertDomain';
 import { AlertSlaBadge } from './AlertSlaBadge';
 import { AlertDetailModal } from './AlertDetailModal';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildAlertsReportData } from './alertsReportAdapter';
 
 const DOMAIN_FILTERS: ReadonlyArray<{ value: AlertDomainFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -316,6 +318,32 @@ export function AlertListPage() {
           isLoading
             ? 'Loading…'
             : `${data?.total ?? 0} ${dedup ? 'customer-deduplicated' : 'individual'} alerts in queue`
+        }
+        actions={
+          /* Enterprise export (P1) — RBAC-gated; renders null without
+             reports:export. Feeds the currently-filtered `visibleRows`
+             (the same array the DataTable renders) so the export honours
+             active severity/assignee/domain/rule filters. BFF stamps
+             tenant/actor server-side. */
+          <ExportButton
+            module="alerts"
+            reportType="risk"
+            adapter={(config) =>
+              buildAlertsReportData(
+                {
+                  alerts: visibleRows.map((a) => ({
+                    id: a.id,
+                    customer: { id: a.customer.id, name: a.customer.name },
+                    severity: a.severity,
+                    rule: { name: a.rule.name },
+                    age_min: a.age_min,
+                  })),
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
         }
       />
 
