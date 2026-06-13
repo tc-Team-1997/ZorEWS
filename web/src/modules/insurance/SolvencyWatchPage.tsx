@@ -27,6 +27,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildSolvencyReportData } from './solvencyReportAdapter';
 import { color } from '@/styles/tokens';
 
 const CONTROL_LEVEL = 1.5;
@@ -60,9 +62,40 @@ export function SolvencyWatchPage() {
         title="Solvency Watch"
         subtitle="IRDAI solvency ratio · forecasting · capital stress · compliance"
         actions={
-          <Button onClick={() => setForecastOpen(true)} data-testid="solvency-forecast-open">
-            <Activity size={15} className="mr-1.5 -ml-0.5" /> Run forecast
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setForecastOpen(true)} data-testid="solvency-forecast-open">
+              <Activity size={15} className="mr-1.5 -ml-0.5" /> Run forecast
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the IRDAI compliance-alerts list + solvency KPIs. */}
+            <ExportButton
+              module="solvency"
+              reportType="compliance"
+              adapter={(config) =>
+                buildSolvencyReportData(
+                  {
+                    current: {
+                      solvency_ratio: data?.current.solvency_ratio ?? 0,
+                      control_level: data?.current.control_level ?? 0,
+                      available_solvency_margin_kes: data?.current.available_solvency_margin_kes ?? 0,
+                      required_solvency_margin_kes: data?.current.required_solvency_margin_kes ?? 0,
+                      capital_adequacy_pct: data?.current.capital_adequacy_pct ?? 0,
+                      status: data?.current.status ?? '—',
+                    },
+                    totals: {
+                      open_alerts: data?.totals.open_alerts ?? 0,
+                      critical_alerts: data?.totals.critical_alerts ?? 0,
+                      min_forecast_ratio: data?.totals.min_forecast_ratio ?? 0,
+                      breach_horizon_days: data?.totals.breach_horizon_days ?? null,
+                    },
+                    compliance_alerts: data?.compliance_alerts ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
