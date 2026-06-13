@@ -923,6 +923,14 @@ import {
   type AuditSeverity,
   type AuditTrailStore,
 } from './audit_trail';
+import {
+  defaultExportHistoryStore,
+  isExportFormat,
+  isReportType,
+  ExportRecordError,
+  type ExportHistoryStore,
+  type ExportRecordInput,
+} from './exports/store';
 import { introspectAuditCatalog } from './audit_action_catalog';
 import { analyseTemplateCloneHistory } from './template_clone_analysis';
 import { bucketVisitsByDowHour, isHeatmapTz } from './field_visit_heatmap';
@@ -1299,6 +1307,9 @@ export interface AppDeps {
    * in a WORM-backed store with hash-chain integrity.
    */
   auditTrailStore?: AuditTrailStore;
+  /** P1 export framework history store. Defaults to the module-level
+   *  InMemoryExportHistoryStore; tests inject a fresh one. */
+  exportHistoryStore?: ExportHistoryStore;
   /**
    * Override for tests — evidence package store (T6 M15.3). Defaults
    * to the module-level InMemoryEvidencePackageStore (cap 100/tenant).
@@ -1652,6 +1663,8 @@ export function makeApp(deps: AppDeps = {}) {
   const indicatorWeightLookup = deps.indicatorWeightLookup ?? defaultIndicatorWeightLookup;
   const configStore = deps.configStore ?? defaultConfigStore;
   const auditTrailStore = deps.auditTrailStore ?? defaultAuditTrailStore;
+  const exportHistoryStore = deps.exportHistoryStore ?? defaultExportHistoryStore();
+  let _exportSeq = 0;
   const evidenceStore = deps.evidenceStore ?? defaultEvidencePackageStore;
   const ingestionRegistry = deps.ingestionRegistry ?? defaultIngestionRegistry;
   const reportJobStore = deps.reportJobStore ?? defaultReportJobStore;
@@ -30194,6 +30207,103 @@ export function makeApp(deps: AppDeps = {}) {
       }
       const summary = auditTrailStore.summarise(req.tenant!.tenant_id, days, now());
       return res.json(wrapResponse({ ...summary, days }, ctx));
+    },
+  );
+
+  // ── P1 Enterprise Report Export Framework ────────────────────────────
+  // POST records an export (history + M15.1 audit). GET lists/reads history.
+  // Generation itself is client-side; this is the server-trustworthy record.
+
+  app.post(
+    '/v1/exports',
+    requireTenantMw,
+    requireRole('reports:export'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const raw = req.body as { header?: unknown; body?: unknown } | unknown;
+      const inner =
+        raw && typeof raw === 'object' && 'header' in (raw as object) && 'body' in (raw as object)
+          ? (raw as { body: unknown }).body
+          : raw;
+      if (!inner || typeof inner !== 'object') {
+        return res.status(400).json(wrapError({ code: 'EWS_400', message: 'request body required', severity: 'MEDIUM' }, ctx));
+      }
+      const b = inner as Partial<ExportRecordInput>;
+      if (!isExportFormat(b.format)) {
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_format', message: `invalid format: ${String(b.format)}`, severity: 'MEDIUM' }, ctx));
+      }
+      if (!isReportType(b.report_type)) {
+        return res.status(400).json(wrapError({ code: 'EWS_400_invalid_report_type', message: `invalid report_type: ${String(b.report_type)}`, severity: 'MEDIUM' }, ctx));
+      }
+      const tenant_id = req.tenant!.tenant_id;
+      const actor = (req.headers['x-apex-user'] as string) || b.generated_by || 'unknown';
+      const role = (req.headers['x-apex-role'] as string) || b.role || 'unknown';
+      const recInput: ExportRecordInput = {
+        generated_by: actor,
+        role,
+        module: String(b.module ?? ''),
+        report_type: b.report_type,
+        format: b.format,
+        record_count: Number.isFinite(b.record_count) ? Number(b.record_count) : 0,
+        title: String(b.title ?? ''),
+        status: b.status === 'failed' ? 'failed' : 'completed',
+        config: (b.config ?? { formats: [b.format], report_type: b.report_type, date_range: 'unknown', data_scope: 'unknown', include: {} }) as ExportRecordInput['config'],
+      };
+      try {
+        const rec = exportHistoryStore.add(tenant_id, recInput, now(), ++_exportSeq);
+        auditTrailStore.record(tenant_id, {
+          actor_username: actor,
+          actor_role: role,
+          action: 'export.generate',
+          resource_type: 'report',
+          resource_id: rec.export_id,
+          outcome: recInput.status === 'failed' ? 'failure' : 'success',
+          severity: 'info',
+          metadata: {
+            module: recInput.module, report_type: recInput.report_type,
+            format: recInput.format, record_count: recInput.record_count,
+            data_scope: recInput.config.data_scope,
+          },
+        }, now());
+        return res.status(201).json(wrapResponse(rec, ctx, { code: 'EWS_201', message: 'Created' }));
+      } catch (e) {
+        if (e instanceof ExportRecordError) {
+          return res.status(400).json(wrapError({ code: `EWS_400_${e.code}`, message: e.message, severity: 'MEDIUM' }, ctx));
+        }
+        return res.status(500).json(wrapError({ code: 'EWS_500', message: e instanceof Error ? e.message : 'export record failed', severity: 'HIGH' }, ctx));
+      }
+    },
+  );
+
+  app.get(
+    '/v1/exports',
+    requireTenantMw,
+    requireRole('reports:export'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const q = req.query;
+      const filters: import('./exports/store').ExportListFilters = {};
+      if (typeof q.module === 'string') filters.module = q.module;
+      if (typeof q.format === 'string' && isExportFormat(q.format)) filters.format = q.format;
+      if (typeof q.report_type === 'string' && isReportType(q.report_type)) filters.report_type = q.report_type;
+      if (typeof q.page === 'string') filters.page = Math.max(1, Number(q.page) || 1);
+      if (typeof q.page_size === 'string') filters.page_size = Math.max(1, Math.min(200, Number(q.page_size) || 50));
+      const out = exportHistoryStore.list(req.tenant!.tenant_id, filters);
+      return res.json(wrapResponse(out, ctx));
+    },
+  );
+
+  app.get(
+    '/v1/exports/:export_id',
+    requireTenantMw,
+    requireRole('reports:export'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const rec = exportHistoryStore.get(req.tenant!.tenant_id, req.params.export_id);
+      if (!rec) {
+        return res.status(404).json(wrapError({ code: 'EWS_404_unknown_export', message: `unknown export: ${req.params.export_id}`, severity: 'LOW' }, ctx));
+      }
+      return res.json(wrapResponse(rec, ctx));
     },
   );
 

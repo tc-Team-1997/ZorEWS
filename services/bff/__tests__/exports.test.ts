@@ -1,8 +1,14 @@
+import request from 'supertest';
+import { makeApp } from '../src/server';
+import { InMemoryAuditTrailStore } from '../src/audit_trail';
 import {
   InMemoryExportHistoryStore,
   ExportRecordError,
+  _resetDefaultExportHistoryStore,
   type ExportRecordInput,
 } from '../src/exports/store';
+
+beforeEach(() => _resetDefaultExportHistoryStore());
 
 const NOW = new Date('2026-06-13T10:00:00.000Z');
 function input(over: Partial<ExportRecordInput> = {}): ExportRecordInput {
@@ -71,5 +77,63 @@ describe('InMemoryExportHistoryStore', () => {
     s.add('BANK_DEMO', input({ title: 'c' }), new Date('2026-06-13T12:00:00Z'), 3);
     const titles = s.list('BANK_DEMO', {}).items.map((r) => r.title);
     expect(titles).toEqual(['c', 'b']); // 'a' evicted, newest-first
+  });
+});
+
+function adminHeaders(tenant = 'BANK_DEMO') {
+  return { 'X-Tenant-ID': tenant, 'X-Channel': 'API', 'X-APEX-USER': 'alice.admin', 'x-apex-role': 'admin' };
+}
+function body() {
+  return {
+    module: 'customer_360', report_type: 'customer', format: 'pdf',
+    record_count: 5, title: 'Customer Report — c-101', status: 'completed',
+    config: { formats: ['pdf'], report_type: 'customer', date_range: '30d', data_scope: 'complete', include: { summary: true } },
+  };
+}
+
+describe('POST/GET /v1/exports', () => {
+  test('POST records an export + writes an M15.1 audit event', async () => {
+    const audit = new InMemoryAuditTrailStore();
+    const { app } = makeApp({ auditTrailStore: audit });
+    const res = await request(app).post('/v1/exports').set(adminHeaders()).send(body());
+    expect(res.status).toBe(201);
+    expect(res.body.body.export_id).toMatch(/^EXP-BANK_DEMO-/);
+    const events = audit.list('BANK_DEMO', { action: 'export.generate' });
+    expect(events.total).toBe(1);
+    expect(events.items[0].metadata.format).toBe('pdf');
+  });
+
+  test('GET lists newest-first, tenant-scoped, filterable', async () => {
+    const { app } = makeApp({});
+    await request(app).post('/v1/exports').set(adminHeaders()).send({ ...body(), module: 'alerts', format: 'csv' });
+    await request(app).post('/v1/exports').set(adminHeaders()).send(body());
+    const all = await request(app).get('/v1/exports').set(adminHeaders());
+    expect(all.body.body.total).toBeGreaterThanOrEqual(2);
+    const onlyAlerts = await request(app).get('/v1/exports?module=alerts').set(adminHeaders());
+    expect(onlyAlerts.body.body.items.every((r: { module: string }) => r.module === 'alerts')).toBe(true);
+  });
+
+  test('GET /:id returns config_snapshot; 404 cross-tenant', async () => {
+    const { app } = makeApp({});
+    const created = await request(app).post('/v1/exports').set(adminHeaders()).send(body());
+    const id = created.body.body.export_id;
+    const ok = await request(app).get(`/v1/exports/${id}`).set(adminHeaders());
+    expect(ok.status).toBe(200);
+    expect(ok.body.body.config.report_type).toBe('customer');
+    const cross = await request(app).get(`/v1/exports/${id}`).set(adminHeaders('BIL'));
+    expect(cross.status).toBe(404);
+  });
+
+  test('POST 403 without reports:export (field_officer)', async () => {
+    const { app } = makeApp({});
+    const res = await request(app).post('/v1/exports')
+      .set({ ...adminHeaders(), 'x-apex-role': 'field_officer' }).send(body());
+    expect(res.status).toBe(403);
+  });
+
+  test('POST 400 on invalid format', async () => {
+    const { app } = makeApp({});
+    const res = await request(app).post('/v1/exports').set(adminHeaders()).send({ ...body(), format: 'docx' });
+    expect(res.status).toBe(400);
   });
 });
