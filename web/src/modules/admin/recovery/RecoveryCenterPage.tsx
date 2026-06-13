@@ -33,6 +33,8 @@ import {
 } from 'lucide-react';
 import { Badge, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildRecoveryReportData } from './recoveryReportAdapter';
 import { useAuth } from '@/store/auth';
 import type { LucideIcon } from 'lucide-react';
 
@@ -176,6 +178,40 @@ export function RecoveryCenterPage() {
       <PageHeader
         title="Recovery Center"
         subtitle="Audit, restore, or permanently purge soft-deleted records across every ZorEWS module."
+        actions={
+          /* Enterprise export (P2) — RBAC-gated; renders null without
+             reports:export. This is a navigation landing page: its primary
+             rendered list is the 10-section recovery-center catalog; the KPI
+             strip (placeholder "—"/"✓" — no fabricated numbers) surfaces as
+             the report's KPIs exactly as the page renders them. */
+          <ExportButton
+            module="recovery"
+            reportType="recovery"
+            adapter={(config) =>
+              buildRecoveryReportData(
+                {
+                  kpis: [
+                    { label: 'Active deletions', value: '—' },
+                    { label: 'Pending approvals', value: '—' },
+                    { label: 'Restored today', value: '—' },
+                    { label: 'Purges pending', value: '—' },
+                    { label: 'High-risk requests', value: '—' },
+                    { label: 'Audit chain', value: '✓' },
+                  ],
+                  sections: RECOVERY_CENTER_CARDS.map((c) => ({
+                    id: c.id,
+                    label: c.label,
+                    description: c.description,
+                    to: c.to,
+                    reuses: c.reuses,
+                  })),
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: 'admin' },
+                },
+                config,
+              )
+            }
+          />
+        }
       />
 
       <Panel className="mb-4">
