@@ -27,6 +27,8 @@ import type {
 } from '@/lib/api';
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { ExportButton } from '@/components/export/ExportButton';
+import { buildUnderwritingReportData } from './underwritingReportAdapter';
 import { color } from '@/styles/tokens';
 
 const fmtPct = (n: number) => `${(n * 100).toFixed(0)}%`;
@@ -66,9 +68,34 @@ export function UnderwritingDeviationPage() {
         title="Underwriting Deviation"
         subtitle="Guideline breaches · medical waivers · sum-assured limits · underwriter risk"
         actions={
-          <Button onClick={() => setAnalyzeOpen(true)} data-testid="uw-analyze-open">
-            <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze proposal
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setAnalyzeOpen(true)} data-testid="uw-analyze-open">
+              <Search size={15} className="mr-1.5 -ml-0.5" /> Analyze proposal
+            </Button>
+            {/* Enterprise export (P3) — RBAC-gated; renders null without
+                reports:export. Reports the rule-violation alerts table + deviation KPI totals. */}
+            <ExportButton
+              module="underwriting"
+              reportType="risk"
+              adapter={(config) =>
+                buildUnderwritingReportData(
+                  {
+                    totals: {
+                      proposals_reviewed: data?.totals.proposals_reviewed ?? 0,
+                      total_deviations: data?.totals.total_deviations ?? 0,
+                      open_deviations: data?.totals.open_deviations ?? 0,
+                      critical_deviations: data?.totals.critical_deviations ?? 0,
+                      medical_waivers: data?.totals.medical_waivers ?? 0,
+                      high_risk_underwriters: data?.totals.high_risk_underwriters ?? 0,
+                    },
+                    rule_violation_alerts: data?.rule_violation_alerts ?? [],
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  },
+                  config,
+                )
+              }
+            />
+          </div>
         }
       />
 
