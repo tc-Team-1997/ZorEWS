@@ -236,6 +236,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { to: '/reports',                      i18nKey: 'reports',                 icon: FileBarChart,   featured: true },
       // Action Center extras
       { to: '/reports/builder',              i18nKey: 'report_builder',          icon: FileBarChart,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
+      { to: '/admin/exports',                i18nKey: 'export_history',          icon: History,        requireRole: ['admin', 'supervisor', 'risk_analyst'], featured: true },
       { to: '/analytics',                    i18nKey: 'analytics',               icon: FileBarChart,   requireRole: ['admin', 'supervisor', 'risk_analyst'] },
       { to: '/scenario',                     i18nKey: 'scenario',                icon: FlaskConical },
       { to: '/admin/case-scenarios',         i18nKey: 'case_scenarios',          icon: Zap,            requireRole: ['admin', 'supervisor'] },

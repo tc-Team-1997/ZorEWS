@@ -845,6 +845,25 @@ export interface WebhookDelivery {
   completed_at: string;
 }
 
+// ── Export History (P4) ───────────────────────────────────────────────
+// Server/MSW records key on `export_id` (no `id`); the History Center page
+// maps each row to `{ ...rec, id: rec.export_id }` to satisfy DataTable's
+// `{ id }` constraint — so this type carries no `id` field.
+export interface ExportHistoryRecord {
+  export_id: string;
+  tenant_id: string;
+  generated_by: string;
+  role: string;
+  module: string;
+  report_type: string;
+  format: string;
+  record_count: number;
+  title: string;
+  status: 'completed' | 'failed';
+  generated_at: string;
+  has_artifact: boolean;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -3310,6 +3329,8 @@ export const api = {
       `/auth/users/audit-history/by-tenant${qs ? '?' + qs : ''}`,
     ).then((r) => r.data);
   },
+  exportsHistory: (params: { module?: string; format?: string; page?: number; page_size?: number } = {}) =>
+    http.get('/v1/exports', { params }).then((r) => r.data as { items: ExportHistoryRecord[]; total: number; page: number; page_size: number }),
 };
 
 // ── Insurance EWS · Module 6 types (mirrors services/bff/src/insurance_underwriting.ts) ──

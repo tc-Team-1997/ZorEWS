@@ -2883,20 +2883,33 @@ const _mswStreamingLatencyHandlers = [
 // real generation is client-side; this records the server-trustworthy
 // history + (server-side) audit. Dev mode + the exportsMsw test exercise it.
 const _mswExports: Record<string, unknown>[] = [];
+// Artifact bytes are stored separately (mirrors the server's metadata-only
+// list/get contract) — the list/get responses carry `has_artifact`, never the
+// base64 blob. P4 re-download serves these via GET /v1/exports/:id/download.
+const _mswExportArtifacts: Record<string, { base64: string; content_type: string }> = {};
 let _mswExportSeq = 0;
 export function __resetMswExports(): void {
   _mswExports.length = 0;
+  for (const k of Object.keys(_mswExportArtifacts)) delete _mswExportArtifacts[k];
   _mswExportSeq = 0;
 }
 
 const _mswExportHandlers = [
   http.post('/v1/exports', async ({ request }) => {
     const b = (await request.json()) as Record<string, unknown>;
+    const export_id = `EXP-BANK_DEMO-${Date.now()}-${++_mswExportSeq}`;
+    // Strip the blob from the stored metadata record; stash it separately.
+    const { artifact_base64, content_type, ...meta } = b;
+    const hasArtifact = typeof artifact_base64 === 'string' && typeof content_type === 'string';
+    if (hasArtifact) {
+      _mswExportArtifacts[export_id] = { base64: artifact_base64 as string, content_type: content_type as string };
+    }
     const rec = {
-      ...b,
-      export_id: `EXP-BANK_DEMO-${Date.now()}-${++_mswExportSeq}`,
+      ...meta,
+      export_id,
       tenant_id: 'BANK_DEMO',
       generated_at: new Date().toISOString(),
+      has_artifact: hasArtifact,
     };
     _mswExports.unshift(rec);
     return HttpResponse.json(envelope(rec, 'EWS_201', 'Created'), { status: 201 });
@@ -2906,6 +2919,19 @@ const _mswExportHandlers = [
       envelope({ items: _mswExports, total: _mswExports.length, page: 1, page_size: 50 }),
     ),
   ),
+  http.get('/v1/exports/:id/download', ({ params }) => {
+    const a = _mswExportArtifacts[params.id as string];
+    if (!a) {
+      return HttpResponse.json(
+        {
+          header: { status: 'FAILURE' },
+          error: { code: 'EWS_404_no_artifact', message: 'none', severity: 'LOW' },
+        },
+        { status: 404 },
+      );
+    }
+    return new HttpResponse(a.base64, { status: 200, headers: { 'Content-Type': a.content_type } });
+  }),
   http.get('/v1/exports/:id', ({ params }) => {
     const rec = _mswExports.find((r) => r.export_id === params.id);
     return rec

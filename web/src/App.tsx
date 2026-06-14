@@ -167,6 +167,7 @@ import { RecycleBinPage } from '@/modules/admin/RecycleBinPage';
 import { RecoveryAnalyticsPage } from '@/modules/admin/RecoveryAnalyticsPage';
 // Audit + Recovery unified centers (additive — legacy URLs still resolve).
 import { AuditCenterPage } from '@/modules/admin/audit/AuditCenterPage';
+import { ExportHistoryPage } from '@/modules/admin/exports/ExportHistoryPage';
 import { AuditExportPage } from '@/modules/admin/audit/AuditExportPage';
 import { AuditComplianceReportsPage } from '@/modules/admin/audit/AuditComplianceReportsPage';
 import { RecoveryCenterPage } from '@/modules/admin/recovery/RecoveryCenterPage';
@@ -444,6 +445,7 @@ export function App() {
             <Route path="admin/case-scenarios" element={<CaseScenariosPage />} />
             <Route path="admin/recycle-bin" element={<RecycleBinPage />} />
             <Route path="admin/recovery-analytics" element={<RecoveryAnalyticsPage />} />
+            <Route path="admin/exports" element={<ExportHistoryPage />} />
             {/* Unified Audit + Recovery Centers (additive — legacy URLs above still work). */}
             <Route path="audit-center" element={<AuditCenterPage />} />
             <Route path="audit-center/trail" element={<AuditTrailPage />} />
