@@ -27,6 +27,7 @@ import { Badge, Button, Input, MetricCard, Panel } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildFraudSignalsReportData } from './fraudSignalsReportAdapter';
 import { api } from '@/lib/api';
 import type {
@@ -73,6 +74,7 @@ function humanize(s: string): string {
 }
 
 export function FraudSignalsPage() {
+  const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<FraudCaseStatus | ''>('');
   const [priorityFilter, setPriorityFilter] = useState<FraudPriority | ''>('');
@@ -120,7 +122,7 @@ export function FraudSignalsPage() {
                   {
                     summary: stats,
                     cases,
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

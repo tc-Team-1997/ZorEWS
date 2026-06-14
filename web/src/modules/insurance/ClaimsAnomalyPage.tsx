@@ -30,6 +30,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildClaimsAnomalyReportData } from './claimsAnomalyReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -57,6 +58,7 @@ function heatBg(score: number): string {
 }
 
 export function ClaimsAnomalyPage() {
+  const me = useAuth((s) => s.user);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
 
   const { data, isLoading } = useQuery<ClaimsAnomalyDashboardShape>({
@@ -91,7 +93,7 @@ export function ClaimsAnomalyPage() {
                       mean_anomaly_score: data?.totals.mean_anomaly_score ?? 0,
                     },
                     suspicious_claims_queue: data?.suspicious_claims_queue ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

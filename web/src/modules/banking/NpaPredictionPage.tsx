@@ -23,6 +23,7 @@ import {
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildNpaPredictionReportData } from './npaPredictionReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -37,6 +38,7 @@ function bandTone(band: NpaHighRiskRow['band']): 'danger' | 'warning' {
 }
 
 export function NpaPredictionPage() {
+  const me = useAuth((s) => s.user);
   const [horizon, setHorizon] = useState<Horizon>(90);
   const [whyOpenId, setWhyOpenId] = useState<string | null>(null);
   const [backtestOpen, setBacktestOpen] = useState(false);
@@ -85,7 +87,7 @@ export function NpaPredictionPage() {
                       total_exposure_kes: list?.total_exposure_kes ?? 0,
                     },
                     rows: list?.rows ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

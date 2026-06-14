@@ -40,6 +40,7 @@ import {
 import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildBorrowerWatchReportData } from './borrowerWatchReportAdapter';
 
 const SECTORS: BorrowerSector[] = ['manufacturing', 'services', 'retail', 'agriculture', 'real_estate', 'msme', 'corporate', 'consumer'];
@@ -94,6 +95,7 @@ function exportRowsCsv(rows: BorrowerWatchRowShape[], name: string): void {
 }
 
 export function BorrowerWatchPage() {
+  const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const [mode, setMode] = useState<'stressed' | 'all'>('stressed');
   const [sector, setSector] = useState<BorrowerSector | ''>('');
@@ -192,7 +194,7 @@ export function BorrowerWatchPage() {
                         S3: report?.by_severity?.S3 ?? 0,
                       },
                     },
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

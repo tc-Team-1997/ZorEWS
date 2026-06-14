@@ -22,6 +22,7 @@ import {
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildCollectionsRiskReportData } from './collectionsRiskReportAdapter';
 
 const formatKES = (n: number) =>
@@ -93,6 +94,7 @@ function Chip({
 }
 
 export function CollectionsRiskPage() {
+  const me = useAuth((s) => s.user);
   const [dpdFilter, setDpdFilter] = useState<CollectionsDpdBucket | null>(null);
   const [stageFilter, setStageFilter] = useState<CollectionsRecoveryStage | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -135,7 +137,7 @@ export function CollectionsRiskPage() {
                     high_risk_count: summary?.high_risk_count ?? 0,
                   },
                   accounts: queue?.accounts ?? [],
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

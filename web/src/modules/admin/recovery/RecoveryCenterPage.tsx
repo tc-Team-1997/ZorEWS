@@ -205,7 +205,7 @@ export function RecoveryCenterPage() {
                     to: c.to,
                     reuses: c.reuses,
                   })),
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

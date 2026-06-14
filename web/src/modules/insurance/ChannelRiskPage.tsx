@@ -29,6 +29,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildChannelRiskReportData } from './channelRiskReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -56,6 +57,7 @@ const SUB_COLORS: Record<string, string> = {
 };
 
 export function ChannelRiskPage() {
+  const me = useAuth((s) => s.user);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
 
   const { data, isLoading } = useQuery<ChannelRiskDashboardShape>({
@@ -90,7 +92,7 @@ export function ChannelRiskPage() {
                       worst_channel: data?.totals.worst_channel ?? null,
                     },
                     channel_risk_leaderboard: data?.channel_risk_leaderboard ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

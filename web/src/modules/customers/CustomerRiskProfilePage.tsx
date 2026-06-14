@@ -27,6 +27,7 @@ import { useChatContext } from '@/components/copilot/useChatContext';
 import { ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildCustomerReportData } from './customerReportAdapter';
 
 const LEVEL_TONE: Record<string, BadgeTone> = {
@@ -43,6 +44,7 @@ const formatKES = (n: number) =>
   }).format(n);
 
 export function CustomerRiskProfilePage() {
+  const me = useAuth((s) => s.user);
   const { id = 'c-101' } = useParams();
   const { data, isLoading } = useQuery({
     queryKey: ['customer.risk', id],
@@ -126,7 +128,7 @@ export function CustomerRiskProfilePage() {
                       case_id: c.id,
                       state: c.state,
                     })),
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

@@ -32,6 +32,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildPersistencyReportData } from './persistencyReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -51,6 +52,7 @@ const BAND_COLOR: Record<PersistencyBandShape, string> = {
 };
 
 export function PersistencyWatchPage() {
+  const me = useAuth((s) => s.user);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
 
   const { data, isLoading } = useQuery<PersistencyDashboardShape>({
@@ -84,7 +86,7 @@ export function PersistencyWatchPage() {
                       worst_dimension: data?.totals.worst_dimension ?? null,
                     },
                     persistency_trend: data?.persistency_trend ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

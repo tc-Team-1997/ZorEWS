@@ -15,6 +15,7 @@ import { ExternalLink, ShieldOff, Star, X, Wallet } from 'lucide-react';
 import { Panel, Button, Input, MetricCard, Badge } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildAccountBehaviourReportData } from './accountBehaviourReportAdapter';
 import { api } from '@/lib/api';
 import type {
@@ -52,6 +53,7 @@ function humanizeType(t: string): string {
 }
 
 export function AccountBehaviourPage() {
+  const me = useAuth((s) => s.user);
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
 
@@ -137,7 +139,7 @@ export function AccountBehaviourPage() {
                     watchlisted: kpis?.watchlisted ?? 0,
                     newCount: kpis?.newCount ?? 0,
                   },
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

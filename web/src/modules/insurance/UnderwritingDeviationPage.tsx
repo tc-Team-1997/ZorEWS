@@ -28,6 +28,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildUnderwritingReportData } from './underwritingReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -55,6 +56,7 @@ function heatBg(count: number): string {
 }
 
 export function UnderwritingDeviationPage() {
+  const me = useAuth((s) => s.user);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
 
   const { data, isLoading } = useQuery<UnderwritingDashboardShape>({
@@ -89,7 +91,7 @@ export function UnderwritingDeviationPage() {
                       high_risk_underwriters: data?.totals.high_risk_underwriters ?? 0,
                     },
                     rule_violation_alerts: data?.rule_violation_alerts ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

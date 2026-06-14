@@ -23,6 +23,7 @@ import {
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildBorrowerTimelineReportData } from './borrowerTimelineReportAdapter';
 
 const SEV_TONE: Record<TimelineSeverity, 'success' | 'warning' | 'danger'> = {
@@ -83,6 +84,7 @@ const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 export function BorrowerTimelinePage() {
+  const me = useAuth((s) => s.user);
   const [params, setParams] = useSearchParams();
   const customerId = params.get('customer_id') || 'c-200000';
   const eventType = (params.get('event_type') as TimelineEventType | null) ?? null;
@@ -132,7 +134,7 @@ export function BorrowerTimelinePage() {
                     critical_events: data?.by_severity.critical ?? 0,
                   },
                   events: data?.events ?? [],
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

@@ -28,6 +28,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildSolvencyReportData } from './solvencyReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -49,6 +50,7 @@ const SEV_TONE: Record<string, BadgeTone> = {
 };
 
 export function SolvencyWatchPage() {
+  const me = useAuth((s) => s.user);
   const [forecastOpen, setForecastOpen] = useState(false);
 
   const { data, isLoading } = useQuery<SolvencyDashboardShape>({
@@ -89,7 +91,7 @@ export function SolvencyWatchPage() {
                       breach_horizon_days: data?.totals.breach_horizon_days ?? null,
                     },
                     compliance_alerts: data?.compliance_alerts ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

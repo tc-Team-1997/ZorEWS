@@ -34,6 +34,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildSmaClassificationReportData } from './smaClassificationReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -56,6 +57,7 @@ const CATEGORY_COLOR: Record<string, string> = {
 };
 
 export function SmaClassificationPage() {
+  const me = useAuth((s) => s.user);
   const qc = useQueryClient();
   const [framework, setFramework] = useState<Framework>('RBI');
   const [drillOpen, setDrillOpen] = useState<{ from: string; to: string } | null>(null);
@@ -115,7 +117,7 @@ export function SmaClassificationPage() {
                     total_exposure_at_risk_kes: body?.total_exposure_at_risk_kes ?? 0,
                   },
                   movements: body?.movements ?? [],
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

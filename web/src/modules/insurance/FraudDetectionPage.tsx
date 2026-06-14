@@ -24,6 +24,7 @@ import type {
 import { Badge, Button, MetricCard, Panel, Modal, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildFraudDetectionReportData } from './fraudDetectionReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -53,6 +54,7 @@ const NODE_COLOR: Record<string, string> = {
 };
 
 export function FraudDetectionPage() {
+  const me = useAuth((s) => s.user);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
 
   const { data, isLoading } = useQuery<FraudDashboardShape>({
@@ -86,7 +88,7 @@ export function FraudDetectionPage() {
                       estimated_exposure_kes: data?.totals.estimated_exposure_kes ?? 0,
                     },
                     fraud_ring_detection: data?.fraud_ring_detection ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

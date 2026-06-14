@@ -33,6 +33,7 @@ import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/u
 import { Modal } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildPolicyLapseReportData } from './policyLapseReportAdapter';
 import { color } from '@/styles/tokens';
 
@@ -54,6 +55,7 @@ const BAND_COLOR: Record<RetentionBandShape, string> = {
 };
 
 export function PolicyLapsePage() {
+  const me = useAuth((s) => s.user);
   const [predictOpen, setPredictOpen] = useState(false);
 
   const { data, isLoading } = useQuery<LapseDashboardShape>({
@@ -87,7 +89,7 @@ export function PolicyLapsePage() {
                       mean_lapse_probability: data?.totals.mean_lapse_probability ?? 0,
                     },
                     high_risk_policies: data?.high_risk_policies ?? [],
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

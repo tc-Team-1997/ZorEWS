@@ -209,7 +209,7 @@ export function CmsCaseListPage() {
                       sla_due_at: c.sla_due_at,
                       updated_at: c.updated_at,
                     })),
-                    meta: { tenant_id: 'BANK_DEMO', generated_by: user?.username ?? 'operator', role: 'admin' },
+                    meta: { tenant_id: 'BANK_DEMO', generated_by: user?.username ?? 'operator', role: user?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

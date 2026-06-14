@@ -16,6 +16,7 @@ import {
 import { AlertSlaBadge } from './AlertSlaBadge';
 import { AlertDetailModal } from './AlertDetailModal';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildAlertsReportData } from './alertsReportAdapter';
 
 const DOMAIN_FILTERS: ReadonlyArray<{ value: AlertDomainFilter; label: string }> = [
@@ -52,6 +53,7 @@ const SCORE_BAND_TONE: Record<ReturnType<typeof bandFor>, BadgeTone> = {
 };
 
 export function AlertListPage() {
+  const me = useAuth((s) => s.user);
   const [searchParams, setSearchParams] = useSearchParams();
   // Phase 4 — clicking a row opens an in-place detail panel (the
   // customer drill-through lives inside it now, one click deeper).
@@ -338,7 +340,7 @@ export function AlertListPage() {
                     rule: { name: a.rule.name },
                     age_min: a.age_min,
                   })),
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

@@ -230,7 +230,7 @@ export function InvestigationCenterPage() {
                       due_at: i.due_at,
                       opened_at: i.opened_at,
                     })),
-                    meta: { tenant_id: ACTIVE_TENANT, generated_by: user?.username ?? 'operator', role: 'admin' },
+                    meta: { tenant_id: ACTIVE_TENANT, generated_by: user?.username ?? 'operator', role: user?.roles?.[0] ?? 'admin' },
                   },
                   config,
                 )

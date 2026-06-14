@@ -20,6 +20,7 @@ import { Panel, Button, Input, MetricCard, Badge } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildFinancialRatiosReportData } from './financialRatiosReportAdapter';
 import { api } from '@/lib/api';
 import type {
@@ -55,6 +56,7 @@ function fmtVal(value: number, unit: '×' | 'ratio' | 'days'): string {
 }
 
 export function FinancialRatiosPage() {
+  const me = useAuth((s) => s.user);
   const qc = useQueryClient();
 
   const masterQ = useQuery({
@@ -148,7 +150,7 @@ export function FinancialRatiosPage() {
                       };
                     }),
                   kpis,
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )

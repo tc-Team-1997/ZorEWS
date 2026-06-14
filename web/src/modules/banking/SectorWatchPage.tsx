@@ -26,6 +26,7 @@ import {
 import { Badge, Button, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
+import { useAuth } from '@/store/auth';
 import { buildSectorWatchReportData } from './sectorWatchReportAdapter';
 
 const formatKES = (n: number) =>
@@ -46,6 +47,7 @@ const HEAT_TONE: Record<SectorHeatLevel, 'danger' | 'warning' | 'blue' | 'succes
 };
 
 export function SectorWatchPage() {
+  const me = useAuth((s) => s.user);
   const [selected, setSelected] = useState<string | null>(null);
   const [showDeepDive, setShowDeepDive] = useState(false);
 
@@ -74,7 +76,7 @@ export function SectorWatchPage() {
                     by_heat_level: body?.by_heat_level ?? {},
                   },
                   cells: body?.cells ?? [],
-                  meta: { tenant_id: 'BANK_DEMO', generated_by: 'operator', role: 'admin' },
+                  meta: { tenant_id: 'BANK_DEMO', generated_by: me?.username ?? 'operator', role: me?.roles?.[0] ?? 'admin' },
                 },
                 config,
               )
