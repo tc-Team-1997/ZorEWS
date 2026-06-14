@@ -12,7 +12,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Network, Building2, Fingerprint, Search, X } from 'lucide-react';
+import { Network, Building2, Fingerprint, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   FraudDashboardShape,
@@ -323,9 +323,6 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="fraud-analyze-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Analyze entity for fraud</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <Field label="Customer / entity ID">

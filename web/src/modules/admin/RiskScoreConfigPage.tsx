@@ -23,7 +23,6 @@ import {
   RefreshCw,
   Scale,
   Trash2,
-  X,
 } from 'lucide-react';
 import { Badge, Button, Input, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -582,9 +581,6 @@ function CreateFactorModal({
       <div className="p-6 space-y-4">
         <header className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Add factor — {domain}</h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
         {err && (
           <div className="rounded border border-danger/40 bg-danger/10 p-3 text-sm text-danger" data-testid="rsc-create-error">

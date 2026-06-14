@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, History, Pause, Play, PlayCircle, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, History, Pause, Play, PlayCircle, RefreshCw } from 'lucide-react';
 import { Badge, Button, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
@@ -262,9 +262,6 @@ function JobHistoryModal({ job, onClose }: { job: ScheduledJobShape; onClose: ()
             <h2 className="text-lg font-semibold">{job.name}</h2>
             <p className="text-xs text-muted">{job.owner_service} · {job.category}</p>
           </div>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

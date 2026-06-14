@@ -21,7 +21,7 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
-import { ShieldAlert, TrendingDown, Sparkles, X } from 'lucide-react';
+import { ShieldAlert, TrendingDown, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   LapseDashboardShape,
@@ -299,14 +299,6 @@ function PredictModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="lapse-predict-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Predict policy lapse</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="text-muted hover:text-ink"
-          >
-            <X size={18} />
-          </button>
         </div>
         <Field label="Customer ID">
           <input className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} />

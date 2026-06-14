@@ -27,7 +27,6 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  X,
 } from 'lucide-react';
 import { Badge, Button, Input, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -347,9 +346,6 @@ function RegisterModal({
       <div className="p-6 space-y-4">
         <header className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Register a new model</h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
         <p className="text-xs text-muted">
           Models register at <code>experimental</code>, <code>staging</code>, or{' '}
@@ -512,9 +508,6 @@ function EditModal({
               Status <Badge tone={STATUS_TONE[model.status] ?? 'blue'}>{model.status}</Badge> — promote via the gate, not here.
             </p>
           </div>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
         {errorMsg && (
           <div
@@ -598,9 +591,6 @@ function RetireModal({
       <div className="p-6 space-y-4">
         <header className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Retire {model.model_id}</h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
         <p className="text-sm">
           This soft-deletes the model — status flips to <Badge tone="danger">retired</Badge> and

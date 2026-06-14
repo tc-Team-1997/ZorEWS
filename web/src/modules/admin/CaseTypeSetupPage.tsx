@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Badge, Button, Input, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
@@ -259,9 +259,6 @@ function CreateCaseTypeModal({ onClose, onSuccess }: { onClose: () => void; onSu
       <div className="p-6 space-y-4">
         <header className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Add case type</h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </Button>
         </header>
         {err && (
           <div className="rounded border border-danger/40 bg-danger/10 p-3 text-sm text-danger" data-testid="cty-create-error">

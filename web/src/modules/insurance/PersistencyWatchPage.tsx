@@ -21,7 +21,7 @@ import {
   Cell,
   ReferenceLine,
 } from 'recharts';
-import { Activity, Boxes, Network, MapPin, Sparkles, X } from 'lucide-react';
+import { Activity, Boxes, Network, MapPin, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   PersistencyDashboardShape,
@@ -239,9 +239,6 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="persistency-analyze-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Root-cause analysis</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

@@ -17,7 +17,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import { Users, Grid3x3, Stethoscope, ShieldAlert, Search, X } from 'lucide-react';
+import { Users, Grid3x3, Stethoscope, ShieldAlert, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   UnderwritingDashboardShape,
@@ -278,9 +278,6 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="uw-analyze-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Analyze proposal for deviations</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

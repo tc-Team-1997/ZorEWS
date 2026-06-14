@@ -18,7 +18,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import { TrendingDown, ShieldCheck, Activity, X } from 'lucide-react';
+import { TrendingDown, ShieldCheck, Activity } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   SolvencyDashboardShape,
@@ -254,9 +254,6 @@ function ForecastModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="solvency-forecast-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Run solvency forecast</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

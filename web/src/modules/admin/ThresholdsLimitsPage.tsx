@@ -28,7 +28,6 @@ import {
   RotateCcw,
   ScrollText,
   Sparkles,
-  X,
 } from 'lucide-react';
 import { Badge, Button, Input, MetricCard, Modal, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -390,7 +389,6 @@ function EditModal({
           <h2 className="text-lg font-semibold">
             Edit thresholds — <span className="font-mono">{row.indicator_id}</span>
           </h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close"><X size={16} /></Button>
         </header>
         <p className="text-xs text-muted">
           Bands must be monotone: yellow ≤ orange ≤ red, each in [0, 1].
@@ -478,7 +476,6 @@ function SuggestModal({
           <h2 className="text-lg font-semibold">
             Suggest from data — <span className="font-mono">{row.indicator_id}</span>
           </h2>
-          <Button variant="ghost" onClick={onClose} aria-label="Close"><X size={16} /></Button>
         </header>
         <p className="text-xs text-muted">
           Paste observed indicator values (≥ 5 finite samples needed). Bands derived from

@@ -17,7 +17,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import { Network, Activity, ShieldAlert, MessageSquareWarning, Search, X } from 'lucide-react';
+import { Network, Activity, ShieldAlert, MessageSquareWarning, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   ChannelRiskDashboardShape,
@@ -293,9 +293,6 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="chr-analyze-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Analyze agent risk</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

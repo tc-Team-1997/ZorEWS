@@ -19,7 +19,7 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
-import { ShieldAlert, Search, Siren, X } from 'lucide-react';
+import { ShieldAlert, Search, Siren } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
   ClaimsAnomalyDashboardShape,
@@ -289,9 +289,6 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3" data-testid="claim-analyze-modal">
         <div className="flex items-center justify-between border-b border-divider pb-3">
           <h2 className="section-title">Analyze claim for anomalies</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-ink">
-            <X size={18} />
-          </button>
         </div>
 
         <Field label="Customer ID">
