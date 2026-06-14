@@ -260,8 +260,12 @@ export function AppShell() {
 
           {/* Right: tools + user menu */}
           <div className="flex items-center gap-1.5">
-            <ModeToggle />
-            <LanguageToggle />
+            {/* Secondary toggles hide on narrow viewports to prevent topbar
+                overflow (same precedent as the md-hidden search button). */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              <ModeToggle />
+              <LanguageToggle />
+            </div>
             <NotificationBell />
 
             {/* Divider */}
@@ -380,7 +384,7 @@ export function AppShell() {
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 overflow-y-auto p-6 focus:outline-none"
+          className="flex-1 min-w-0 overflow-auto p-6 focus:outline-none"
         >
           <Outlet />
         </main>
