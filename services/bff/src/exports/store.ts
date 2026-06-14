@@ -41,13 +41,20 @@ export interface ExportRecordInput {
   title: string;
   status: 'completed' | 'failed';
   config: ExportConfigSnapshot;
+  /** Optional base64 of the generated file, for byte-identical re-download.
+   *  Stored separately + size/count-capped; never inlined into list/get views. */
+  artifact_base64?: string;
+  content_type?: string;
 }
 
-export interface ExportRecord extends ExportRecordInput {
+export interface ExportRecord extends Omit<ExportRecordInput, 'artifact_base64' | 'content_type'> {
   export_id: string;
   tenant_id: string;
   generated_at: string; // ISO
+  has_artifact: boolean;
 }
+
+export interface ExportArtifact { base64: string; content_type: string; }
 
 export interface ExportListFilters {
   module?: string;
@@ -68,6 +75,7 @@ export interface ExportHistoryStore {
   add(tenant_id: string, input: ExportRecordInput, now: Date, seq: number): ExportRecord;
   list(tenant_id: string, filters: ExportListFilters): ExportListPage;
   get(tenant_id: string, export_id: string): ExportRecord | null;
+  getArtifact(tenant_id: string, export_id: string): ExportArtifact | null;
 }
 
 export class ExportRecordError extends Error {
@@ -78,10 +86,13 @@ export class ExportRecordError extends Error {
 }
 
 const DEFAULT_CAP = 500;
+const MAX_ARTIFACT_B64 = 4 * 1024 * 1024; // ~4MB base64 ceiling per artifact
 
 export class InMemoryExportHistoryStore implements ExportHistoryStore {
   private byTenant = new Map<string, ExportRecord[]>();
-  constructor(private readonly cap = DEFAULT_CAP) {}
+  /** per-tenant artifact store; Map insertion order = eviction order */
+  private artifacts = new Map<string, Map<string, ExportArtifact>>();
+  constructor(private readonly cap = DEFAULT_CAP, private readonly artifactCap = 50) {}
 
   add(tenant_id: string, input: ExportRecordInput, now: Date, seq: number): ExportRecord {
     if (!tenant_id) throw new ExportRecordError('invalid_input', 'tenant_id required');
@@ -94,17 +105,38 @@ export class InMemoryExportHistoryStore implements ExportHistoryStore {
     if (!isReportType(input.report_type)) {
       throw new ExportRecordError('invalid_report_type', `invalid report_type: ${String(input.report_type)}`);
     }
+    // Strip artifact bytes out of the metadata record — never inline the blob.
+    const { artifact_base64, content_type, ...meta } = input;
     const rec: ExportRecord = {
-      ...input,
+      ...meta,
       export_id: `EXP-${tenant_id}-${now.getTime()}-${seq}`,
       tenant_id,
       generated_at: now.toISOString(),
+      has_artifact: false,
     };
+    if (artifact_base64 && content_type && artifact_base64.length <= MAX_ARTIFACT_B64) {
+      const am = this.artifacts.get(tenant_id) ?? new Map<string, ExportArtifact>();
+      am.set(rec.export_id, { base64: artifact_base64, content_type });
+      // evict oldest artifact(s) beyond the cap (insertion order = Map order)
+      while (am.size > this.artifactCap) {
+        const oldest = am.keys().next().value as string;
+        am.delete(oldest);
+        const stale = (this.byTenant.get(tenant_id) ?? []).find((r) => r.export_id === oldest);
+        if (stale) stale.has_artifact = false;
+      }
+      this.artifacts.set(tenant_id, am);
+      rec.has_artifact = true;
+    }
     const list = this.byTenant.get(tenant_id) ?? [];
     list.push(rec);
     while (list.length > this.cap) list.shift();
     this.byTenant.set(tenant_id, list);
     return { ...rec };
+  }
+
+  getArtifact(tenant_id: string, export_id: string): ExportArtifact | null {
+    const a = this.artifacts.get(tenant_id)?.get(export_id);
+    return a ? { ...a } : null;
   }
 
   list(tenant_id: string, filters: ExportListFilters): ExportListPage {

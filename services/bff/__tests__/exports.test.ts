@@ -137,3 +137,36 @@ describe('POST/GET /v1/exports', () => {
     expect(res.status).toBe(400);
   });
 });
+
+import { InMemoryExportHistoryStore as Store2 } from '../src/exports/store';
+
+describe('export artifact storage', () => {
+  test('add() with artifact → getArtifact returns it + has_artifact true', () => {
+    const s = new Store2();
+    const rec = s.add('BANK_DEMO', { ...input(), artifact_base64: 'aGVsbG8=', content_type: 'text/csv' }, NOW, 1);
+    expect(rec.has_artifact).toBe(true);
+    expect((rec as { artifact_base64?: string }).artifact_base64).toBeUndefined(); // list/get views never inline the blob
+    const art = s.getArtifact('BANK_DEMO', rec.export_id);
+    expect(art?.base64).toBe('aGVsbG8=');
+    expect(art?.content_type).toBe('text/csv');
+  });
+  test('add() without artifact → has_artifact false, getArtifact null', () => {
+    const s = new Store2();
+    const rec = s.add('BANK_DEMO', input(), NOW, 1);
+    expect(rec.has_artifact).toBe(false);
+    expect(s.getArtifact('BANK_DEMO', rec.export_id)).toBeNull();
+  });
+  test('artifact cap evicts oldest artifact bytes (record metadata stays)', () => {
+    const s = new Store2(500, 2); // artifactCap = 2
+    const a = s.add('BANK_DEMO', { ...input(), artifact_base64: 'YQ==', content_type: 'text/csv' }, new Date('2026-06-13T10:00:00Z'), 1);
+    s.add('BANK_DEMO', { ...input(), artifact_base64: 'Yg==', content_type: 'text/csv' }, new Date('2026-06-13T11:00:00Z'), 2);
+    s.add('BANK_DEMO', { ...input(), artifact_base64: 'Yw==', content_type: 'text/csv' }, new Date('2026-06-13T12:00:00Z'), 3);
+    expect(s.getArtifact('BANK_DEMO', a.export_id)).toBeNull();      // oldest artifact evicted
+    expect(s.get('BANK_DEMO', a.export_id)?.has_artifact).toBe(false); // metadata stays, flag flips
+  });
+  test('getArtifact cross-tenant returns null', () => {
+    const s = new Store2();
+    const rec = s.add('BANK_DEMO', { ...input(), artifact_base64: 'YQ==', content_type: 'text/csv' }, NOW, 1);
+    expect(s.getArtifact('BIL', rec.export_id)).toBeNull();
+  });
+});
