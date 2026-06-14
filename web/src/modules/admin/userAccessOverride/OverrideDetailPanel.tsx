@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, ShieldCheck, Trash2, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Trash2, XCircle } from 'lucide-react';
 import { api, type UserAccessOverride } from '@/lib/api';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, EnterpriseDialog, Panel } from '@/components/ui';
 import { useAuth } from '@/store/auth';
 
 interface Props {
@@ -52,24 +52,14 @@ export function OverrideDetailPanel({ override, onClose, onChange }: Props) {
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Override detail"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={`Override · ${override.override_id.slice(0, 8)}`}
+      size="lg"
+      testId="uao-detail-dialog"
     >
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4" />
-            Override · {override.override_id.slice(0, 8)}
-          </h2>
-          <button onClick={onClose} aria-label="Close" className="p-1 hover:bg-slate-100 rounded">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-6 py-4 space-y-4 text-sm">
+      <div className="space-y-4 text-sm">
           <div className="grid grid-cols-2 gap-3">
             <Field label="User">{override.user_id}</Field>
             <Field label="Status">
@@ -225,9 +215,8 @@ export function OverrideDetailPanel({ override, onClose, onChange }: Props) {
               </ul>
             )}
           </Panel>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 

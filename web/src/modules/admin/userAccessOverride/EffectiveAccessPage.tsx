@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ShieldCheck, Trash2 } from 'lucide-react';
 import { api, type EffectiveAccessRow } from '@/lib/api';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
 const PERMISSION_TONE: Record<string, 'success' | 'blue' | 'warning' | 'danger'> = {
@@ -155,61 +155,68 @@ export function EffectiveAccessPage() {
       )}
 
       {showBulkRevoke && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Bulk revoke confirmation"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
-        >
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-5">
-            <h2 className="text-base font-semibold mb-2">Revoke all active overrides</h2>
-            <p className="text-xs text-muted mb-3">
-              This will revoke{' '}
-              <strong>{q.data?.overrides_applied.length ?? 0}</strong> active
-              override{q.data && q.data.overrides_applied.length === 1 ? '' : 's'} for{' '}
-              <span className="font-mono">{user_id}</span>. The action is audit-logged
-              and cannot be batch-undone — overrides must be re-created individually.
-            </p>
-            <textarea
-              value={bulkReason}
-              onChange={(e) => setBulkReason(e.target.value)}
-              rows={3}
-              placeholder="Reason (≥ 10 chars; audit-logged)"
-              className="w-full border rounded-md px-3 py-2 text-sm"
-              data-testid="uao-bulk-revoke-reason"
+        <EnterpriseDialog
+          open
+          onClose={() => {
+            setShowBulkRevoke(false);
+            setBulkErr(null);
+          }}
+          title="Revoke all active overrides"
+          size="md"
+          testId="uao-bulk-revoke-dialog"
+          footer={
+            <DialogFooter
+              secondary={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowBulkRevoke(false);
+                    setBulkErr(null);
+                  }}
+                  disabled={bulk.isPending}
+                >
+                  Cancel
+                </Button>
+              }
+              primary={
+                <Button
+                  onClick={() => {
+                    if (bulkReason.trim().length < 10) {
+                      setBulkErr('Reason ≥ 10 characters required');
+                      return;
+                    }
+                    bulk.mutate();
+                  }}
+                  disabled={bulk.isPending}
+                  data-testid="uao-bulk-revoke-confirm"
+                >
+                  {bulk.isPending ? 'Revoking…' : 'Revoke all'}
+                </Button>
+              }
             />
-            {bulkErr && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-md px-3 py-2 text-xs mt-2">
-                {bulkErr}
-              </div>
-            )}
-            <div className="flex justify-end gap-2 mt-3">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowBulkRevoke(false);
-                  setBulkErr(null);
-                }}
-                disabled={bulk.isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  if (bulkReason.trim().length < 10) {
-                    setBulkErr('Reason ≥ 10 characters required');
-                    return;
-                  }
-                  bulk.mutate();
-                }}
-                disabled={bulk.isPending}
-                data-testid="uao-bulk-revoke-confirm"
-              >
-                {bulk.isPending ? 'Revoking…' : 'Revoke all'}
-              </Button>
+          }
+        >
+          <p className="text-xs text-muted mb-3">
+            This will revoke{' '}
+            <strong>{q.data?.overrides_applied.length ?? 0}</strong> active
+            override{q.data && q.data.overrides_applied.length === 1 ? '' : 's'} for{' '}
+            <span className="font-mono">{user_id}</span>. The action is audit-logged
+            and cannot be batch-undone — overrides must be re-created individually.
+          </p>
+          <textarea
+            value={bulkReason}
+            onChange={(e) => setBulkReason(e.target.value)}
+            rows={3}
+            placeholder="Reason (≥ 10 chars; audit-logged)"
+            className="w-full border rounded-md px-3 py-2 text-sm"
+            data-testid="uao-bulk-revoke-reason"
+          />
+          {bulkErr && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-md px-3 py-2 text-xs mt-2">
+              {bulkErr}
             </div>
-          </div>
-        </div>
+          )}
+        </EnterpriseDialog>
       )}
     </div>
   );

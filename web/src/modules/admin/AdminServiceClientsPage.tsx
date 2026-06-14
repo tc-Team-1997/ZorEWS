@@ -6,7 +6,7 @@ import {
   type ServiceClientCreated,
   type ServiceClientRow,
 } from '@/store/auth';
-import { Badge, Button, Input, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, Input, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
 
@@ -211,53 +211,52 @@ function SecretRevealDialog({
     }
   };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="service-client-secret-title"
-      data-testid="service-client-secret-dialog"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Copy your client secret now"
+      description="The plaintext secret will not be shown again. Store it in your secrets manager."
+      size="md"
+      closeOnBackdrop={false}
+      closeOnEsc={false}
+      testId="service-client-secret-dialog"
+      footer={
+        <DialogFooter
+          secondary={
+            <Button variant="secondary" onClick={onCopy} data-testid="service-client-secret-copy">
+              <Copy size={14} className="mr-1" /> {copied ? 'Copied' : 'Copy'}
+            </Button>
+          }
+          primary={
+            <Button onClick={onClose} data-testid="service-client-secret-close">
+              I&apos;ve stored it
+            </Button>
+          }
+        />
+      }
     >
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-9 h-9 rounded-full bg-warning-bg flex items-center justify-center shrink-0">
-            <AlertCircle size={18} className="text-warning" strokeWidth={2} />
-          </div>
-          <div className="min-w-0">
-            <h2
-              id="service-client-secret-title"
-              className="text-base font-semibold text-ink leading-snug"
-            >
-              Copy your client secret now
-            </h2>
-            <p className="text-[13px] text-sub mt-1">
-              The plaintext secret will not be shown again. Store it in your secrets manager —
-              the API call to <code className="font-mono">/oauth/token</code> needs it.
-            </p>
-          </div>
+      <div className="flex items-start gap-3 mb-4">
+        <div className="w-9 h-9 rounded-full bg-warning-bg flex items-center justify-center shrink-0">
+          <AlertCircle size={18} className="text-warning" strokeWidth={2} />
         </div>
-        <dl className="grid grid-cols-3 gap-2 text-[12px] mb-3">
-          <dt className="text-muted">tenant_id</dt>
-          <dd className="col-span-2 font-mono text-ink">{client.tenant_id}</dd>
-          <dt className="text-muted">client_id</dt>
-          <dd className="col-span-2 font-mono text-ink">{client.client_id}</dd>
-        </dl>
-        <div
-          className="rounded border border-divider bg-page p-3 font-mono text-[11px] break-all text-ink mb-3"
-          data-testid="service-client-secret-value"
-        >
-          {client.client_secret}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onCopy} data-testid="service-client-secret-copy">
-            <Copy size={14} className="mr-1" /> {copied ? 'Copied' : 'Copy'}
-          </Button>
-          <Button onClick={onClose} data-testid="service-client-secret-close">
-            I&apos;ve stored it
-          </Button>
-        </div>
+        <p className="text-[13px] text-sub min-w-0">
+          The API call to <code className="font-mono">/oauth/token</code> needs this secret.
+          Store it before closing — it cannot be retrieved later.
+        </p>
       </div>
-    </div>
+      <dl className="grid grid-cols-3 gap-2 text-[12px] mb-3">
+        <dt className="text-muted">tenant_id</dt>
+        <dd className="col-span-2 font-mono text-ink">{client.tenant_id}</dd>
+        <dt className="text-muted">client_id</dt>
+        <dd className="col-span-2 font-mono text-ink">{client.client_id}</dd>
+      </dl>
+      <div
+        className="rounded border border-divider bg-page p-3 font-mono text-[11px] break-all text-ink"
+        data-testid="service-client-secret-value"
+      >
+        {client.client_secret}
+      </div>
+    </EnterpriseDialog>
   );
 }
 

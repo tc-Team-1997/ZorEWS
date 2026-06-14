@@ -18,7 +18,7 @@ import {
   type WebhookSubscriptionCreated,
   type WebhookSubscriptionView,
 } from '@/lib/api';
-import { Badge, type BadgeTone, Button, Input, Panel } from '@/components/ui';
+import { Badge, type BadgeTone, Button, DialogFooter, EnterpriseDialog, Input, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useChatContext } from '@/components/copilot/useChatContext';
 
@@ -238,41 +238,41 @@ function SecretRevealDialog({
     }
   };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="webhook-secret-title"
-      data-testid="webhook-secret-dialog"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Copy your signing secret now"
+      description="This is the only time the secret will be shown. Store it in your secrets manager — you can't retrieve it later."
+      size="md"
+      closeOnBackdrop={false}
+      closeOnEsc={false}
+      testId="webhook-secret-dialog"
+      footer={
+        <DialogFooter
+          secondary={
+            <Button variant="secondary" onClick={onCopy} data-testid="webhook-secret-copy">
+              <Copy size={14} className="mr-1" /> {copied ? 'Copied' : 'Copy'}
+            </Button>
+          }
+          primary={
+            <Button onClick={onClose} data-testid="webhook-secret-close">
+              I&apos;ve stored it
+            </Button>
+          }
+        />
+      }
     >
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-9 h-9 rounded-full bg-warning-bg flex items-center justify-center shrink-0">
-            <AlertCircle size={18} className="text-warning" strokeWidth={2} />
-          </div>
-          <div className="min-w-0">
-            <h2 id="webhook-secret-title" className="text-base font-semibold text-ink leading-snug">
-              Copy your signing secret now
-            </h2>
-            <p className="text-[13px] text-sub mt-1">
-              This is the only time the secret will be shown. Store it in your secrets manager —
-              you can&apos;t retrieve it later.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-full bg-warning-bg flex items-center justify-center shrink-0">
+          <AlertCircle size={18} className="text-warning" strokeWidth={2} />
         </div>
-        <div className="rounded border border-divider bg-page p-3 font-mono text-[11px] break-all text-ink mb-3" data-testid="webhook-secret-value">
-          {subscription.secret}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onCopy} data-testid="webhook-secret-copy">
-            <Copy size={14} className="mr-1" /> {copied ? 'Copied' : 'Copy'}
-          </Button>
-          <Button onClick={onClose} data-testid="webhook-secret-close">
-            I&apos;ve stored it
-          </Button>
+        <div className="min-w-0 flex-1">
+          <div className="rounded border border-divider bg-page p-3 font-mono text-[11px] break-all text-ink" data-testid="webhook-secret-value">
+            {subscription.secret}
+          </div>
         </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 
