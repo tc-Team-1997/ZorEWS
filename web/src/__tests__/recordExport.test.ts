@@ -22,4 +22,14 @@ describe('recordExport', () => {
       config: { formats: ['pdf'], report_type: 'risk', date_range: 'today', data_scope: 'current_page', include: {} },
     })).resolves.toBeUndefined();
   });
+
+  test('forwards artifact_base64 + content_type when provided', async () => {
+    await recordExport({
+      module: 'alerts', report_type: 'risk', format: 'csv', record_count: 1,
+      title: 'x', status: 'completed',
+      config: { formats: ['csv'], report_type: 'risk', date_range: 'today', data_scope: 'current_page', include: {} },
+      artifact_base64: 'YQ==', content_type: 'text/csv',
+    });
+    expect(http.post).toHaveBeenCalledWith('/v1/exports', expect.objectContaining({ artifact_base64: 'YQ==', content_type: 'text/csv' }));
+  });
 });

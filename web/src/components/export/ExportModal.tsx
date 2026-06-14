@@ -36,6 +36,19 @@ function download(blob: Blob, filename: string) {
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  let binary = ''; const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+const MIME: Record<ExportFormat, string> = {
+  csv: 'text/csv', pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
 export interface ExportModalProps {
   open: boolean;
   onClose: () => void;
@@ -75,10 +88,13 @@ export function ExportModal({ open, onClose, adapter, module, defaultReportType 
         else if (fmt === 'docx') blob = await buildReportDocxBlob(data, config);
         else blob = await buildReportXlsxBlob(data, config);
         download(blob, `${module}-${slug}-${stamp}.${fmt}`);
+        let artifact_base64: string | undefined;
+        try { artifact_base64 = await blobToBase64(blob); } catch { artifact_base64 = undefined; }
         await recordExport({
           module, report_type: reportType, format: fmt, record_count: data.record_count,
           title: data.title, status: 'completed',
           config: { formats, report_type: reportType, date_range: dateRange, data_scope: scope, include },
+          artifact_base64, content_type: MIME[fmt],
         });
       }
       onClose();

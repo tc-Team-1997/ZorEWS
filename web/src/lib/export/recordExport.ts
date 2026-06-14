@@ -14,6 +14,10 @@ export interface RecordExportInput {
     date_range: string; data_scope: string; include: Record<string, boolean>;
     custom_range?: { from: string; to: string };
   };
+  /** Base64-encoded generated artifact, stored server-side for re-download (P4). */
+  artifact_base64?: string;
+  /** MIME type of the artifact (e.g. text/csv, application/pdf). */
+  content_type?: string;
 }
 
 /** Fire-and-forget — the client download already succeeded; never block on this. */
