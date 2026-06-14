@@ -177,7 +177,7 @@ export function CaseScenarioFormModal(props: Props) {
             />
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
               <span className="mb-1 block text-2xs font-semibold uppercase text-slate-500">Case category</span>
               <input
@@ -211,7 +211,7 @@ export function CaseScenarioFormModal(props: Props) {
               />
               Auto-trigger on indicator
             </legend>
-            <div className={`grid grid-cols-2 gap-3 ${triggerOn ? '' : 'opacity-40 pointer-events-none'}`}>
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${triggerOn ? '' : 'opacity-40 pointer-events-none'}`}>
               <label className="block">
                 <span className="mb-1 block text-2xs text-slate-500">Indicator id</span>
                 <input

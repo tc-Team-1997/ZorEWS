@@ -188,7 +188,7 @@ export function EscalationMatrixFormModal(props: Props) {
             />
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
               <span className="mb-1 block text-2xs font-semibold uppercase text-slate-500">Case category</span>
               <input
@@ -220,7 +220,7 @@ export function EscalationMatrixFormModal(props: Props) {
 
           <fieldset className="rounded border border-slate-200 p-3">
             <legend className="px-1 text-2xs font-semibold uppercase text-slate-500">Level 1 (always required)</legend>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="block">
                 <span className="mb-1 block text-2xs text-slate-500">After minutes</span>
                 <input
@@ -257,7 +257,7 @@ export function EscalationMatrixFormModal(props: Props) {
               />
               Level 2
             </legend>
-            <div className={`grid grid-cols-2 gap-3 ${l2on ? '' : 'opacity-40 pointer-events-none'}`}>
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${l2on ? '' : 'opacity-40 pointer-events-none'}`}>
               <label className="block">
                 <span className="mb-1 block text-2xs text-slate-500">After minutes (must be &gt; level 1)</span>
                 <input
@@ -297,7 +297,7 @@ export function EscalationMatrixFormModal(props: Props) {
               />
               Level 3 {!l2on && <em className="normal-case text-muted">(needs level 2)</em>}
             </legend>
-            <div className={`grid grid-cols-2 gap-3 ${l3on && l2on ? '' : 'opacity-40 pointer-events-none'}`}>
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${l3on && l2on ? '' : 'opacity-40 pointer-events-none'}`}>
               <label className="block">
                 <span className="mb-1 block text-2xs text-slate-500">After minutes (must be &gt; level 2)</span>
                 <input

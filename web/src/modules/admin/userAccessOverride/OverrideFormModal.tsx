@@ -148,7 +148,7 @@ export function OverrideFormModal({
         </div>
 
         {/* override type + permission */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-medium text-muted block mb-1">Override type *</label>
             <div className="flex gap-2">
@@ -250,7 +250,7 @@ export function OverrideFormModal({
         </div>
 
         {/* effective dates */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-medium text-muted block mb-1">Effective from *</label>
             <input
