@@ -43926,13 +43926,6 @@ export function makeApp(deps: AppDeps = {}) {
   );
 
 
-  // ── T6 M1.28 — API key geographic access analysis ────────────────────
-  app.get('/v1/admin/api-keys/geo-access', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildApiKeyGeoAccess } = require('./api_key_geo_access') as typeof import('./api_key_geo_access');
-    const out = buildApiKeyGeoAccess(apiKeyStore, req.tenant!.tenant_id, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
   // ── T6 M2.28 — Tenant onboarding ROI estimate ─────────────────────────
   app.get('/v1/tenants/onboarding/roi-estimate', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
@@ -43958,29 +43951,8 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-  // ── T6 M5.28 — Rule conflict detection ───────────────────────────────
-  app.get('/v1/rules/conflict-detection', requireTenantMw, requireRole('rules:list'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildRuleConflictDetection } = require('./rule_conflict_detection') as typeof import('./rule_conflict_detection');
-    const out = buildRuleConflictDetection(req.tenant!.tenant_id, ruleStore, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
-  // ── T6 M6.28 — Scoring weight sensitivity heatmap ────────────────────
-  app.get('/v1/scoring/presets/sensitivity-heatmap', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildScoringWeightSensitivityHeatmap } = require('./scoring_weight_sensitivity_heatmap') as typeof import('./scoring_weight_sensitivity_heatmap');
-    const out = buildScoringWeightSensitivityHeatmap(req.tenant!.tenant_id, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
-  // ── T6 M7.28 — Model version lineage tracker ─────────────────────────
-  app.get('/v1/ai/models/version-lineage', requireTenantMw, requireRole('customers:read_risk_profile'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildModelVersionLineage } = require('./model_version_lineage') as typeof import('./model_version_lineage');
-    const out = buildModelVersionLineage(aiModelRegistry, req.tenant!.tenant_id, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
   // ── T6 M8.27 — Alert resolution time by assignee role ────────────────
   app.get('/v1/alerts/resolution-by-role', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
@@ -43990,13 +43962,6 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-  // ── T6 M9.28 — Investigation team workload distribution ───────────────
-  app.get('/v1/investigations/team-distribution', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildInvestigationTeamDistribution } = require('./investigation_team_distribution') as typeof import('./investigation_team_distribution');
-    const out = buildInvestigationTeamDistribution(req.tenant!.tenant_id, caseInvestigationStore, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
   // ── T6 M10.26 — Notification retry pattern analysis ───────────────────
   app.get('/v1/notifications/retry-patterns', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
@@ -44006,29 +43971,8 @@ export function makeApp(deps: AppDeps = {}) {
     return res.json(wrapResponse(out, ctx));
   });
 
-  // ── T6 M11.26 — Dashboard cross-tenant template suggestions ───────────
-  app.get('/v1/dashboards/custom/template-suggestions', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildDashboardTemplateSuggestions } = require('./dashboard_template_suggestions') as typeof import('./dashboard_template_suggestions');
-    const out = buildDashboardTemplateSuggestions(req.tenant!.tenant_id, customDashboardStore, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
-  // ── T6 M12.26 — Report subscription health check ─────────────────────
-  app.get('/v1/reports/schedules/subscription-health', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildReportSubscriptionHealth } = require('./report_subscription_health') as typeof import('./report_subscription_health');
-    const out = buildReportSubscriptionHealth(req.tenant!.tenant_id, reportScheduleStore, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
-  // ── T6 M13.26 — Config rollback readiness assessment ─────────────────
-  app.get('/v1/admin/config/rollback-readiness', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
-    const ctx = extractCtx(req, now);
-    const { buildConfigRollbackReadiness } = require('./config_rollback_readiness') as typeof import('./config_rollback_readiness');
-    const out = buildConfigRollbackReadiness(req.tenant!.tenant_id, configStore, auditTrailStore, now());
-    return res.json(wrapResponse(out, ctx));
-  });
 
   // ── T6 M14.38 — Adapter data volume analysis ─────────────────────────
   app.get('/v1/integrations/adapters/data-volume', requireTenantMw, requireRole('audit:read'), (req: Request, res: Response) => {
