@@ -20,6 +20,10 @@ export {
 export type { TimeRangeKey } from './TimeRangeSelector';
 export { Modal } from './Modal';
 export type { ModalProps, ModalSize } from './Modal';
+export { EnterpriseDialog } from './EnterpriseDialog';
+export type { EnterpriseDialogProps, EnterpriseDialogSize } from './EnterpriseDialog';
+export { DialogGrid } from './DialogGrid';
+export { DialogFooter } from './DialogFooter';
 export { EmptyState } from './EmptyState';
 export { Skeleton, SkeletonText, SkeletonCard } from './Skeleton';
 export { CurrencyValue, CurrencyRow } from './CurrencyValue';
