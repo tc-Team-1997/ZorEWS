@@ -7,11 +7,10 @@
 // Reuses Panel/MetricCard/Badge/Button/PageHeader + the established
 // banking-page architecture; MSW-backed in dev.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { X } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -29,7 +28,7 @@ import {
   type BranchHeatLevel,
   type BranchHeatmapDimension,
 } from '@/lib/api';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, EnterpriseDialog, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
 const formatKES = (n: number) =>
@@ -178,7 +177,7 @@ function BranchDetailModal({
     queryFn: () => api.branchSummary(branch_id),
   });
   return (
-    <ModalShell title={`Branch: ${data?.label ?? branch_id}`} onClose={onClose} testId="bh-detail-modal">
+    <EnterpriseDialog open onClose={onClose} title={`Branch: ${data?.label ?? branch_id}`} size="md" testId="bh-detail-modal">
       {isLoading || !data ? (
         <p className="text-sm text-ink-subtle">Loading…</p>
       ) : (
@@ -200,7 +199,7 @@ function BranchDetailModal({
           </div>
         </div>
       )}
-    </ModalShell>
+    </EnterpriseDialog>
   );
 }
 
@@ -210,7 +209,7 @@ function BranchDeepDiveModal({ branch_id, onClose }: { branch_id: string; onClos
     queryFn: () => api.branchDeepDive(branch_id),
   });
   return (
-    <ModalShell title={`Deep-dive: ${data?.branch_name ?? branch_id}`} onClose={onClose} testId="bh-deep-dive-modal" width="wide">
+    <EnterpriseDialog open onClose={onClose} title={`Deep-dive: ${data?.branch_name ?? branch_id}`} size="lg" testId="bh-deep-dive-modal">
       {isLoading || !data ? (
         <p className="text-sm text-ink-subtle">Loading…</p>
       ) : (
@@ -285,52 +284,6 @@ function BranchDeepDiveModal({ branch_id, onClose }: { branch_id: string; onClos
           </Panel>
         </div>
       )}
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  title,
-  onClose,
-  children,
-  testId,
-  width = 'normal',
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  testId?: string;
-  width?: 'normal' | 'wide';
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      data-testid={testId}
-      onClick={onClose}
-    >
-      <div
-        className={`w-full ${width === 'wide' ? 'max-w-5xl' : 'max-w-2xl'} rounded-lg border border-divider bg-surface p-6 shadow-xl`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:bg-divider/40 hover:text-ink" aria-label="Close" data-testid="modal-close">
-            <X className="size-5" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }

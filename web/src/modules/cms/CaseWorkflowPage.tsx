@@ -15,7 +15,7 @@
 // Re-uses the existing M3.1 cmsApi (stats + bulkAssign) and the new
 // M3.2 cmsApi.workflow.* wrappers (list/get/submit/approve/reject).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -26,9 +26,8 @@ import {
   RefreshCw,
   ShieldCheck,
   Users,
-  X,
 } from 'lucide-react';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
 import { cmsApi, type SensitiveActionType, type WorkflowStatus } from './api';
@@ -423,22 +422,48 @@ function WorkflowDetailModal({
     onError: (e: unknown) => setError(extractErrorMessage(e)),
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const a = detailQ.data;
   const isMaker = a?.maker_username === currentUser;
   // M3.2 acceptance — reject requires reason (≥ 3 chars after trim);
   // approve allows empty notes since the action itself is neutral.
   const rejectArmed = decisionNotes.trim().length >= 3;
+  // Only show the standard footer action row when this pending request is
+  // decidable by the current (non-maker) user. Otherwise no footer.
+  const showActions = !!a && a.status === 'pending' && !isMaker && canDecide;
 
   return (
-    <ModalShell title="Workflow request" onClose={onClose} testId="workflow-detail-modal">
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Workflow request"
+      size="md"
+      testId="workflow-detail-modal"
+      footer={
+        showActions ? (
+          <DialogFooter
+            primary={
+              <Button
+                onClick={() => approveMut.mutate()}
+                disabled={approveMut.isPending}
+                data-testid="workflow-approve-btn"
+              >
+                {approveMut.isPending ? 'Approving…' : 'Approve'}
+              </Button>
+            }
+            secondary={
+              <Button
+                variant="ghost"
+                onClick={() => rejectMut.mutate()}
+                disabled={!rejectArmed || rejectMut.isPending}
+                data-testid="workflow-reject-btn"
+              >
+                {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
+              </Button>
+            }
+          />
+        ) : undefined
+      }
+    >
       {!a ? (
         <p className="text-sm text-slate-500">Loading…</p>
       ) : (
@@ -511,23 +536,6 @@ function WorkflowDetailModal({
                       {error}
                     </p>
                   )}
-                  <div className="mt-3 flex justify-end gap-2">
-                    <Button
-                      variant="ghost"
-                      onClick={() => rejectMut.mutate()}
-                      disabled={!rejectArmed || rejectMut.isPending}
-                      data-testid="workflow-reject-btn"
-                    >
-                      {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
-                    </Button>
-                    <Button
-                      onClick={() => approveMut.mutate()}
-                      disabled={approveMut.isPending}
-                      data-testid="workflow-approve-btn"
-                    >
-                      {approveMut.isPending ? 'Approving…' : 'Approve'}
-                    </Button>
-                  </div>
                 </>
               )}
               {!isMaker && !canDecide && (
@@ -542,7 +550,7 @@ function WorkflowDetailModal({
           )}
         </div>
       )}
-    </ModalShell>
+    </EnterpriseDialog>
   );
 }
 
@@ -580,18 +588,30 @@ function SubmitWorkflowModal({
     onError: (e: unknown) => setError(extractErrorMessage(e)),
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const armed = caseId.trim().length > 0 && rationale.trim().length >= 3;
 
   return (
-    <ModalShell title="Submit workflow request" onClose={onClose} testId="workflow-submit-modal">
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Submit workflow request"
+      size="md"
+      testId="workflow-submit-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button
+              onClick={() => submitMut.mutate()}
+              disabled={!armed || submitMut.isPending}
+              data-testid="workflow-submit-confirm"
+            >
+              {submitMut.isPending ? 'Submitting…' : 'Submit'}
+            </Button>
+          }
+        />
+      }
+    >
       <div className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">Case ID</label>
@@ -650,20 +670,8 @@ function SubmitWorkflowModal({
             {error}
           </p>
         )}
-        <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => submitMut.mutate()}
-            disabled={!armed || submitMut.isPending}
-            data-testid="workflow-submit-confirm"
-          >
-            {submitMut.isPending ? 'Submitting…' : 'Submit'}
-          </Button>
-        </div>
       </div>
-    </ModalShell>
+    </EnterpriseDialog>
   );
 }
 
@@ -694,18 +702,30 @@ function ReassignLoadModal({
     onError: (e: unknown) => setError(extractErrorMessage(e)),
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const armed = caseIdsText.trim().length > 0 && assignee.trim().length > 0;
 
   return (
-    <ModalShell title="Reassign caseload" onClose={onClose} testId="workflow-reassign-modal">
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Reassign caseload"
+      size="md"
+      testId="workflow-reassign-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button
+              onClick={() => bulkMut.mutate()}
+              disabled={!armed || bulkMut.isPending}
+              data-testid="workflow-reassign-confirm"
+            >
+              {bulkMut.isPending ? 'Assigning…' : 'Reassign'}
+            </Button>
+          }
+        />
+      }
+    >
       <p className="text-sm text-slate-600">
         Bulk reassign multiple cases to a single owner. Paste case IDs separated by
         whitespace or commas. Uses the existing M3.1 bulk-assign route (audit
@@ -757,64 +777,12 @@ function ReassignLoadModal({
             {error}
           </p>
         )}
-        <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => bulkMut.mutate()}
-            disabled={!armed || bulkMut.isPending}
-            data-testid="workflow-reassign-confirm"
-          >
-            {bulkMut.isPending ? 'Assigning…' : 'Reassign'}
-          </Button>
-        </div>
       </div>
-    </ModalShell>
+    </EnterpriseDialog>
   );
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────
-
-function ModalShell({
-  title,
-  onClose,
-  children,
-  testId,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  testId?: string;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      data-testid={testId}
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-3xl rounded-lg border border-slate-300 bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded p-1 hover:bg-slate-100"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (

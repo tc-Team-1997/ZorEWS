@@ -41,7 +41,7 @@ describe('ClaimInvestigationPage — investigation workflow', () => {
     // fresh investigation starts in triage
     expect(within(modal).getByText(/Triage/)).toBeInTheDocument();
     // and the investigations list now has the row
-    fireEvent.click(within(modal).getByTestId('modal-close'));
+    fireEvent.click(within(modal).getByTestId('siu-detail-modal-close'));
     await waitFor(() => expect(screen.getByTestId('siu-list')).toBeInTheDocument());
     expect(within(screen.getByTestId('siu-list')).getAllByTestId(/^siu-inv-/).length).toBe(1);
   });

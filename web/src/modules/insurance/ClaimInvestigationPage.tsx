@@ -8,9 +8,9 @@
 // decision. Two panels (suspicious queue + open investigations) + a detail
 // workspace modal. Backed by /v1/insurance/siu/*; MSW-backed in dev.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, ShieldAlert, FileSearch, Paperclip, Link2, ArrowUpCircle } from 'lucide-react';
+import { ShieldAlert, FileSearch, Paperclip, Link2, ArrowUpCircle } from 'lucide-react';
 import {
   api,
   type SiuQueueShape,
@@ -20,7 +20,7 @@ import {
   type SiuDecisionShape,
   type SiuEvidenceTypeShape,
 } from '@/lib/api';
-import { Badge, Button, MetricCard, Panel, type BadgeTone } from '@/components/ui';
+import { Badge, Button, EnterpriseDialog, MetricCard, Panel, type BadgeTone } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 
 const fmtKES = (n: number) =>
@@ -208,7 +208,7 @@ function InvestigationModal({ investigation_id, onClose }: { investigation_id: s
   const linkMut = useMutation({ mutationFn: () => api.siuLinkAlert(investigation_id, alertId), onSuccess: () => { setAlertId(''); invalidate(); } });
 
   return (
-    <ModalShell title={data ? `Investigation — ${data.claim_id}` : 'Investigation'} onClose={onClose} testId="siu-detail-modal">
+    <EnterpriseDialog open onClose={onClose} title={data ? `Investigation — ${data.claim_id}` : 'Investigation'} size="lg" testId="siu-detail-modal">
       {isLoading || !data ? (
         <p className="text-sm text-ink-subtle">Loading…</p>
       ) : (
@@ -326,27 +326,6 @@ function InvestigationModal({ investigation_id, onClose }: { investigation_id: s
           </Panel>
         </div>
       )}
-    </ModalShell>
-  );
-}
-
-function ModalShell({ title, onClose, children, testId }: { title: string; onClose: () => void; children: React.ReactNode; testId?: string }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={title} data-testid={testId} onClick={onClose}>
-      <div className="w-full max-w-4xl rounded-lg border border-divider bg-surface p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:bg-divider/40 hover:text-ink" aria-label="Close" data-testid="modal-close">
-            <X className="size-5" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }

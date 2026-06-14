@@ -7,9 +7,9 @@
 // the established banking-page architecture; MSW-backed in dev like the other
 // Bank-EWS modules.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, PhoneCall, HandCoins } from 'lucide-react';
+import { PhoneCall, HandCoins } from 'lucide-react';
 import {
   api,
   type CollectionsSummaryReport,
@@ -19,7 +19,7 @@ import {
   type CollectionsRecoveryStage,
   type CollectionsPtpStatus,
 } from '@/lib/api';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, EnterpriseDialog, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
 import { useAuth } from '@/store/auth';
@@ -304,7 +304,7 @@ function CollectionAccountModal({ account_id, onClose }: { account_id: string; o
   });
 
   return (
-    <ModalShell title={`Account: ${account_id}`} onClose={onClose} testId="coll-detail-modal">
+    <EnterpriseDialog open onClose={onClose} title={`Account: ${account_id}`} size="lg" testId="coll-detail-modal">
       {isLoading || !data ? (
         <p className="text-sm text-ink-subtle">Loading…</p>
       ) : (
@@ -487,55 +487,6 @@ function CollectionAccountModal({ account_id, onClose }: { account_id: string; o
           </Panel>
         </div>
       )}
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  title,
-  onClose,
-  children,
-  testId,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  testId?: string;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      data-testid={testId}
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-4xl rounded-lg border border-divider bg-surface p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-ink-subtle hover:bg-divider/40 hover:text-ink"
-            aria-label="Close"
-            data-testid="modal-close"
-          >
-            <X className="size-5" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
