@@ -93,16 +93,61 @@ export function AppShell() {
 
   // Mobile nav drawer — sidebar collapses to a hamburger-triggered drawer < lg.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const navTriggerFocusRef = useRef<HTMLElement | null>(null);
   const location = useLocation();
   // Close the drawer on any route change (covers nav-link clicks).
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
-  // Escape closes + body-scroll lock while the drawer is open.
+  // While the drawer is open: Escape closes, body-scroll locks, and focus is
+  // managed like a modal — moved into the drawer on open, Tab/Shift+Tab trapped
+  // inside it, and restored to the trigger on close (a11y parity with dialogs).
   useEffect(() => {
     if (!mobileNavOpen) return;
+    const sidebar = sidebarRef.current;
+    const focusablesIn = () =>
+      sidebar
+        ? Array.from(
+            sidebar.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          )
+        : [];
+
+    // Remember the trigger so focus can return there on close.
+    navTriggerFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    // Move focus into the drawer (first nav item, or the drawer itself).
+    const t = window.setTimeout(() => {
+      const f = focusablesIn();
+      (f[0] ?? sidebar)?.focus();
+    }, 0);
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileNavOpen(false);
+      if (e.key === 'Escape') {
+        setMobileNavOpen(false);
+        return;
+      }
+      if (e.key === 'Tab' && sidebar) {
+        const f = focusablesIn();
+        if (f.length === 0) {
+          e.preventDefault();
+          sidebar.focus();
+          return;
+        }
+        const first = f[0];
+        const last = f[f.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (active === first || active === sidebar) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
@@ -110,6 +155,13 @@ export function AppShell() {
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
+      window.clearTimeout(t);
+      // Restore focus to the trigger (hamburger) so keyboard users land back.
+      try {
+        navTriggerFocusRef.current?.focus();
+      } catch {
+        /* trigger may have unmounted */
+      }
     };
   }, [mobileNavOpen]);
   // Crossing up to ≥ lg (e.g. tablet rotate / window resize) must close the
@@ -219,6 +271,8 @@ export function AppShell() {
           display:none, so nav links stay in the a11y tree) and slides in when
           the hamburger is tapped. On ≥ lg it is a static, always-visible rail. */}
       <aside
+        ref={sidebarRef}
+        tabIndex={-1}
         data-testid="primary-sidebar"
         className={cn(
           'w-[220px] shrink-0 bg-white flex flex-col border-r border-[#E5E7EB]',

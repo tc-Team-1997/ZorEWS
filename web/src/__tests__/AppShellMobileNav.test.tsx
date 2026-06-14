@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { AppShell } from '@/components/layout/AppShell';
 import { renderWithProviders } from './utils';
 import { useAuth } from '@/store/auth';
@@ -68,5 +68,36 @@ describe('AppShell — mobile nav drawer', () => {
     expect(screen.getByTestId('mobile-nav-backdrop')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('mobile-nav-backdrop')).not.toBeInTheDocument();
+  });
+
+  it('moves focus into the drawer on open + restores to the trigger on close', async () => {
+    renderShell();
+    const toggle = screen.getByTestId('mobile-nav-toggle');
+    toggle.focus();
+    fireEvent.click(toggle);
+    const sidebar = screen.getByTestId('primary-sidebar');
+    await waitFor(() => expect(sidebar.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  it('traps Tab focus within the open drawer (wraps at both ends)', async () => {
+    renderShell();
+    fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
+    const sidebar = screen.getByTestId('primary-sidebar');
+    await waitFor(() => expect(sidebar.contains(document.activeElement)).toBe(true));
+    const f = sidebar.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    const first = f[0];
+    const last = f[f.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 });
