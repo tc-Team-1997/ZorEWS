@@ -141,4 +141,24 @@ describe('Modal', () => {
     );
     expect(screen.getByTestId('m-content').className).toContain('max-w-sm');
   });
+
+  it('uses widthClass override instead of the size default when provided', () => {
+    render(
+      <Modal open onClose={vi.fn()} ariaLabel="x" testId="m" widthClass="max-w-[720px]">
+        <div>body</div>
+      </Modal>,
+    );
+    const content = screen.getByTestId('m-content');
+    expect(content.className).toContain('max-w-[720px]');
+    expect(content.className).not.toContain('max-w-2xl');
+  });
+
+  it('falls back to the size default (max-w-2xl) when no widthClass is given', () => {
+    render(
+      <Modal open onClose={vi.fn()} ariaLabel="x" testId="m">
+        <div>body</div>
+      </Modal>,
+    );
+    expect(screen.getByTestId('m-content').className).toContain('max-w-2xl');
+  });
 });

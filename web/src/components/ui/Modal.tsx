@@ -41,6 +41,10 @@ export interface ModalProps {
   ariaLabel: string;
   /** Optional. Default '2xl'. */
   size?: ModalSize;
+  /** Optional Tailwind max-width class (e.g. `max-w-[720px]`). When set it
+   *  overrides the `size`-derived width on the content container. Additive:
+   *  callers that omit it keep the `size` default behaviour. */
+  widthClass?: string;
   /** Default true. Set false when an in-progress form must not be
    *  discarded by an accidental backdrop click. */
   closeOnBackdrop?: boolean;
@@ -59,6 +63,7 @@ export function Modal({
   onClose,
   ariaLabel,
   size = '2xl',
+  widthClass,
   closeOnBackdrop = true,
   closeOnEsc = true,
   showCloseButton = true,
@@ -130,7 +135,7 @@ export function Modal({
         tabIndex={-1}
         data-testid={testId ? `${testId}-content` : undefined}
         onClick={(e) => e.stopPropagation()}
-        className={`relative ${MAX_W_BY_SIZE[size]} w-full max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl outline-none`}
+        className={`relative ${widthClass ?? MAX_W_BY_SIZE[size]} w-full max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl outline-none`}
       >
         {showCloseButton && (
           <button
