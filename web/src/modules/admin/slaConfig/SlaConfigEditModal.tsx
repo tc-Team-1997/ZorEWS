@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingDown, TrendingUp, X } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { TrendingDown, TrendingUp } from 'lucide-react';
+import { Button, DialogFooter, EnterpriseDialog } from '@/components/ui';
 import { api, type SlaConfigRow } from '@/lib/api';
 
 interface Props {
@@ -17,14 +17,6 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
   const [notes, setNotes] = useState(row.notes ?? '');
   const [validation, setValidation] = useState<string | null>(null);
   const [debouncedDays, setDebouncedDays] = useState(days);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   // Debounce the target value 400ms before asking the server for a
   // preview. Avoids hammering the resolver on every keystroke.
@@ -85,21 +77,25 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
     validation ?? (error instanceof Error ? error.message : null);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Edit SLA target"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Edit SLA target"
+      size="md"
+      closeOnBackdrop={false}
+      testId="sla-edit-dialog"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button onClick={submit} disabled={isPending} data-testid="sla-save">
+              {isPending ? 'Saving…' : 'Save (supersede)'}
+            </Button>
+          }
+        />
+      }
     >
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h2 className="text-base font-semibold">Edit SLA target</h2>
-          <button onClick={onClose} aria-label="Close" className="p-1 hover:bg-slate-100 rounded">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-5 py-4 space-y-4 text-sm">
+      <div className="space-y-4 text-sm">
           <div className="bg-slate-50 border border-slate-200 rounded p-3 text-xs">
             <div className="grid grid-cols-3 gap-2">
               <div>
@@ -171,18 +167,8 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
               {errorMsg}
             </div>
           )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t bg-slate-50 rounded-b-lg">
-          <Button variant="secondary" onClick={onClose} disabled={isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={isPending} data-testid="sla-save">
-            {isPending ? 'Saving…' : 'Save (supersede)'}
-          </Button>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 

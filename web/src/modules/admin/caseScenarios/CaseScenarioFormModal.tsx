@@ -7,8 +7,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { GripVertical, Plus, Trash2, X } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { GripVertical, Plus, Trash2 } from 'lucide-react';
+import { Button, DialogFooter, EnterpriseDialog } from '@/components/ui';
 import {
   api,
   type CaseScenarioChecklistItem,
@@ -58,15 +58,6 @@ export function CaseScenarioFormModal(props: Props) {
     initial?.checklist ?? [],
   );
   const [validation, setValidation] = useState<string | null>(null);
-
-  // ESC closes
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') props.onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [props]);
 
   // Load FK-target candidates from the matrix + templates APIs
   const escalationsQ = useQuery({
@@ -157,32 +148,24 @@ export function CaseScenarioFormModal(props: Props) {
     props.error instanceof Error ? props.error.message : props.error ? String(props.error) : null;
 
   return (
-    <div
-      role="dialog"
-      aria-label={isEdit ? 'Edit case scenario' : 'Create case scenario'}
-      data-testid="case-scenario-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={props.onClose}
+    <EnterpriseDialog
+      open
+      onClose={props.onClose}
+      title={isEdit ? 'Edit case scenario' : 'New case scenario'}
+      size="md"
+      testId="case-scenario-modal"
+      footer={
+        <DialogFooter
+          onCancel={props.onClose}
+          primary={
+            <Button onClick={submit} disabled={props.isPending} data-testid="cs-save">
+              {isEdit ? 'Save changes' : 'Create draft'}
+            </Button>
+          }
+        />
+      }
     >
-      <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-          <h3 className="text-base font-semibold">
-            {isEdit ? 'Edit case scenario' : 'New case scenario'}
-          </h3>
-          <button
-            type="button"
-            onClick={props.onClose}
-            className="text-slate-400 hover:text-slate-700"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3 p-4 text-sm">
+      <div className="space-y-3 text-sm">
           <label className="block">
             <span className="mb-1 block text-2xs font-semibold uppercase text-slate-500">Name</span>
             <input
@@ -362,15 +345,7 @@ export function CaseScenarioFormModal(props: Props) {
               {errMsg}
             </div>
           )}
-        </div>
-
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3">
-          <Button variant="ghost" onClick={props.onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={props.isPending} data-testid="cs-save">
-            {isEdit ? 'Save changes' : 'Create draft'}
-          </Button>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }

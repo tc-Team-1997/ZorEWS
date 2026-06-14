@@ -6,7 +6,17 @@ import {
   type SlaConfigRow,
   type SlaConfigStatus,
 } from '@/lib/api';
-import { Badge, Button, DataTable, Input, Panel, type BadgeTone, type Column } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  DataTable,
+  DialogFooter,
+  EnterpriseDialog,
+  Input,
+  Panel,
+  type BadgeTone,
+  type Column,
+} from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SlaConfigEditModal } from './SlaConfigEditModal';
 import { CreateSlaConfigModal } from './CreateSlaConfigModal';
@@ -272,37 +282,38 @@ function ArchiveConfirmModal({
   error: unknown;
 }) {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Archive SLA config row"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Archive SLA target"
+      size="sm"
+      closeOnBackdrop={false}
+      testId="sla-archive-dialog"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button onClick={onConfirm} disabled={isPending} data-testid="sla-archive-confirm">
+              {isPending ? 'Archiving…' : 'Archive'}
+            </Button>
+          }
+        />
+      }
     >
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-5">
-        <h2 className="text-base font-semibold mb-2">Archive SLA target</h2>
-        <p className="text-xs text-muted mb-3">
-          Archiving <span className="font-mono">{row.case_category}/{row.priority}/{row.business_unit ?? '*'}</span>{' '}
-          drops the SLA target for matching new cases. Existing open
-          cases keep their current breach state until the next
-          dashboard refresh, when they fall through to{' '}
-          <span className="font-mono">default_fallback</span>. The row
-          stays in audit history — it does not delete.
-        </p>
-        {error instanceof Error && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-md px-3 py-2 text-xs mb-3">
-            {error.message}
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={isPending}>
-            Cancel
-          </Button>
-          <Button onClick={onConfirm} disabled={isPending} data-testid="sla-archive-confirm">
-            {isPending ? 'Archiving…' : 'Archive'}
-          </Button>
+      <p className="text-xs text-muted mb-3">
+        Archiving <span className="font-mono">{row.case_category}/{row.priority}/{row.business_unit ?? '*'}</span>{' '}
+        drops the SLA target for matching new cases. Existing open
+        cases keep their current breach state until the next
+        dashboard refresh, when they fall through to{' '}
+        <span className="font-mono">default_fallback</span>. The row
+        stays in audit history — it does not delete.
+      </p>
+      {error instanceof Error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-md px-3 py-2 text-xs">
+          {error.message}
         </div>
-      </div>
-    </div>
+      )}
+    </EnterpriseDialog>
   );
 }
 

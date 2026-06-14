@@ -4,8 +4,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
-import { Badge, Button, type BadgeTone } from '@/components/ui';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { Badge, EnterpriseDialog, type BadgeTone } from '@/components/ui';
 import {
   api,
   type CaseScenarioHistoryAction,
@@ -33,32 +33,14 @@ export function CaseScenarioHistoryModal({ scenario, onClose }: Props) {
   });
 
   return (
-    <div
-      role="dialog"
-      aria-label={`History — ${scenario.name}`}
-      data-testid="case-scenario-history-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={`History — ${scenario.name}`}
+      size="lg"
+      testId="case-scenario-history-modal"
     >
-      <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-          <h3 className="text-base font-semibold">
-            History — <span className="font-normal text-muted">{scenario.name}</span>
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 p-4 text-sm">
+      <div className="space-y-2 text-sm">
           {historyQ.isLoading && <p className="text-muted">Loading history…</p>}
           {historyQ.isError && (
             <p className="text-rose-700" role="alert">
@@ -138,12 +120,7 @@ export function CaseScenarioHistoryModal({ scenario, onClose }: Props) {
               );
             })}
           </ol>
-        </div>
-
-        <div className="sticky bottom-0 flex justify-end border-t border-slate-200 bg-white px-4 py-3">
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }

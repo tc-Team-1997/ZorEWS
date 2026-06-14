@@ -156,10 +156,10 @@ describe('SlaConfigPage', () => {
     renderWithProviders(<SlaConfigPage />);
     await screen.findAllByText('credit_risk');
     await userEvent.click(screen.getByTestId('sla-archive-sla-seed-credit_risk-P4-all'));
-    expect(screen.getByRole('dialog', { name: /Archive SLA config row/i })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: /Archive SLA target/i })).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('sla-archive-confirm'));
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /Archive SLA config row/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Archive SLA target/i })).not.toBeInTheDocument();
     });
     // Status pivot to ARCHIVED — the just-archived row is here
     await userEvent.click(screen.getByTestId('sla-pivot-archived'));

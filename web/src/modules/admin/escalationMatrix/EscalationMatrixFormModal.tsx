@@ -4,8 +4,7 @@
 // (and L2) before save.
 
 import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, DialogFooter, EnterpriseDialog } from '@/components/ui';
 import {
   ESCALATION_ROLES,
   type EscalationMatrixCreateInput,
@@ -72,15 +71,6 @@ export function EscalationMatrixFormModal(props: Props) {
   const [l3m, setL3m] = useState(String(initial?.level_3_after_minutes ?? 720));
   const [l3r, setL3r] = useState<EscalationRole>(initial?.level_3_role ?? 'admin');
   const [validation, setValidation] = useState<string | null>(null);
-
-  // ESC closes
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') props.onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [props]);
 
   // Disabling L2 forces L3 off (DB CHECK: l3 set ⇒ l2 set)
   useEffect(() => {
@@ -159,32 +149,24 @@ export function EscalationMatrixFormModal(props: Props) {
       : 'New escalation rule';
 
   return (
-    <div
-      role="dialog"
-      aria-label={heading}
-      data-testid="escalation-matrix-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={props.onClose}
+    <EnterpriseDialog
+      open
+      onClose={props.onClose}
+      title={heading}
+      size="md"
+      testId="escalation-matrix-modal"
+      footer={
+        <DialogFooter
+          onCancel={props.onClose}
+          primary={
+            <Button onClick={submit} disabled={props.isPending} data-testid="esc-save">
+              {isEdit ? 'Save changes' : 'Create rule'}
+            </Button>
+          }
+        />
+      }
     >
-      <div
-        className="w-full max-w-xl rounded-lg bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h3 className="text-base font-semibold">
-            {heading}
-          </h3>
-          <button
-            type="button"
-            onClick={props.onClose}
-            className="text-slate-400 hover:text-slate-700"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3 p-4 text-sm">
+      <div className="space-y-3 text-sm">
           {isDuplicate && (
             <p
               className="rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-2xs text-blue-800"
@@ -357,15 +339,7 @@ export function EscalationMatrixFormModal(props: Props) {
               {errMsg}
             </div>
           )}
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
-          <Button variant="ghost" onClick={props.onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={props.isPending} data-testid="esc-save">
-            {isEdit ? 'Save changes' : 'Create rule'}
-          </Button>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
