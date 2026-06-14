@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ShieldCheck,
@@ -11,6 +11,7 @@ import {
   Settings,
   KeyRound,
   Building2,
+  Menu,
 } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
@@ -89,6 +90,40 @@ export function AppShell() {
     }
     return 'Enterprise';
   })();
+
+  // Mobile nav drawer — sidebar collapses to a hamburger-triggered drawer < lg.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const location = useLocation();
+  // Close the drawer on any route change (covers nav-link clicks).
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+  // Escape closes + body-scroll lock while the drawer is open.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileNavOpen]);
+  // Crossing up to ≥ lg (e.g. tablet rotate / window resize) must close the
+  // drawer — otherwise the (now-hidden) backdrop would leave the desktop body
+  // scroll-locked.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => {
+      if (mq.matches) setMobileNavOpen(false);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // Enterprise user-menu dropdown — lives in the top navbar
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -180,7 +215,18 @@ export function AppShell() {
       </a>
 
       {/* ── SIDEBAR ──────────────────────────────────────────────────── */}
-      <aside className="w-[220px] shrink-0 bg-white flex flex-col border-r border-[#E5E7EB]">
+      {/* Always rendered; on < lg it is fixed + off-canvas (translate, NOT
+          display:none, so nav links stay in the a11y tree) and slides in when
+          the hamburger is tapped. On ≥ lg it is a static, always-visible rail. */}
+      <aside
+        data-testid="primary-sidebar"
+        className={cn(
+          'w-[220px] shrink-0 bg-white flex flex-col border-r border-[#E5E7EB]',
+          'fixed inset-y-0 left-0 z-40 transition-transform duration-200',
+          'lg:static lg:z-auto lg:translate-x-0',
+          mobileNavOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full lg:shadow-none',
+        )}
+      >
 
         {/* Logo */}
         <div className="h-[56px] px-4 flex items-center gap-3 border-b border-[#E5E7EB]">
@@ -237,14 +283,33 @@ export function AppShell() {
         {/* No sidebar footer — user profile moved to top navbar */}
       </aside>
 
+      {/* Mobile drawer backdrop — only rendered while open, only on < lg. */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          data-testid="mobile-nav-backdrop"
+          aria-hidden
+        />
+      )}
+
       {/* ── MAIN AREA ─────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Top Navbar */}
         <header className="h-[56px] shrink-0 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-5 gap-4">
 
-          {/* Left: search */}
+          {/* Left: hamburger (mobile) + search */}
           <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className="lg:hidden -ml-1 rounded-[8px] p-2 text-[#6B7280] hover:bg-[#F5F7FA] hover:text-[#4F46E5] transition-colors"
+              aria-label="Open navigation"
+              data-testid="mobile-nav-toggle"
+            >
+              <Menu size={18} strokeWidth={2} />
+            </button>
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
