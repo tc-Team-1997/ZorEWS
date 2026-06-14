@@ -74,7 +74,7 @@ export function EnterpriseDialog({
           <X size={18} aria-hidden />
         </button>
       </header>
-      <div className="px-6 py-6">{children}</div>
+      <div className="px-6 py-6 break-words">{children}</div>
       {footer && (
         <footer className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-aurora-line bg-white px-6 py-3">
           {footer}
