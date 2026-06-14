@@ -161,4 +161,26 @@ describe('Modal', () => {
     );
     expect(screen.getByTestId('m-content').className).toContain('max-w-2xl');
   });
+
+  it('traps Tab focus within the dialog (wraps at both ends)', () => {
+    render(
+      <Modal open onClose={vi.fn()} ariaLabel="x" testId="m" showCloseButton={false}>
+        <button>first</button>
+        <button>last</button>
+      </Modal>,
+    );
+    const first = screen.getByText('first');
+    const last = screen.getByText('last');
+
+    // Forward Tab from the last focusable wraps to the first.
+    last.focus();
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    // Shift+Tab from the first focusable wraps to the last.
+    first.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
 });

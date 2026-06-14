@@ -86,6 +86,32 @@ export function Modal({
       if (closeOnEsc && e.key === 'Escape') {
         e.stopPropagation();
         onClose();
+        return;
+      }
+      // Focus trap: keep Tab / Shift+Tab cycling INSIDE the dialog so keyboard
+      // users can't tab out to the (inert) page behind the modal.
+      if (e.key === 'Tab' && contentRef.current) {
+        const focusable = contentRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) {
+          // Nothing focusable inside — pin focus on the container itself.
+          e.preventDefault();
+          contentRef.current.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (active === first || active === contentRef.current) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener('keydown', handleKey);
