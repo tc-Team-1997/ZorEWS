@@ -28,9 +28,8 @@ import {
   ShieldCheck,
   Sparkles,
   UserPlus,
-  X,
 } from 'lucide-react';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, EnterpriseDialog, Panel } from '@/components/ui';
 import {
   cmsApi,
   type AttachmentPayload,
@@ -313,23 +312,14 @@ function EventDetailModal({
 }) {
   const meta = TYPE_META[event.type];
   return (
-    <div
-      role="dialog"
-      aria-label={`${meta.label} detail`}
-      data-testid={`tracking-modal-${event.event_id}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={meta.label}
+      size="lg"
+      testId={`tracking-modal-${event.event_id}`}
     >
-      <div
-        className="w-full max-w-md rounded-md bg-white p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-base font-semibold">{meta.label}</h3>
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <X size={14} />
-          </Button>
-        </div>
+      <div className="space-y-2">
         <ModalBody event={event} />
         <div className="mt-2 text-xs text-slate-500">
           Performed by <span className="font-medium">{event.actor}</span>{' '}
@@ -347,7 +337,7 @@ function EventDetailModal({
           </div>
         )}
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 

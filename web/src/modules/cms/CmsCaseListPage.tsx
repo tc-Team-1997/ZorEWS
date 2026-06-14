@@ -10,9 +10,8 @@ import {
   Search,
   UserPlus,
   Zap,
-  X,
 } from 'lucide-react';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExportButton } from '@/components/export/ExportButton';
 import { buildCasesReportData } from './casesReportAdapter';
@@ -589,36 +588,45 @@ function AutoEscalateSlaModal({
     },
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const view = result ?? plan;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Auto-escalate SLA breaches"
-      data-testid="cms-auto-escalate-modal"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title="Auto-escalate SLA breaches"
+      size="lg"
+      testId="cms-auto-escalate-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          cancelLabel="Close"
+          secondary={
+            !plan ? (
+              <Button
+                onClick={() => dryRunMut.mutate()}
+                disabled={dryRunMut.isPending}
+                data-testid="cms-auto-escalate-preview"
+              >
+                {dryRunMut.isPending ? 'Previewing…' : 'Preview'}
+              </Button>
+            ) : undefined
+          }
+          primary={
+            plan && !result && plan.candidates.length > 0 ? (
+              <Button
+                onClick={() => executeMut.mutate()}
+                disabled={executeMut.isPending}
+                data-testid="cms-auto-escalate-execute"
+              >
+                {executeMut.isPending ? 'Escalating…' : `Execute (${plan.candidates.length})`}
+              </Button>
+            ) : undefined
+          }
+        />
+      }
     >
-      <div
-        className="w-full max-w-4xl rounded-lg border border-slate-300 bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Auto-escalate SLA breaches</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-slate-100">
-            <X size={18} />
-          </button>
-        </div>
-
+      <div className="space-y-4">
         <p className="text-sm text-slate-600">
           Walks non-closed cases and escalates those whose SLA progress
           (elapsed ÷ total) reaches the threshold. Default lives at the
@@ -724,32 +732,8 @@ function AutoEscalateSlaModal({
             )}
           </div>
         )}
-
-        <div className="mt-6 flex justify-end gap-2 border-t border-slate-200 pt-4">
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-          {!plan && (
-            <Button
-              onClick={() => dryRunMut.mutate()}
-              disabled={dryRunMut.isPending}
-              data-testid="cms-auto-escalate-preview"
-            >
-              {dryRunMut.isPending ? 'Previewing…' : 'Preview'}
-            </Button>
-          )}
-          {plan && !result && plan.candidates.length > 0 && (
-            <Button
-              onClick={() => executeMut.mutate()}
-              disabled={executeMut.isPending}
-              data-testid="cms-auto-escalate-execute"
-            >
-              {executeMut.isPending ? 'Escalating…' : `Execute (${plan.candidates.length})`}
-            </Button>
-          )}
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 

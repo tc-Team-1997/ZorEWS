@@ -29,10 +29,9 @@ import {
   RefreshCw,
   Trash2,
   Workflow,
-  X,
   Zap,
 } from 'lucide-react';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, MetricCard, Panel } from '@/components/ui';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useAuth } from '@/store/auth';
 import { api, type AiModelRow, type AiPrompt, type PromptCategory } from '@/lib/api';
@@ -474,29 +473,28 @@ function PromptFormModal({
   const armed = name.trim().length >= 3 && body.trim().length >= 3;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={editing ? 'Edit prompt' : 'New prompt'}
-      data-testid="aiwb-prompt-form-modal"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={editing ? 'Edit prompt' : 'New prompt'}
+      size="md"
+      testId="aiwb-prompt-form-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button
+              onClick={() => saveMut.mutate()}
+              disabled={!armed || saveMut.isPending}
+              data-testid="aiwb-prompt-form-save"
+            >
+              {saveMut.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create prompt'}
+            </Button>
+          }
+        />
+      }
     >
-      <div
-        className="w-full max-w-2xl rounded-lg border border-divider bg-surface p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{editing ? 'Edit prompt' : 'New prompt'}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded p-1 hover:bg-divider/40"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="space-y-3">
+      <div className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-muted">Name</label>
             <input
@@ -565,21 +563,8 @@ function PromptFormModal({
               {error}
             </p>
           )}
-          <div className="flex justify-end gap-2 border-t border-divider pt-3">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => saveMut.mutate()}
-              disabled={!armed || saveMut.isPending}
-              data-testid="aiwb-prompt-form-save"
-            >
-              {saveMut.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create prompt'}
-            </Button>
-          </div>
         </div>
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 

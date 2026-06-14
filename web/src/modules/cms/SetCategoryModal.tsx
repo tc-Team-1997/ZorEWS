@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, DialogFooter, EnterpriseDialog } from '@/components/ui';
 import { api, type SlaConfigRow } from '@/lib/api';
 
 interface Props {
@@ -42,14 +41,6 @@ export function SetCategoryModal({
     return Array.from(set).sort();
   }, [slaConfigs.data?.items]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const submit = () => {
     const trimmed = category.trim();
     if (trimmed.length > 64) {
@@ -68,23 +59,25 @@ export function SetCategoryModal({
     validation ?? (error instanceof Error ? error.message : null);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Re-categorise case"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={`Re-categorise ${caseNumber}`}
+      size="md"
+      testId="set-category-dialog"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          cancelLabel="Cancel"
+          primary={
+            <Button onClick={submit} disabled={isPending} data-testid="set-category-save">
+              {isPending ? 'Saving…' : 'Save category'}
+            </Button>
+          }
+        />
+      }
     >
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h2 className="text-base font-semibold">
-            Re-categorise <span className="font-mono text-xs">{caseNumber}</span>
-          </h2>
-          <button onClick={onClose} aria-label="Close" className="p-1 hover:bg-slate-100 rounded">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-5 py-4 space-y-4 text-sm">
+      <div className="space-y-4 text-sm">
           <div className="bg-slate-50 border border-slate-200 rounded p-3 text-2xs">
             <div className="text-muted">Current category</div>
             <div className="font-mono text-xs mt-0.5">
@@ -141,17 +134,7 @@ export function SetCategoryModal({
               {errorMsg}
             </div>
           )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t bg-slate-50 rounded-b-lg">
-          <Button variant="secondary" onClick={onClose} disabled={isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={isPending} data-testid="set-category-save">
-            {isPending ? 'Saving…' : 'Save category'}
-          </Button>
-        </div>
       </div>
-    </div>
+    </EnterpriseDialog>
   );
 }

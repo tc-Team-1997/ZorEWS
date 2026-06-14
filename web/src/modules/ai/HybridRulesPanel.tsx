@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Pencil, Plus, Power, RefreshCw, Trash2, X } from 'lucide-react';
-import { Badge, Button, MetricCard, Panel } from '@/components/ui';
+import { Badge, Button, DialogFooter, EnterpriseDialog, MetricCard, Panel } from '@/components/ui';
 import {
   api,
   type HybridActionShape,
@@ -382,26 +382,28 @@ function HybridRuleFormModal({
     setConditions((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={editing ? 'Edit hybrid rule' : 'New hybrid rule'}
-      data-testid="aiwb-hybrid-form-modal"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={editing ? 'Edit hybrid rule' : 'New hybrid rule'}
+      size="md"
+      testId="aiwb-hybrid-form-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          primary={
+            <Button
+              onClick={() => saveMut.mutate()}
+              disabled={!allValid || saveMut.isPending}
+              data-testid="aiwb-hybrid-form-save"
+            >
+              {saveMut.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create rule'}
+            </Button>
+          }
+        />
+      }
     >
-      <div
-        className="w-full max-w-2xl rounded-lg border border-divider bg-surface p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{editing ? 'Edit hybrid rule' : 'New hybrid rule'}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-divider/40">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
+      <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase text-muted">Name</label>
@@ -573,22 +575,8 @@ function HybridRuleFormModal({
               {error}
             </p>
           )}
-
-          <div className="flex justify-end gap-2 border-t border-divider pt-3">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => saveMut.mutate()}
-              disabled={!allValid || saveMut.isPending}
-              data-testid="aiwb-hybrid-form-save"
-            >
-              {saveMut.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create rule'}
-            </Button>
-          </div>
         </div>
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
 
@@ -632,25 +620,28 @@ function HybridDryRunModal({ rule, onClose }: { rule: HybridRuleShape; onClose: 
   const scoreKeys = Object.keys(scores);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Dry-run hybrid rule"
-      data-testid="aiwb-hybrid-dryrun-modal"
-      onClick={onClose}
+    <EnterpriseDialog
+      open
+      onClose={onClose}
+      title={`Dry-run: ${rule.name}`}
+      size="lg"
+      testId="aiwb-hybrid-dryrun-modal"
+      footer={
+        <DialogFooter
+          onCancel={onClose}
+          cancelLabel="Close"
+          primary={
+            <Button
+              onClick={() => runMut.mutate()}
+              disabled={runMut.isPending}
+              data-testid="aiwb-hybrid-dryrun-run"
+            >
+              <FlaskConical size={14} /> {runMut.isPending ? 'Evaluating…' : 'Evaluate'}
+            </Button>
+          }
+        />
+      }
     >
-      <div
-        className="w-full max-w-2xl rounded-lg border border-divider bg-surface p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Dry-run: {rule.name}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-divider/40">
-            <X size={18} />
-          </button>
-        </div>
-
         <code className="block text-xs font-mono text-ink/80 bg-divider/10 rounded px-2 py-1.5 mb-4">
           {exprOf(rule)}
         </code>
@@ -700,16 +691,6 @@ function HybridDryRunModal({ rule, onClose }: { rule: HybridRuleShape; onClose: 
           )}
         </div>
 
-        <div className="flex justify-end gap-2 mb-4">
-          <Button
-            onClick={() => runMut.mutate()}
-            disabled={runMut.isPending}
-            data-testid="aiwb-hybrid-dryrun-run"
-          >
-            <FlaskConical size={14} /> {runMut.isPending ? 'Evaluating…' : 'Evaluate'}
-          </Button>
-        </div>
-
         {result && (
           <div data-testid="aiwb-hybrid-dryrun-result">
             <div
@@ -754,7 +735,6 @@ function HybridDryRunModal({ rule, onClose }: { rule: HybridRuleShape; onClose: 
             </table>
           </div>
         )}
-      </div>
-    </div>
+    </EnterpriseDialog>
   );
 }
