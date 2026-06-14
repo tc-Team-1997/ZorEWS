@@ -30248,6 +30248,8 @@ export function makeApp(deps: AppDeps = {}) {
         title: String(b.title ?? ''),
         status: b.status === 'failed' ? 'failed' : 'completed',
         config: (b.config ?? { formats: [b.format], report_type: b.report_type, date_range: 'unknown', data_scope: 'unknown', include: {} }) as ExportRecordInput['config'],
+        artifact_base64: typeof b.artifact_base64 === 'string' ? b.artifact_base64 : undefined,
+        content_type: typeof b.content_type === 'string' ? b.content_type : undefined,
       };
       try {
         const rec = exportHistoryStore.add(tenant_id, recInput, now(), ++_exportSeq);
@@ -30304,6 +30306,27 @@ export function makeApp(deps: AppDeps = {}) {
         return res.status(404).json(wrapError({ code: 'EWS_404_unknown_export', message: `unknown export: ${req.params.export_id}`, severity: 'LOW' }, ctx));
       }
       return res.json(wrapResponse(rec, ctx));
+    },
+  );
+
+  // Byte-identical re-download of a stored artifact (P4 — closes the §11
+  // re-download caveat). 404 when no artifact is held for this export.
+  // Registered after /:export_id; the extra /download segment means Express
+  // routes them distinctly (the JSON /:export_id route still resolves).
+  app.get(
+    '/v1/exports/:export_id/download',
+    requireTenantMw,
+    requireRole('reports:export'),
+    (req: Request, res: Response) => {
+      const ctx = extractCtx(req, now);
+      const art = exportHistoryStore.getArtifact(req.tenant!.tenant_id, req.params.export_id);
+      if (!art) {
+        return res.status(404).json(wrapError({ code: 'EWS_404_no_artifact', message: 'no stored artifact for this export', severity: 'LOW' }, ctx));
+      }
+      const buf = Buffer.from(art.base64, 'base64');
+      res.setHeader('Content-Type', art.content_type);
+      res.setHeader('Content-Disposition', `attachment; filename="export-${req.params.export_id}"`);
+      return res.status(200).send(buf);
     },
   );
 

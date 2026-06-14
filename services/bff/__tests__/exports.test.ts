@@ -170,3 +170,34 @@ describe('export artifact storage', () => {
     expect(s.getArtifact('BIL', rec.export_id)).toBeNull();
   });
 });
+
+describe('POST artifact + GET /:id/download', () => {
+  beforeEach(() => _resetDefaultExportHistoryStore());
+  test('POST with artifact → download returns the bytes + content-type', async () => {
+    const { app } = makeApp({});
+    const created = await request(app).post('/v1/exports').set(adminHeaders())
+      .send({ ...body(), artifact_base64: Buffer.from('hello,world').toString('base64'), content_type: 'text/csv' });
+    expect(created.body.body.has_artifact).toBe(true);
+    const id = created.body.body.export_id;
+    const dl = await request(app).get(`/v1/exports/${id}/download`).set(adminHeaders());
+    expect(dl.status).toBe(200);
+    expect(dl.headers['content-type']).toContain('text/csv');
+    expect(dl.headers['content-disposition']).toContain('attachment');
+    expect(dl.text).toBe('hello,world');
+  });
+  test('download 404 when no artifact stored', async () => {
+    const { app } = makeApp({});
+    const created = await request(app).post('/v1/exports').set(adminHeaders()).send(body());
+    const id = created.body.body.export_id;
+    const dl = await request(app).get(`/v1/exports/${id}/download`).set(adminHeaders());
+    expect(dl.status).toBe(404);
+  });
+  test('download 403 without reports:export', async () => {
+    const { app } = makeApp({});
+    const created = await request(app).post('/v1/exports').set(adminHeaders())
+      .send({ ...body(), artifact_base64: Buffer.from('x').toString('base64'), content_type: 'text/csv' });
+    const id = created.body.body.export_id;
+    const dl = await request(app).get(`/v1/exports/${id}/download`).set({ ...adminHeaders(), 'x-apex-role': 'field_officer' });
+    expect(dl.status).toBe(403);
+  });
+});
