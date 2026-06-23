@@ -110,7 +110,7 @@ function SourceRow({
 
       {expanded && (
         <div className="px-4 pb-3 bg-[#FAFAFA] border-t border-[#F3F4F6]">
-          <div className="grid grid-cols-3 gap-3 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
             <div>
               <p className="text-[9px] font-bold text-[#9CA3AF] uppercase tracking-wide mb-1">Metrics</p>
               <p className="text-[10.5px] text-[#374151]">p50: {metrics.p50LatencyMs ?? '—'}ms</p>
@@ -243,7 +243,7 @@ export function IntegrationReadinessPage() {
             </div>
           </div>
           {/* Quick stats */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: 'Readiness Score', value: `${report?.overallScore ?? 0}/100`, color: (report?.overallScore ?? 0) >= 80 ? 'text-green-600' : 'text-amber-600' },
               { label: 'Sources Live', value: `${modeSummary.sourcesLive}/${modeSummary.totalSources}`, color: 'text-[#4F46E5]' },
@@ -366,7 +366,7 @@ export function IntegrationReadinessPage() {
         {/* ── FRESHNESS tab ── */}
         {activeTab === 'freshness' && (
           <div className="p-4">
-            <div className="grid grid-cols-5 gap-2 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
               {(['fresh','aging','stale','critical','unknown'] as const).map(s => {
                 const count = freshnessRecs.filter(r => r.status === s).length;
                 const colors = FRESHNESS_COLORS[s];

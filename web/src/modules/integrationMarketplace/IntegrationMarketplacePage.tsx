@@ -417,7 +417,7 @@ export function IntegrationMarketplacePage() {
                       <span className="text-xs font-bold text-indigo-700">{p.compliance_rating}</span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-1 text-xs text-center">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 text-xs text-center">
                     <div className="p-1 bg-slate-50 rounded"><p className="font-bold text-slate-800">{p.performance_score}</p><p className="text-slate-500">Score</p></div>
                     <div className="p-1 bg-slate-50 rounded"><p className="font-bold text-slate-800">{fmtPct(p.sla_met_pct)}</p><p className="text-slate-500">SLA met</p></div>
                     <div className={`p-1 rounded ${expiryDays < 60 ? 'bg-amber-50' : 'bg-slate-50'}`}><p className={`font-bold ${expiryDays < 60 ? 'text-amber-700' : 'text-slate-800'}`}>{expiryDays}d</p><p className="text-slate-500">Expiry</p></div>

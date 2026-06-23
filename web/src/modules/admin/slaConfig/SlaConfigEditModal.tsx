@@ -97,7 +97,7 @@ export function SlaConfigEditModal({ row, onClose, onSubmit, isPending, error }:
     >
       <div className="space-y-4 text-sm">
           <div className="bg-slate-50 border border-slate-200 rounded p-3 text-xs">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               <div>
                 <div className="text-2xs uppercase text-muted">Category</div>
                 <div className="font-mono text-xs">{row.case_category}</div>

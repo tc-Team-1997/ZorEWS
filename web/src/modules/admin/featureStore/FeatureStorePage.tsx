@@ -141,7 +141,7 @@ function FeatureHistoryMiniChart({
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <div className="grid grid-cols-3 gap-1 text-[10px]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 text-[10px]">
         <div>
           <div className="text-muted">min</div>
           <div className="font-mono">{h.min !== null ? fmtValue(feature, h.min) : '—'}</div>

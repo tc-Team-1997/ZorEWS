@@ -364,7 +364,7 @@ function AddDefinitionModal({
             <span className="text-xs font-medium text-slate-600">Key column (join field)</span>
             <input value={keyField} onChange={(e) => setKeyField(e.target.value)} className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5 font-mono" placeholder="loan_id" />
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             <label className="block">
               <span className="text-xs font-medium text-slate-600">Kind</span>
               <select value={kind} onChange={(e) => setKind(e.target.value as ReconKind)} className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5">
@@ -501,7 +501,7 @@ function ReconDetailModal({
                       ) : null}
                     </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
                     <Stat label="Source" value={r.source_count.toLocaleString()} />
                     <Stat label="Target" value={r.target_count.toLocaleString()} />
                     <Stat label="Matched" value={r.matched_count.toLocaleString()} />

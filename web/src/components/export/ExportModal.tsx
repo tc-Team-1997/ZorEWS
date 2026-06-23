@@ -127,7 +127,7 @@ export function ExportModal({ open, onClose, adapter, module, defaultReportType 
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <label className="text-sm">Report Type
             <select className="input mt-1" value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)} data-testid="export-report-type">
               {REPORT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -147,7 +147,7 @@ export function ExportModal({ open, onClose, adapter, module, defaultReportType 
 
         <div>
           <div className="text-sm font-medium mb-2">Include Sections</div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {SECTIONS.map((sec) => (
               <label key={sec.key} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" data-testid={`export-section-${sec.key}`} checked={include[sec.key]}

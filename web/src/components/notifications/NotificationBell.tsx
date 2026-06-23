@@ -168,7 +168,7 @@ function AiSummaryStrip({
         </div>
       </div>
       {/* Mini KPI strip */}
-      <div className="mt-2 grid grid-cols-4 gap-1">
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1">
         {[
           { label: 'Critical', count: critical, color: 'text-red-600 bg-red-50' },
           { label: 'Cases', count: pending, color: 'text-orange-600 bg-orange-50' },

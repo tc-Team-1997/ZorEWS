@@ -244,7 +244,7 @@ function SecretRevealDialog({
           Store it before closing — it cannot be retrieved later.
         </p>
       </div>
-      <dl className="grid grid-cols-3 gap-2 text-[12px] mb-3">
+      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-[12px] mb-3">
         <dt className="text-muted">tenant_id</dt>
         <dd className="col-span-2 font-mono text-ink">{client.tenant_id}</dd>
         <dt className="text-muted">client_id</dt>

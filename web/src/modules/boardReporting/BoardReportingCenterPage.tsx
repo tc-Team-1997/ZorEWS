@@ -526,7 +526,7 @@ export function BoardReportingCenterPage() {
                     <p className="text-xs font-semibold text-slate-800">{report.title}</p>
                     <span className={`text-xs px-1.5 py-0.5 rounded font-medium uppercase ${report.stress_level === 'severe' ? 'bg-red-100 text-red-700' : report.stress_level === 'moderate' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{report.stress_level}</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mb-2 text-xs text-center">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-2 text-xs text-center">
                     <div className="p-1.5 bg-white/60 rounded"><p className="font-bold text-slate-800">{report.scenarios_included}</p><p className="text-slate-500">Scenarios</p></div>
                     <div className="p-1.5 bg-white/60 rounded"><p className="font-bold text-red-600">+{report.worst_case_npa_impact_pp}pp</p><p className="text-slate-500">NPA Impact</p></div>
                     <div className="p-1.5 bg-white/60 rounded"><p className="font-bold text-red-600">₹{(report.worst_case_ecl_increase_cr / 100).toFixed(1)}Cr</p><p className="text-slate-500">ECL Increase</p></div>

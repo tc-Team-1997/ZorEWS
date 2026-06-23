@@ -775,7 +775,7 @@ export function AiDecisioningCenterPage() {
                 </RadarChart>
               </ResponsiveContainer>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-center text-xs">
                 {[
                   { label: 'Integration Points', value: '18 centers' },
                   { label: 'Decision Types', value: '15 active' },

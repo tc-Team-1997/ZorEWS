@@ -446,7 +446,7 @@ export function EventStreamingCenterPage() {
                   <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${proc.status === 'running' ? 'bg-green-50 text-green-700' : proc.status === 'paused' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{proc.status}</span>
                 </div>
                 <p className="text-xs text-slate-500 mb-2 line-clamp-2">{proc.description}</p>
-                <div className="grid grid-cols-3 gap-1 text-xs text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 text-xs text-center">
                   <div className="p-1 bg-slate-50 rounded"><p className="font-bold text-slate-800">{fmtInt(proc.events_processed_24h)}</p><p className="text-slate-500">Processed</p></div>
                   <div className="p-1 bg-violet-50 rounded"><p className="font-bold text-violet-700">{proc.patterns_detected_24h}</p><p className="text-slate-500">Patterns</p></div>
                   <div className="p-1 bg-amber-50 rounded"><p className="font-bold text-amber-700">{proc.alerts_generated_24h}</p><p className="text-slate-500">Alerts</p></div>

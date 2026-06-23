@@ -409,7 +409,7 @@ export function AutonomousRiskCenterPage() {
               <span className="text-sm font-semibold text-slate-800">Insurance Fraud Agent</span>
               <RiskBadge level="critical" />
             </div>
-            <div className="grid grid-cols-3 gap-1 mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 mb-2">
               {[
                 { label: 'Rings', value: insurance.fraud.organized_fraud_rings_detected },
                 { label: 'Collusion', value: insurance.fraud.provider_collusion_cases },
@@ -474,7 +474,7 @@ export function AutonomousRiskCenterPage() {
               </span>
             </div>
             <ProgressBar value={enterprise.compliance.compliance_score} color="#10B981" height={4} />
-            <div className="mt-2 grid grid-cols-3 gap-1 text-center text-xs">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 text-center text-xs">
               <div className="p-1 bg-green-50 rounded"><span className="font-bold text-green-700">{enterprise.compliance.compliant_count}</span><p className="text-slate-500">OK</p></div>
               <div className="p-1 bg-amber-50 rounded"><span className="font-bold text-amber-700">{enterprise.compliance.at_risk_count}</span><p className="text-slate-500">Risk</p></div>
               <div className="p-1 bg-red-50 rounded"><span className="font-bold text-red-700">{enterprise.compliance.breached_count}</span><p className="text-slate-500">Breach</p></div>
@@ -773,7 +773,7 @@ export function AutonomousRiskCenterPage() {
               ))}
             </ul>
             <p className="text-xs font-semibold text-slate-700 mb-2">Investigation Status</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-center">
               {[
                 { label: 'Active', value: activeBriefing.investigation_status.total_active },
                 { label: 'High Priority', value: activeBriefing.investigation_status.high_priority },

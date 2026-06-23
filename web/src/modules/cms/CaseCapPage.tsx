@@ -178,7 +178,7 @@ export function CaseCapPage() {
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Total Actions', value: items.length, color: 'text-[#4F46E5]' },
           { label: 'Open / Active', value: openCount, color: openCount > 0 ? 'text-amber-600' : 'text-green-600' },
@@ -241,7 +241,7 @@ export function CaseCapPage() {
                   </div>
 
                   {/* Details grid */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div>
                       <p className="text-[9px] font-bold text-[#9CA3AF] uppercase tracking-wide mb-1">Owner</p>
                       <div className="flex items-center gap-1.5">

@@ -321,7 +321,7 @@ function ShareModal({ layout, onClose }: { layout: DashboardLayout; onClose: () 
         {/* Access levels */}
         <div className="border-t border-[#F3F4F6] pt-4">
           <p className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wide mb-2">Layout Visibility</p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {([['private','Private','Lock',],[['team','Team','Users',],['org','Organisation','Globe',]]] as const).flat().map(([val, label, icon]) => {
               const Icon = icon === 'Lock' ? Lock : icon === 'Users' ? Users : Globe;
               return (
@@ -681,7 +681,7 @@ export function DashboardBuilderPage() {
               </div>
               {/* Template grid */}
               <p className="text-[11px] text-[#9CA3AF] mb-3">Or start from a role template:</p>
-              <div className="grid grid-cols-4 gap-2 max-w-[600px]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 max-w-[600px]">
                 {ROLE_TEMPLATES.map(t => (
                   <button key={t.id} onClick={() => { createNew(t.id as RoleTemplateId); }}
                     className="flex flex-col items-center gap-1.5 p-3 rounded-[10px] border border-[#E5E7EB] hover:border-[#4F46E5] hover:bg-[#EEF2FF]/30 transition-all text-center">

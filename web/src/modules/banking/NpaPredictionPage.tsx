@@ -305,7 +305,7 @@ function ManageModelModal({ onClose }: { onClose: () => void }) {
               {data.metrics && (
                 <div>
                   <div className="text-xs text-ink-subtle mb-1">Performance metrics</div>
-                  <div className="rounded border border-divider p-2 grid grid-cols-3 gap-3 text-sm">
+                  <div className="rounded border border-divider p-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
                     {data.metrics.auc !== undefined && (
                       <div>
                         <div className="text-xs text-ink-subtle">AUC</div>
@@ -393,7 +393,7 @@ function DataLineageModal({ datasetId, onClose }: { datasetId: string; onClose: 
                 {data.description && (
                   <div className="text-xs text-ink-subtle mt-1">{data.description}</div>
                 )}
-                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                   {data.owner && (
                     <div>
                       <span className="text-ink-subtle">Owner:</span> {data.owner}

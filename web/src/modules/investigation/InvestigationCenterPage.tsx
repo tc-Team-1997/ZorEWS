@@ -769,7 +769,7 @@ export function InvestigationCenterPage() {
             </ul>
           </div>
         </div>
-        <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
           <MetricCard label="SLA compliance" value={fmtPct(execView.investigation_performance.sla_compliance_rate)} testId="exec-kpi-sla" />
           <MetricCard label="Avg resolution" value={`${execView.investigation_performance.avg_resolution_days.toFixed(1)}d`} testId="exec-kpi-avg" />
           <MetricCard label="Closure rate 30d" value={fmtPct(execView.investigation_performance.closure_rate_30d)} testId="exec-kpi-closure" />

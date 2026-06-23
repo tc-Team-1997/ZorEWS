@@ -148,7 +148,7 @@ function ExecutiveBriefingWidget({ tenant_id, userName }: { tenant_id: string; u
           <p className="text-[12px] text-[#6B7280] mt-0.5">{brief.headline}</p>
         </div>
         {/* KPI changes */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {brief.changes.map((c) => (
             <div key={c.label} className="bg-[#F9FAFB] rounded-[8px] px-2.5 py-2">
               <p className="text-[10px] text-gray-500 mb-0.5">{c.label}</p>
@@ -259,7 +259,7 @@ function EnterpriseHeatMap({ tenant_id }: { tenant_id: string; domain: 'banking'
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {cells.map((c) => (
             <div key={c.label}
               className="rounded-[8px] p-2.5 border border-[#E5E7EB] text-center"
@@ -338,7 +338,7 @@ function AlertRadarWidget({ tenant_id }: { tenant_id: string }) {
   return (
     <SectionCard title="Alert Radar" icon={Zap} href="/alerts">
       <div className="p-4 space-y-3">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {radar.map(r => (
             <div key={r.severity} className="text-center rounded-[8px] p-2.5 bg-gray-50 border border-gray-100">
               <p className="text-[9px] font-semibold uppercase tracking-wide mb-1"
@@ -398,7 +398,7 @@ function InvestigationHealthWidget({ tenant_id }: { tenant_id: string }) {
           <span className={cn('text-[12px] font-semibold', TREND_CLR)}>{TREND_ICON} {health.trend}</span>
           <span className="text-[11px] text-gray-400">· {health.open} active investigations</span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {ITEMS.map(({ label, value, alert }) => (
             <div key={label} className={cn('rounded-[8px] p-2.5 text-center border',
               alert ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100')}>

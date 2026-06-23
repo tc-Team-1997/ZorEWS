@@ -61,7 +61,7 @@ export function RecoveryStatsCard() {
       )}
       {q.data && (
         <>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <Stat label="Recoverable" value={q.data.by_status.archived} tone="warning" />
             <Stat label="Restored" value={q.data.by_status.restored} tone="success" />
             <Stat label="Permanently deleted" value={q.data.by_status.purged} tone="muted" />

@@ -192,7 +192,7 @@ export function PortfolioInsightsRow() {
           <p className="text-sm text-muted">Loading…</p>
         ) : ingestion.data ? (
           <div className="space-y-2.5">
-            <div className="grid grid-cols-4 gap-2 text-2xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-2xs">
               {(['healthy', 'degraded', 'failing', 'paused'] as const).map((s) => (
                 <div
                   key={s}

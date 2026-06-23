@@ -241,7 +241,7 @@ function CreateExperimentModal({ onClose, onCreated }: { onClose: () => void; on
           </Field>
         </div>
         <Field label="Dataset ref"><Input value={datasetRef} onChange={(e) => setDatasetRef(e.target.value)} data-testid="exp-c-dataset_ref" /></Field>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Rows"><Input value={datasetRows} onChange={(e) => setDatasetRows(e.target.value)} data-testid="exp-c-dataset_rows" /></Field>
           <Field label="Owner"><Input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="dsci.alice" data-testid="exp-c-owner" /></Field>
           <Field label="AUC (opt)"><Input value={auc} onChange={(e) => setAuc(e.target.value)} placeholder="0.842" data-testid="exp-c-auc" /></Field>

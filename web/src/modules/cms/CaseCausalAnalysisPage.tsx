@@ -158,7 +158,7 @@ export function CaseCausalAnalysisPage() {
       />
 
       {/* Summary strip */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {[
           { label: 'CAS Records', value: records.length, color: 'text-[#4F46E5]' },
           { label: 'Pending Review', value: pendingCount, color: pendingCount > 0 ? 'text-amber-600' : 'text-green-600' },

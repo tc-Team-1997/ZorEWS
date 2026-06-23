@@ -510,7 +510,7 @@ function SimulatorTab() {
           </Panel>
 
           <Panel title="By severity" data-testid="re-sim-severity-panel">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <MetricCard label="Critical" value={result.by_severity.critical.toString()} tone="danger" />
               <MetricCard label="High" value={result.by_severity.high.toString()} tone="danger" />
               <MetricCard label="Medium" value={result.by_severity.medium.toString()} tone="warning" />

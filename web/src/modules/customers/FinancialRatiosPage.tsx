@@ -475,7 +475,7 @@ function RatioDetailModal({
         <div className="p-4 space-y-4">
           {slice && (
             <>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <div className="text-xs text-ink-muted">Current</div>
                   <div className="text-xl font-mono">{fmtVal(slice.current.value, def?.unit ?? '×')}</div>
