@@ -30,7 +30,11 @@ export function DataTable<T extends { id: number | string }>({
 }) {
   return (
     <div className="overflow-hidden rounded-[14px] border border-aurora-line bg-white shadow-sm">
-      <table className="w-full text-sm">
+      {/* Inner layer scrolls horizontally below the table's natural min-width so
+          wide tables stay reachable on narrow viewports instead of being clipped
+          by the rounded border container. */}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
         <thead>
           <tr className="bg-aurora-canvas border-b border-aurora-line">
             {columns.map((col) => (
@@ -88,7 +92,8 @@ export function DataTable<T extends { id: number | string }>({
             })
           )}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }
