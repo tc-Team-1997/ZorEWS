@@ -386,7 +386,7 @@ function DiffBody({
                 {r.kind}
               </Badge>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <pre className="overflow-x-auto rounded bg-rose-50 p-1 text-rose-800">
                 {JSON.stringify(r.before, null, 2)}
               </pre>

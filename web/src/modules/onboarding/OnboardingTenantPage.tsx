@@ -121,7 +121,7 @@ export function OnboardingTenantPage() {
           </p>
 
           {/* Locked context summary */}
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <ContextChip
               icon={<Globe2 size={11} />}
               label="Country"
@@ -180,7 +180,7 @@ export function OnboardingTenantPage() {
         {/* Region */}
         {chosenOrg && (
           <Section label="Region" icon={<Compass size={12} />}>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {regions.map((r) => (
                 <PillButton
                   key={r}
@@ -198,7 +198,7 @@ export function OnboardingTenantPage() {
         {/* Branch */}
         {chosenOrg && region && (
           <Section label="Branch / Division" icon={<MapPin size={12} />}>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {branches.map((b) => (
                 <PillButton
                   key={b}

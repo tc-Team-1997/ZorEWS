@@ -107,7 +107,7 @@ function EnterpriseRiskIndexWidget({ tenant_id }: { tenant_id: string }) {
               <Target size={13} className="text-gray-400" />
               <span className="text-[12px] text-gray-600">Confidence: {eri.confidence}%</span>
             </div>
-            <div className="grid grid-cols-2 gap-1.5 mt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-3">
               {eri.dimensions.map(d => (
                 <div key={d.name} className="flex items-center justify-between bg-gray-50 rounded-[6px] px-2 py-1">
                   <span className="text-[10px] text-gray-500 truncate mr-1">{d.name.replace(' Risk', '')}</span>
@@ -617,13 +617,13 @@ export function EnterpriseCommandCenter() {
         <div className="flex-1 min-w-0 space-y-4">
 
           {/* Row 1 — Risk Index + Briefing */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <EnterpriseRiskIndexWidget tenant_id={tenant_id} />
             <ExecutiveBriefingWidget tenant_id={tenant_id} userName={userName} />
           </div>
 
           {/* Row 2 — Emerging Risks + Forecast */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <EmergingRisksWidget tenant_id={tenant_id} />
             <ForecastStrip tenant_id={tenant_id} />
           </div>
@@ -632,13 +632,13 @@ export function EnterpriseCommandCenter() {
           <EnterpriseHeatMap tenant_id={tenant_id} domain={domainCast} />
 
           {/* Row 4 — Alert Radar + Investigation Health */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <AlertRadarWidget tenant_id={tenant_id} />
             <InvestigationHealthWidget tenant_id={tenant_id} />
           </div>
 
           {/* Row 5 — Regulatory + Benchmarking */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <RegulatoryReadinessWidget tenant_id={tenant_id} />
             <TenantBenchmarkWidget tenant_id={tenant_id} domain={domainCast} />
           </div>

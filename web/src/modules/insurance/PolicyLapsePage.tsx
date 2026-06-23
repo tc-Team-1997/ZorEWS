@@ -303,7 +303,7 @@ function PredictModal({ onClose }: { onClose: () => void }) {
         <Field label="Customer ID">
           <input className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Missed instalments (12m)">
             <input
               type="number"

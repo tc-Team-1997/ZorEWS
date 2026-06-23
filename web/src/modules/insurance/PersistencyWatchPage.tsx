@@ -241,7 +241,7 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
           <h2 className="section-title">Root-cause analysis</h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Dimension">
             <select className="input" value={dimension} onChange={(e) => setDimension(e.target.value)}>
               <option value="product">Product</option>

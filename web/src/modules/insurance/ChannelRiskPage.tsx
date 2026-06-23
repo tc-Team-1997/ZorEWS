@@ -295,7 +295,7 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
           <h2 className="section-title">Analyze agent risk</h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Channel">
             <select className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
               {['agent', 'broker', 'bancassurance', 'direct', 'online'].map((c) => (

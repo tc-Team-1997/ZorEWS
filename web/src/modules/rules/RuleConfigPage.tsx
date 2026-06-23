@@ -1024,7 +1024,7 @@ function PerformancePanel({ perf, state }: { perf: RulePerformance; state: RuleV
           tone={perf.false_positive_rate > 50 ? 'danger' : 'neutral'}
         />
       </div>
-      <div className="mt-3 pt-3 border-t border-divider grid grid-cols-2 gap-3 text-[12px]">
+      <div className="mt-3 pt-3 border-t border-divider grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
         <div>
           <p className="text-muted">Avg days to default after alert</p>
           <p className="text-ink font-medium tabular">{perf.avg_days_to_default} days</p>

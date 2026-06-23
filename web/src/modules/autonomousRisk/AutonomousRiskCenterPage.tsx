@@ -294,7 +294,7 @@ export function AutonomousRiskCenterPage() {
               <span className="text-sm font-semibold text-slate-800">Credit Risk Agent</span>
               <RiskBadge level={banking.credit_risk.npa_risk_count > 500 ? 'high' : 'medium'} />
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
               <div className="text-center p-2 bg-blue-50 rounded">
                 <p className="text-lg font-bold text-blue-700">{fmtInt(banking.credit_risk.deteriorating_count)}</p>
                 <p className="text-xs text-slate-500">Deteriorating</p>
@@ -320,7 +320,7 @@ export function AutonomousRiskCenterPage() {
               <span className="text-sm font-semibold text-slate-800">Fraud Detection Agent</span>
               <RiskBadge level="high" />
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
               <div className="text-center p-2 bg-red-50 rounded">
                 <p className="text-lg font-bold text-red-700">{fmtInt(banking.fraud.fraud_signals_24h)}</p>
                 <p className="text-xs text-slate-500">Signals 24h</p>
@@ -390,7 +390,7 @@ export function AutonomousRiskCenterPage() {
               <span className="text-sm font-semibold text-slate-800">Claims Agent</span>
               <RiskBadge level={insurance.claims.suspicious_claims_count > 200 ? 'high' : 'medium'} />
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
               <div className="text-center p-2 bg-teal-50 rounded">
                 <p className="text-lg font-bold text-teal-700">{fmtInt(insurance.claims.suspicious_claims_count)}</p>
                 <p className="text-xs text-slate-500">Suspicious</p>
@@ -487,7 +487,7 @@ export function AutonomousRiskCenterPage() {
               <span className="text-sm font-semibold text-slate-800">Investigation Agent</span>
               <RiskBadge level={enterprise.investigation.high_priority_count > 5 ? 'high' : 'medium'} />
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
               <div className="text-center p-1.5 bg-indigo-50 rounded">
                 <p className="text-lg font-bold text-indigo-700">{enterprise.investigation.active_investigations}</p>
                 <p className="text-xs text-slate-500">Active</p>
@@ -550,7 +550,7 @@ export function AutonomousRiskCenterPage() {
               </span>
             </div>
             <ProgressBar value={enterprise.governance.governance_score} color="#8B5CF6" height={4} />
-            <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
               <div><span className="text-slate-500">Violations: </span><span className="font-medium text-red-600">{enterprise.governance.policy_violations_detected}</span></div>
               <div><span className="text-slate-500">Board compliance: </span><span className="font-medium">{fmtPct(enterprise.governance.board_policy_compliance_pct)}</span></div>
             </div>

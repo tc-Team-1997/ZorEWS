@@ -228,7 +228,7 @@ function CreateExperimentModal({ onClose, onCreated }: { onClose: () => void; on
       <h2 className="mb-4 text-lg font-semibold">Log experiment run</h2>
       <div className="space-y-3">
         <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="XGBoost PD v4 sweep" data-testid="exp-c-name" /></Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Domain">
             <select value={domain} onChange={(e) => setDomain(e.target.value as ExperimentDomainShape)} data-testid="exp-c-domain" className="w-full rounded border border-divider bg-surface px-2 py-1.5 text-sm">
               {DOMAINS.map((d) => <option key={d} value={d}>{d}</option>)}

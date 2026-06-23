@@ -117,7 +117,7 @@ export function SectorWatchPage() {
                   <h3 className="font-semibold">{cell.sector.replace(/_/g, ' ')}</h3>
                   {cell.is_watchlisted && <Star className="size-4 fill-current" aria-label="Watchlisted" />}
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                   <div>
                     <div className="text-xs uppercase opacity-70">NPA Ratio</div>
                     <div className="text-xl font-bold tabular-nums">{cell.npa_ratio_pct.toFixed(2)}%</div>

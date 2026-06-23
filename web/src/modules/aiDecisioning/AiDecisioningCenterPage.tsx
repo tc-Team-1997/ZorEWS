@@ -566,7 +566,7 @@ export function AiDecisioningCenterPage() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { label: 'Transparency Score', value: `${explainReport.transparency_score}/100` },
                   { label: 'Traceability Score', value: `${explainReport.traceability_score}/100` },

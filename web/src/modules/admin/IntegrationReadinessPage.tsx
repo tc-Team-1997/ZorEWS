@@ -425,7 +425,7 @@ export function IntegrationReadinessPage() {
                   {expandLineage === entry.sourceId ? <ChevronDown size={12} className="text-[#9CA3AF]" /> : <ChevronRight size={12} className="text-[#9CA3AF]" />}
                 </button>
                 {expandLineage === entry.sourceId && (
-                  <div className="px-4 pb-4 border-t border-[#F3F4F6] grid grid-cols-2 gap-4 pt-3">
+                  <div className="px-4 pb-4 border-t border-[#F3F4F6] grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3">
                     <div>
                       <p className="text-[9px] font-bold text-[#9CA3AF] uppercase tracking-wide mb-1">Upstream Systems</p>
                       {entry.upstreamSystems.map((s, i) => <p key={i} className="text-[10.5px] text-[#374151]">← {s}</p>)}

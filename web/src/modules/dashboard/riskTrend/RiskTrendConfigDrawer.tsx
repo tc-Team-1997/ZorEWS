@@ -127,7 +127,7 @@ function SectionDomains({ config, onChange }: { config: RiskTrendConfig; onChang
     <div>
       <h3 className="text-sm font-semibold text-slate-800 mb-3">Select Risk Domains</h3>
       <p className="text-xs text-slate-500 mb-4">Choose the risk domains to include in the trend analysis. At least one must be selected.</p>
-      <div className="grid grid-cols-2 gap-2" data-testid="domain-grid">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="domain-grid">
         {ALL_DOMAINS.map((d) => {
           const active = config.domains.includes(d);
           return (
@@ -341,7 +341,7 @@ function SectionSources({ config, onChange }: { config: RiskTrendConfig; onChang
     <div>
       <h3 className="text-sm font-semibold text-slate-800 mb-3">Alert Sources</h3>
       <p className="text-xs text-slate-500 mb-4">Filter alerts to only those originating from selected sources.</p>
-      <div className="grid grid-cols-2 gap-2" data-testid="sources-grid">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="sources-grid">
         {ALL_SOURCES.map((s) => {
           const active = config.sources.includes(s);
           return (

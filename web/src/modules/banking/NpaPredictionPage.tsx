@@ -271,7 +271,7 @@ function ManageModelModal({ onClose }: { onClose: () => void }) {
           )}
           {data && (
             <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <div className="text-xs text-ink-subtle">Name</div>
                   <div className="font-medium">{data.name}</div>
@@ -699,7 +699,7 @@ function BacktestModal({ onClose }: { onClose: () => void }) {
               </div>
 
               <Panel title="Confusion matrix">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="rounded border border-success/30 bg-success/5 p-3">
                     <div className="text-xs text-ink-subtle">True Positive</div>
                     <div className="text-2xl font-semibold tabular-nums">{body.confusion.tp.toLocaleString()}</div>

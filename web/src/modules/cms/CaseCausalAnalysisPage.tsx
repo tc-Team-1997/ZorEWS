@@ -215,7 +215,7 @@ export function CaseCausalAnalysisPage() {
                 </div>
 
                 {/* Audit trail */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-wide mb-2">Submission</p>
                     <div className="flex items-center gap-2">

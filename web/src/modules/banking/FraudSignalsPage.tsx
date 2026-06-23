@@ -324,7 +324,7 @@ function CaseDetailModal({
         </div>
 
         <div className="p-4 space-y-4 text-sm">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <KV label="Customer" value={case_.customer_id ?? '—'} />
             <KV label="Account" value={case_.account_id ?? '—'} />
             <KV label="Detected at" value={new Date(case_.detected_at).toLocaleString()} />
@@ -340,7 +340,7 @@ function CaseDetailModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <KV
               label="SAR (Suspicious Activity Report)"
               value={

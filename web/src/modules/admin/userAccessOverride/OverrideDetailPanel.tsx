@@ -60,7 +60,7 @@ export function OverrideDetailPanel({ override, onClose, onChange }: Props) {
       testId="uao-detail-dialog"
     >
       <div className="space-y-4 text-sm">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="User">{override.user_id}</Field>
             <Field label="Status">
               <Badge tone={statusTone(override.status)} className="uppercase">

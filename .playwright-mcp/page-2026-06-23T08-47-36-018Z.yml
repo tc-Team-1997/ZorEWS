@@ -1,0 +1,1089 @@
+- generic [ref=e3]:
+  - link "Skip to main content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: ZorEWS
+        - paragraph [ref=e13]: Early Warning System
+    - navigation "Primary" [ref=e14]:
+      - list [ref=e15]:
+        - listitem [ref=e16]:
+          - link "Dashboard" [ref=e17] [cursor=pointer]:
+            - /url: /
+            - img [ref=e18]
+            - generic [ref=e23]: Dashboard
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - button "Data Cleaning" [expanded] [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - img [ref=e28]
+              - generic [ref=e32]: Data Cleaning
+            - img [ref=e33]
+          - list [ref=e35]:
+            - listitem [ref=e36]:
+              - link "Data ingestion" [ref=e37] [cursor=pointer]:
+                - /url: /admin/ingestion
+                - img [ref=e38]
+                - generic [ref=e42]: Data ingestion
+            - listitem [ref=e43]:
+              - link "Data profiling (AI)" [ref=e44] [cursor=pointer]:
+                - /url: /admin/data-profiling
+                - img [ref=e45]
+                - generic [ref=e57]: Data profiling (AI)
+            - listitem [ref=e58]:
+              - link "Anomaly detection (AI)" [ref=e59] [cursor=pointer]:
+                - /url: /admin/anomalies
+                - img [ref=e60]
+                - generic [ref=e62]: Anomaly detection (AI)
+            - listitem [ref=e63]:
+              - link "Reconciliation" [ref=e64] [cursor=pointer]:
+                - /url: /admin/reconciliation
+                - img [ref=e65]
+                - generic [ref=e69]: Reconciliation
+            - listitem [ref=e70]:
+              - link "DQ score" [ref=e71] [cursor=pointer]:
+                - /url: /admin/dq-score
+                - img [ref=e72]
+                - generic [ref=e75]: DQ score
+            - listitem [ref=e76]:
+              - link "Streaming Latency" [ref=e77] [cursor=pointer]:
+                - /url: /admin/streaming-latency
+                - img [ref=e78]
+                - generic [ref=e81]: Streaming Latency
+            - listitem [ref=e82]:
+              - link "Integration Readiness" [ref=e83] [cursor=pointer]:
+                - /url: /admin/integration-readiness
+                - img [ref=e84]
+                - generic [ref=e86]: Integration Readiness
+        - generic [ref=e87]:
+          - button "Bank — Early Warning" [expanded] [ref=e88] [cursor=pointer]:
+            - generic [ref=e89]:
+              - img [ref=e90]
+              - generic [ref=e93]: Bank — Early Warning
+            - img [ref=e94]
+          - list [ref=e96]:
+            - listitem [ref=e97]:
+              - link "Borrower watch" [ref=e98] [cursor=pointer]:
+                - /url: /borrower-watch
+                - img [ref=e99]
+                - generic [ref=e102]: Borrower watch
+            - listitem [ref=e103]:
+              - link "Account behaviour" [ref=e104] [cursor=pointer]:
+                - /url: /account-behaviour
+                - img [ref=e105]
+                - generic [ref=e107]: Account behaviour
+            - listitem [ref=e108]:
+              - link "Financial ratios" [ref=e109] [cursor=pointer]:
+                - /url: /financial-ratios
+                - img [ref=e110]
+                - generic [ref=e112]: Financial ratios
+            - listitem [ref=e113]:
+              - link "SMA Classification" [ref=e114] [cursor=pointer]:
+                - /url: /banking/sma
+                - img [ref=e115]
+                - generic [ref=e118]: SMA Classification
+            - listitem [ref=e119]:
+              - link "NPA Prediction" [ref=e120] [cursor=pointer]:
+                - /url: /banking/npa-prediction
+                - img [ref=e121]
+                - generic [ref=e133]: NPA Prediction
+            - listitem [ref=e134]:
+              - link "Fraud signals" [ref=e135] [cursor=pointer]:
+                - /url: /fraud-signals
+                - img [ref=e136]
+                - generic [ref=e138]: Fraud signals
+            - listitem [ref=e139]:
+              - link "Sector Watch" [ref=e140] [cursor=pointer]:
+                - /url: /banking/sectors
+                - img [ref=e141]
+                - generic [ref=e143]: Sector Watch
+            - listitem [ref=e144]:
+              - link "Collections Risk" [ref=e145] [cursor=pointer]:
+                - /url: /collections-risk
+                - img [ref=e146]
+                - generic [ref=e152]: Collections Risk
+            - listitem [ref=e153]:
+              - link "Borrower Timeline" [ref=e154] [cursor=pointer]:
+                - /url: /borrower-timeline
+                - img [ref=e155]
+                - generic [ref=e159]: Borrower Timeline
+            - listitem [ref=e160]:
+              - link "Branch & Geography Risk" [ref=e161] [cursor=pointer]:
+                - /url: /branch-heatmap
+                - img [ref=e162]
+                - generic [ref=e164]: Branch & Geography Risk
+            - listitem [ref=e165]:
+              - link "Customers" [ref=e166] [cursor=pointer]:
+                - /url: /customers
+                - img [ref=e167]
+                - generic [ref=e172]: Customers
+        - generic [ref=e173]:
+          - button "Insurance — Early Warning" [expanded] [ref=e174] [cursor=pointer]:
+            - generic [ref=e175]:
+              - img [ref=e176]
+              - generic [ref=e179]: Insurance — Early Warning
+            - img [ref=e180]
+          - list [ref=e182]:
+            - listitem [ref=e183]:
+              - link "Policy Lapse Risk" [ref=e184] [cursor=pointer]:
+                - /url: /insurance/policy-lapse
+                - img [ref=e185]
+                - generic [ref=e188]: Policy Lapse Risk
+            - listitem [ref=e189]:
+              - link "Claims Anomaly" [ref=e190] [cursor=pointer]:
+                - /url: /insurance/claims-anomaly
+                - img [ref=e191]
+                - generic [ref=e193]: Claims Anomaly
+            - listitem [ref=e194]:
+              - link "Fraud Detection" [ref=e195] [cursor=pointer]:
+                - /url: /insurance/fraud
+                - img [ref=e196]
+                - generic [ref=e200]: Fraud Detection
+            - listitem [ref=e201]:
+              - link "Solvency Watch" [ref=e202] [cursor=pointer]:
+                - /url: /insurance/solvency
+                - img [ref=e203]
+                - generic [ref=e206]: Solvency Watch
+            - listitem [ref=e207]:
+              - link "Persistency Watch" [ref=e208] [cursor=pointer]:
+                - /url: /insurance/persistency
+                - img [ref=e209]
+                - generic [ref=e211]: Persistency Watch
+            - listitem [ref=e212]:
+              - link "Underwriting Deviation" [ref=e213] [cursor=pointer]:
+                - /url: /insurance/underwriting
+                - img [ref=e214]
+                - generic [ref=e215]: Underwriting Deviation
+            - listitem [ref=e216]:
+              - link "Channel Risk" [ref=e217] [cursor=pointer]:
+                - /url: /insurance/channel-risk
+                - img [ref=e218]
+                - generic [ref=e223]: Channel Risk
+            - listitem [ref=e224]:
+              - link "Claim Investigation" [ref=e225] [cursor=pointer]:
+                - /url: /insurance/claim-investigation
+                - img [ref=e226]
+                - generic [ref=e231]: Claim Investigation
+            - listitem [ref=e232]:
+              - link "Policy Timeline" [ref=e233] [cursor=pointer]:
+                - /url: /insurance/policy-timeline
+                - img [ref=e234]
+                - generic [ref=e238]: Policy Timeline
+            - listitem [ref=e239]:
+              - link "Insurance Heatmaps" [ref=e240] [cursor=pointer]:
+                - /url: /insurance/heatmaps
+                - img [ref=e241]
+                - generic [ref=e243]: Insurance Heatmaps
+        - generic [ref=e244]:
+          - button "Action Center" [expanded] [ref=e245] [cursor=pointer]:
+            - generic [ref=e246]:
+              - img [ref=e247]
+              - generic [ref=e250]: Action Center
+            - img [ref=e251]
+          - list [ref=e253]:
+            - listitem [ref=e254]:
+              - link "Role Dashboard" [ref=e255] [cursor=pointer]:
+                - /url: /dashboards/role-based
+                - img [ref=e256]
+                - generic [ref=e261]: Role Dashboard
+            - listitem [ref=e262]:
+              - link "Dashboard Builder" [ref=e263] [cursor=pointer]:
+                - /url: /dashboards/builder
+                - img [ref=e264]
+                - generic [ref=e269]: Dashboard Builder
+            - listitem [ref=e270]:
+              - link "Executive Cockpit" [ref=e271] [cursor=pointer]:
+                - /url: /executive-cockpit
+                - img [ref=e272]
+                - generic [ref=e274]: Executive Cockpit
+            - listitem [ref=e275]:
+              - link "Predictive Risk Center" [ref=e276] [cursor=pointer]:
+                - /url: /predictive-risk-center
+                - img [ref=e277]
+                - generic [ref=e284]: Predictive Risk Center
+            - listitem [ref=e285]:
+              - link "Investigation Center" [ref=e286] [cursor=pointer]:
+                - /url: /investigation-center
+                - img [ref=e287]
+                - generic [ref=e290]: Investigation Center
+            - listitem [ref=e291]:
+              - link "Regulatory Compliance Center" [ref=e292] [cursor=pointer]:
+                - /url: /regulatory-compliance-center
+                - img [ref=e293]
+                - generic [ref=e299]: Regulatory Compliance Center
+            - listitem [ref=e300]:
+              - link "Data Fabric Center" [ref=e301] [cursor=pointer]:
+                - /url: /data-fabric-center
+                - img [ref=e302]
+                - generic [ref=e308]: Data Fabric Center
+            - listitem [ref=e309]:
+              - link "Enterprise Demo Foundation" [ref=e310] [cursor=pointer]:
+                - /url: /enterprise-demo-center
+                - img [ref=e311]
+                - generic [ref=e313]: Enterprise Demo Foundation
+            - listitem [ref=e314]:
+              - link "Demo Readiness & UAT" [ref=e315] [cursor=pointer]:
+                - /url: /demo-readiness-center
+                - img [ref=e316]
+                - generic [ref=e320]: Demo Readiness & UAT
+            - listitem [ref=e321]:
+              - link "Digital Twin Simulation" [ref=e322] [cursor=pointer]:
+                - /url: /digital-twin-center
+                - img [ref=e323]
+                - generic [ref=e326]: Digital Twin Simulation
+            - listitem [ref=e327]:
+              - link "Autonomous Risk Center" [ref=e328] [cursor=pointer]:
+                - /url: /autonomous-risk-center
+                - img [ref=e329]
+                - generic [ref=e332]: Autonomous Risk Center
+            - listitem [ref=e333]:
+              - link "AI Decisioning Center" [ref=e334] [cursor=pointer]:
+                - /url: /ai-decisioning-center
+                - img [ref=e335]
+                - generic [ref=e347]: AI Decisioning Center
+            - listitem [ref=e348]:
+              - link "Integration Marketplace" [ref=e349] [cursor=pointer]:
+                - /url: /integration-marketplace
+                - img [ref=e350]
+                - generic [ref=e352]: Integration Marketplace
+            - listitem [ref=e353]:
+              - link "Board Reporting Center" [ref=e354] [cursor=pointer]:
+                - /url: /board-reporting-center
+                - img [ref=e355]
+                - generic [ref=e358]: Board Reporting Center
+            - listitem [ref=e359]:
+              - link "Event Streaming Center" [ref=e360] [cursor=pointer]:
+                - /url: /event-streaming-center
+                - img [ref=e361]
+                - generic [ref=e363]: Event Streaming Center
+            - listitem [ref=e364]:
+              - link "Operations Center" [ref=e365] [cursor=pointer]:
+                - /url: /operations-center
+                - img [ref=e366]
+                - generic [ref=e377]: Operations Center
+            - listitem [ref=e378]:
+              - link "Risk Intelligence Hub" [ref=e379] [cursor=pointer]:
+                - /url: /risk-intelligence
+                - img [ref=e380]
+                - generic [ref=e390]: Risk Intelligence Hub
+            - listitem [ref=e391]:
+              - link "Alerts" [ref=e392] [cursor=pointer]:
+                - /url: /alerts
+                - img [ref=e393]
+                - generic [ref=e396]: Alerts
+            - listitem [ref=e397]:
+              - link "Case Management" [ref=e398] [cursor=pointer]:
+                - /url: /cms/cases
+                - img [ref=e399]
+                - generic [ref=e402]: Case Management
+            - listitem [ref=e403]:
+              - link "Case Workflow" [ref=e404] [cursor=pointer]:
+                - /url: /cms/workflow
+                - img [ref=e405]
+                - generic [ref=e409]: Case Workflow
+            - listitem [ref=e410]:
+              - link "Reports" [ref=e411] [cursor=pointer]:
+                - /url: /reports
+                - img [ref=e412]
+                - generic [ref=e415]: Reports
+            - listitem [ref=e416]:
+              - link "Report Builder" [ref=e417] [cursor=pointer]:
+                - /url: /reports/builder
+                - img [ref=e418]
+                - generic [ref=e421]: Report Builder
+            - listitem [ref=e422]:
+              - link "Export History" [ref=e423] [cursor=pointer]:
+                - /url: /admin/exports
+                - img [ref=e424]
+                - generic [ref=e428]: Export History
+            - listitem [ref=e429]:
+              - link "Analytics" [ref=e430] [cursor=pointer]:
+                - /url: /analytics
+                - img [ref=e431]
+                - generic [ref=e434]: Analytics
+            - listitem [ref=e435]:
+              - link "Scenario" [ref=e436] [cursor=pointer]:
+                - /url: /scenario
+                - img [ref=e437]
+                - generic [ref=e439]: Scenario
+            - listitem [ref=e440]:
+              - link "Case scenarios" [ref=e441] [cursor=pointer]:
+                - /url: /admin/case-scenarios
+                - img [ref=e442]
+                - generic [ref=e444]: Case scenarios
+            - listitem [ref=e445]:
+              - link "Notification dispatches" [ref=e446] [cursor=pointer]:
+                - /url: /admin/notification-dispatches
+                - img [ref=e447]
+                - generic [ref=e450]: Notification dispatches
+        - generic [ref=e451]:
+          - button "AI Workbench" [expanded] [ref=e452] [cursor=pointer]:
+            - generic [ref=e453]:
+              - img [ref=e454]
+              - generic [ref=e457]: AI Workbench
+            - img [ref=e458]
+          - list [ref=e460]:
+            - listitem [ref=e461]:
+              - link "AI Workbench" [ref=e462] [cursor=pointer]:
+                - /url: /ai/workbench
+                - img [ref=e463]
+                - generic [ref=e466]: AI Workbench
+            - listitem [ref=e467]:
+              - link "Explainability" [ref=e468] [cursor=pointer]:
+                - /url: /ai/workbench/explainability
+                - img [ref=e469]
+                - generic [ref=e473]: Explainability
+            - listitem [ref=e474]:
+              - link "Model Registry" [ref=e475] [cursor=pointer]:
+                - /url: /ai/registry
+                - img [ref=e476]
+                - generic [ref=e486]: Model Registry
+            - listitem [ref=e487]:
+              - link "Experiment Tracking" [ref=e488] [cursor=pointer]:
+                - /url: /ai/experiments
+                - img [ref=e489]
+                - generic [ref=e491]: Experiment Tracking
+            - listitem [ref=e492]:
+              - link "Drift Detection" [ref=e493] [cursor=pointer]:
+                - /url: /ai/drift
+                - img [ref=e494]
+                - generic [ref=e496]: Drift Detection
+            - listitem [ref=e497]:
+              - link "AI Insights" [ref=e498] [cursor=pointer]:
+                - /url: /ai/insights
+                - img [ref=e499]
+                - generic [ref=e511]: AI Insights
+            - listitem [ref=e512]:
+              - link "Feature Store" [ref=e513] [cursor=pointer]:
+                - /url: /admin/feature-store
+                - img [ref=e514]
+                - generic [ref=e518]: Feature Store
+            - listitem [ref=e519]:
+              - link "AI Governance Center" [ref=e520] [cursor=pointer]:
+                - /url: /ai/governance
+                - img [ref=e521]
+                - generic [ref=e524]: AI Governance Center
+        - generic [ref=e525]:
+          - button "Configuration" [expanded] [ref=e526] [cursor=pointer]:
+            - generic [ref=e527]:
+              - img [ref=e528]
+              - generic [ref=e539]: Configuration
+            - img [ref=e540]
+          - list [ref=e542]:
+            - listitem [ref=e543]:
+              - link "Master Setup" [ref=e544] [cursor=pointer]:
+                - /url: /admin/master-setup
+                - img [ref=e545]
+                - generic [ref=e547]: Master Setup
+            - listitem [ref=e548]:
+              - link "Governance Center" [ref=e549] [cursor=pointer]:
+                - /url: /admin/governance
+                - img [ref=e550]
+                - generic [ref=e553]: Governance Center
+            - listitem [ref=e554]:
+              - link "Risk Score Config" [ref=e555] [cursor=pointer]:
+                - /url: /admin/risk-score-config
+                - img [ref=e556]
+                - generic [ref=e560]: Risk Score Config
+            - listitem [ref=e561]:
+              - link "Alert Classification" [ref=e562] [cursor=pointer]:
+                - /url: /admin/alert-classification
+                - img [ref=e563]
+                - generic [ref=e565]: Alert Classification
+            - listitem [ref=e566]:
+              - link "Case Management Setup" [ref=e567] [cursor=pointer]:
+                - /url: /admin/case-types
+                - img [ref=e568]
+                - generic [ref=e571]: Case Management Setup
+            - listitem [ref=e572]:
+              - link "Job & Scheduler" [ref=e573] [cursor=pointer]:
+                - /url: /admin/job-scheduler
+                - img [ref=e574]
+                - generic [ref=e577]: Job & Scheduler
+            - listitem [ref=e578]:
+              - link "Access Control" [ref=e579] [cursor=pointer]:
+                - /url: /admin/access-control
+                - img [ref=e580]
+                - generic [ref=e584]: Access Control
+            - listitem [ref=e585]:
+              - link "Rule Center" [ref=e586] [cursor=pointer]:
+                - /url: /rule-center
+                - img [ref=e587]
+                - generic [ref=e598]: Rule Center
+            - listitem [ref=e599]:
+              - link "Thresholds & Limits" [ref=e600] [cursor=pointer]:
+                - /url: /admin/thresholds-limits
+                - img [ref=e601]
+                - generic [ref=e604]: Thresholds & Limits
+            - listitem [ref=e605]:
+              - link "Workflows" [ref=e606] [cursor=pointer]:
+                - /url: /admin/workflows
+                - img [ref=e607]
+                - generic [ref=e611]: Workflows
+            - listitem [ref=e612]:
+              - link "Integrations" [ref=e613] [cursor=pointer]:
+                - /url: /admin/integrations
+                - img [ref=e614]
+                - generic [ref=e616]: Integrations
+            - listitem [ref=e617]:
+              - link "Webhooks" [ref=e618] [cursor=pointer]:
+                - /url: /admin/webhooks
+                - img [ref=e619]
+                - generic [ref=e623]: Webhooks
+        - generic [ref=e624]:
+          - button "Admin" [expanded] [ref=e625] [cursor=pointer]:
+            - generic [ref=e626]:
+              - img [ref=e627]
+              - generic [ref=e630]: Admin
+            - img [ref=e631]
+          - list [ref=e633]:
+            - listitem [ref=e634]:
+              - link "Users" [ref=e635] [cursor=pointer]:
+                - /url: /admin/users
+                - img [ref=e636]
+                - generic [ref=e640]: Users
+            - listitem [ref=e641]:
+              - link "Security Activity Center" [ref=e642] [cursor=pointer]:
+                - /url: /admin/security
+                - img [ref=e643]
+                - generic [ref=e646]: Security Activity Center
+            - listitem [ref=e647]:
+              - link "IAM Center" [ref=e648] [cursor=pointer]:
+                - /url: /admin/iam
+                - img [ref=e649]
+                - generic [ref=e661]: IAM Center
+            - listitem [ref=e662]:
+              - link "Audit Center" [ref=e663] [cursor=pointer]:
+                - /url: /audit-center
+                - img [ref=e664]
+                - generic [ref=e666]: Audit Center
+            - listitem [ref=e667]:
+              - link "Testing Hub" [ref=e668] [cursor=pointer]:
+                - /url: /admin/testing-hub
+                - img [ref=e669]
+                - generic [ref=e671]: Testing Hub
+            - listitem [ref=e672]:
+              - link "Glossary" [ref=e673] [cursor=pointer]:
+                - /url: /glossary
+                - img [ref=e674]
+                - generic [ref=e676]: Glossary
+            - listitem [ref=e677]:
+              - link "Tenants" [ref=e678] [cursor=pointer]:
+                - /url: /admin/tenants
+                - img [ref=e679]
+                - generic [ref=e683]: Tenants
+            - listitem [ref=e684]:
+              - link "Service clients" [ref=e685] [cursor=pointer]:
+                - /url: /admin/service-clients
+                - img [ref=e686]
+                - generic [ref=e690]: Service clients
+            - listitem [ref=e691]:
+              - link "User access override" [ref=e692] [cursor=pointer]:
+                - /url: /admin/user-access-override
+                - img [ref=e693]
+                - generic [ref=e696]: User access override
+            - listitem [ref=e697]:
+              - link "Escalation worker" [ref=e698] [cursor=pointer]:
+                - /url: /admin/escalation-worker
+                - img [ref=e699]
+                - generic [ref=e702]: Escalation worker
+            - listitem [ref=e703]:
+              - link "Recovery Center" [ref=e704] [cursor=pointer]:
+                - /url: /recovery-center
+                - img [ref=e705]
+                - generic [ref=e708]: Recovery Center
+  - generic [ref=e709]:
+    - banner [ref=e710]:
+      - button "Open command palette" [ref=e712] [cursor=pointer]:
+        - img [ref=e713]
+        - generic [ref=e716]: Search…
+        - generic [ref=e717]: ⌘K
+      - generic [ref=e718]:
+        - generic [ref=e719]:
+          - radiogroup "Vertical mode" [ref=e720]:
+            - radio "BANK" [checked] [ref=e721] [cursor=pointer]:
+              - img [ref=e722]
+              - text: BANK
+            - radio "INSURANCE" [ref=e725] [cursor=pointer]:
+              - img [ref=e726]
+              - text: INSURANCE
+          - generic [ref=e729]:
+            - img [ref=e730]
+            - generic [ref=e733]: Language
+            - combobox "Language" [ref=e734]:
+              - option "English" [selected]
+              - option "हिन्दी"
+              - option "རྫོང་ཁ"
+              - option "नेपाली"
+        - button "Notifications (0 unread, 0 active scenarios)" [ref=e736] [cursor=pointer]:
+          - img [ref=e737]
+        - button "AA Alice Mwangi admin" [ref=e743] [cursor=pointer]:
+          - generic [ref=e744]: AA
+          - generic [ref=e745]:
+            - paragraph [ref=e746]: Alice Mwangi
+            - paragraph [ref=e747]: admin
+          - img [ref=e748]
+    - main [ref=e750]:
+      - generic [ref=e751]:
+        - generic [ref=e753]:
+          - generic [ref=e754]:
+            - heading "EWS Dashboard — Banking" [level=1] [ref=e755]
+            - paragraph [ref=e756]: Real-time Early Warning Intelligence · Updated 02:47 pm, Tue, 23 Jun
+          - generic [ref=e757]:
+            - generic [ref=e760]:
+              - paragraph [ref=e761]: State Bank of India
+              - paragraph [ref=e762]: Banking · SBI
+            - button "Export" [ref=e763] [cursor=pointer]:
+              - img [ref=e764]
+              - text: Export
+            - link "Executive Cockpit" [ref=e767] [cursor=pointer]:
+              - /url: /executive-cockpit
+              - text: Executive Cockpit
+              - img [ref=e768]
+        - generic [ref=e773] [cursor=pointer]:
+          - generic [ref=e774]:
+            - img [ref=e775]
+            - generic [ref=e777]: About This Dashboard
+          - generic [ref=e778]:
+            - link "AI Explain Dashboard" [ref=e779]:
+              - /url: /predictive-risk-center
+              - img [ref=e780]
+              - text: AI Explain Dashboard
+            - link "Glossary" [ref=e783]:
+              - /url: /glossary
+              - img [ref=e784]
+              - text: Glossary
+            - img [ref=e786]
+        - generic [ref=e788]:
+          - 'link "Critical Alerts: 4" [ref=e789] [cursor=pointer]':
+            - /url: /alerts
+            - paragraph [ref=e790]: Critical Alerts
+            - paragraph [ref=e791]: "4"
+            - generic [ref=e792]: requires immediate action
+          - 'link "Open Cases: 30" [ref=e793] [cursor=pointer]':
+            - /url: /cms/cases
+            - paragraph [ref=e794]: Open Cases
+            - paragraph [ref=e795]: "30"
+            - generic [ref=e796]: across all queues
+          - 'link "High-Risk Accounts: 85" [ref=e797] [cursor=pointer]':
+            - /url: /customers?level=High&pdMin=0.5
+            - paragraph [ref=e798]: High-Risk Accounts
+            - paragraph [ref=e799]: "85"
+            - generic [ref=e800]: PD ≥ 0.5
+          - 'link "Active Alerts: 0" [ref=e801] [cursor=pointer]':
+            - /url: /alerts
+            - paragraph [ref=e802]: Active Alerts
+            - paragraph [ref=e803]: "0"
+            - generic [ref=e804]: unresolved
+          - 'link "SLA Breaches: 0" [ref=e805] [cursor=pointer]':
+            - /url: /cms/cases?breached=true
+            - paragraph [ref=e806]: SLA Breaches
+            - paragraph [ref=e807]: "0"
+            - generic [ref=e808]: 0 approaching
+          - 'link "Recovery Actions: 7" [ref=e809] [cursor=pointer]':
+            - /url: /recovery-center
+            - paragraph [ref=e810]: Recovery Actions
+            - paragraph [ref=e811]: "7"
+            - generic [ref=e812]: pending review
+          - 'link "Compliance Gaps: 4" [ref=e813] [cursor=pointer]':
+            - /url: /regulatory-compliance-center
+            - paragraph [ref=e814]: Compliance Gaps
+            - paragraph [ref=e815]: "4"
+            - generic [ref=e816]: regulators flagged
+          - 'link "Customers Monitored: 0" [ref=e817] [cursor=pointer]':
+            - /url: /customers
+            - paragraph [ref=e818]: Customers Monitored
+            - paragraph [ref=e819]: "0"
+            - generic [ref=e820]: all portfolios
+        - generic [ref=e821]:
+          - generic [ref=e822]:
+            - generic [ref=e823]:
+              - img [ref=e824]
+              - generic [ref=e826]: Top Emerging Risks — Right Now
+            - link "Full Analysis" [ref=e827] [cursor=pointer]:
+              - /url: /predictive-risk-center
+              - text: Full Analysis
+              - img [ref=e828]
+          - generic [ref=e830]:
+            - generic [ref=e831]:
+              - generic [ref=e832]:
+                - paragraph [ref=e833]: MSME Portfolio Stress
+                - generic [ref=e834]: high
+              - generic [ref=e835]:
+                - generic [ref=e836]: Banking
+                - generic [ref=e837]: ·
+                - generic [ref=e838]: 21d to material
+              - paragraph [ref=e839]: ₹124 Cr exposure
+              - generic [ref=e840]:
+                - img [ref=e841]
+                - generic [ref=e844]: accelerating · 81% conf
+            - generic [ref=e845]:
+              - generic [ref=e846]:
+                - paragraph [ref=e847]: Claims Inflation Spike
+                - generic [ref=e848]: high
+              - generic [ref=e849]:
+                - generic [ref=e850]: Insurance
+                - generic [ref=e851]: ·
+                - generic [ref=e852]: 14d to material
+              - paragraph [ref=e853]: ₹38 Cr at risk
+              - generic [ref=e854]:
+                - img [ref=e855]
+                - generic [ref=e858]: accelerating · 77% conf
+            - generic [ref=e859]:
+              - generic [ref=e860]:
+                - paragraph [ref=e861]: Fraud Cluster — North
+                - generic [ref=e862]: critical
+              - generic [ref=e863]:
+                - generic [ref=e864]: Banking
+                - generic [ref=e865]: ·
+                - generic [ref=e866]: 7d to material
+              - paragraph [ref=e867]: ₹9.4 Cr exposed
+              - generic [ref=e868]:
+                - img [ref=e869]
+                - generic [ref=e872]: accelerating · 94% conf
+            - generic [ref=e873]:
+              - generic [ref=e874]:
+                - paragraph [ref=e875]: Liquidity Gap — Q3
+                - generic [ref=e876]: medium
+              - generic [ref=e877]:
+                - generic [ref=e878]: Banking
+                - generic [ref=e879]: ·
+                - generic [ref=e880]: 45d to material
+              - paragraph [ref=e881]: ₹280 Cr buffer risk
+              - generic [ref=e882]:
+                - img [ref=e883]
+                - generic [ref=e884]: stable · 63% conf
+            - generic [ref=e885]:
+              - generic [ref=e886]:
+                - paragraph [ref=e887]: Persistency Decline
+                - generic [ref=e888]: medium
+              - generic [ref=e889]:
+                - generic [ref=e890]: Insurance
+                - generic [ref=e891]: ·
+                - generic [ref=e892]: 60d to material
+              - paragraph [ref=e893]: ₹17 Cr GWP at risk
+              - generic [ref=e894]:
+                - img [ref=e895]
+                - generic [ref=e898]: decelerating · 72% conf
+            - generic [ref=e899]:
+              - generic [ref=e900]:
+                - paragraph [ref=e901]: Cross-border AML Signal
+                - generic [ref=e902]: high
+              - generic [ref=e903]:
+                - generic [ref=e904]: Cross-domain
+                - generic [ref=e905]: ·
+                - generic [ref=e906]: 10d to material
+              - paragraph [ref=e907]: Regulatory action
+              - generic [ref=e908]:
+                - img [ref=e909]
+                - generic [ref=e912]: accelerating · 83% conf
+        - generic [ref=e915]: Operational Analytics
+        - generic [ref=e917]:
+          - generic [ref=e918]:
+            - generic [ref=e919]:
+              - heading "Portfolio PD trend · 30 days" [level=2] [ref=e920]
+              - tablist "Time range" [ref=e921]:
+                - tab "7D" [ref=e922] [cursor=pointer]
+                - tab "30D" [selected] [ref=e923] [cursor=pointer]
+                - tab "90D" [ref=e924] [cursor=pointer]
+                - tab "All" [ref=e925] [cursor=pointer]
+            - paragraph [ref=e926]: Click any point to drill into that week's severity mix, top firing rules, and most-affected customers.
+            - img [ref=e930]
+          - generic [ref=e934]:
+            - heading "Active alerts by severity" [level=2] [ref=e936]
+            - paragraph [ref=e937]: Click a bar to drill into top rules, customers, age distribution, and assignment status.
+            - img [ref=e941]
+        - generic [ref=e945]:
+          - generic [ref=e946]:
+            - heading "Alert analytics" [level=2] [ref=e947]:
+              - generic [ref=e948]:
+                - img [ref=e949]
+                - text: Alert analytics
+            - button "Configure" [ref=e951] [cursor=pointer]:
+              - img [ref=e952]
+              - text: Configure
+          - generic [ref=e955]: Loading…
+        - generic [ref=e958]: Executive Intelligence
+        - generic [ref=e960]:
+          - generic [ref=e962]:
+            - generic [ref=e963]:
+              - generic [ref=e964]:
+                - img [ref=e965]
+                - generic [ref=e967]: Executive Briefing
+              - link "Full Cockpit" [ref=e968] [cursor=pointer]:
+                - /url: /executive-cockpit
+                - text: Full Cockpit
+                - img [ref=e969]
+            - generic [ref=e971]:
+              - generic [ref=e972]:
+                - paragraph [ref=e973]: Today's Movement
+                - generic [ref=e974]:
+                  - generic [ref=e975]:
+                    - generic [ref=e976]: Risk Score
+                    - generic [ref=e977]:
+                      - generic [ref=e978]: "64"
+                      - generic [ref=e979]: −3
+                  - generic [ref=e980]:
+                    - generic [ref=e981]: Active Alerts
+                    - generic [ref=e982]:
+                      - generic [ref=e983]: "134"
+                      - generic [ref=e984]: "+10"
+                  - generic [ref=e985]:
+                    - generic [ref=e986]: Open Cases
+                    - generic [ref=e987]:
+                      - generic [ref=e988]: "37"
+                      - generic [ref=e989]: "+7"
+                  - generic [ref=e990]:
+                    - generic [ref=e991]: Compliance Score
+                    - generic [ref=e992]:
+                      - generic [ref=e993]: 81%
+                      - generic [ref=e994]: +0.2%
+                  - generic [ref=e995]:
+                    - generic [ref=e996]: Security Events
+                    - generic [ref=e997]:
+                      - generic [ref=e998]: "6"
+                      - generic [ref=e999]: −3
+                  - generic [ref=e1000]:
+                    - generic [ref=e1001]: Recovery Actions
+                    - generic [ref=e1002]:
+                      - generic [ref=e1003]: "2"
+                      - generic [ref=e1004]: "+2"
+              - generic [ref=e1005]:
+                - paragraph [ref=e1006]: Priorities
+                - generic [ref=e1007]:
+                  - generic [ref=e1008]:
+                    - generic [ref=e1009]: "1"
+                    - paragraph [ref=e1010]: Review 3 critical fraud alerts in MSME portfolio
+                  - generic [ref=e1011]:
+                    - generic [ref=e1012]: "2"
+                    - paragraph [ref=e1013]: Approve 2 case escalations pending maker-checker
+                  - generic [ref=e1014]:
+                    - generic [ref=e1015]: "3"
+                    - paragraph [ref=e1016]: RBI quarterly compliance filing due in 4 days
+                  - button "+2 more" [ref=e1017] [cursor=pointer]
+              - generic [ref=e1018]:
+                - paragraph [ref=e1019]: Recommended Actions
+                - generic [ref=e1020]:
+                  - generic [ref=e1021]:
+                    - img [ref=e1022]
+                    - paragraph [ref=e1025]: Trigger immediate fraud case review for accounts flagged by AI model
+                  - generic [ref=e1026]:
+                    - img [ref=e1027]
+                    - paragraph [ref=e1030]: Initiate RBI compliance readiness check for Q2 filing
+                  - generic [ref=e1031]:
+                    - img [ref=e1032]
+                    - paragraph [ref=e1035]: Escalate NPA early warning alerts to relationship managers
+          - generic [ref=e1037]:
+            - generic [ref=e1038]:
+              - img [ref=e1039]
+              - generic [ref=e1041]: Quick Actions
+            - generic [ref=e1042]:
+              - link "Create Investigation" [ref=e1043] [cursor=pointer]:
+                - /url: /investigation-center
+                - generic [ref=e1046]: Create Investigation
+                - img [ref=e1047]
+              - link "Escalate Alert" [ref=e1049] [cursor=pointer]:
+                - /url: /alerts
+                - generic [ref=e1052]: Escalate Alert
+                - img [ref=e1053]
+              - link "Compliance Overview" [ref=e1055] [cursor=pointer]:
+                - /url: /regulatory-compliance-center
+                - generic [ref=e1058]: Compliance Overview
+                - img [ref=e1059]
+              - link "Generate Board Report" [ref=e1061] [cursor=pointer]:
+                - /url: /board-reporting-center
+                - generic [ref=e1064]: Generate Board Report
+                - img [ref=e1065]
+              - link "Export Summary" [ref=e1067] [cursor=pointer]:
+                - /url: /reports
+                - generic [ref=e1070]: Export Summary
+                - img [ref=e1071]
+        - generic [ref=e1073]:
+          - generic [ref=e1074]:
+            - generic [ref=e1075]:
+              - generic [ref=e1076]:
+                - img [ref=e1077]
+                - generic [ref=e1079]: Enterprise Risk Index
+              - link "Analytical View" [ref=e1080] [cursor=pointer]:
+                - /url: /executive-cockpit
+                - text: Analytical View
+                - img [ref=e1081]
+            - generic [ref=e1083]:
+              - generic [ref=e1084]:
+                - generic [ref=e1085]:
+                  - generic [ref=e1086]: "63"
+                  - generic [ref=e1087]: high
+                - generic [ref=e1088]:
+                  - generic [ref=e1089]:
+                    - generic [ref=e1090]: Credit Risk
+                    - generic [ref=e1091]: "70"
+                  - generic [ref=e1092]:
+                    - generic [ref=e1093]: Fraud Risk
+                    - generic [ref=e1094]: "67"
+                  - generic [ref=e1095]:
+                    - generic [ref=e1096]: Operational Risk
+                    - generic [ref=e1097]: "59"
+                  - generic [ref=e1098]:
+                    - generic [ref=e1099]: Compliance Risk
+                    - generic [ref=e1100]: "67"
+                  - generic [ref=e1101]:
+                    - generic [ref=e1102]: Liquidity Risk
+                    - generic [ref=e1103]: "80"
+                  - generic [ref=e1104]:
+                    - generic [ref=e1105]: Insurance Risk
+                    - generic [ref=e1106]: "32"
+                  - generic [ref=e1107]:
+                    - generic [ref=e1108]: Investigation Risk
+                    - generic [ref=e1109]: "61"
+                  - generic [ref=e1110]:
+                    - generic [ref=e1111]: Security Risk
+                    - generic [ref=e1112]: "45"
+              - img [ref=e1116]:
+                - generic [ref=e1130]:
+                  - generic [ref=e1132]: Credit
+                  - generic [ref=e1135]: Fraud
+                  - generic [ref=e1137]: Operational
+                  - generic [ref=e1140]: Compliance
+                  - generic [ref=e1142]: Liquidity
+                  - generic [ref=e1145]: Insurance
+                  - generic [ref=e1147]: Investigation
+                  - generic [ref=e1150]: Security
+          - generic [ref=e1151]:
+            - generic [ref=e1152]:
+              - generic [ref=e1153]:
+                - img [ref=e1154]
+                - generic [ref=e1157]: Risk Forecast
+              - link "Full Forecast" [ref=e1158] [cursor=pointer]:
+                - /url: /predictive-risk-center
+                - text: Full Forecast
+                - img [ref=e1159]
+            - table [ref=e1162]:
+              - rowgroup [ref=e1163]:
+                - row "Metric 30d 60d 90d 180d" [ref=e1164]:
+                  - columnheader "Metric" [ref=e1165]
+                  - columnheader "30d" [ref=e1166]
+                  - columnheader "60d" [ref=e1167]
+                  - columnheader "90d" [ref=e1168]
+                  - columnheader "180d" [ref=e1169]
+              - rowgroup [ref=e1170]:
+                - row "NPA Forecast 4.9% 5.3% 5.6% 5.9%" [ref=e1171]:
+                  - cell "NPA Forecast" [ref=e1172]
+                  - cell "4.9%" [ref=e1173]
+                  - cell "5.3%" [ref=e1174]
+                  - cell "5.6%" [ref=e1175]
+                  - cell "5.9%" [ref=e1176]
+                - row "Fraud Exposure 12.6₹Cr 13.4₹Cr 13.5₹Cr 15.3₹Cr" [ref=e1177]:
+                  - cell "Fraud Exposure" [ref=e1178]
+                  - cell "12.6₹Cr" [ref=e1179]
+                  - cell "13.4₹Cr" [ref=e1180]
+                  - cell "13.5₹Cr" [ref=e1181]
+                  - cell "15.3₹Cr" [ref=e1182]
+                - row "Claims Ratio 72.9% 73.6% 82.5% 88.1%" [ref=e1183]:
+                  - cell "Claims Ratio" [ref=e1184]
+                  - cell "72.9%" [ref=e1185]
+                  - cell "73.6%" [ref=e1186]
+                  - cell "82.5%" [ref=e1187]
+                  - cell "88.1%" [ref=e1188]
+                - row "Compliance Score 91.2% 96.9% 95.9% 109.3%" [ref=e1189]:
+                  - cell "Compliance Score" [ref=e1190]
+                  - cell "91.2%" [ref=e1191]
+                  - cell "96.9%" [ref=e1192]
+                  - cell "95.9%" [ref=e1193]
+                  - cell "109.3%" [ref=e1194]
+        - generic [ref=e1197]: Cases, Alerts & SLA Status
+        - generic [ref=e1199]:
+          - generic [ref=e1201]:
+            - generic [ref=e1202]:
+              - heading "SLA Breach Matrix" [level=2] [ref=e1203]
+              - generic [ref=e1204]: Open cases by age bucket · live
+            - status "Loading SLA breach matrix" [ref=e1205]
+          - generic [ref=e1211]:
+            - generic [ref=e1212]:
+              - heading "Live activity" [level=2] [ref=e1213]
+              - generic [ref=e1214]: Offline
+            - paragraph [ref=e1216]: No activity yet — alerts, case assignments and acks land here in real time.
+        - generic [ref=e1218]:
+          - generic [ref=e1219]:
+            - heading "Recovery Center" [level=2] [ref=e1220]:
+              - generic [ref=e1221]:
+                - img [ref=e1222]
+                - text: Recovery Center
+            - link "Open" [ref=e1225] [cursor=pointer]:
+              - /url: /admin/recycle-bin
+              - text: Open
+              - img [ref=e1226]
+          - generic [ref=e1230]: Loading…
+        - generic [ref=e1231]:
+          - generic [ref=e1232]:
+            - heading "Sector risk heatmap" [level=2] [ref=e1234]:
+              - generic [ref=e1235]:
+                - img [ref=e1236]
+                - text: Sector risk heatmap
+            - paragraph [ref=e1238]: Loading…
+          - generic [ref=e1239]:
+            - heading "AI confidence — PD model" [level=2] [ref=e1241]:
+              - generic [ref=e1242]:
+                - img [ref=e1243]
+                - text: AI confidence — PD model
+            - paragraph [ref=e1255]: Loading…
+          - generic [ref=e1256]:
+            - heading "Data quality — connector fleet" [level=2] [ref=e1258]:
+              - generic [ref=e1259]:
+                - img [ref=e1260]
+                - text: Data quality — connector fleet
+            - paragraph [ref=e1264]: Loading…
+        - generic [ref=e1267]: Board View
+        - generic [ref=e1269]:
+          - generic [ref=e1270]:
+            - generic [ref=e1271]:
+              - img [ref=e1272]
+              - generic [ref=e1275]: Board View — Executive Scorecards
+            - link "Board Reports" [ref=e1276] [cursor=pointer]:
+              - /url: /board-reporting-center
+              - text: Board Reports
+              - img [ref=e1277]
+          - generic [ref=e1279]:
+            - link "37 Portfolio Health" [ref=e1280] [cursor=pointer]:
+              - /url: /executive-cockpit
+              - generic [ref=e1282]: "37"
+              - paragraph [ref=e1283]: Portfolio Health
+            - link "37 Risk Appetite" [ref=e1284] [cursor=pointer]:
+              - /url: /executive-cockpit
+              - generic [ref=e1286]: "37"
+              - paragraph [ref=e1287]: Risk Appetite
+            - link "83 Compliance Readiness" [ref=e1288] [cursor=pointer]:
+              - /url: /regulatory-compliance-center
+              - generic [ref=e1290]: "83"
+              - paragraph [ref=e1291]: Compliance Readiness
+            - link "88 Operational Stability" [ref=e1292] [cursor=pointer]:
+              - /url: /operations-center
+              - generic [ref=e1294]: "88"
+              - paragraph [ref=e1295]: Operational Stability
+            - link "79 AI Confidence" [ref=e1296] [cursor=pointer]:
+              - /url: /ai/governance
+              - generic [ref=e1298]: "79"
+              - paragraph [ref=e1299]: AI Confidence
+            - link "68 Board Readiness" [ref=e1300] [cursor=pointer]:
+              - /url: /board-reporting-center
+              - generic [ref=e1302]: "68"
+              - paragraph [ref=e1303]: Board Readiness
+  - button "Open ZorEWS Copilot" [ref=e1304] [cursor=pointer]:
+    - img [ref=e1305]
+  - dialog:
+    - banner:
+      - generic:
+        - generic:
+          - img
+        - generic:
+          - paragraph: ZorEWS Copilot
+          - paragraph: Enterprise Risk Intelligence Assistant
+      - generic:
+        - generic: 16 Centers
+        - button:
+          - img
+    - generic:
+      - generic: All systems operational
+      - generic: ·
+      - generic: "Context: dashboard"
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - img
+            - generic: ZorEWS Copilot
+          - paragraph: Welcome back, Alice Mwangi 👋
+          - paragraph: Enterprise Risk Intelligence · Live
+        - generic:
+          - generic:
+            - paragraph: Today's Risk Snapshot
+          - generic:
+            - link:
+              - /url: /alerts
+              - paragraph: "6"
+              - paragraph: Critical Alerts
+            - link:
+              - /url: /customers?level=High
+              - paragraph: "85"
+              - paragraph: High Risk Accounts
+            - link:
+              - /url: /investigation-center
+              - paragraph: "30"
+              - paragraph: Active Investigations
+            - link:
+              - /url: /regulatory-compliance-center
+              - paragraph: "8"
+              - paragraph: Compliance Gaps
+            - link:
+              - /url: /admin/security
+              - paragraph: "3"
+              - paragraph: Security Events
+            - link:
+              - /url: /recovery-center
+              - paragraph: "7"
+              - paragraph: Recovery Events
+        - generic:
+          - generic:
+            - paragraph: Top Priorities
+          - generic:
+            - generic:
+              - generic: "1"
+              - paragraph: Review critical fraud cluster in MSME segment
+            - generic:
+              - generic: "2"
+              - paragraph: Approve 2 escalated investigation cases
+            - generic:
+              - generic: "3"
+              - paragraph: RBI monthly AML filing — 8 days remaining
+            - generic:
+              - generic: "4"
+              - paragraph: "NPA early warning: 8 borrowers above threshold"
+            - generic:
+              - generic: "5"
+              - paragraph: "Security anomaly: after-hours admin access detected"
+        - generic:
+          - paragraph: Quick Access
+          - generic:
+            - button:
+              - img
+              - generic: Executive Summary
+              - img
+            - button:
+              - img
+              - generic: Investigation Queue
+              - img
+            - button:
+              - img
+              - generic: Compliance Overview
+              - img
+            - button:
+              - img
+              - generic: Predictive Forecast
+              - img
+            - button:
+              - img
+              - generic: Security Overview
+              - img
+        - paragraph: Ask anything about risk, compliance, or any enterprise center ↓
+    - generic:
+      - paragraph: Suggested Prompts
+      - generic:
+        - button: Executive summary
+        - button: Show top emerging risks
+        - button: Alert radar today
+        - button: Predictive forecast 90 days
+    - generic:
+      - generic:
+        - img
+        - textbox:
+          - /placeholder: Ask anything… search IDs, query risk, get briefings
+      - button [disabled]:
+        - img
+    - generic:
+      - paragraph: ZorEWS Copilot · Enterprise Risk Intelligence
+      - generic:
+        - link:
+          - /url: /ai/workbench
+          - text: AI Workbench
+          - img

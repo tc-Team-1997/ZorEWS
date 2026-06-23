@@ -268,7 +268,7 @@ function CreateCaseTypeModal({ onClose, onSuccess }: { onClose: () => void; onSu
         <Input label="Code (uppercase A-Z 0-9 _)" value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. AML_ESCALATION" data-testid="cty-create-code" />
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" data-testid="cty-create-name" />
         <Input label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} data-testid="cty-create-desc" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase text-muted">Priority</span>
             <select

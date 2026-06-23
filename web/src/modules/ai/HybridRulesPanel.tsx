@@ -404,7 +404,7 @@ function HybridRuleFormModal({
       }
     >
       <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase text-muted">Name</label>
               <input

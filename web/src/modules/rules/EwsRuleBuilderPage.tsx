@@ -656,7 +656,7 @@ function CreateRuleForm({
         Compose the conditions and severity. Rules land in 'draft' state — activate them once tested.
       </div>
       <div className="grid gap-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
             label="rule_id"
             value={ruleId}
@@ -691,7 +691,7 @@ function CreateRuleForm({
             options={['RED', 'ORANGE', 'YELLOW', 'GREEN']}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
             label="weight (1-100)"
             value={String(weight)}

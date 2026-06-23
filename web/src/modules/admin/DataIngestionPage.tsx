@@ -583,7 +583,7 @@ function SourceEditorModal({
               className="w-full rounded-input border border-divider bg-surface px-2.5 py-1.5 text-sm outline-none"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Source system">
               <input
                 type="text"

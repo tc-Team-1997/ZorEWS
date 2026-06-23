@@ -334,7 +334,7 @@ function SnapshotView({ r }: { r: PortfolioSnapshot }) {
           </div>
         </Panel>
         <Panel title="In-flight workload">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <MetricCard label="Alerts open" value={r.alerts_open} tone="warning" />
             <MetricCard label="Cases in progress" value={r.cases_in_progress} tone="neutral" />
           </div>

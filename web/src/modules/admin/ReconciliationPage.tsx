@@ -350,7 +350,7 @@ function AddDefinitionModal({
             <span className="text-xs font-medium text-slate-600">Display name</span>
             <input value={name} onChange={(e) => setName(e.target.value)} className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5" placeholder="CBS Loans → Staging" data-testid="recon-add-name" />
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="block">
               <span className="text-xs font-medium text-slate-600">Source label</span>
               <input value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5 font-mono" placeholder="cbs.loan_book" />

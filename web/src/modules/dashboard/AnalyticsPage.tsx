@@ -272,7 +272,7 @@ function AlertResolutionView({ report }: { report: AlertResolutionReport }) {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+          <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
             {funnelData.map((s) => (
               <li key={s.stage} className="flex justify-between">
                 <span className="capitalize">{s.stage}</span>

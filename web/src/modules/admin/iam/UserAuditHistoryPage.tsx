@@ -122,7 +122,7 @@ export function UserAuditHistoryPage() {
                 </div>
                 {e.comments && <div className="text-[11px] text-muted mt-1 italic">"{e.comments}"</div>}
                 {expanded === e.audit_id && (
-                  <div className="grid grid-cols-2 gap-3 mt-2 text-[11px]" data-testid={`audit-history-diff-${e.audit_id}`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 text-[11px]" data-testid={`audit-history-diff-${e.audit_id}`}>
                     <div>
                       <div className="text-muted uppercase tracking-wide text-[10px]">Before</div>
                       <pre className="bg-danger-bg/20 p-2 rounded mt-1 overflow-x-auto">{JSON.stringify(e.before_state ?? {}, null, 2)}</pre>

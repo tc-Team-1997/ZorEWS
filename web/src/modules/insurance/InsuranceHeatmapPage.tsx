@@ -153,7 +153,7 @@ export function InsuranceHeatmapPage() {
                   <Badge tone={HEAT_TONE[cell.heat_level]}>{cell.heat_level.toUpperCase()}</Badge>
                 </div>
                 {cell.group && <div className="mt-1 text-xs opacity-70">{cell.group}</div>}
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                   <div>
                     <div className="text-xs uppercase opacity-70">Risk score</div>
                     <div className="text-xl font-bold tabular-nums">{cell.risk_score}</div>

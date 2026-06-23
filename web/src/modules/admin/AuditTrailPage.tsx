@@ -447,7 +447,7 @@ function AuditEventDetailModal({
               </div>
 
               {/* Action + resource */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div className="rounded-md border border-divider bg-surface p-3">
                   <p className="text-xs text-muted">Action</p>
                   <code className="text-sm font-medium">{data.action}</code>
@@ -680,7 +680,7 @@ function EvidencePackagesPanel({ currentFilters }: { currentFilters: AuditEventQ
                 immutable, chain-verified package. Submit to the regulator
                 with the .txt summary attached.
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <label className="block">
                   <span className="block text-xs font-semibold text-muted">Actor</span>
                   <input

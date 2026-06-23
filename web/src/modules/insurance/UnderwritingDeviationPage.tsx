@@ -280,7 +280,7 @@ function AnalyzeModal({ onClose }: { onClose: () => void }) {
           <h2 className="section-title">Analyze proposal for deviations</h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Premium vs guideline (×)">
             <input type="number" min={0} step={0.05} className="input" value={premiumRatio} onChange={(e) => setPremiumRatio(Number(e.target.value))} />
           </Field>

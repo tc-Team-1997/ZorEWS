@@ -153,7 +153,7 @@ function WelcomeScreen({
         <div className="px-3 py-2 bg-[#F9FAFB] border-b border-[#E5E7EB]">
           <p className="text-[11px] font-semibold text-[#374151] uppercase tracking-wide">Today's Risk Snapshot</p>
         </div>
-        <div className="grid grid-cols-2 gap-px bg-[#E5E7EB]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-[#E5E7EB]">
           {SNAP_ITEMS.map((item) => (
             <Link
               key={item.label}

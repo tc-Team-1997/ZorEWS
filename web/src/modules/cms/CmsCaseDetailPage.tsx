@@ -230,7 +230,7 @@ export function CmsCaseDetailPage() {
 
           {tab === 'Overview' ? (
             <Panel title="Overview">
-              <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                 <Field label="Description">{c.description || '—'}</Field>
                 <Field label="Alert ID">{c.alert_id ?? '—'}</Field>
                 <Field label="Assigned to">{c.assigned_to ?? '—'}</Field>

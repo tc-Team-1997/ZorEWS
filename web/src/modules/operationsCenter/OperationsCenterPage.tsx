@@ -246,7 +246,7 @@ export function OperationsCenterPage() {
               <p className="text-xs text-slate-500 mt-2">{fmtPct(healthKpis.availability_pct)} availability · {healthKpis.mtbf_days}d MTBF</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
                 { label: 'Active Services', value: `${healthKpis.active_services}/${healthKpis.total_services}`, tone: 'success' },
                 { label: 'Degraded', value: healthKpis.degraded_services, tone: healthKpis.degraded_services > 0 ? 'warning' : 'neutral' },
@@ -591,7 +591,7 @@ export function OperationsCenterPage() {
                   <ProgressBar value={value} height={5} color={value >= target ? '#10B981' : '#F59E0B'} />
                 </div>
               ))}
-              <div className="grid grid-cols-2 gap-2 text-xs text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-center">
                 {[
                   { l: 'Privileged Sessions', v: secOps.privileged_sessions_active, warn: 6 },
                   { l: 'Active Security Incidents', v: secOps.security_incidents_active, warn: 1 },
@@ -756,7 +756,7 @@ export function OperationsCenterPage() {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-center">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-center">
             {[
               { label: 'Release Success Rate', value: fmtPct(execOps.release_success_rate_pct), good: execOps.release_success_rate_pct >= 95 },
               { label: 'Cost Optimisation Opp.', value: fmtCr(execOps.cost_optimization_opportunity_cr), good: true },

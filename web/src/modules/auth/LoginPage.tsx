@@ -270,7 +270,7 @@ export function LoginPage() {
             </label>
 
             {/* Domain + Tenant side by side */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block">
                 <span className="label">{t('login.domain_label')}</span>
                 <select {...register('domain')} className="input" data-testid="login-domain">

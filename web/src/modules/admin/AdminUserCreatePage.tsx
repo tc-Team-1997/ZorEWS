@@ -326,7 +326,7 @@ export function AdminUserCreatePage() {
             title="Identity"
             subtitle="Personal details the operator signs in with."
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input
                 label="Full name *"
                 value={form.full_name}
@@ -400,7 +400,7 @@ export function AdminUserCreatePage() {
             title="Tenant"
             subtitle="Which organisation, division and branch the user belongs to."
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <SelectField
                 label="Domain *"
                 value={form.domain}
@@ -471,7 +471,7 @@ export function AdminUserCreatePage() {
                 {enterpriseRole.description}
               </p>
             )}
-            <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
               <SelectField
                 label="User type *"
                 value={form.user_type}

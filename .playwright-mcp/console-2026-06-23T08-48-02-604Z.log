@@ -1,0 +1,23 @@
+[     190ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-XQLYTHWV.js?v=46889e64:21550
+[     292ms] [WARNING] ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition. @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=46889e64:4435
+[     292ms] [WARNING] ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath. @ http://localhost:5173/node_modules/.vite/deps/react-router-dom.js?v=46889e64:4435
+[     370ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[     370ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    3383ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    3383ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    6401ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    6401ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    9414ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[    9414ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   12429ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   12429ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   15446ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   15447ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   18459ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   18459ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   21478ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   21478ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   24493ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   24494ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   27505ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0
+[   27506ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ http://v1/notifications/stream:0

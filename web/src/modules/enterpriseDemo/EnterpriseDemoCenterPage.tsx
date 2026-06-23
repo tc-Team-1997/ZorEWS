@@ -721,7 +721,7 @@ export function EnterpriseDemoCenterPage() {
               ))}
             </ul>
             <div className="mt-3 text-xs uppercase tracking-wider text-slate-400 font-mono mb-1">Domain health</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div data-testid="domain-health-banking" className="rounded border border-slate-700 bg-slate-900/40 p-2 text-center">
                 <div className="text-slate-500 text-[10px]">Banking</div>
                 <div className="text-lg font-bold text-emerald-300 tabular-nums">{fmtPct(compliancePosture.domain_health_scores.banking)}</div>

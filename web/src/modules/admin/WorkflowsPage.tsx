@@ -159,7 +159,7 @@ function EditModal({
           </button>
         </div>
         <div className="space-y-4 p-5">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-xs font-semibold text-ink-muted">Name</span>
               <Input
@@ -220,7 +220,7 @@ function EditModal({
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <Input
                       placeholder="Stage name"
                       value={s.name}

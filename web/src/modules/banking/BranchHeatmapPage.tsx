@@ -125,7 +125,7 @@ export function BranchHeatmapPage() {
                 <div className="mt-1 text-xs opacity-70">
                   {cell.city ? `${cell.city} · ${cell.region}` : `${cell.branch_count} branches`}
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                   <div>
                     <div className="text-xs uppercase opacity-70">NPA Ratio</div>
                     <div className="text-xl font-bold tabular-nums">{cell.npa_ratio_pct.toFixed(2)}%</div>

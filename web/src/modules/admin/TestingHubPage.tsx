@@ -531,7 +531,7 @@ function CaseModal({
               data-testid={`${testid}-name`}
             />
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="block">
               <span className="block text-xs font-semibold text-muted">Target type</span>
               <select
