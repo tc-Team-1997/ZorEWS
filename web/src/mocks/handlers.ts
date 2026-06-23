@@ -8685,7 +8685,7 @@ export const handlers = [
       owner_user_id: (body.owner_user_id as string | null) ?? null,
       is_custom: true,
     };
-    __mswCustomConnectors.push(created as never);
+    __mswCustomConnectors.push(created);
     return HttpResponse.json(envelope(created), { status: 201 });
   }),
 
@@ -9997,7 +9997,7 @@ function __mswConnectors() {
     { id: 'agent_productivity', name: 'Agent Productivity', source_system: 'AGENT', type: 'batch_csv', schedule: 'daily 03:00', description: 'Daily agent KPI rollup', default_status: 'degraded', status: 'degraded', last_run_at: new Date(Date.now() - 90 * 60_000).toISOString(), last_run_status: 'partial', last_run_records: 5_880, average_lag_seconds: 32, paused_at: null, owner_user_id: 'sue.super', is_custom: false },
     { id: 'aml_watchlist', name: 'AML Watchlist Sync', source_system: 'AML', type: 'rest_api', schedule: 'hourly', description: 'Pulls sanctions + PEP updates', default_status: 'healthy', status: 'healthy', last_run_at: new Date(Date.now() - 30 * 60_000).toISOString(), last_run_status: 'success', last_run_records: 412, average_lag_seconds: 4, paused_at: null, owner_user_id: null, is_custom: false },
   ];
-  return [...__mswCustomConnectors, ...seed] as Array<Record<string, unknown>> as never[];
+  return [...__mswCustomConnectors, ...seed] as Array<Record<string, unknown>>;
 }
 
 function __mswAuditEvents() {
@@ -12984,14 +12984,16 @@ const __mswFraudHandlers = [
     __mswFraudRuleSeq++;
     const now = new Date().toISOString();
     const r: MswFraudRule = {
+      ...body,
+      // server-assigned identity + audit fields win over any client-supplied values
       rule_id: `fr-BANK_DEMO-${String(__mswFraudRuleSeq).padStart(3, '0')}`,
       tenant_id: 'BANK_DEMO',
       created_at: now,
       updated_at: now,
       created_by: 'admin',
-      enabled: true,
-      threshold: 0.75,
-      ...body,
+      // client-overridable defaults
+      enabled: body.enabled ?? true,
+      threshold: body.threshold ?? 0.75,
     };
     __mswFraudRules.push(r);
     return __mswFraudWrap(r, 201);
